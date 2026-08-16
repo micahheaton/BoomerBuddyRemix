@@ -15,7 +15,8 @@ if (
 }
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'boomerbuddy-loss-drill-'));
 const clone = join(temporaryRoot, 'repository');
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npm = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
+const npmPrefix = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd'] : [];
 
 function run(command, args) {
   const result = spawnSync(command, args, { cwd: clone, stdio: 'inherit', shell: false });
@@ -30,12 +31,12 @@ try {
     shell: false,
   });
   if (cloned.status !== 0) throw new Error('External source recovery failed');
-  run(npm, ['ci']);
+  run(npm, [...npmPrefix, 'ci']);
   run('node', ['scripts/verify-portability.mjs']);
-  run(npm, ['run', 'typecheck']);
-  run(npm, ['test']);
-  run(npm, ['run', 'build']);
-  run(npm, ['run', 'build', '-w', '@boomerbuddy/worker']);
+  run(npm, [...npmPrefix, 'run', 'typecheck']);
+  run(npm, [...npmPrefix, 'test']);
+  run(npm, [...npmPrefix, 'run', 'build']);
+  run(npm, [...npmPrefix, 'run', 'build', '-w', '@boomerbuddy/worker']);
   process.stdout.write(
     `${JSON.stringify({
       status: 'partial_source_build_proof_only',

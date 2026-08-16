@@ -7,7 +7,8 @@ import process from 'node:process';
 const source = resolve(process.cwd());
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'boomerbuddy-clean-clone-'));
 const clone = join(temporaryRoot, 'repository');
-const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+const npm = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
+const npmPrefix = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd'] : [];
 
 function run(command, args, cwd = clone) {
   const result = spawnSync(command, args, { cwd, stdio: 'inherit', shell: false });
@@ -17,12 +18,12 @@ function run(command, args, cwd = clone) {
 
 try {
   run('git', ['clone', '--no-local', source, clone], source);
-  run(npm, ['ci']);
+  run(npm, [...npmPrefix, 'ci']);
   run('node', ['scripts/verify-portability.mjs']);
-  run(npm, ['run', 'typecheck']);
-  run(npm, ['test']);
-  run(npm, ['run', 'build']);
-  run(npm, ['run', 'build', '-w', '@boomerbuddy/worker']);
+  run(npm, [...npmPrefix, 'run', 'typecheck']);
+  run(npm, [...npmPrefix, 'test']);
+  run(npm, [...npmPrefix, 'run', 'build']);
+  run(npm, [...npmPrefix, 'run', 'build', '-w', '@boomerbuddy/worker']);
   process.stdout.write('Clean-clone source/install/test/build reconstruction passed.\n');
 } finally {
   const resolvedTemporaryRoot = resolve(temporaryRoot);

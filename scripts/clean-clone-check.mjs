@@ -24,7 +24,8 @@ const continuityEnvironment = {
   ...process.env,
   NODE_ENV: 'test',
   BB_DATABASE_DRIVER: 'pglite',
-  BB_PGLITE_PATH: join(clone, '.data', 'continuity'),
+  // PGlite creates the database directory itself, but not an absent parent such as `.data`.
+  BB_PGLITE_PATH: join(clone, '.continuity-database'),
   BB_RUN_MIGRATIONS: 'true',
   BB_SEED_DEMO: 'false',
   BB_ALLOW_DEV_IDENTITY: 'true',

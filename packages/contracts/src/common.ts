@@ -8,9 +8,11 @@ export const isoDateTimeSchema = z.string().datetime({ offset: true });
 
 export const audienceSchema = z.enum(['customer', 'mobile', 'hq']);
 export const roleSchema = z.enum([
-  'household_owner',
+  'household_administrator',
   'protected_member',
   'trusted_circle',
+  'payer',
+  'billing_manager',
   'hq_owner',
   'hq_reviewer',
   'hq_support',
@@ -41,6 +43,8 @@ export const apiPaths = {
   live: '/health/live',
   ready: '/health/ready',
   publicConfig: '/v1/public/config',
+  publicCheckContexts: '/v1/public/check-contexts',
+  publicChecks: '/v1/public/checks',
   customerSession: '/v1/dev/sessions/customer',
   hqSession: '/v1/dev/sessions/hq',
   mobileSession: '/v1/dev/sessions/mobile',

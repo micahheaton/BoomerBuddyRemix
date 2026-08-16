@@ -5,13 +5,14 @@ export function PublicHeader() {
   return (
     <>
       <p className="dev-banner">
-        Local development build · Uses seeded people and local rules-only analysis · No live
-        reputation provider
+        Local development build · Public Check needs no account; member access uses seeded people ·
+        Local rules-only analysis · No live reputation provider
       </p>
       <header className="site-header">
         <div className="header-inner">
           <Brand />
           <nav className="public-nav" aria-label="Main navigation">
+            <Link href="/check">Check something</Link>
             <Link href="/how-it-works">How it works</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/trust">Trust</Link>

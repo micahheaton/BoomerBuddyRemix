@@ -6,7 +6,7 @@ import {
   serializeEncryptedField,
 } from '@boomerbuddy/security';
 import type { Audience } from '@boomerbuddy/domain';
-import type { Database } from './database';
+import type { Database, SqlExecutor } from './database';
 import { hasEffectiveProtectedEnrollment } from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import {
@@ -168,6 +168,18 @@ const checkProjection = `
   JOIN artifacts r ON r.household_id = a.household_id AND r.id = a.artifact_id
 `;
 
+export interface CreateStoredCheckInput {
+  readonly householdId: string;
+  readonly actorPersonId: string;
+  readonly audience: Audience;
+  readonly kind: 'text' | 'url';
+  readonly content: string;
+  readonly decision: DecisionRecord;
+  readonly correlationId: string;
+  readonly now: Date;
+  readonly ids?: { readonly artifactId: string; readonly analysisId: string };
+}
+
 export class CheckRepository {
   constructor(
     private readonly database: Database,
@@ -175,17 +187,14 @@ export class CheckRepository {
     private readonly idFactory: IdFactory = randomIdFactory,
   ) {}
 
-  async create(input: {
-    readonly householdId: string;
-    readonly actorPersonId: string;
-    readonly audience: Audience;
-    readonly kind: 'text' | 'url';
-    readonly content: string;
-    readonly decision: DecisionRecord;
-    readonly correlationId: string;
-    readonly now: Date;
-    readonly ids?: { readonly artifactId: string; readonly analysisId: string };
-  }): Promise<StoredCheck> {
+  async create(input: CreateStoredCheckInput): Promise<StoredCheck> {
+    return this.database.transaction((transaction) => this.createWithExecutor(transaction, input));
+  }
+
+  async createWithExecutor(
+    transaction: SqlExecutor,
+    input: CreateStoredCheckInput,
+  ): Promise<StoredCheck> {
     const minimized = minimizeRestrictedInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
     if (minimized.status === 'rejected') {
       throw new DomainError(
@@ -213,91 +222,89 @@ export class CheckRepository {
       purpose: `artifact:${input.kind}`,
       keyVersion: this.protection.fingerprintKeyVersion,
     });
-    await this.database.transaction(async (transaction) => {
-      const hasEnrollment = await hasEffectiveProtectedEnrollment(
-        transaction,
-        input.householdId,
-        input.actorPersonId,
-        input.now,
-        true,
-      );
-      if (!hasEnrollment) {
-        throw new DomainError('not_authorized', 'Protected-member enrollment is required');
-      }
-      await transaction.query(
-        `INSERT INTO artifacts(
+    const hasEnrollment = await hasEffectiveProtectedEnrollment(
+      transaction,
+      input.householdId,
+      input.actorPersonId,
+      input.now,
+      true,
+    );
+    if (!hasEnrollment) {
+      throw new DomainError('not_authorized', 'Protected-member enrollment is required');
+    }
+    await transaction.query(
+      `INSERT INTO artifacts(
            household_id, id, owner_person_id, kind, encrypted_content, input_fingerprint,
            encryption_key_version, fingerprint_key_version, state, delete_after, created_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9,$10)`,
-        [
-          input.householdId,
-          artifactId,
-          input.actorPersonId,
-          input.kind,
-          encrypted,
-          fingerprint.value,
-          this.protection.encryptionKeyVersion,
-          this.protection.fingerprintKeyVersion,
-          deleteAfter.toISOString(),
-          input.now.toISOString(),
-        ],
-      );
-      await transaction.query(
-        `INSERT INTO analyses(
+      [
+        input.householdId,
+        artifactId,
+        input.actorPersonId,
+        input.kind,
+        encrypted,
+        fingerprint.value,
+        this.protection.encryptionKeyVersion,
+        this.protection.fingerprintKeyVersion,
+        deleteAfter.toISOString(),
+        input.now.toISOString(),
+      ],
+    );
+    await transaction.query(
+      `INSERT INTO analyses(
            household_id, id, artifact_id, requested_by, risk, evidence_sufficiency, calibration, summary, evidence,
            actions, provider_name, provider_state, provider_version, ruleset_version, state, created_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14,'completed',$15)`,
-        [
-          input.householdId,
-          analysisId,
-          artifactId,
-          input.actorPersonId,
-          input.decision.risk,
-          input.decision.evidenceSufficiency,
-          input.decision.calibration,
-          input.decision.summary,
-          jsonParameter(input.decision.evidence),
-          jsonParameter(input.decision.actions),
-          input.decision.provider.name,
-          input.decision.provider.state,
-          input.decision.provider.version,
-          input.decision.rulesetVersion,
-          input.now.toISOString(),
-        ],
-      );
-      await writeAuditAndOutbox(
-        transaction,
-        this.idFactory,
-        {
-          householdId: input.householdId,
-          actorPersonId: input.actorPersonId,
-          audience: input.audience,
-          correlationId: input.correlationId,
-          now: input.now,
+      [
+        input.householdId,
+        analysisId,
+        artifactId,
+        input.actorPersonId,
+        input.decision.risk,
+        input.decision.evidenceSufficiency,
+        input.decision.calibration,
+        input.decision.summary,
+        jsonParameter(input.decision.evidence),
+        jsonParameter(input.decision.actions),
+        input.decision.provider.name,
+        input.decision.provider.state,
+        input.decision.provider.version,
+        input.decision.rulesetVersion,
+        input.now.toISOString(),
+      ],
+    );
+    await writeAuditAndOutbox(
+      transaction,
+      this.idFactory,
+      {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        audience: input.audience,
+        correlationId: input.correlationId,
+        now: input.now,
+      },
+      {
+        action: 'check.created',
+        resourceType: 'check',
+        resourceId: analysisId,
+        outcome: 'completed',
+        metadata: {
+          kind: input.kind,
+          risk: input.decision.risk,
+          providerState: input.decision.provider.state,
         },
-        {
-          action: 'check.created',
-          resourceType: 'check',
-          resourceId: analysisId,
-          outcome: 'completed',
-          metadata: {
-            kind: input.kind,
-            risk: input.decision.risk,
-            providerState: input.decision.provider.state,
-          },
+      },
+      {
+        eventType: 'check.completed.v1',
+        aggregateType: 'check',
+        aggregateId: analysisId,
+        payload: {
+          kind: input.kind,
+          risk: input.decision.risk,
+          providerState: input.decision.provider.state,
         },
-        {
-          eventType: 'check.completed.v1',
-          aggregateType: 'check',
-          aggregateId: analysisId,
-          payload: {
-            kind: input.kind,
-            risk: input.decision.risk,
-            providerState: input.decision.provider.state,
-          },
-        },
-      );
-    });
+      },
+    );
     return {
       id: analysisId,
       artifactId,
@@ -309,6 +316,25 @@ export class CheckRepository {
       deleteAfter,
       state: 'active',
     };
+  }
+
+  async findOwnedWithExecutor(
+    executor: SqlExecutor,
+    input: {
+      readonly householdId: string;
+      readonly checkId: string;
+      readonly actorPersonId: string;
+      readonly now: Date;
+    },
+  ): Promise<StoredCheck | null> {
+    const result = await executor.query<CheckRow>(
+      `${checkProjection}
+       WHERE a.household_id = $1 AND a.id = $2 AND a.requested_by = $3
+         AND a.state = 'completed' AND r.state = 'active' AND r.delete_after > $4`,
+      [input.householdId, input.checkId, input.actorPersonId, input.now.toISOString()],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : mapCheck(row);
   }
 
   async listVisible(input: {

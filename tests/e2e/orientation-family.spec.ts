@@ -7,12 +7,15 @@ test('independent protected enrollment gates owner workflows', async ({ page }) 
     await page.request.get(`${apiUrl}/v1/me`, { headers: { Origin: customerUrl } })
   ).json()) as {
     principal: {
-      households: Array<{ id: string; role: string; isProtectedMember: boolean }>;
+      households: Array<{
+        id: string;
+        isAdministrator: boolean;
+        isProtectedMember: boolean;
+      }>;
     };
   };
   const sunrise = protectedOwnerMe.principal.households[0]!;
-  expect(sunrise.role).toBe('household_owner');
-  expect(sunrise.isProtectedMember).toBe(true);
+  expect(sunrise).toMatchObject({ isAdministrator: true, isProtectedMember: true });
   await expect(page.getByRole('link', { name: 'Check', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Continue orientation', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Family', exact: true }).click();
@@ -24,12 +27,15 @@ test('independent protected enrollment gates owner workflows', async ({ page }) 
     await page.request.get(`${apiUrl}/v1/me`, { headers: { Origin: customerUrl } })
   ).json()) as {
     principal: {
-      households: Array<{ id: string; role: string; isProtectedMember: boolean }>;
+      households: Array<{
+        id: string;
+        isAdministrator: boolean;
+        isProtectedMember: boolean;
+      }>;
     };
   };
   const harbor = unallocatedOwnerMe.principal.households[0]!;
-  expect(harbor.role).toBe('household_owner');
-  expect(harbor.isProtectedMember).toBe(false);
+  expect(harbor).toMatchObject({ isAdministrator: true, isProtectedMember: false });
   await expect(page.getByRole('link', { name: 'Check', exact: true })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Continue orientation', exact: true })).toHaveCount(
     0,
@@ -225,7 +231,7 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
   await expect(jordanRelationship.getByRole('button', { name: 'Revoke access' })).toBeVisible();
   await jordanRelationship.getByRole('button', { name: 'Revoke access' }).click();
   await expect(page).toHaveURL(/\/member$/);
-  await expect(page.getByText('No household access')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Family', exact: true })).toHaveCount(0);
   const denied = await page.request.get(`${apiUrl}/v1/family`, {
     headers: { Origin: customerUrl, 'X-BB-Household-Id': sunriseId! },
   });
@@ -290,20 +296,34 @@ test('a multi-household actor keeps protected and Trusted Circle scopes separate
       principal: {
         households: Array<{
           id: string;
+          isAdministrator: boolean;
           isProtectedMember: boolean;
-          permissions: string[];
+          trustedCircleGrants: Array<{
+            relationshipId: string;
+            protectedPersonId: string;
+            permissions: string[];
+          }>;
         }>;
       };
     };
     expect(me.principal.households.map((scope) => scope.id)).toEqual(
       expect.arrayContaining([sunriseId, harborId]),
     );
-    expect(me.principal.households.find((scope) => scope.id === sunriseId)).toMatchObject({
+    const sunriseScope = me.principal.households.find((scope) => scope.id === sunriseId);
+    expect(sunriseScope).toMatchObject({
+      isAdministrator: false,
       isProtectedMember: false,
-      permissions: expect.arrayContaining(['view_shared_checks']),
+    });
+    expect(sunriseScope?.trustedCircleGrants).toHaveLength(1);
+    expect(sunriseScope?.trustedCircleGrants[0]).toEqual({
+      relationshipId: expect.any(String),
+      protectedPersonId: 'person-protected-pat',
+      permissions: ['view_shared_checks'],
     });
     expect(me.principal.households.find((scope) => scope.id === harborId)).toMatchObject({
+      isAdministrator: false,
       isProtectedMember: true,
+      trustedCircleGrants: [],
     });
 
     await expect(page.getByRole('link', { name: 'Check', exact: true })).toHaveCount(0);

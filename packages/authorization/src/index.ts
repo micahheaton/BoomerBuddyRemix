@@ -1,13 +1,17 @@
 import {
   DomainError,
   hasActiveProtectedEnrollment,
+  hasTrustedCirclePermission,
   type Audience,
   type Capability,
   type HouseholdId,
   type OrganizationId,
   type PersonId,
+  type RelationshipId,
+  type RestrictedAccessGrantId,
   type Role,
   type SessionId,
+  type SupportCaseId,
   type TrustedCirclePermission,
 } from '@boomerbuddy/domain';
 
@@ -29,6 +33,10 @@ export const actions = [
   'hq:households:list',
   'hq:reviews:list',
   'hq:audit:list',
+  'hq:business_os:read',
+  'hq:business_os:manage',
+  'hq:support_case:view',
+  'hq:restricted_resource:read',
 ] as const;
 export type Action = (typeof actions)[number];
 
@@ -60,6 +68,7 @@ export type Resource =
         | { readonly kind: 'subject_invitation'; readonly protectedPersonId: PersonId }
         | {
             readonly kind: 'pairwise_relationship';
+            readonly relationshipId: RelationshipId;
             readonly protectedPersonId: PersonId;
             readonly trustedPersonId: PersonId;
           };
@@ -68,6 +77,7 @@ export type Resource =
       readonly kind: 'invitation';
       readonly householdId: HouseholdId;
       readonly invitedPersonId?: PersonId;
+      readonly identityBindingState: 'development_unbound' | 'verified_identity';
       readonly credentialPresented: boolean;
     }
   | {
@@ -76,6 +86,18 @@ export type Resource =
       readonly subjectPersonId: PersonId;
     }
   | { readonly kind: 'entitlement'; readonly householdId: HouseholdId }
+  | {
+      readonly kind: 'support_case';
+      readonly householdId: HouseholdId;
+      readonly caseId: SupportCaseId;
+    }
+  | {
+      readonly kind: 'restricted_customer_resource';
+      readonly householdId: HouseholdId;
+      readonly caseId: SupportCaseId;
+      readonly resourceType: 'artifact' | 'analysis' | 'family';
+      readonly resourceId: string;
+    }
   | { readonly kind: 'hq'; readonly organizationId?: OrganizationId };
 
 export interface Principal {
@@ -85,16 +107,40 @@ export interface Principal {
   readonly roles: readonly Role[];
   readonly households: readonly {
     readonly householdId: HouseholdId;
-    readonly role: Extract<Role, 'household_owner' | 'protected_member' | 'trusted_circle'>;
+    readonly membershipKind: 'member';
+    readonly isAdministrator: boolean;
     readonly isProtectedMember: boolean;
-    readonly permissions: readonly TrustedCirclePermission[];
+    readonly trustedCircleGrants: readonly {
+      readonly relationshipId: RelationshipId;
+      readonly protectedPersonId: PersonId;
+      readonly permissions: readonly TrustedCirclePermission[];
+    }[];
+    readonly isPayer: boolean;
+    readonly isBillingManager: boolean;
     readonly capabilities: readonly Capability[];
     readonly status: 'active' | 'revoked';
   }[];
   readonly organizations: readonly {
+    readonly employeeAssignmentId: string;
     readonly organizationId?: OrganizationId;
     readonly role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_support'>;
     readonly status: 'active' | 'suspended';
+  }[];
+  readonly supportCases: readonly {
+    readonly caseId: SupportCaseId;
+    readonly householdId: HouseholdId;
+    readonly employeeAssignmentId: string;
+    readonly purpose: string;
+  }[];
+  readonly restrictedAccess: readonly {
+    readonly grantId: RestrictedAccessGrantId;
+    readonly caseId: SupportCaseId;
+    readonly householdId: HouseholdId;
+    readonly employeeAssignmentId: string;
+    readonly purpose: string;
+    readonly resourceType: 'artifact' | 'analysis' | 'family';
+    readonly resourceId: string;
+    readonly expiresAt: Date;
   }[];
 }
 
@@ -151,8 +197,48 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
   if (!knownActions.has(action)) return deny('unsupported_action_resource');
 
   if (action.startsWith('hq:')) {
-    if (resource.kind !== 'hq') return deny('unsupported_action_resource');
     if (principal.audience !== 'hq') return deny('wrong_audience');
+    if (action === 'hq:support_case:view') {
+      if (resource.kind !== 'support_case') return deny('unsupported_action_resource');
+      const supportScope = principal.supportCases.find(
+        (scope) => scope.caseId === resource.caseId && scope.householdId === resource.householdId,
+      );
+      const eligible =
+        supportScope !== undefined &&
+        principal.organizations.some(
+          (assignment) =>
+            assignment.employeeAssignmentId === supportScope.employeeAssignmentId &&
+            assignment.role === 'hq_support' &&
+            assignment.status === 'active',
+        );
+      return eligible
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('inactive_relationship');
+    }
+    if (action === 'hq:restricted_resource:read') {
+      if (resource.kind !== 'restricted_customer_resource') {
+        return deny('unsupported_action_resource');
+      }
+      const accessScope = principal.restrictedAccess.find(
+        (scope) =>
+          scope.caseId === resource.caseId &&
+          scope.householdId === resource.householdId &&
+          scope.resourceType === resource.resourceType &&
+          scope.resourceId === resource.resourceId,
+      );
+      const eligible =
+        accessScope !== undefined &&
+        principal.organizations.some(
+          (assignment) =>
+            assignment.employeeAssignmentId === accessScope.employeeAssignmentId &&
+            assignment.role === 'hq_support' &&
+            assignment.status === 'active',
+        );
+      return eligible
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('inactive_relationship');
+    }
+    if (resource.kind !== 'hq') return deny('unsupported_action_resource');
     const activeRoles = principal.organizations
       .filter(
         (scope) =>
@@ -178,11 +264,20 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
   if (principal.audience !== 'customer' && principal.audience !== 'mobile') {
     return deny('wrong_audience');
   }
-  if (resource.kind === 'hq') return deny('unsupported_action_resource');
+  if (
+    resource.kind === 'hq' ||
+    resource.kind === 'support_case' ||
+    resource.kind === 'restricted_customer_resource'
+  ) {
+    return deny('unsupported_action_resource');
+  }
 
   if (resource.kind === 'invitation' && action === 'family:accept_invitation') {
-    return resource.credentialPresented &&
-      (resource.invitedPersonId === undefined || resource.invitedPersonId === principal.personId)
+    const identityMatches =
+      resource.identityBindingState === 'development_unbound'
+        ? resource.invitedPersonId === undefined
+        : resource.invitedPersonId === principal.personId;
+    return resource.credentialPresented && identityMatches
       ? { allowed: true, reason: 'allowed_by_policy' }
       : deny('not_owner_or_shared');
   }
@@ -225,8 +320,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
     const owns = resource.ownerPersonId === principal.personId;
     const explicitlyShared = resource.sharedWithPersonIds?.includes(principal.personId) ?? false;
     const relationshipCanView =
-      relationship.role === 'trusted_circle' &&
-      relationship.permissions.includes('view_shared_checks') &&
+      hasTrustedCirclePermission(relationship, resource.ownerPersonId, 'view_shared_checks') &&
       explicitlyShared;
     if (
       action === 'check:read' &&
@@ -245,12 +339,13 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
 
   if (resource.kind === 'family') {
     if (action === 'family:view') {
-      if (resource.scope.kind === 'roster' && relationship.role === 'household_owner') {
+      if (resource.scope.kind === 'roster' && relationship.isAdministrator) {
         return { allowed: true, reason: 'allowed_by_policy' };
       }
       if (
         resource.scope.kind === 'subject_relationships' &&
-        resource.scope.subjectPersonId === principal.personId
+        resource.scope.subjectPersonId === principal.personId &&
+        (relationship.isProtectedMember || relationship.trustedCircleGrants.length > 0)
       ) {
         return { allowed: true, reason: 'allowed_by_policy' };
       }
@@ -281,7 +376,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       // The server resolves this exact subject from the pending invitation.
       // Withdrawal remains available after protected enrollment or entitlement lapses.
       const protectedSubjectMayCancel = resource.scope.protectedPersonId === principal.personId;
-      return relationship.role === 'household_owner' || protectedSubjectMayCancel
+      return relationship.isAdministrator || protectedSubjectMayCancel
         ? { allowed: true, reason: 'allowed_by_policy' }
         : deny('not_owner_or_shared');
     }
@@ -289,13 +384,13 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       if (resource.scope.kind !== 'pairwise_relationship') {
         return deny('unsupported_action_resource');
       }
+      const pair = resource.scope;
       // The server resolves both participants from the exact relationship. A protected
       // subject must retain withdrawal rights after enrollment or entitlement lapses.
       const participantMayWithdraw =
-        resource.scope.protectedPersonId === principal.personId ||
-        (relationship.role === 'trusted_circle' &&
-          resource.scope.trustedPersonId === principal.personId);
-      return relationship.role === 'household_owner' || participantMayWithdraw
+        pair.protectedPersonId === principal.personId ||
+        pair.trustedPersonId === principal.personId;
+      return relationship.isAdministrator || participantMayWithdraw
         ? { allowed: true, reason: 'allowed_by_policy' }
         : deny('not_owner_or_shared');
     }
@@ -315,8 +410,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       return { allowed: true, reason: 'allowed_by_policy' };
     }
     if (
-      relationship.role === 'trusted_circle' &&
-      relationship.permissions.includes('help_with_orientation')
+      hasTrustedCirclePermission(relationship, resource.subjectPersonId, 'help_with_orientation')
     ) {
       return { allowed: true, reason: 'allowed_by_policy' };
     }
@@ -324,7 +418,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
   }
 
   if (resource.kind === 'entitlement' && action === 'entitlement:view') {
-    return relationship.role === 'household_owner'
+    return relationship.isBillingManager
       ? { allowed: true, reason: 'allowed_by_policy' }
       : deny('insufficient_role');
   }

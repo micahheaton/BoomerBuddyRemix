@@ -97,7 +97,7 @@ describe('input, persistence, and no-network security', () => {
     expect(urlDenied.json().error.details.reason).toBe('missing_capability');
   });
 
-  it('rejects restricted content without persisting or reflecting the submitted value', async () => {
+  it('redacts safe typed spans before persistence and never reflects the submitted value', async () => {
     harness = await createApiHarness();
     const alice = await login(harness.app, 'owner-alice');
     const restricted = 'Use payment card 4111111111111111 immediately';
@@ -115,9 +115,37 @@ describe('input, persistence, and no-network security', () => {
       `SELECT (SELECT count(*)::int FROM artifacts) AS artifacts,
               (SELECT count(*)::int FROM analyses) AS analyses`,
     );
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(201);
     expect(response.body).not.toContain('4111111111111111');
-    expect(after.rows[0]).toEqual(before.rows[0]);
+    expect(after.rows[0]).toEqual({
+      artifacts: (before.rows[0]?.artifacts ?? 0) + 1,
+      analyses: (before.rows[0]?.analyses ?? 0) + 1,
+    });
+    const stored = await harness.database.query<{
+      artifact_id: string;
+      household_id: string;
+      encrypted_content: string;
+    }>(
+      `SELECT a.artifact_id, a.household_id, r.encrypted_content
+       FROM analyses a JOIN artifacts r
+         ON r.household_id = a.household_id AND r.id = a.artifact_id
+       WHERE a.id = $1`,
+      [response.json().check.id],
+    );
+    const row = stored.rows[0];
+    const plaintext = decryptField(
+      parseEncryptedField(row?.encrypted_content as string),
+      Buffer.alloc(32, 7),
+      {
+        tenantId: row?.household_id as string,
+        resourceId: row?.artifact_id as string,
+        field: 'content',
+        schemaVersion: 1,
+        keyVersion: 1,
+      },
+    ).toString('utf8');
+    expect(plaintext).toContain('[PAYMENT_CARD]');
+    expect(plaintext).not.toContain('4111111111111111');
     const events = await harness.database.query<Record<string, unknown>>(
       'SELECT metadata FROM audit_events UNION ALL SELECT payload AS metadata FROM outbox_events',
     );

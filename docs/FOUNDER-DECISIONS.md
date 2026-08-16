@@ -47,3 +47,18 @@ Build Run 1 used reversible local hypotheses, so none of these decisions blocked
 ## Not delegated to a founder decision
 
 The local Run 1 PASS is not permission to accept unresolved production risk. Production identity/KMS, representative fraud evidence, legal/privacy review, accessibility evidence, dependency remediation, durable operations, commerce controls, and support/incident ownership remain evidence gates. A future launch decision may weigh residual risk only after those controls are demonstrated.
+
+## Run 2 implementation delta — 2026-08-16
+
+Run 2 did not decide the five historical choices above. It made their evidence requirements more precise and added a no-launch sequencing decision. The local commercialization foundation can continue while these stay open; external accounts, spending, promises, research recruitment, outreach, hiring, and launch cannot be inferred from implementation.
+
+| Founder choice before Run 3 external work | Current recommendation | What remains unknown |
+| --- | --- | --- |
+| U.S. launch geography and initial channel/device order | Bound one geography and a web-first or explicitly supported device matrix before account creation | Current law/store treatment, user access, and device behavior |
+| Working offer and research prices | Research Free, Plus `$8.99/$89`, and Family `$14.99/$149`; treat `$119/year` only as a controlled Family offer | Willingness to pay, plan mix, churn, refunds, support load, and channel contribution |
+| Direct-family versus sponsor discovery emphasis | Keep both as narrow discovery tracks; prohibit custom enterprise delivery and invented pipeline | Activation, sales cycle, implementation cost, sponsor contribution, renewal, and data demands |
+| First external budget and stop-loss | Buy paired research, adjudicated fraud evidence, independent security/privacy, and accessibility evidence before reach | Quotes, runway, acceptable residual risk, and which finding would stop the thesis |
+| Human coverage and Philippines option | Measure queue hours first; define truthful support/incident hours and accountable U.S. owner; obtain counsel before any Philippines structure | Handle times, severity mix, shift overlap, employer/EOR/BPO form, processor terms, and fully loaded cost |
+| Run 3 authorization | Authorize a bounded launch-enablement dossier that stops at `GO / NO-GO / REMEDIATE` | Account scope, professional work, device matrix, risk thresholds, and named owners/backups |
+
+No founder decision may waive an in-scope Critical/High authority, consent, security, or commerce defect. The final Run 2 independent review is PASS with no such defect unresolved. That bounded code closure does not resolve the founder choices or external evidence gates above and does not authorize launch; see the [Run 2 Report](./BUILD-RUN-2-REPORT.md) and [Run 3 plan](./run-2/33-run-3-launch-plan.md).

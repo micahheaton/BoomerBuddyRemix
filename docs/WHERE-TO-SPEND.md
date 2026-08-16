@@ -28,3 +28,16 @@ Release money against a measurable question: Does it reduce missed scams? Improv
 Broad paid acquisition before activation/retention, a large sales team before a repeatable pilot, enterprise infrastructure without a requirement, multiple overlapping intelligence feeds without marginal-lift measurement, custom CRM/accounting/payroll, 24/7 concierge before demand and staffing math, and expensive brand production before name validation.
 
 The unfair advantage is likely a compound of trusted family workflow, reviewed safety data, distribution, and operational credibility—not raw feature volume.
+
+## Run 2 implementation delta — 2026-08-16
+
+Run 2 changes no evidence-first rank. It reduces uncertainty about what an external tranche must prove and makes sequencing stricter:
+
+1. preserve the independently reviewed zero-open-Critical/High local gate and reproduce it on every candidate before buying reach;
+2. approve a bounded company-account/staging/recovery tranche only to produce managed identity, Stripe test-mode, real PostgreSQL/restore, monitoring, and Replit-loss evidence;
+3. preserve the highest discretionary spend for paired-family research, a rights-cleared independently adjudicated fraud/action corpus, independent security/privacy review, and disabled-older-adult accessibility evidence; and
+4. release brand production, native extensions, commercial intelligence, acquisition, or partner-pilot money only after the preceding measurable question passes.
+
+The [50K model](./run-2/50K-SUBSCRIBER-MODEL.md) reinforces why evidence comes first. Its base case reaches about `$1.018M` operating profit at 50,000 average paid households but misses that target under plausible independent service-cost, store-fee, CAC, or price stress. The [staffing model](./run-2/STAFFING-AND-PHILIPPINES-OPS.md) likewise prohibits subscriber-count hiring: review fractional capacity only after at least 60 productive queue hours/month for two months, and dedicated capacity around 120 hours/month, subject to safety/SLA overrides.
+
+Do not confuse staging prerequisites with scale infrastructure. Use monthly cost ceilings, company ownership, MFA/recovery, export/termination rights, reviewed processor terms, reversible pilots, and explicit stop-loss evidence. No Run 2 document authorizes a vendor purchase, account, research recruitment, outreach, hire, or public launch.

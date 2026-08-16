@@ -8,13 +8,15 @@ import { apiRequest, readableError } from '../../../lib/api';
 const steps = [
   {
     key: 'protection_subject',
-    title: 'Who is being protected?',
-    detail: 'Review the seeded household and decide who the setup is meant to help.',
+    title: 'Confirm the protected person',
+    detail:
+      'This setup belongs to the enrolled protected adult. Household administration does not replace that person’s choice.',
   },
   {
     key: 'trusted_circle',
-    title: 'Choose trusted helpers',
-    detail: 'Only invite people you know. Permissions and consent remain visible in Family.',
+    title: 'Consent and Trusted Circle',
+    detail:
+      'Invite only people you know. Each pairwise permission requires review and acceptance, can be ended, and does not send a notification in this build.',
   },
   {
     key: 'safe_word',
@@ -24,8 +26,8 @@ const steps = [
   },
   {
     key: 'practice_check',
-    title: 'Practice a check',
-    detail: 'Try a harmless sample so the risk, uncertainty, and safe actions feel familiar.',
+    title: 'Practice a safer response',
+    detail: 'Use a synthetic scenario to practice pausing and verifying independently.',
   },
   {
     key: 'capabilities_and_limits',
@@ -37,7 +39,7 @@ const steps = [
     key: 'review',
     title: 'Review the plan',
     detail:
-      'Confirm the people, permissions, safe-word choice, and independent verification steps.',
+      'Confirm the protected-person scope, consent choices, permissions, safe-word choice, and independent verification steps.',
   },
 ] as const;
 
@@ -135,7 +137,7 @@ export default function OrientationPage() {
           <h2>Protected-adult enrollment required</h2>
           <p>
             Self-orientation and safe-word setup require an active protected-adult enrollment.
-            Household owner access alone does not grant these protected workflows.
+            Household administrator access alone does not grant these protected workflows.
           </p>
         </section>
       </main>
@@ -171,6 +173,14 @@ export default function OrientationPage() {
           <strong>{completed} of 6 complete</strong> · Status:{' '}
           {orientation?.status?.replaceAll('_', ' ') ?? 'loading'}
         </p>
+        {orientation ? (
+          <p className="meta">
+            Safe-word choice: {orientation.safeWordDisposition.replaceAll('_', ' ')} · Attention:{' '}
+            {orientation.needsAttention
+              ? 'setup still needs review'
+              : 'no incomplete stage flagged'}
+          </p>
+        ) : null}
         {orientation?.status === 'not_started' && (
           <button
             className="button-primary"
@@ -194,6 +204,13 @@ export default function OrientationPage() {
                 {step.title} {done && <span className="checkmark">— complete</span>}
               </h2>
               <p>{step.detail}</p>
+              {step.key === 'trusted_circle' ? (
+                <p className="help">
+                  Completing this stage records that you reviewed the consent model. It does not
+                  create a relationship, grant a permission, or send a notification; those actions
+                  remain explicit in Family.
+                </p>
+              ) : null}
               {!done && !isCurrent ? (
                 <p className="meta">Complete the earlier steps before this one.</p>
               ) : !done && step.key === 'safe_word' ? (

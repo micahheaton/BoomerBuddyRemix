@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -7,7 +7,7 @@ import type { MeResponse, PrincipalDto } from '@boomerbuddy/contracts';
 import { designTokens } from '@boomerbuddy/design';
 import { mobileRequest } from './src/api';
 import { MobileHouseholdProvider } from './src/household';
-import type { RootStackParamList } from './src/navigation';
+import type { NativeEntrySignal, RootStackParamList } from './src/navigation';
 import {
   clearSessionToken,
   readSessionToken,
@@ -21,6 +21,7 @@ import {
   FamilyScreen,
   HistoryScreen,
   HomeScreen,
+  NativeProofScreen,
   OrientationScreen,
   ResultScreen,
   SignInScreen,
@@ -28,9 +29,36 @@ import {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
+function nativeEntrySignal(url: string): NativeEntrySignal {
+  if (/^boomerbuddy-local:\/\/check\/?$/u.test(url)) return 'route_only_check';
+  if (url.startsWith('boomerbuddy-local://check')) return 'rejected_payload';
+  return 'none';
+}
+
 export default function App() {
   const [principal, setPrincipal] = useState<PrincipalDto>();
   const [restoring, setRestoring] = useState(true);
+  const [nativeEntry, setNativeEntry] = useState<NativeEntrySignal>('none');
+
+  useEffect(() => {
+    let active = true;
+    const observe = (url: string) => {
+      const signal = nativeEntrySignal(url);
+      if (active && signal !== 'none') setNativeEntry(signal);
+    };
+    void Linking.getInitialURL()
+      .then((url) => {
+        if (url) observe(url);
+      })
+      .catch(() => {
+        // Native intake remains explicitly unverified when the OS cannot provide an initial URL.
+      });
+    const subscription = Linking.addEventListener('url', ({ url }) => observe(url));
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -108,7 +136,13 @@ export default function App() {
           >
             <>
               <Stack.Screen name="Home" options={{ title: 'BoomerBuddy' }}>
-                {(props) => <HomeScreen {...props} onSignOut={() => void signOut()} />}
+                {(props) => (
+                  <HomeScreen
+                    {...props}
+                    nativeEntrySignal={nativeEntry}
+                    onSignOut={() => void signOut()}
+                  />
+                )}
               </Stack.Screen>
               <Stack.Screen name="Check" component={CheckScreen} options={{ title: 'Check' }} />
               <Stack.Screen name="Result" component={ResultScreen} options={{ title: 'Result' }} />
@@ -124,6 +158,11 @@ export default function App() {
                 name="Orientation"
                 component={OrientationScreen}
                 options={{ title: 'Orientation' }}
+              />
+              <Stack.Screen
+                name="NativeProof"
+                component={NativeProofScreen}
+                options={{ title: 'Native proof' }}
               />
             </>
           </Stack.Navigator>

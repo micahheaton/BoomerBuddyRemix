@@ -29,11 +29,20 @@ export const principalSchema = z.object({
   households: z.array(
     z.object({
       id: opaqueIdSchema,
-      role: z.enum(['household_owner', 'protected_member', 'trusted_circle']),
+      membershipKind: z.literal('member'),
+      isAdministrator: z.boolean(),
       isProtectedMember: z.boolean(),
-      permissions: z.array(
-        z.enum(['view_shared_checks', 'receive_escalations', 'help_with_orientation']),
+      trustedCircleGrants: z.array(
+        z.object({
+          relationshipId: opaqueIdSchema,
+          protectedPersonId: opaqueIdSchema,
+          permissions: z.array(
+            z.enum(['view_shared_checks', 'receive_escalations', 'help_with_orientation']),
+          ),
+        }),
       ),
+      isPayer: z.boolean(),
+      isBillingManager: z.boolean(),
       capabilities: z.array(capabilitySchema),
     }),
   ),

@@ -1,0 +1,1331 @@
+import {
+  authorizeAutomation,
+  canTransitionReferral,
+  canTransitionOpportunity,
+  evaluateContentForPublication,
+  evaluateCustomerHealth,
+  evaluateOpportunityHygiene,
+  evaluateReferralReward,
+  lifecyclePlan,
+  routeSupportCase,
+  sanitizeAttribution,
+  isAutoEligibleAction,
+  isAutoPolicyWithinBoundary,
+  type AcquisitionMilestone,
+  type AutomationPolicy,
+  type AutomationRequest,
+  type CreditUnionRecord,
+  type CustomerHealthSignals,
+  type LifecycleTrigger,
+  type OpportunityStage,
+  type RawAttribution,
+  type ReferralRewardPolicy,
+  type ReferralState,
+} from '@boomerbuddy/business-os';
+
+import type { Database } from './database';
+import { writeAuditAndOutbox, type OperationalEventContext } from './events';
+import {
+  asDate,
+  jsonParameter,
+  jsonValue,
+  randomIdFactory,
+  stringArray,
+  type IdFactory,
+} from './values';
+
+export interface NcuaImportInput {
+  readonly records: readonly CreditUnionRecord[];
+  readonly provenance: {
+    readonly cycleDate: string;
+    readonly downloadedAt: Date;
+    readonly sha256: string;
+    readonly sourceUrl: string;
+  };
+  readonly context: OperationalEventContext;
+}
+
+export interface NcuaImportResult {
+  readonly imported: boolean;
+  readonly organizationCount: number;
+  readonly snapshotId: string;
+}
+
+interface SnapshotRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly row_count: number;
+}
+
+interface CreditUnionRow extends Record<string, unknown> {
+  readonly snapshot_id: string;
+  readonly charter_number: number;
+  readonly internal_join_number: number;
+  readonly name: string;
+  readonly city: string;
+  readonly state: string;
+  readonly charter_state: string;
+  readonly zip_code: string;
+  readonly ncua_region: string;
+  readonly source_type_code: string;
+  readonly low_income_designation: boolean;
+  readonly peer_group: number;
+  readonly members: number;
+  readonly assets: number;
+  readonly loans: number;
+  readonly deposits: number;
+  readonly member_segment: CreditUnionRecord['memberSegment'];
+  readonly fit_score: number;
+  readonly fit_reasons: unknown;
+}
+
+interface OpportunityRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly organization_id: string;
+  readonly organization_name: string;
+  readonly name: string;
+  readonly stage: OpportunityStage;
+  readonly owner_person_id: string | null;
+  readonly next_action: string | null;
+  readonly next_action_at: unknown | null;
+  readonly last_meaningful_activity_at: unknown;
+  readonly snoozed_until: unknown | null;
+  readonly suppression_reason: string | null;
+}
+
+interface AttentionRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly attention_kind: string;
+  readonly source_type: string;
+  readonly source_id: string;
+  readonly why_founder_required: string;
+  readonly recommended_action: string;
+  readonly consequence_of_inaction: string;
+  readonly deadline: unknown | null;
+  readonly state: 'open' | 'snoozed' | 'resolved' | 'dismissed';
+  readonly created_at: unknown;
+  readonly updated_at: unknown;
+}
+
+interface PolicyRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly action_key: string;
+  readonly autonomy_class: AutomationPolicy['autonomy'];
+  readonly allowed_data_classes: unknown;
+  readonly allowed_tools: unknown;
+  readonly budget_cents: number;
+  readonly requires_audit: boolean;
+  readonly enabled: boolean;
+}
+
+const codePattern = /^[a-z][a-z0-9_.-]{1,79}$/u;
+
+function assertCode(value: string, field: string): void {
+  if (!codePattern.test(value)) throw new TypeError(`Invalid ${field}`);
+}
+
+function mapCreditUnion(row: CreditUnionRow): CreditUnionRecord {
+  return {
+    assets: Number(row.assets),
+    charterNumber: row.charter_number,
+    charterState: row.charter_state,
+    city: row.city,
+    deposits: Number(row.deposits),
+    fitReasons: [...stringArray(row.fit_reasons, 'ncua_credit_unions.fit_reasons')],
+    fitScore: row.fit_score,
+    internalJoinNumber: row.internal_join_number,
+    loans: Number(row.loans),
+    lowIncomeDesignation: row.low_income_designation,
+    memberSegment: row.member_segment,
+    members: Number(row.members),
+    name: row.name,
+    ncuaRegion: row.ncua_region,
+    peerGroup: row.peer_group,
+    sourceTypeCode: row.source_type_code,
+    state: row.state,
+    zipCode: row.zip_code,
+  };
+}
+
+export class BusinessOsRepository {
+  constructor(
+    private readonly database: Database,
+    private readonly ids: IdFactory = randomIdFactory,
+  ) {}
+
+  async recordAttribution(input: {
+    readonly attribution: RawAttribution;
+    readonly milestone: AcquisitionMilestone;
+    readonly now: Date;
+    readonly subjectId: string;
+    readonly subjectKind: 'anonymous_context' | 'person' | 'household';
+  }): Promise<string> {
+    const sanitized = sanitizeAttribution(input.attribution);
+    const id = this.ids.next('touch');
+    await this.database.query(
+      `INSERT INTO acquisition_touchpoints(
+         id, subject_kind, subject_id, channel, milestone, source_token, medium_token,
+         campaign_token, content_token, partner_token, referrer_host, occurred_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      [
+        id,
+        input.subjectKind,
+        input.subjectId,
+        sanitized.channel,
+        input.milestone,
+        sanitized.source ?? null,
+        sanitized.medium ?? null,
+        sanitized.campaign ?? null,
+        sanitized.content ?? null,
+        sanitized.partner ?? null,
+        sanitized.referrerHost ?? null,
+        input.now.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async createContentSource(input: {
+    readonly canonicalUrl?: string;
+    readonly capturedAt: Date;
+    readonly createdByPersonId?: string;
+    readonly evidenceState: 'candidate' | 'verified' | 'rejected' | 'retired';
+    readonly freshUntil?: Date;
+    readonly sourceFingerprint: string;
+    readonly sourceKind: 'official' | 'adjudicated_incident' | 'founder_original' | 'partner';
+    readonly title: string;
+  }): Promise<string> {
+    const id = this.ids.next('content_source');
+    await this.database.query(
+      `INSERT INTO content_sources(
+         id, source_kind, title, canonical_url, source_fingerprint, evidence_state,
+         captured_at, fresh_until, created_by_person_id
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [
+        id,
+        input.sourceKind,
+        input.title,
+        input.canonicalUrl ?? null,
+        input.sourceFingerprint,
+        input.evidenceState,
+        input.capturedAt.toISOString(),
+        input.freshUntil?.toISOString() ?? null,
+        input.createdByPersonId ?? null,
+      ],
+    );
+    return id;
+  }
+
+  async createContentItem(input: {
+    readonly claimFlags: readonly ('unsupported_statistics' | 'unverified_urgency')[];
+    readonly contentKind:
+      | 'scam_page'
+      | 'explainer'
+      | 'alert'
+      | 'newsletter'
+      | 'social_draft'
+      | 'faq'
+      | 'video_talking_points'
+      | 'founder_derivative';
+    readonly createdAt: Date;
+    readonly createdByPersonId?: string;
+    readonly evidence: readonly { readonly sourceId: string; readonly supportedClaim: string }[];
+    readonly founderSourceId?: string;
+    readonly sourceContentItemId?: string;
+    readonly title: string;
+  }): Promise<string> {
+    const id = this.ids.next('content');
+    await this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO governed_content_items(
+           id, content_kind, title, review_state, source_content_item_id, founder_source_id,
+           claim_flags, created_by_person_id, created_at
+         ) VALUES ($1,$2,$3,'draft',$4,$5,$6::jsonb,$7,$8)`,
+        [
+          id,
+          input.contentKind,
+          input.title,
+          input.sourceContentItemId ?? null,
+          input.founderSourceId ?? null,
+          jsonParameter(input.claimFlags),
+          input.createdByPersonId ?? null,
+          input.createdAt.toISOString(),
+        ],
+      );
+      for (const evidence of input.evidence) {
+        await transaction.query(
+          `INSERT INTO governed_content_evidence(content_item_id, source_id, supported_claim)
+           VALUES ($1,$2,$3)`,
+          [id, evidence.sourceId, evidence.supportedClaim],
+        );
+      }
+    });
+    return id;
+  }
+
+  async submitContentForReview(input: {
+    readonly contentItemId: string;
+    readonly founderApproval: boolean;
+  }): Promise<void> {
+    const state = input.founderApproval ? 'founder_approval' : 'evidence_review';
+    const result = await this.database.query(
+      `UPDATE governed_content_items SET review_state = $2
+       WHERE id = $1 AND review_state = 'draft'`,
+      [input.contentItemId, state],
+    );
+    if (result.rowCount !== 1) throw new Error('Content item is not in draft state');
+  }
+
+  async approveContent(input: {
+    readonly approvedAt: Date;
+    readonly approvedByPersonId: string;
+    readonly contentItemId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const item = await transaction.query<
+        {
+          claim_flags: unknown;
+          review_state: 'evidence_review' | 'founder_approval';
+        } & Record<string, unknown>
+      >(
+        `SELECT claim_flags, review_state FROM governed_content_items
+         WHERE id = $1 AND review_state IN ('evidence_review','founder_approval')
+         FOR UPDATE`,
+        [input.contentItemId],
+      );
+      const itemRow = item.rows[0];
+      if (itemRow === undefined) throw new Error('Content item is not ready for approval');
+      const evidence = await transaction.query<
+        { evidence_count: number; stale_count: number } & Record<string, unknown>
+      >(
+        `SELECT count(evidence.source_id)::int AS evidence_count,
+                count(evidence.source_id) FILTER (
+                  WHERE source.evidence_state <> 'verified'
+                     OR (source.fresh_until IS NOT NULL AND source.fresh_until <= $2)
+                )::int AS stale_count
+         FROM governed_content_evidence evidence
+         JOIN content_sources source ON source.id = evidence.source_id
+         WHERE evidence.content_item_id = $1`,
+        [input.contentItemId, input.approvedAt.toISOString()],
+      );
+      const evidenceRow = evidence.rows[0] ?? { evidence_count: 0, stale_count: 0 };
+      const claimFlags = stringArray(itemRow.claim_flags, 'governed_content_items.claim_flags');
+      const decision = evaluateContentForPublication({
+        evidenceCount: evidenceRow.stale_count > 0 ? 0 : evidenceRow.evidence_count,
+        hasUnsupportedStatistics: claimFlags.includes('unsupported_statistics'),
+        hasUnverifiedUrgency: claimFlags.includes('unverified_urgency'),
+        reviewState: 'approved',
+      });
+      if (!decision.publishable) throw new Error(decision.reasons.join(' '));
+      await transaction.query(
+        `UPDATE governed_content_items
+         SET review_state = 'approved', approved_by_person_id = $2, approved_at = $3
+         WHERE id = $1`,
+        [input.contentItemId, input.approvedByPersonId, input.approvedAt.toISOString()],
+      );
+    });
+  }
+
+  async createReferral(input: {
+    readonly attributionTouchpointId?: string;
+    readonly createdAt: Date;
+    readonly referredHouseholdId?: string;
+    readonly referredPersonId?: string;
+    readonly referralKind: 'family_invitation' | 'trusted_circle' | 'friend' | 'gift_trial';
+    readonly referrerHouseholdId?: string;
+    readonly referrerPersonId?: string;
+  }): Promise<string> {
+    if (input.referrerPersonId === undefined && input.referrerHouseholdId === undefined) {
+      throw new TypeError('Referral requires a referrer.');
+    }
+    const id = this.ids.next('referral');
+    await this.database.query(
+      `INSERT INTO referrals(
+         id, referral_kind, referrer_person_id, referrer_household_id,
+         referred_person_id, referred_household_id, attribution_touchpoint_id,
+         state, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,'created',$8)`,
+      [
+        id,
+        input.referralKind,
+        input.referrerPersonId ?? null,
+        input.referrerHouseholdId ?? null,
+        input.referredPersonId ?? null,
+        input.referredHouseholdId ?? null,
+        input.attributionTouchpointId ?? null,
+        input.createdAt.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async transitionReferral(input: {
+    readonly at: Date;
+    readonly nextState: ReferralState;
+    readonly referralId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const result = await transaction.query<{ state: ReferralState } & Record<string, unknown>>(
+        'SELECT state FROM referrals WHERE id = $1 FOR UPDATE',
+        [input.referralId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) throw new Error('Referral not found');
+      if (!canTransitionReferral(row.state, input.nextState)) {
+        throw new Error(`Invalid referral transition ${row.state} -> ${input.nextState}`);
+      }
+      const timestampColumn =
+        input.nextState === 'accepted'
+          ? 'accepted_at'
+          : input.nextState === 'activated'
+            ? 'activated_at'
+            : input.nextState === 'paid'
+              ? 'paid_at'
+              : undefined;
+      if (timestampColumn === undefined) {
+        await transaction.query('UPDATE referrals SET state = $2 WHERE id = $1', [
+          input.referralId,
+          input.nextState,
+        ]);
+      } else {
+        await transaction.query(
+          `UPDATE referrals SET state = $2, ${timestampColumn} = $3 WHERE id = $1`,
+          [input.referralId, input.nextState, input.at.toISOString()],
+        );
+      }
+    });
+  }
+
+  async approveReferralReward(input: {
+    readonly amountMinor: number;
+    readonly approvedByPersonId: string;
+    readonly createdAt: Date;
+    readonly currency: string;
+    readonly policy: ReferralRewardPolicy;
+    readonly priorAwards: number;
+    readonly referralId: string;
+    readonly referredHouseholdActivated: boolean;
+  }): Promise<string | undefined> {
+    const decision = evaluateReferralReward(
+      input.policy,
+      input.priorAwards,
+      input.referredHouseholdActivated,
+    );
+    if (!decision.award || input.policy.rewardCode === undefined) return undefined;
+    const id = this.ids.next('reward');
+    await this.database.query(
+      `INSERT INTO referral_reward_ledger(
+         id, referral_id, reward_code, disposition, approved_by_person_id,
+         amount_minor, currency, reason, created_at
+       ) VALUES ($1,$2,$3,'approved',$4,$5,$6,$7,$8)`,
+      [
+        id,
+        input.referralId,
+        input.policy.rewardCode,
+        input.approvedByPersonId,
+        input.amountMinor,
+        input.currency,
+        decision.reason,
+        input.createdAt.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async startLifecycle(input: {
+    readonly householdId: string;
+    readonly marketingConsented: boolean;
+    readonly now: Date;
+    readonly trigger: LifecycleTrigger;
+    readonly triggerEventId?: string;
+  }): Promise<string> {
+    const workflowKind =
+      input.trigger === 'signup' || input.trigger === 'incomplete_signup'
+        ? 'signup'
+        : input.trigger.includes('orientation')
+          ? 'orientation'
+          : input.trigger.includes('trial')
+            ? 'trial'
+            : input.trigger.includes('payment')
+              ? 'payment_recovery'
+              : input.trigger === 'renewal'
+                ? 'renewal'
+                : input.trigger.includes('cancel')
+                  ? 'cancellation'
+                  : input.trigger === 'win_back_eligible'
+                    ? 'win_back'
+                    : input.trigger === 'referral_success'
+                      ? 'referral'
+                      : 'activation';
+    const steps = lifecyclePlan(input.trigger, input.marketingConsented);
+    const workflowId = this.ids.next('lifecycle');
+    return this.database.transaction(async (transaction) => {
+      if (input.triggerEventId !== undefined) {
+        const existing = await transaction.query<{ id: string } & Record<string, unknown>>(
+          'SELECT id FROM lifecycle_workflows WHERE trigger_event_id = $1',
+          [input.triggerEventId],
+        );
+        const row = existing.rows[0];
+        if (row !== undefined) return row.id;
+      }
+      await transaction.query(
+        `INSERT INTO lifecycle_workflows(
+           id, household_id, workflow_kind, state, trigger_event_id, current_step_key,
+           consent_basis, started_at, updated_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8)`,
+        [
+          workflowId,
+          input.householdId,
+          workflowKind,
+          steps.length === 0 ? 'suppressed' : 'active',
+          input.triggerEventId ?? null,
+          steps[0]?.key ?? null,
+          input.marketingConsented ? 'marketing_opt_in' : 'transactional_or_internal_only',
+          input.now.toISOString(),
+        ],
+      );
+      for (const [index, step] of steps.entries()) {
+        await transaction.query(
+          `INSERT INTO lifecycle_steps(
+             id, workflow_id, step_key, action_kind, state, scheduled_at
+           ) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            this.ids.next('lifecycle_step'),
+            workflowId,
+            step.key,
+            step.actionKind,
+            index === 0 ? 'ready' : 'pending',
+            input.now.toISOString(),
+          ],
+        );
+      }
+      return workflowId;
+    });
+  }
+
+  async suppressCommunication(input: {
+    readonly channel: 'email' | 'sms' | 'phone' | 'all';
+    readonly effectiveAt: Date;
+    readonly reason: string;
+    readonly scope: 'transactional' | 'lifecycle' | 'b2b' | 'all';
+    readonly source: string;
+    readonly subjectId: string;
+    readonly subjectKind: 'person' | 'contact' | 'organization' | 'address';
+  }): Promise<string> {
+    const id = this.ids.next('suppression');
+    await this.database.query(
+      `INSERT INTO communication_suppressions(
+         id, subject_kind, subject_id, channel, scope, reason, source, effective_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        id,
+        input.subjectKind,
+        input.subjectId,
+        input.channel,
+        input.scope,
+        input.reason,
+        input.source,
+        input.effectiveAt.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async createWorkCase(input: {
+    readonly assignedPersonId?: string;
+    readonly category:
+      'account' | 'billing' | 'fraud' | 'navigation' | 'orientation' | 'security_privacy';
+    readonly dueAt?: Date;
+    readonly executiveEscalation: boolean;
+    readonly householdId?: string;
+    readonly needsArtifactAccess: boolean;
+    readonly now: Date;
+    readonly organizationId?: string;
+    readonly safetySeverity: 'none' | 'low' | 'high';
+    readonly severity: 'low' | 'medium' | 'high' | 'critical';
+    readonly summary: string;
+  }): Promise<string> {
+    const routingClass = routeSupportCase(input);
+    const caseKind =
+      input.category === 'security_privacy'
+        ? 'security_privacy'
+        : input.category === 'billing'
+          ? 'billing'
+          : input.category === 'fraud'
+            ? 'fraud'
+            : 'support';
+    const id = this.ids.next('case');
+    await this.database.query(
+      `INSERT INTO hq_work_cases(
+         id, case_kind, household_id, organization_id, severity, state, routing_class,
+         summary, assigned_person_id, due_at, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,'open',$6,$7,$8,$9,$10,$10)`,
+      [
+        id,
+        caseKind,
+        input.householdId ?? null,
+        input.organizationId ?? null,
+        input.severity,
+        routingClass,
+        input.summary,
+        input.assignedPersonId ?? null,
+        input.dueAt?.toISOString() ?? null,
+        input.now.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async importNcuaSnapshot(input: NcuaImportInput): Promise<NcuaImportResult> {
+    if (!/^[A-Fa-f0-9]{64}$/u.test(input.provenance.sha256)) {
+      throw new TypeError('Invalid NCUA snapshot SHA-256');
+    }
+    const existing = await this.database.query<SnapshotRow>(
+      `SELECT id, row_count FROM ncua_snapshots
+       WHERE cycle_date = $1::date AND lower(source_sha256) = lower($2)`,
+      [input.provenance.cycleDate, input.provenance.sha256],
+    );
+    const existingRow = existing.rows[0];
+    if (existingRow !== undefined) {
+      return {
+        imported: false,
+        organizationCount: existingRow.row_count,
+        snapshotId: existingRow.id,
+      };
+    }
+
+    const snapshotId = this.ids.next('ncua_snapshot');
+    await this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO ncua_snapshots(
+           id, cycle_date, source_url, source_sha256, downloaded_at, imported_at, row_count, state
+         ) VALUES ($1,$2::date,$3,$4,$5,$6,$7,'imported')`,
+        [
+          snapshotId,
+          input.provenance.cycleDate,
+          input.provenance.sourceUrl,
+          input.provenance.sha256.toLowerCase(),
+          input.provenance.downloadedAt.toISOString(),
+          input.context.now.toISOString(),
+          input.records.length,
+        ],
+      );
+      for (const record of input.records) {
+        await transaction.query(
+          `INSERT INTO ncua_credit_unions(
+             snapshot_id, charter_number, internal_join_number, name, city, state,
+             charter_state, zip_code, ncua_region, source_type_code,
+             low_income_designation, peer_group, members, assets, loans, deposits,
+             member_segment, fit_score, fit_reasons
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19::jsonb)`,
+          [
+            snapshotId,
+            record.charterNumber,
+            record.internalJoinNumber,
+            record.name,
+            record.city,
+            record.state,
+            record.charterState,
+            record.zipCode,
+            record.ncuaRegion,
+            record.sourceTypeCode,
+            record.lowIncomeDesignation,
+            record.peerGroup,
+            record.members,
+            record.assets,
+            record.loans,
+            record.deposits,
+            record.memberSegment,
+            record.fitScore,
+            jsonParameter(record.fitReasons),
+          ],
+        );
+        const externalId = String(record.charterNumber);
+        await transaction.query(
+          `INSERT INTO crm_organizations(
+             id, name, organization_kind, verification_state, source_name,
+             source_external_id, source_snapshot_id, source_charter_number,
+             attributes, created_at, updated_at
+           ) VALUES ($1,$2,'credit_union','public_source','ncua',$3,$4,$5,$6::jsonb,$7,$7)
+           ON CONFLICT (source_name, source_external_id) WHERE source_external_id IS NOT NULL
+           DO UPDATE SET name = excluded.name, verification_state = 'public_source',
+             source_snapshot_id = excluded.source_snapshot_id,
+             source_charter_number = excluded.source_charter_number,
+             attributes = excluded.attributes, updated_at = excluded.updated_at`,
+          [
+            this.ids.next('crm_org'),
+            record.name,
+            externalId,
+            snapshotId,
+            record.charterNumber,
+            jsonParameter({
+              assets: record.assets,
+              fitReasons: record.fitReasons,
+              fitScore: record.fitScore,
+              members: record.members,
+              segment: record.memberSegment,
+              state: record.state,
+            }),
+            input.context.now.toISOString(),
+          ],
+        );
+      }
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        input.context,
+        {
+          action: 'business_os.ncua_snapshot_imported',
+          resourceType: 'ncua_snapshot',
+          resourceId: snapshotId,
+          outcome: 'completed',
+          metadata: { rowCount: input.records.length },
+        },
+        {
+          eventType: 'business_os.ncua_snapshot_imported',
+          aggregateType: 'ncua_snapshot',
+          aggregateId: snapshotId,
+          payload: { rowCount: input.records.length },
+        },
+      );
+    });
+    return { imported: true, organizationCount: input.records.length, snapshotId };
+  }
+
+  async creditUnionTargets(
+    input: {
+      readonly limit?: number;
+      readonly memberSegment?: CreditUnionRecord['memberSegment'];
+      readonly minimumFitScore?: number;
+    } = {},
+  ): Promise<readonly CreditUnionRecord[]> {
+    const limit = Math.min(500, Math.max(1, input.limit ?? 100));
+    const result = await this.database.query<CreditUnionRow>(
+      `SELECT cu.* FROM ncua_credit_unions cu
+       JOIN ncua_snapshots snapshot ON snapshot.id = cu.snapshot_id
+       WHERE snapshot.state = 'imported'
+         AND ($1::text IS NULL OR cu.member_segment = $1)
+         AND cu.fit_score >= $2
+       ORDER BY snapshot.cycle_date DESC, cu.fit_score DESC, cu.members DESC, cu.charter_number
+       LIMIT $3`,
+      [input.memberSegment ?? null, input.minimumFitScore ?? 0, limit],
+    );
+    return result.rows.map(mapCreditUnion);
+  }
+
+  async createOpportunity(input: {
+    readonly amountMinor?: number;
+    readonly context: OperationalEventContext;
+    readonly currency?: string;
+    readonly name: string;
+    readonly organizationId: string;
+    readonly ownerPersonId?: string;
+    readonly useCase?: string;
+  }): Promise<string> {
+    const id = this.ids.next('opportunity');
+    await this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO crm_opportunities(
+           id, organization_id, name, stage, owner_person_id, amount_minor, currency,
+           forecast_probability, use_case, last_meaningful_activity_at, created_at, updated_at
+         ) VALUES ($1,$2,$3,'target',$4,$5,$6,0,$7,$8,$8,$8)`,
+        [
+          id,
+          input.organizationId,
+          input.name,
+          input.ownerPersonId ?? null,
+          input.amountMinor ?? null,
+          input.currency ?? null,
+          input.useCase ?? null,
+          input.context.now.toISOString(),
+        ],
+      );
+      await transaction.query(
+        `INSERT INTO crm_opportunity_stage_history(
+           id, opportunity_id, from_stage, to_stage, reason, changed_by_person_id, changed_at
+         ) VALUES ($1,$2,NULL,'target','Opportunity created',$3,$4)`,
+        [
+          this.ids.next('stage'),
+          id,
+          input.context.actorPersonId ?? null,
+          input.context.now.toISOString(),
+        ],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        input.context,
+        {
+          action: 'business_os.opportunity_created',
+          resourceType: 'crm_opportunity',
+          resourceId: id,
+          outcome: 'completed',
+        },
+        {
+          eventType: 'business_os.opportunity_created',
+          aggregateType: 'crm_opportunity',
+          aggregateId: id,
+          payload: { stage: 'target' },
+        },
+      );
+    });
+    return id;
+  }
+
+  async transitionOpportunity(input: {
+    readonly context: OperationalEventContext;
+    readonly nextStage: OpportunityStage;
+    readonly opportunityId: string;
+    readonly reason: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const current = await transaction.query<
+        { stage: OpportunityStage } & Record<string, unknown>
+      >('SELECT stage FROM crm_opportunities WHERE id = $1 FOR UPDATE', [input.opportunityId]);
+      const row = current.rows[0];
+      if (row === undefined) throw new Error('Opportunity not found');
+      if (!canTransitionOpportunity(row.stage, input.nextStage)) {
+        throw new Error(`Invalid opportunity transition ${row.stage} -> ${input.nextStage}`);
+      }
+      await transaction.query(
+        `UPDATE crm_opportunities SET stage = $2, updated_at = $3,
+           last_meaningful_activity_at = $3
+         WHERE id = $1`,
+        [input.opportunityId, input.nextStage, input.context.now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO crm_opportunity_stage_history(
+           id, opportunity_id, from_stage, to_stage, reason, changed_by_person_id, changed_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [
+          this.ids.next('stage'),
+          input.opportunityId,
+          row.stage,
+          input.nextStage,
+          input.reason,
+          input.context.actorPersonId ?? null,
+          input.context.now.toISOString(),
+        ],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        input.context,
+        {
+          action: 'business_os.opportunity_transitioned',
+          resourceType: 'crm_opportunity',
+          resourceId: input.opportunityId,
+          outcome: 'completed',
+          metadata: { fromStage: row.stage, toStage: input.nextStage },
+        },
+        {
+          eventType: 'business_os.opportunity_transitioned',
+          aggregateType: 'crm_opportunity',
+          aggregateId: input.opportunityId,
+          payload: { fromStage: row.stage, toStage: input.nextStage },
+        },
+      );
+    });
+  }
+
+  async setOpportunityNextAction(input: {
+    readonly context: OperationalEventContext;
+    readonly nextAction: string;
+    readonly nextActionAt: Date;
+    readonly opportunityId: string;
+  }): Promise<void> {
+    const result = await this.database.query(
+      `UPDATE crm_opportunities
+       SET next_action = $2, next_action_at = $3, updated_at = $4
+       WHERE id = $1`,
+      [
+        input.opportunityId,
+        input.nextAction,
+        input.nextActionAt.toISOString(),
+        input.context.now.toISOString(),
+      ],
+    );
+    if (result.rowCount !== 1) throw new Error('Opportunity not found');
+  }
+
+  async opportunityQueue(now: Date): Promise<
+    readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly organizationId: string;
+      readonly organizationName: string;
+      readonly ownerPersonId?: string;
+      readonly stage: OpportunityStage;
+      readonly stale: boolean;
+      readonly reasons: readonly string[];
+      readonly recommendedAction?: string;
+    }[]
+  > {
+    const result = await this.database.query<OpportunityRow>(
+      `SELECT opportunity.id, opportunity.organization_id, organization.name AS organization_name,
+              opportunity.name, opportunity.stage, opportunity.owner_person_id,
+              opportunity.next_action, opportunity.next_action_at,
+              opportunity.last_meaningful_activity_at, opportunity.snoozed_until,
+              opportunity.suppression_reason
+       FROM crm_opportunities opportunity
+       JOIN crm_organizations organization ON organization.id = opportunity.organization_id
+       ORDER BY opportunity.updated_at DESC`,
+    );
+    return result.rows.map((row) => {
+      const hygiene = evaluateOpportunityHygiene(
+        {
+          stage: row.stage,
+          lastMeaningfulActivityAt: asDate(
+            row.last_meaningful_activity_at,
+            'crm_opportunities.last_meaningful_activity_at',
+          ),
+          ...(row.next_action === null ? {} : { nextAction: row.next_action }),
+          ...(row.next_action_at === null
+            ? {}
+            : { nextActionAt: asDate(row.next_action_at, 'crm_opportunities.next_action_at') }),
+          ...(row.snoozed_until === null
+            ? {}
+            : { snoozedUntil: asDate(row.snoozed_until, 'crm_opportunities.snoozed_until') }),
+          ...(row.suppression_reason === null ? {} : { suppressionReason: row.suppression_reason }),
+        },
+        now,
+      );
+      return {
+        id: row.id,
+        name: row.name,
+        organizationId: row.organization_id,
+        organizationName: row.organization_name,
+        ...(row.owner_person_id === null ? {} : { ownerPersonId: row.owner_person_id }),
+        stage: row.stage,
+        stale: hygiene.stale,
+        reasons: hygiene.reasons,
+        ...(hygiene.recommendedAction === undefined
+          ? {}
+          : { recommendedAction: hygiene.recommendedAction }),
+      };
+    });
+  }
+
+  async recordCustomerHealth(input: {
+    readonly householdId: string;
+    readonly now: Date;
+    readonly rulesetVersion: string;
+    readonly signals: CustomerHealthSignals;
+  }): Promise<string> {
+    const result = evaluateCustomerHealth(input.signals);
+    const id = this.ids.next('health');
+    await this.database.query(
+      `INSERT INTO customer_health_snapshots(
+         id, household_id, state, score, components, calculated_at, ruleset_version
+       ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7)`,
+      [
+        id,
+        input.householdId,
+        result.state,
+        result.score,
+        jsonParameter(result.components),
+        input.now.toISOString(),
+        input.rulesetVersion,
+      ],
+    );
+    return id;
+  }
+
+  async upsertOwnerAttention(input: {
+    readonly attentionKind: string;
+    readonly consequenceOfInaction: string;
+    readonly deadline?: Date;
+    readonly dedupeKey: string;
+    readonly now: Date;
+    readonly recommendedAction: string;
+    readonly sourceId: string;
+    readonly sourceType: string;
+    readonly whyFounderRequired: string;
+  }): Promise<string> {
+    assertCode(input.attentionKind, 'attention kind');
+    assertCode(input.sourceType, 'source type');
+    assertCode(input.dedupeKey, 'attention dedupe key');
+    const id = this.ids.next('attention');
+    const result = await this.database.query<{ id: string } & Record<string, unknown>>(
+      `INSERT INTO owner_attention_items(
+         id, attention_kind, source_type, source_id, dedupe_key, why_founder_required,
+         recommended_action, consequence_of_inaction, deadline, state, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'open',$10,$10)
+       ON CONFLICT (dedupe_key) WHERE state IN ('open', 'snoozed')
+       DO UPDATE SET why_founder_required = excluded.why_founder_required,
+         recommended_action = excluded.recommended_action,
+         consequence_of_inaction = excluded.consequence_of_inaction,
+         deadline = excluded.deadline, state = 'open', updated_at = excluded.updated_at
+       RETURNING id`,
+      [
+        id,
+        input.attentionKind,
+        input.sourceType,
+        input.sourceId,
+        input.dedupeKey,
+        input.whyFounderRequired,
+        input.recommendedAction,
+        input.consequenceOfInaction,
+        input.deadline?.toISOString() ?? null,
+        input.now.toISOString(),
+      ],
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('Unable to create attention item');
+    return row.id;
+  }
+
+  async ownerAttention(): Promise<
+    readonly {
+      readonly attentionKind: string;
+      readonly consequenceOfInaction: string;
+      readonly createdAt: Date;
+      readonly deadline?: Date;
+      readonly id: string;
+      readonly recommendedAction: string;
+      readonly sourceId: string;
+      readonly sourceType: string;
+      readonly state: AttentionRow['state'];
+      readonly updatedAt: Date;
+      readonly whyFounderRequired: string;
+    }[]
+  > {
+    const result = await this.database.query<AttentionRow>(
+      `SELECT id, attention_kind, source_type, source_id, why_founder_required,
+              recommended_action, consequence_of_inaction, deadline, state, created_at, updated_at
+       FROM owner_attention_items
+       WHERE state IN ('open', 'snoozed')
+       ORDER BY deadline NULLS LAST, created_at`,
+    );
+    return result.rows.map((row) => ({
+      attentionKind: row.attention_kind,
+      consequenceOfInaction: row.consequence_of_inaction,
+      createdAt: asDate(row.created_at, 'owner_attention_items.created_at'),
+      ...(row.deadline === null
+        ? {}
+        : { deadline: asDate(row.deadline, 'owner_attention_items.deadline') }),
+      id: row.id,
+      recommendedAction: row.recommended_action,
+      sourceId: row.source_id,
+      sourceType: row.source_type,
+      state: row.state,
+      updatedAt: asDate(row.updated_at, 'owner_attention_items.updated_at'),
+      whyFounderRequired: row.why_founder_required,
+    }));
+  }
+
+  async putAutomationPolicy(input: {
+    readonly approvedByPersonId?: string;
+    readonly correlationId?: string;
+    readonly now: Date;
+    readonly policy: AutomationPolicy;
+  }): Promise<string> {
+    assertCode(input.policy.action, 'automation action');
+    if (input.policy.autonomy === 'auto' && !isAutoEligibleAction(input.policy.action)) {
+      throw new TypeError('Action is not eligible for autonomous execution');
+    }
+    if (input.policy.autonomy === 'auto' && !isAutoPolicyWithinBoundary(input.policy)) {
+      throw new TypeError('Policy exceeds the code-owned autonomous execution boundary');
+    }
+    const id = this.ids.next('autonomy_policy');
+    return this.database.transaction(async (transaction) => {
+      const result = await transaction.query<
+        { id: string; version: number } & Record<string, unknown>
+      >(
+        `INSERT INTO autonomy_policies(
+         id, action_key, autonomy_class, allowed_data_classes, allowed_tools,
+         budget_cents, requires_audit, enabled, approved_by_person_id, version,
+         created_at, updated_at
+       ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8,$9,1,$10,$10)
+       ON CONFLICT (action_key) DO UPDATE SET autonomy_class = excluded.autonomy_class,
+         allowed_data_classes = excluded.allowed_data_classes,
+         allowed_tools = excluded.allowed_tools, budget_cents = excluded.budget_cents,
+         requires_audit = excluded.requires_audit, enabled = excluded.enabled,
+         approved_by_person_id = excluded.approved_by_person_id,
+         version = autonomy_policies.version + 1, updated_at = excluded.updated_at
+       RETURNING id, version`,
+        [
+          id,
+          input.policy.action,
+          input.policy.autonomy,
+          jsonParameter(input.policy.allowedDataClasses),
+          jsonParameter(input.policy.allowedTools),
+          input.policy.budgetCents,
+          input.policy.requiresAudit,
+          input.policy.enabled,
+          input.approvedByPersonId ?? null,
+          input.now.toISOString(),
+        ],
+      );
+      const row = result.rows[0];
+      if (row === undefined) throw new Error('Unable to write autonomy policy');
+      await transaction.query(
+        `INSERT INTO autonomy_policy_versions(
+           id, policy_id, action_key, version, autonomy_class, allowed_data_classes,
+           allowed_tools, budget_cents, requires_audit, enabled, approved_by_person_id,
+           recorded_at
+         ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9,$10,$11,$12)`,
+        [
+          this.ids.next('autonomy_policy_version'),
+          row.id,
+          input.policy.action,
+          row.version,
+          input.policy.autonomy,
+          jsonParameter(input.policy.allowedDataClasses),
+          jsonParameter(input.policy.allowedTools),
+          input.policy.budgetCents,
+          input.policy.requiresAudit,
+          input.policy.enabled,
+          input.approvedByPersonId ?? null,
+          input.now.toISOString(),
+        ],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        {
+          ...(input.approvedByPersonId === undefined
+            ? {}
+            : { actorPersonId: input.approvedByPersonId, audience: 'hq' as const }),
+          correlationId: input.correlationId ?? `autonomy-policy:${row.id}:${row.version}`,
+          now: input.now,
+        },
+        {
+          action: 'business_os.autonomy_policy_changed',
+          resourceType: 'autonomy_policy',
+          resourceId: row.id,
+          outcome: 'completed',
+          metadata: {
+            actionKey: input.policy.action,
+            autonomyClass: input.policy.autonomy,
+            budgetCents: input.policy.budgetCents,
+            enabled: input.policy.enabled,
+            version: row.version,
+          },
+        },
+        {
+          eventType: 'business_os.autonomy_policy_changed',
+          aggregateType: 'autonomy_policy',
+          aggregateId: row.id,
+          payload: {
+            actionKey: input.policy.action,
+            autonomyClass: input.policy.autonomy,
+            enabled: input.policy.enabled,
+            version: row.version,
+          },
+        },
+      );
+      return row.id;
+    });
+  }
+
+  async globalAutomationControl(): Promise<{
+    readonly killSwitch: boolean;
+    readonly updatedAt: Date;
+    readonly updatedByPersonId?: string;
+  }> {
+    const result = await this.database.query<
+      {
+        readonly kill_switch: boolean;
+        readonly updated_at: unknown;
+        readonly updated_by_person_id: string | null;
+      } & Record<string, unknown>
+    >(
+      `SELECT kill_switch, updated_by_person_id, updated_at
+       FROM automation_global_control WHERE control_key = 'global'`,
+    );
+    const row = result.rows[0];
+    if (row === undefined) throw new Error('Global automation control is unavailable');
+    return {
+      killSwitch: row.kill_switch,
+      updatedAt: asDate(row.updated_at, 'automation_global_control.updated_at'),
+      ...(row.updated_by_person_id === null ? {} : { updatedByPersonId: row.updated_by_person_id }),
+    };
+  }
+
+  async setGlobalAutomationKillSwitch(input: {
+    readonly correlationId?: string;
+    readonly killSwitch: boolean;
+    readonly now: Date;
+    readonly updatedByPersonId: string;
+  }): Promise<void> {
+    await this.database.transaction(async (transaction) => {
+      const result = await transaction.query(
+        `UPDATE automation_global_control
+       SET kill_switch = $1, updated_by_person_id = $2, updated_at = $3
+       WHERE control_key = 'global'`,
+        [input.killSwitch, input.updatedByPersonId, input.now.toISOString()],
+      );
+      if (result.rowCount !== 1) throw new Error('Global automation control is unavailable');
+      const historyId = this.ids.next('automation_global_control');
+      await transaction.query(
+        `INSERT INTO automation_global_control_history(
+           id, kill_switch, updated_by_person_id, recorded_at
+         ) VALUES ($1,$2,$3,$4)`,
+        [historyId, input.killSwitch, input.updatedByPersonId, input.now.toISOString()],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        {
+          actorPersonId: input.updatedByPersonId,
+          audience: 'hq',
+          correlationId: input.correlationId ?? `automation-control:${historyId}`,
+          now: input.now,
+        },
+        {
+          action: 'business_os.automation_global_control_changed',
+          resourceType: 'automation_global_control',
+          resourceId: 'global',
+          outcome: 'completed',
+          metadata: { killSwitch: input.killSwitch },
+        },
+        {
+          eventType: 'business_os.automation_global_control_changed',
+          aggregateType: 'automation_global_control',
+          aggregateId: 'global',
+          payload: { killSwitch: input.killSwitch },
+        },
+      );
+    });
+  }
+
+  async evaluateAutomation(input: {
+    readonly globalKillSwitch: boolean;
+    readonly now: Date;
+    readonly request: AutomationRequest;
+  }): Promise<{
+    readonly allowed: boolean;
+    readonly disposition: 'auto' | 'approval' | 'human' | 'professional' | 'blocked';
+    readonly reasons: readonly string[];
+    readonly runId: string;
+  }> {
+    const result = await this.database.query<PolicyRow>(
+      `SELECT id, action_key, autonomy_class, allowed_data_classes, allowed_tools,
+              budget_cents, requires_audit, enabled
+       FROM autonomy_policies WHERE action_key = $1`,
+      [input.request.action],
+    );
+    const row = result.rows[0];
+    const policy: AutomationPolicy | undefined =
+      row === undefined
+        ? undefined
+        : {
+            action: row.action_key,
+            allowedDataClasses: [
+              ...stringArray(row.allowed_data_classes, 'autonomy_policies.allowed_data_classes'),
+            ],
+            allowedTools: [...stringArray(row.allowed_tools, 'autonomy_policies.allowed_tools')],
+            autonomy: row.autonomy_class,
+            budgetCents: row.budget_cents,
+            enabled: row.enabled,
+            requiresAudit: row.requires_audit,
+          };
+    const decision = authorizeAutomation(policy, input.request, input.globalKillSwitch);
+    const runId = this.ids.next('automation_run');
+    await this.database.query(
+      `INSERT INTO automation_runs(
+         id, policy_id, action_key, tool_key, data_classes, estimated_cost_cents,
+         state, audit_reference, created_at
+       ) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8,$9)`,
+      [
+        runId,
+        row?.id ?? null,
+        input.request.action,
+        input.request.tool,
+        jsonParameter(input.request.dataClasses),
+        input.request.estimatedCostCents,
+        decision.allowed ? 'approved' : decision.disposition === 'approval' ? 'blocked' : 'blocked',
+        `automation:${runId}`,
+        input.now.toISOString(),
+      ],
+    );
+    return { ...decision, runId };
+  }
+
+  async ownerBrief(now: Date): Promise<{
+    readonly attention: number;
+    readonly atRiskHouseholds: number;
+    readonly creditUnionUniverse: number;
+    readonly openOpportunities: number;
+    readonly staleOpportunities: number;
+  }> {
+    const [counts, opportunities] = await Promise.all([
+      this.database.query<
+        {
+          attention: number;
+          at_risk_households: number;
+          credit_unions: number;
+          open_opportunities: number;
+        } & Record<string, unknown>
+      >(`SELECT
+          (SELECT count(*)::int FROM owner_attention_items WHERE state IN ('open','snoozed')) AS attention,
+          (SELECT count(*)::int FROM (
+             SELECT DISTINCT ON (household_id) household_id, state
+             FROM customer_health_snapshots
+             ORDER BY household_id, calculated_at DESC
+           ) latest_health WHERE latest_health.state = 'at_risk') AS at_risk_households,
+          (SELECT count(*)::int FROM ncua_credit_unions cu JOIN ncua_snapshots s ON s.id = cu.snapshot_id
+             WHERE s.state = 'imported') AS credit_unions,
+          (SELECT count(*)::int FROM crm_opportunities
+             WHERE stage NOT IN ('closed_won','closed_lost')) AS open_opportunities`),
+      this.opportunityQueue(now),
+    ]);
+    const row = counts.rows[0] ?? {
+      attention: 0,
+      at_risk_households: 0,
+      credit_unions: 0,
+      open_opportunities: 0,
+    };
+    return {
+      attention: row.attention,
+      atRiskHouseholds: row.at_risk_households,
+      creditUnionUniverse: row.credit_unions,
+      openOpportunities: row.open_opportunities,
+      staleOpportunities: opportunities.filter((opportunity) => opportunity.stale).length,
+    };
+  }
+
+  async createPrivacyRequest(input: {
+    readonly dueAt: Date;
+    readonly householdId?: string;
+    readonly now: Date;
+    readonly personId?: string;
+    readonly requestKind: 'access' | 'export' | 'delete' | 'correct' | 'restrict';
+  }): Promise<string> {
+    if (input.personId === undefined && input.householdId === undefined) {
+      throw new TypeError('Privacy request needs a person or household subject');
+    }
+    const id = this.ids.next('privacy_request');
+    await this.database.query(
+      `INSERT INTO privacy_requests(
+         id, person_id, household_id, request_kind, identity_verification_state,
+         state, due_at, created_at, updated_at
+       ) VALUES ($1,$2,$3,$4,'pending','received',$5,$6,$6)`,
+      [
+        id,
+        input.personId ?? null,
+        input.householdId ?? null,
+        input.requestKind,
+        input.dueAt.toISOString(),
+        input.now.toISOString(),
+      ],
+    );
+    return id;
+  }
+
+  async rawAutomationPolicy(
+    action: string,
+  ): Promise<Readonly<Record<string, unknown>> | undefined> {
+    const result = await this.database.query<Record<string, unknown>>(
+      'SELECT * FROM autonomy_policies WHERE action_key = $1',
+      [action],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return undefined;
+    const parsed: Record<string, unknown> = { ...row };
+    for (const key of ['allowed_data_classes', 'allowed_tools'] as const) {
+      parsed[key] = jsonValue(row[key]);
+    }
+    return parsed;
+  }
+}

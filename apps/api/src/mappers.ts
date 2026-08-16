@@ -69,7 +69,9 @@ export function checkDto(check: StoredCheck, actorPersonId: string): CheckResult
     id: check.id,
     householdId: check.householdId,
     kind: check.kind,
-    risk: check.risk,
+    // Historic Run 1 rows may retain the reserved value for migration evidence,
+    // but active API semantics never represent absence of bad evidence as safety.
+    risk: check.risk === 'lower_concern' ? 'unknown' : check.risk,
     evidenceSufficiency: check.evidenceSufficiency,
     calibration: check.calibration,
     summary: check.summary,
@@ -97,6 +99,8 @@ export function relationshipDto(relationship: RelationshipRecord) {
     state: relationship.state,
     consentVersion: relationship.consentVersion,
     createdAt: relationship.createdAt.toISOString(),
+    ...(relationship.endedAction === undefined ? {} : { endedAction: relationship.endedAction }),
+    ...(relationship.endedAt === undefined ? {} : { endedAt: relationship.endedAt.toISOString() }),
   };
 }
 
@@ -105,7 +109,7 @@ export function familyDto(
 ): FamilyResponse {
   return {
     household: family.household,
-    members: family.members.map((member) => ({ ...member, permissions: [...member.permissions] })),
+    members: family.members.map((member) => ({ ...member })),
     relationships: family.relationships.map(relationshipDto),
     invitations: family.invitations.map((invitation) => ({
       ...invitation,

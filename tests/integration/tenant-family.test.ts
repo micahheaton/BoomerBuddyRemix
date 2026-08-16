@@ -67,7 +67,7 @@ describe('tenant and pairwise family boundaries', () => {
     expect(unsharedSameTenant.statusCode).toBe(404);
   }, 15_000);
 
-  it('projects protected enrollment independently from role and denies an unallocated owner', async () => {
+  it('projects independent authority facts on neutral membership and denies an unprotected admin', async () => {
     harness = await createApiHarness();
     const alice = await login(harness.app, 'owner-alice');
     const pat = await login(harness.app, 'protected-pat');
@@ -77,15 +77,18 @@ describe('tenant and pairwise family boundaries', () => {
         (candidate) => candidate.id === id,
       );
     expect(household(alice, 'household-sunrise')).toMatchObject({
-      role: 'household_owner',
+      membershipKind: 'member',
+      isAdministrator: true,
       isProtectedMember: true,
     });
     expect(household(pat, 'household-sunrise')).toMatchObject({
-      role: 'protected_member',
+      membershipKind: 'member',
+      isAdministrator: false,
       isProtectedMember: true,
     });
     expect(household(bob, 'household-harbor')).toMatchObject({
-      role: 'household_owner',
+      membershipKind: 'member',
+      isAdministrator: true,
       isProtectedMember: false,
       capabilities: [],
     });
@@ -100,12 +103,20 @@ describe('tenant and pairwise family boundaries', () => {
       family
         .json()
         .members.find((member: { personId: string }) => member.personId === 'person-owner-alice'),
-    ).toMatchObject({ role: 'household_owner', isProtectedMember: true });
+    ).toMatchObject({
+      membershipKind: 'member',
+      isAdministrator: true,
+      isProtectedMember: true,
+    });
     expect(
       family
         .json()
         .members.find((member: { personId: string }) => member.personId === 'person-trusted-terry'),
-    ).toMatchObject({ role: 'trusted_circle', isProtectedMember: false });
+    ).toMatchObject({
+      membershipKind: 'member',
+      isAdministrator: false,
+      isProtectedMember: false,
+    });
 
     for (const attempt of [
       harness.app.inject({
@@ -207,9 +218,9 @@ describe('tenant and pairwise family boundaries', () => {
     );
     await harness.database.query(
       `INSERT INTO household_memberships(
-         household_id, id, person_id, role, status, permissions, created_at
+         household_id, id, person_id, membership_kind, status, created_at
        ) VALUES ('household-free','membership-free-alice','person-owner-alice',
-                 'household_owner','active','[]'::jsonb,$1)`,
+                 'member','active',$1)`,
       [harness.clock.now().toISOString()],
     );
     const alice = await login(harness.app, 'owner-alice');
@@ -385,6 +396,7 @@ describe('tenant and pairwise family boundaries', () => {
       protectedPerson: { id: 'person-protected-pat', displayName: 'Pat Protected' },
       permissions: ['view_shared_checks'],
       state: 'pending',
+      identityBindingState: 'development_unbound',
       previewVersion: expect.any(String),
     });
     expect(preview.body).not.toContain(String(invited.json().localInviteCode));
@@ -486,12 +498,89 @@ describe('tenant and pairwise family boundaries', () => {
       headers: browserHeaders(pat.cookie as string),
     });
     expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ state: 'withdrawn' });
     const afterRevocation = await harness.app.inject({
       method: 'GET',
       url: '/v1/family',
       headers: browserHeaders(jordan.cookie as string),
     });
     expect(afterRevocation.statusCode).toBe(403);
+  });
+
+  it('lets an existing administrator and protected member accept a pair without losing authority', async () => {
+    harness = await createApiHarness();
+    const alice = await login(harness.app, 'owner-alice');
+    const pat = await login(harness.app, 'protected-pat');
+    const invited = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/family/invitations',
+      headers: browserHeaders(pat.cookie as string),
+      payload: { inviteeDisplayName: 'Alice Owner', permissions: ['view_shared_checks'] },
+    });
+    expect(invited.statusCode).toBe(201);
+    const invitationId = String(invited.json().invitation.id);
+    const localInviteCode = String(invited.json().localInviteCode);
+    const preview = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/family/invitations/${invitationId}/preview`,
+      headers: browserHeaders(alice.cookie as string),
+      payload: { localInviteCode },
+    });
+    expect(preview.statusCode).toBe(200);
+    const accepted = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/family/invitations/${invitationId}/accept`,
+      headers: browserHeaders(alice.cookie as string),
+      payload: {
+        localInviteCode,
+        previewVersion: preview.json().invitation.previewVersion,
+      },
+    });
+    expect(accepted.statusCode).toBe(201);
+    const me = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/me',
+      headers: browserHeaders(alice.cookie as string),
+    });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().principal.households[0]).toMatchObject({
+      membershipKind: 'member',
+      isAdministrator: true,
+      isProtectedMember: true,
+      trustedCircleGrants: [
+        {
+          relationshipId: accepted.json().relationship.id,
+          protectedPersonId: 'person-protected-pat',
+          permissions: ['view_shared_checks'],
+        },
+      ],
+    });
+    const authority = await harness.database.query<{
+      memberships: number;
+      administrators: number;
+      protected_members: number;
+      active_pairs: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM household_memberships
+          WHERE household_id = 'household-sunrise' AND person_id = 'person-owner-alice'
+            AND membership_kind = 'member' AND status = 'active') AS memberships,
+         (SELECT count(*)::int FROM household_administrator_assignments
+          WHERE household_id = 'household-sunrise' AND person_id = 'person-owner-alice'
+            AND status = 'active') AS administrators,
+         (SELECT count(*)::int FROM protected_members
+          WHERE household_id = 'household-sunrise' AND person_id = 'person-owner-alice'
+            AND status = 'accepted') AS protected_members,
+         (SELECT count(*)::int FROM trusted_circle_relationships
+          WHERE household_id = 'household-sunrise' AND trusted_person_id = 'person-owner-alice'
+            AND state = 'active') AS active_pairs`,
+    );
+    expect(authority.rows[0]).toEqual({
+      memberships: 1,
+      administrators: 1,
+      protected_members: 1,
+      active_pairs: 1,
+    });
   });
 
   it('previews and cancels pending invitations with exact scope and no credential leakage', async () => {
@@ -604,6 +693,7 @@ describe('tenant and pairwise family boundaries', () => {
       headers: browserHeaders(pat.cookie as string),
     });
     expect(selfCancelled.statusCode).toBe(200);
+    expect(selfCancelled.json()).toMatchObject({ id: selfCancelledId, state: 'withdrawn' });
 
     const expiredInvite = await createInvitation('Expired credential');
     const expiredId = String(expiredInvite.json().invitation.id);
@@ -652,7 +742,7 @@ describe('tenant and pairwise family boundaries', () => {
       'family.invitation_created',
       'family.invitation_revoked',
       'family.invitation_created',
-      'family.invitation_revoked',
+      'family.invitation_withdrawn',
     ]);
     const eventPayloads = await harness.database.query<{ payload: unknown }>(
       `SELECT payload FROM outbox_events
@@ -687,31 +777,13 @@ describe('tenant and pairwise family boundaries', () => {
       headers: browserHeaders(terry.cookie as string),
     });
     expect(visible.statusCode).toBe(200);
-    await harness.database.query(
-      `UPDATE trusted_circle_relationships SET permissions = '[]'::jsonb
-       WHERE household_id = 'household-sunrise'
-         AND id = 'relationship-sunrise-pat-terry'`,
-    );
-    const permissionWithdrawnList = await harness.app.inject({
-      method: 'GET',
-      url: '/v1/checks',
-      headers: browserHeaders(terry.cookie as string),
-    });
-    const permissionWithdrawnDetail = await harness.app.inject({
-      method: 'GET',
-      url: `/v1/checks/${checkId}`,
-      headers: browserHeaders(terry.cookie as string),
-    });
-    expect(permissionWithdrawnList.statusCode).toBe(200);
-    expect(
-      permissionWithdrawnList.json().checks.some((check: { id: string }) => check.id === checkId),
-    ).toBe(false);
-    expect(permissionWithdrawnDetail.statusCode).toBe(404);
-    await harness.database.query(
-      `UPDATE trusted_circle_relationships SET permissions = '["view_shared_checks"]'::jsonb
-       WHERE household_id = 'household-sunrise'
-         AND id = 'relationship-sunrise-pat-terry'`,
-    );
+    await expect(
+      harness.database.query(
+        `UPDATE trusted_circle_relationships SET permissions = '[]'::jsonb
+         WHERE household_id = 'household-sunrise'
+           AND id = 'relationship-sunrise-pat-terry'`,
+      ),
+    ).rejects.toThrow('relationship authority changes require new consent evidence');
 
     const invalidOwnerShare = await harness.app.inject({
       method: 'POST',
@@ -727,12 +799,13 @@ describe('tenant and pairwise family boundaries', () => {
       headers: browserHeaders(alice.cookie as string),
     });
     expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ state: 'suspended' });
     const noLongerVisible = await harness.app.inject({
       method: 'GET',
       url: `/v1/checks/${checkId}`,
       headers: browserHeaders(terry.cookie as string),
     });
-    expect(noLongerVisible.statusCode).toBe(403);
+    expect(noLongerVisible.statusCode).toBe(404);
 
     const reconsentInvite = await harness.app.inject({
       method: 'POST',
@@ -790,11 +863,12 @@ describe('tenant and pairwise family boundaries', () => {
       headers: browserHeaders(terry.cookie as string),
     });
     expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toMatchObject({ state: 'relinquished' });
     const membership = await harness.database.query<{ status: string }>(
       `SELECT status FROM household_memberships
        WHERE household_id = 'household-sunrise' AND person_id = 'person-trusted-terry'`,
     );
-    expect(membership.rows[0]?.status).toBe('revoked');
+    expect(membership.rows[0]?.status).toBe('active');
     const afterRevocation = await harness.app.inject({
       method: 'GET',
       url: '/v1/family',

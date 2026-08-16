@@ -1,0 +1,88 @@
+services:
+  - type: web
+    name: boomerbuddy-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node apps/api/dist/server.js
+    preDeployCommand: node apps/worker/dist/migrate.js
+    healthCheckPath: /health/ready
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BB_API_HOST
+        value: 0.0.0.0
+      - key: BB_API_PORT
+        value: 10000
+      - key: BB_DATABASE_DRIVER
+        value: postgres
+      - key: BB_RUN_MIGRATIONS
+        value: 'false'
+      - key: BB_SEED_DEMO
+        value: 'false'
+      - key: BB_ALLOW_DEV_IDENTITY
+        value: 'false'
+      - key: DATABASE_URL
+        sync: false
+      - key: BB_CUSTOMER_ORIGINS
+        sync: false
+      - key: BB_HQ_ORIGINS
+        sync: false
+      - key: BB_SESSION_SECRET
+        sync: false
+      - key: BB_ARTIFACT_KEY_BASE64
+        sync: false
+      - key: BB_FINGERPRINT_KEY_BASE64
+        sync: false
+      - key: BB_SAFE_WORD_PEPPER
+        sync: false
+
+  - type: worker
+    name: boomerbuddy-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: node apps/worker/dist/server.js
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BB_DATABASE_DRIVER
+        value: postgres
+      - key: BB_RUN_MIGRATIONS
+        value: 'false'
+      - key: BB_SEED_DEMO
+        value: 'false'
+      - key: BB_ALLOW_DEV_IDENTITY
+        value: 'false'
+      - key: BB_WORKER_ID
+        value: render-worker-1
+      - key: BB_WORKER_POLL_MS
+        value: '1000'
+      - key: BB_WORKER_LEASE_MS
+        value: '30000'
+      - key: BB_WORKER_HEARTBEAT_MS
+        value: '10000'
+      - key: BB_WORKER_SHUTDOWN_MS
+        value: '20000'
+      - key: BB_WORKER_BATCH_SIZE
+        value: '10'
+      - key: BB_WORKER_RETRY_BASE_MS
+        value: '1000'
+      - key: BB_WORKER_RETRY_MAX_MS
+        value: '300000'
+      - key: DATABASE_URL
+        sync: false
+      - key: BB_CUSTOMER_ORIGINS
+        sync: false
+      - key: BB_HQ_ORIGINS
+        sync: false
+      - key: BB_SESSION_SECRET
+        sync: false
+      - key: BB_ARTIFACT_KEY_BASE64
+        sync: false
+      - key: BB_FINGERPRINT_KEY_BASE64
+        sync: false
+      - key: BB_SAFE_WORD_PEPPER
+        sync: false

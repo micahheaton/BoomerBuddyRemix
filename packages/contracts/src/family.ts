@@ -13,10 +13,10 @@ export const familyMemberSchema = z.object({
   membershipId: opaqueIdSchema,
   personId: opaqueIdSchema,
   displayName: z.string().min(1).max(120),
-  role: z.enum(['household_owner', 'protected_member', 'trusted_circle']),
+  membershipKind: z.literal('member'),
+  isAdministrator: z.boolean(),
   isProtectedMember: z.boolean(),
   status: z.enum(['active', 'revoked']),
-  permissions: z.array(trustedCirclePermissionSchema),
 });
 
 export const invitationSchema = z.object({
@@ -24,7 +24,8 @@ export const invitationSchema = z.object({
   protectedPersonId: opaqueIdSchema,
   inviteeDisplayName: z.string().min(1).max(120),
   permissions: z.array(trustedCirclePermissionSchema),
-  state: z.enum(['pending', 'accepted', 'expired', 'revoked']),
+  state: z.enum(['pending', 'accepted', 'expired', 'revoked', 'withdrawn']),
+  identityBindingState: z.enum(['development_unbound', 'verified_identity']),
   expiresAt: isoDateTimeSchema,
   createdAt: isoDateTimeSchema,
 });
@@ -35,9 +36,11 @@ export const trustedRelationshipSchema = z.object({
   trustedPersonId: opaqueIdSchema,
   trustedDisplayName: z.string().min(1).max(120),
   permissions: z.array(trustedCirclePermissionSchema),
-  state: z.enum(['active', 'revoked']),
+  state: z.enum(['active', 'withdrawn', 'relinquished', 'suspended', 'revoked']),
   consentVersion: z.string().min(1).max(40),
   createdAt: isoDateTimeSchema,
+  endedAction: z.enum(['withdraw', 'relinquish', 'suspend', 'legacy_revoke']).optional(),
+  endedAt: isoDateTimeSchema.optional(),
 });
 
 export const familyResponseSchema = z.object({
@@ -70,6 +73,7 @@ export const invitationPreviewResponseSchema = z.object({
     protectedPerson: z.object({ id: opaqueIdSchema, displayName: z.string().min(1).max(120) }),
     permissions: z.array(trustedCirclePermissionSchema),
     state: z.literal('pending'),
+    identityBindingState: z.enum(['development_unbound', 'verified_identity']),
     expiresAt: isoDateTimeSchema,
     previewVersion: z.string().min(1).max(40),
   }),
@@ -83,13 +87,13 @@ export const acceptInvitationResponseSchema = z.object({
 });
 export const revokeRelationshipResponseSchema = z.object({
   id: opaqueIdSchema,
-  state: z.literal('revoked'),
-  revokedAt: isoDateTimeSchema,
+  state: z.enum(['withdrawn', 'relinquished', 'suspended']),
+  endedAt: isoDateTimeSchema,
 });
 export const revokeInvitationResponseSchema = z.object({
   id: opaqueIdSchema,
-  state: z.literal('revoked'),
-  revokedAt: isoDateTimeSchema,
+  state: z.enum(['withdrawn', 'revoked']),
+  endedAt: isoDateTimeSchema,
 });
 
 export type TrustedCirclePermissionDto = z.infer<typeof trustedCirclePermissionSchema>;

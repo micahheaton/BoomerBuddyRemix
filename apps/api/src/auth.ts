@@ -109,13 +109,18 @@ export function toAuthorizationPrincipal(resolved: ResolvedSession): Principal {
     roles: principal.roles,
     households: principal.householdMemberships.map((membership) => ({
       householdId: membership.householdId,
-      role: membership.role,
+      membershipKind: membership.membershipKind,
+      isAdministrator: membership.isAdministrator,
       isProtectedMember: membership.isProtectedMember,
-      permissions: membership.permissions,
+      trustedCircleGrants: membership.trustedCircleGrants,
+      isPayer: membership.isPayer,
+      isBillingManager: membership.isBillingManager,
       capabilities: membership.capabilities,
       status: membership.status,
     })),
     organizations: principal.employeeScopes,
+    supportCases: principal.supportCaseScopes,
+    restrictedAccess: principal.restrictedAccessScopes,
   };
 }
 
@@ -131,9 +136,16 @@ export function principalDto(resolved: ResolvedSession): PrincipalDto {
       .filter((membership) => membership.status === 'active')
       .map((membership) => ({
         id: membership.householdId,
-        role: membership.role,
+        membershipKind: membership.membershipKind,
+        isAdministrator: membership.isAdministrator,
         isProtectedMember: membership.isProtectedMember,
-        permissions: [...membership.permissions],
+        trustedCircleGrants: membership.trustedCircleGrants.map((grant) => ({
+          relationshipId: grant.relationshipId,
+          protectedPersonId: grant.protectedPersonId,
+          permissions: [...grant.permissions],
+        })),
+        isPayer: membership.isPayer,
+        isBillingManager: membership.isBillingManager,
         capabilities: [...membership.capabilities],
       })),
     expiresAt: principal.expiresAt.toISOString(),

@@ -53,8 +53,8 @@ export default function PricingPage() {
           without entering payment details.
         </div>
         <div className="button-row">
-          <Link className="button button-primary" href="/sign-in">
-            Open the local build
+          <Link className="button button-primary" href="/check">
+            Use anonymous Public Check
           </Link>
           <Link className="button button-secondary" href="/trust">
             Read the trust model

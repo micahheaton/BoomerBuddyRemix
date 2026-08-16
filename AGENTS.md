@@ -8,6 +8,7 @@ BoomerBuddy 2.0 is an npm-workspaces TypeScript monorepo. Runtime surfaces live 
 
 - `npm install` installs the pinned workspace graph (Node 22.13+ and npm 10.9+).
 - `npm run dev` starts API, web, and HQ together on ports 4000, 3000, and 3001.
+- `npm run dev:worker` runs durable jobs and commerce reconciliation separately.
 - `npm run dev:mobile` starts Expo; native device validation still requires an appropriate host toolchain.
 - `npm run db:migrate && npm run db:seed` creates deterministic local PGlite data.
 - `npm test` runs unit, integration, security, and fraud-evaluation checks.

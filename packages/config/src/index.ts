@@ -20,6 +20,15 @@ const environmentSchema = z.object({
   BB_ARTIFACT_KEY_BASE64: nonEmpty,
   BB_FINGERPRINT_KEY_BASE64: nonEmpty,
   BB_SAFE_WORD_PEPPER: z.string().min(16),
+  BB_STRIPE_MODE: z.enum(['disabled', 'test']).default('disabled'),
+  BB_STRIPE_SECRET_KEY: z.string().optional(),
+  BB_STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  BB_STRIPE_API_VERSION: z.string().optional(),
+  BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  BB_STRIPE_PLUS_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_PLUS_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_FAMILY_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_FAMILY_ANNUAL_PRICE_ID: z.string().optional(),
   BB_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -50,6 +59,20 @@ export interface AppConfig {
     readonly fingerprintKey: Buffer;
     readonly safeWordPepper: Buffer;
   };
+  readonly commerce:
+    | { readonly stripe: { readonly mode: 'disabled' } }
+    | {
+        readonly stripe: {
+          readonly mode: 'test';
+          readonly secretKey: string;
+          readonly webhookSecret: string;
+          readonly apiVersion: string;
+          readonly cancelOnlyPortalConfigurationId: string;
+          readonly prices: Readonly<
+            Record<'plus_v1:month' | 'plus_v1:year' | 'family_v1:month' | 'family_v1:year', string>
+          >;
+        };
+      };
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
@@ -89,11 +112,59 @@ function origins(value: string, name: string): readonly string[] {
 
 function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void {
   if (parsed.NODE_ENV !== 'production') return;
-  // Run 1 has no managed identity or KMS adapter. Refusing the entire production
-  // mode is more truthful than accepting raw environment keys as production-ready.
+  // Managed identity and KMS adapters are not yet implemented. Refusing the entire
+  // production mode is more truthful than accepting raw environment keys as ready.
   throw new TypeError(
-    'Build Run 1 refuses production startup until managed identity and KMS adapters are configured',
+    'BoomerBuddy refuses production startup until managed identity and KMS adapters are configured',
   );
+}
+
+function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConfig['commerce'] {
+  if (parsed.BB_STRIPE_MODE === 'disabled') return { stripe: { mode: 'disabled' } };
+  const required = {
+    secretKey: parsed.BB_STRIPE_SECRET_KEY,
+    webhookSecret: parsed.BB_STRIPE_WEBHOOK_SECRET,
+    apiVersion: parsed.BB_STRIPE_API_VERSION,
+    cancelOnlyPortalConfigurationId: parsed.BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
+    plusMonth: parsed.BB_STRIPE_PLUS_MONTHLY_PRICE_ID,
+    plusYear: parsed.BB_STRIPE_PLUS_ANNUAL_PRICE_ID,
+    familyMonth: parsed.BB_STRIPE_FAMILY_MONTHLY_PRICE_ID,
+    familyYear: parsed.BB_STRIPE_FAMILY_ANNUAL_PRICE_ID,
+  };
+  if (
+    required.secretKey === undefined ||
+    !/^sk_test_[A-Za-z0-9_]{8,}$/u.test(required.secretKey) ||
+    required.webhookSecret === undefined ||
+    !/^whsec_[A-Za-z0-9_]{8,}$/u.test(required.webhookSecret) ||
+    required.apiVersion === undefined ||
+    !/^\d{4}-\d{2}-\d{2}(?:\.[A-Za-z0-9_-]+)?$/u.test(required.apiVersion) ||
+    required.cancelOnlyPortalConfigurationId === undefined ||
+    !/^bpc_[A-Za-z0-9_]{6,}$/u.test(required.cancelOnlyPortalConfigurationId) ||
+    required.plusMonth === undefined ||
+    required.plusYear === undefined ||
+    required.familyMonth === undefined ||
+    required.familyYear === undefined ||
+    ![required.plusMonth, required.plusYear, required.familyMonth, required.familyYear].every(
+      (value) => /^price_[A-Za-z0-9_]{6,}$/u.test(value),
+    )
+  ) {
+    throw new TypeError('Stripe test mode requires complete test credentials and price mapping');
+  }
+  return {
+    stripe: {
+      mode: 'test',
+      secretKey: required.secretKey,
+      webhookSecret: required.webhookSecret,
+      apiVersion: required.apiVersion,
+      cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+      prices: {
+        'plus_v1:month': required.plusMonth,
+        'plus_v1:year': required.plusYear,
+        'family_v1:month': required.familyMonth,
+        'family_v1:year': required.familyYear,
+      },
+    },
+  };
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -157,6 +228,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       fingerprintKey,
       safeWordPepper,
     },
+    commerce: stripeConfiguration(parsed),
     logLevel: parsed.BB_LOG_LEVEL,
   };
 }

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { apiRequest, setSelectedHouseholdId } from '../lib/api';
 import { Brand } from './brand';
-import { useHousehold } from './household-context';
+import { householdScopeSummary, useHousehold } from './household-context';
 
 export function MemberHeader() {
   const router = useRouter();
@@ -18,7 +18,15 @@ export function MemberHeader() {
     (capabilities.includes('check:text') || capabilities.includes('check:url'));
   const canReadHistory =
     capabilities.includes('history:read') &&
-    (isProtectedMember || selectedScope?.permissions.includes('view_shared_checks') === true);
+    (isProtectedMember ||
+      selectedScope?.trustedCircleGrants.some((grant) =>
+        grant.permissions.includes('view_shared_checks'),
+      ) === true);
+  const canUseFamily =
+    me.principal.households.length === 0 ||
+    selectedScope?.isAdministrator === true ||
+    selectedScope?.isProtectedMember === true ||
+    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
 
   async function signOut() {
     setBusy(true);
@@ -39,7 +47,7 @@ export function MemberHeader() {
           <Link href="/member">Home</Link>
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
-          <Link href="/member/family">Family</Link>
+          {canUseFamily ? <Link href="/member/family">Family</Link> : null}
           <button className="button-secondary" type="button" disabled={busy} onClick={signOut}>
             {busy ? 'Signing out…' : 'Sign out'}
           </button>
@@ -54,8 +62,7 @@ export function MemberHeader() {
             >
               {me.principal.households.map((scope, index) => (
                 <option key={scope.id} value={scope.id}>
-                  {householdName(scope.id, index)} — {scope.role.replaceAll('_', ' ')}
-                  {scope.isProtectedMember ? ' · protected adult' : ''}
+                  {householdName(scope.id, index)} — {householdScopeSummary(scope)}
                 </option>
               ))}
             </select>

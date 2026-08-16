@@ -48,6 +48,7 @@ export function testConfig(): AppConfig {
       fingerprintKey: Buffer.alloc(32, 11),
       safeWordPepper: Buffer.from('test-safe-word-pepper-value', 'utf8'),
     },
+    commerce: { stripe: { mode: 'disabled' } },
     logLevel: 'error',
   };
 }

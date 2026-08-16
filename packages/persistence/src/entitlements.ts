@@ -26,6 +26,7 @@ import {
   type NormalizedSubscription,
 } from '@boomerbuddy/domain';
 import type { Database, SqlExecutor } from './database';
+import { appendConsentEvidence, identityEvidenceForPerson } from './consent';
 import { asDate, jsonValue, randomIdFactory, stringArray, type IdFactory } from './values';
 
 interface CommerceRow extends Record<string, unknown> {
@@ -81,6 +82,13 @@ interface ProtectedEnrollmentRow extends Record<string, unknown> {
   readonly allowance_allocation_id: string;
   readonly entitlement_grant_id: string;
   readonly consent_version: string;
+  readonly consent_id: string;
+  readonly latest_consent_evidence_id: string;
+}
+
+interface AllowanceAllocationRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly entitlement_grant_id: string;
 }
 
 export interface CommerceSourceRecord {
@@ -97,6 +105,91 @@ export interface HouseholdEntitlements {
   readonly grants: readonly EntitlementGrant[];
   readonly portfolio: EffectiveCommercePortfolio;
   readonly sources: readonly CommerceSourceRecord[];
+}
+
+export interface ActiveBillingAuthority {
+  readonly authorityReference: string;
+  readonly householdId: string;
+  readonly personId: string;
+  readonly isPayer: boolean;
+}
+
+export interface ActivePayerFact {
+  readonly payerReference: string;
+  readonly householdId: string;
+  readonly personId: string;
+  readonly source: 'legacy_subscription' | 'local' | 'provider' | 'support';
+}
+
+function authorityReference(
+  kind: 'billing-authority' | 'payer',
+  householdId: string,
+  personId: string,
+) {
+  return `${kind}:${encodeURIComponent(householdId)}:${encodeURIComponent(personId)}`;
+}
+
+export async function resolveActiveBillingAuthority(
+  executor: SqlExecutor,
+  householdId: string,
+  personId: string,
+): Promise<ActiveBillingAuthority | null> {
+  const result = await executor.query<
+    { household_id: string; person_id: string; is_payer: boolean } & Record<string, unknown>
+  >(
+    `SELECT authority.household_id, authority.person_id,
+            EXISTS (
+              SELECT 1 FROM household_payers payer
+              WHERE payer.household_id = authority.household_id
+                AND payer.person_id = authority.person_id AND payer.status = 'active'
+            ) AS is_payer
+     FROM household_billing_authorities authority
+     JOIN household_memberships membership
+       ON membership.household_id = authority.household_id
+      AND membership.person_id = authority.person_id AND membership.status = 'active'
+     WHERE authority.household_id = $1 AND authority.person_id = $2
+       AND authority.status = 'active'`,
+    [householdId, personId],
+  );
+  const row = result.rows[0];
+  return row === undefined
+    ? null
+    : {
+        authorityReference: authorityReference(
+          'billing-authority',
+          row.household_id,
+          row.person_id,
+        ),
+        householdId: row.household_id,
+        personId: row.person_id,
+        isPayer: row.is_payer,
+      };
+}
+
+export async function resolveActivePayerFact(
+  executor: SqlExecutor,
+  householdId: string,
+  personId: string,
+): Promise<ActivePayerFact | null> {
+  const result = await executor.query<
+    { household_id: string; person_id: string; source: ActivePayerFact['source'] } & Record<
+      string,
+      unknown
+    >
+  >(
+    `SELECT household_id, person_id, source FROM household_payers
+     WHERE household_id = $1 AND person_id = $2 AND status = 'active'`,
+    [householdId, personId],
+  );
+  const row = result.rows[0];
+  return row === undefined
+    ? null
+    : {
+        payerReference: authorityReference('payer', row.household_id, row.person_id),
+        householdId: row.household_id,
+        personId: row.person_id,
+        source: row.source,
+      };
 }
 
 export interface ProtectedMemberEnrollment {
@@ -213,9 +306,16 @@ function grantFromRow(row: GrantRow): EntitlementGrant {
 async function allowanceUsage(
   executor: SqlExecutor,
   householdId: string,
+  contributingGrantIds: readonly string[],
 ): Promise<readonly AllowanceUsageInput[]> {
+  if (contributingGrantIds.length === 0) {
+    return allowanceKinds.map((kind) => ({ kind, count: 0 }));
+  }
   const result = await executor.query<UsageRow>(
-    `SELECT
+    `WITH contributing_grants AS (
+       SELECT jsonb_array_elements_text($2::jsonb) AS id
+     )
+     SELECT
        (SELECT count(DISTINCT p.person_id)::int
         FROM protected_members p
         JOIN household_memberships m
@@ -225,6 +325,7 @@ async function allowanceUsage(
         WHERE p.household_id = $1 AND p.status = 'accepted' AND m.status = 'active'
           AND a.state = 'active' AND a.allowance_key = 'protected_members'
           AND a.subject_kind = 'protected_member' AND a.subject_id = p.person_id
+          AND a.entitlement_grant_id IN (SELECT id FROM contributing_grants)
        ) AS protected_members,
        (SELECT count(DISTINCT a.subject_id)::int
         FROM commerce_allowance_allocations a
@@ -233,8 +334,9 @@ async function allowanceUsage(
         WHERE a.household_id = $1 AND a.state = 'active' AND m.status = 'active'
           AND a.allowance_key = 'trusted_circle_participants'
           AND a.subject_kind = 'trusted_circle_person'
+          AND a.entitlement_grant_id IN (SELECT id FROM contributing_grants)
        ) AS trusted_circle_participants`,
-    [householdId],
+    [householdId, JSON.stringify(contributingGrantIds)],
   );
   const row = result.rows[0];
   if (row === undefined) throw new TypeError('Unable to count household allowance usage');
@@ -251,7 +353,8 @@ export async function protectedEnrollment(
   lock = false,
 ): Promise<ProtectedEnrollmentRow | null> {
   const result = await executor.query<ProtectedEnrollmentRow>(
-    `SELECT p.allowance_allocation_id, a.entitlement_grant_id, p.consent_version
+    `SELECT p.allowance_allocation_id, a.entitlement_grant_id, p.consent_version,
+            p.consent_id, p.latest_consent_evidence_id
      FROM protected_members p
      JOIN household_memberships m
        ON m.household_id = p.household_id AND m.person_id = p.person_id
@@ -261,6 +364,24 @@ export async function protectedEnrollment(
        AND m.status = 'active' AND a.state = 'active'
        AND a.allowance_key = 'protected_members' AND a.subject_kind = 'protected_member'
        AND a.subject_id = p.person_id${lock ? ' FOR UPDATE OF p, a' : ''}`,
+    [householdId, personId],
+  );
+  return result.rows[0] ?? null;
+}
+
+async function protectedConsentForWithdrawal(
+  executor: SqlExecutor,
+  householdId: string,
+  personId: string,
+): Promise<Pick<ProtectedEnrollmentRow, 'consent_id' | 'latest_consent_evidence_id'> | null> {
+  const result = await executor.query<
+    Pick<ProtectedEnrollmentRow, 'consent_id' | 'latest_consent_evidence_id'> &
+      Record<string, unknown>
+  >(
+    `SELECT consent_id, latest_consent_evidence_id
+     FROM protected_members
+     WHERE household_id = $1 AND person_id = $2 AND status = 'accepted'
+     FOR UPDATE`,
     [householdId, personId],
   );
   return result.rows[0] ?? null;
@@ -342,7 +463,6 @@ async function loadHouseholdEntitlements(
     [householdId],
   );
   const grants = grantRows.rows.map(grantFromRow);
-  const usage = await allowanceUsage(executor, householdId);
   const subject = { kind: 'household' as const, householdId: ids.household(householdId) };
   const sources = commerce.rows.map((row) => {
     if (!commerceSubscriptionLifecycles.includes(row.lifecycle)) {
@@ -375,14 +495,26 @@ async function loadHouseholdEntitlements(
       product: productFromRow(row),
     };
   });
+  const contexts = sources.map((source) => ({
+    productVersion: source.product,
+    planVersion: source.plan,
+    subscription: source.subscription,
+    grants,
+  }));
+  const preliminaryPortfolio = resolveCommercePortfolio({
+    subject,
+    contexts,
+    allowanceUsage: allowanceKinds.map((kind) => ({ kind, count: 0 })),
+    at: now,
+  });
+  const usage = await allowanceUsage(
+    executor,
+    householdId,
+    preliminaryPortfolio.contributingGrantIds,
+  );
   const portfolio = resolveCommercePortfolio({
     subject,
-    contexts: sources.map((source) => ({
-      productVersion: source.product,
-      planVersion: source.plan,
-      subscription: source.subscription,
-      grants,
-    })),
+    contexts,
     allowanceUsage: usage,
     at: now,
   });
@@ -393,6 +525,200 @@ async function loadHouseholdEntitlements(
     portfolio,
     sources,
   };
+}
+
+function availableAllowanceGrantId(
+  entitlements: HouseholdEntitlements,
+  kind: AllowanceKind,
+): string {
+  const counter = assertPortfolioAllowanceAvailable(entitlements.portfolio, kind);
+  const source = entitlements.portfolio.sources.find(
+    (candidate) => candidate.subscriptionId === counter.sourceSubscriptionId,
+  );
+  const grantId = source?.contributingGrantIds[0];
+  if (grantId === undefined) throw new TypeError('Allowance source grant is unavailable');
+  return grantId;
+}
+
+export async function rebindCommerceAllowanceToEffectiveGrant(
+  executor: SqlExecutor,
+  input: {
+    readonly householdId: string;
+    readonly kind: AllowanceKind;
+    readonly subjectKind: 'protected_member' | 'trusted_circle_person';
+    readonly subjectId: string;
+    readonly now: Date;
+  },
+): Promise<'not_found' | 'already_effective' | 'rebound'> {
+  const entitlements = await loadHouseholdEntitlements(
+    executor,
+    input.householdId,
+    input.now,
+    true,
+  );
+  const allocationResult = await executor.query<AllowanceAllocationRow>(
+    `SELECT id, entitlement_grant_id
+     FROM commerce_allowance_allocations
+     WHERE household_id = $1 AND allowance_key = $2 AND subject_kind = $3
+       AND subject_id = $4 AND state = 'active'
+     FOR UPDATE`,
+    [input.householdId, input.kind, input.subjectKind, input.subjectId],
+  );
+  const allocation = allocationResult.rows[0];
+  if (allocation === undefined) return 'not_found';
+  if (
+    entitlements.portfolio.contributingGrantIds.includes(
+      ids.entitlementGrant(allocation.entitlement_grant_id),
+    )
+  ) {
+    return 'already_effective';
+  }
+  const replacementGrantId = availableAllowanceGrantId(entitlements, input.kind);
+  const rebound = await executor.query(
+    `UPDATE commerce_allowance_allocations
+     SET entitlement_grant_id = $3
+     WHERE household_id = $1 AND id = $2 AND state = 'active'
+       AND allowance_key = $4 AND subject_kind = $5 AND subject_id = $6`,
+    [
+      input.householdId,
+      allocation.id,
+      replacementGrantId,
+      input.kind,
+      input.subjectKind,
+      input.subjectId,
+    ],
+  );
+  if (rebound.rowCount !== 1) {
+    throw new DomainError('conflict', 'The commerce allowance could not be rebound');
+  }
+  return 'rebound';
+}
+
+export async function reconcileTrustedCircleAllowanceBindings(
+  executor: SqlExecutor,
+  input: {
+    readonly householdId: string;
+    readonly now: Date;
+  },
+): Promise<{ readonly rebound: number }> {
+  const entitlements = await loadHouseholdEntitlements(
+    executor,
+    input.householdId,
+    input.now,
+    true,
+  );
+  const counter = entitlements.portfolio.allowances.find(
+    (allowance) => allowance.kind === 'trusted_circle_participants',
+  );
+  if (counter === undefined || counter.state !== 'available' || counter.remaining === 0) {
+    return { rebound: 0 };
+  }
+  const replacementGrantId = availableAllowanceGrantId(entitlements, 'trusted_circle_participants');
+  const allocations = await executor.query<AllowanceAllocationRow>(
+    `SELECT allocation.id, allocation.entitlement_grant_id
+     FROM commerce_allowance_allocations allocation
+     JOIN household_memberships membership
+       ON membership.household_id = allocation.household_id
+      AND membership.person_id = allocation.subject_id AND membership.status = 'active'
+     WHERE allocation.household_id = $1 AND allocation.state = 'active'
+       AND allocation.allowance_key = 'trusted_circle_participants'
+       AND allocation.subject_kind = 'trusted_circle_person'
+       AND EXISTS (
+         SELECT 1 FROM trusted_circle_relationships relationship
+         JOIN consent_current_projections consent
+           ON consent.household_id = relationship.household_id
+          AND consent.consent_id = relationship.consent_id
+          AND consent.latest_evidence_id = relationship.latest_consent_evidence_id
+          AND consent.state = 'active'
+         WHERE relationship.household_id = allocation.household_id
+           AND relationship.trusted_person_id = allocation.subject_id
+           AND relationship.state = 'active'
+       )
+     ORDER BY allocation.allocated_at, allocation.id
+     FOR UPDATE OF allocation`,
+    [input.householdId],
+  );
+  const contributingGrantIds = new Set<string>(entitlements.portfolio.contributingGrantIds);
+  const stale = allocations.rows
+    .filter((allocation) => !contributingGrantIds.has(allocation.entitlement_grant_id))
+    .slice(0, counter.remaining);
+  for (const allocation of stale) {
+    const rebound = await executor.query(
+      `UPDATE commerce_allowance_allocations
+       SET entitlement_grant_id = $3
+       WHERE household_id = $1 AND id = $2 AND state = 'active'
+         AND allowance_key = 'trusted_circle_participants'
+         AND subject_kind = 'trusted_circle_person'`,
+      [input.householdId, allocation.id, replacementGrantId],
+    );
+    if (rebound.rowCount !== 1) {
+      throw new DomainError('conflict', 'Trusted Circle allowance reconciliation failed');
+    }
+  }
+  return { rebound: stale.length };
+}
+
+export async function reconcileProtectedMemberAllowanceBindings(
+  executor: SqlExecutor,
+  input: {
+    readonly householdId: string;
+    readonly now: Date;
+  },
+): Promise<{ readonly rebound: number }> {
+  const entitlements = await loadHouseholdEntitlements(
+    executor,
+    input.householdId,
+    input.now,
+    true,
+  );
+  const counter = entitlements.portfolio.allowances.find(
+    (allowance) => allowance.kind === 'protected_members',
+  );
+  if (counter === undefined || counter.state !== 'available' || counter.remaining === 0) {
+    return { rebound: 0 };
+  }
+  const allocations = await executor.query<AllowanceAllocationRow>(
+    `SELECT allocation.id, allocation.entitlement_grant_id
+     FROM commerce_allowance_allocations allocation
+     JOIN protected_members protected
+       ON protected.household_id = allocation.household_id
+      AND protected.person_id = allocation.subject_id
+      AND protected.allowance_allocation_id = allocation.id
+      AND protected.status = 'accepted'
+     JOIN household_memberships membership
+       ON membership.household_id = protected.household_id
+      AND membership.person_id = protected.person_id AND membership.status = 'active'
+     JOIN consent_current_projections consent
+       ON consent.household_id = protected.household_id
+      AND consent.consent_id = protected.consent_id
+      AND consent.latest_evidence_id = protected.latest_consent_evidence_id
+      AND consent.state = 'active'
+     WHERE allocation.household_id = $1 AND allocation.state = 'active'
+       AND allocation.allowance_key = 'protected_members'
+       AND allocation.subject_kind = 'protected_member'
+     ORDER BY allocation.allocated_at, allocation.id
+     FOR UPDATE OF allocation`,
+    [input.householdId],
+  );
+  const contributingGrantIds = new Set<string>(entitlements.portfolio.contributingGrantIds);
+  const stale = allocations.rows.filter(
+    (allocation) => !contributingGrantIds.has(allocation.entitlement_grant_id),
+  );
+  if (stale.length === 0 || stale.length > counter.remaining) return { rebound: 0 };
+  const replacementGrantId = availableAllowanceGrantId(entitlements, 'protected_members');
+  for (const allocation of stale) {
+    const rebound = await executor.query(
+      `UPDATE commerce_allowance_allocations
+       SET entitlement_grant_id = $3
+       WHERE household_id = $1 AND id = $2 AND state = 'active'
+         AND allowance_key = 'protected_members' AND subject_kind = 'protected_member'`,
+      [input.householdId, allocation.id, replacementGrantId],
+    );
+    if (rebound.rowCount !== 1) {
+      throw new DomainError('conflict', 'Protected-member allowance reconciliation failed');
+    }
+  }
+  return { rebound: stale.length };
 }
 
 export async function allocateCommerceAllowance(
@@ -412,12 +738,7 @@ export async function allocateCommerceAllowance(
     input.now,
     true,
   );
-  const counter = assertPortfolioAllowanceAvailable(entitlements.portfolio, input.kind);
-  const source = entitlements.portfolio.sources.find(
-    (candidate) => candidate.subscriptionId === counter.sourceSubscriptionId,
-  );
-  const grantId = source?.contributingGrantIds[0];
-  if (grantId === undefined) throw new TypeError('Allowance source grant is unavailable');
+  const grantId = availableAllowanceGrantId(entitlements, input.kind);
   await executor.query(
     `INSERT INTO commerce_allowance_allocations(
        household_id, id, entitlement_grant_id, allowance_key, subject_kind,
@@ -483,6 +804,9 @@ export class EntitlementRepository {
     readonly personId: string;
     readonly actorPersonId: string;
     readonly consentVersion: string;
+    readonly actorIssuer?: string;
+    readonly sessionId?: string;
+    readonly correlationId?: string;
     readonly now: Date;
   }): Promise<ProtectedMemberEnrollment> {
     if (input.actorPersonId !== input.personId) {
@@ -497,6 +821,7 @@ export class EntitlementRepository {
       if (membership.rows.length !== 1) {
         throw new DomainError('not_authorized', 'An active household membership is required');
       }
+      await loadHouseholdEntitlements(transaction, input.householdId, input.now, true);
       const current = await protectedEnrollment(
         transaction,
         input.householdId,
@@ -504,25 +829,23 @@ export class EntitlementRepository {
         true,
       );
       if (current !== null) {
-        const effective = await hasEffectiveProtectedEnrollment(
-          transaction,
-          input.householdId,
-          input.personId,
-          input.now,
-          true,
-        );
-        if (effective) {
-          return {
-            householdId: input.householdId,
-            personId: input.personId,
-            status: 'accepted',
-            consentVersion: current.consent_version,
-            allowanceAllocationId: current.allowance_allocation_id,
-          };
-        }
-        throw new DomainError('conflict', 'The existing protected enrollment is not effective');
+        await rebindCommerceAllowanceToEffectiveGrant(transaction, {
+          householdId: input.householdId,
+          kind: 'protected_members',
+          subjectKind: 'protected_member',
+          subjectId: input.personId,
+          now: input.now,
+        });
+        return {
+          householdId: input.householdId,
+          personId: input.personId,
+          status: 'accepted',
+          consentVersion: current.consent_version,
+          allowanceAllocationId: current.allowance_allocation_id,
+        };
       }
       const allocationId = this.idFactory.next('allocation');
+      const consentId = this.idFactory.next('consent');
       await allocateCommerceAllowance(transaction, {
         householdId: input.householdId,
         allocationId,
@@ -531,23 +854,63 @@ export class EntitlementRepository {
         subjectId: input.personId,
         now: input.now,
       });
+      const actorIdentity = await identityEvidenceForPerson(
+        transaction,
+        input.actorPersonId,
+        input.actorIssuer,
+      );
+      if (actorIdentity === null) {
+        throw new DomainError('not_authenticated', 'An active identity is required');
+      }
+      await transaction.query(
+        `INSERT INTO consents(
+           household_id, id, protected_person_id, granted_by_person_id, purpose,
+           consent_version, state, granted_at
+         ) VALUES ($1,$2,$3,$3,'protected_enrollment',$4,'active',$5)`,
+        [
+          input.householdId,
+          consentId,
+          input.personId,
+          input.consentVersion,
+          input.now.toISOString(),
+        ],
+      );
+      const consentEvidenceId = await appendConsentEvidence(transaction, this.idFactory, {
+        householdId: input.householdId,
+        consentId,
+        actorPersonId: input.actorPersonId,
+        subjectPersonId: input.personId,
+        purpose: 'protected_enrollment',
+        scope: { protectedEnrollment: true },
+        action: 'accept',
+        sourceInteraction: 'protected_enrollment_accept',
+        actorIdentity,
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+        ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
+        effectiveAt: input.now,
+      });
       await transaction.query(
         `INSERT INTO protected_members(
            household_id, person_id, status, consented_by_person_id, consent_version,
-           allowance_allocation_id, accepted_at, created_at, updated_at
-         ) VALUES ($1,$2,'accepted',$2,$3,$4,$5,$5,$5)
+           allowance_allocation_id, accepted_at, created_at, updated_at,
+           consent_id, latest_consent_evidence_id
+         ) VALUES ($1,$2,'accepted',$2,$3,$4,$5,$5,$5,$6,$7)
          ON CONFLICT (household_id, person_id) DO UPDATE SET
            status = 'accepted', consented_by_person_id = EXCLUDED.consented_by_person_id,
            consent_version = EXCLUDED.consent_version,
            allowance_allocation_id = EXCLUDED.allowance_allocation_id,
-           accepted_at = EXCLUDED.accepted_at, deferred_at = NULL, revoked_at = NULL,
-           updated_at = EXCLUDED.updated_at`,
+            accepted_at = EXCLUDED.accepted_at, deferred_at = NULL, revoked_at = NULL,
+            consent_id = EXCLUDED.consent_id,
+            latest_consent_evidence_id = EXCLUDED.latest_consent_evidence_id,
+            updated_at = EXCLUDED.updated_at`,
         [
           input.householdId,
           input.personId,
           input.consentVersion,
           allocationId,
           input.now.toISOString(),
+          consentId,
+          consentEvidenceId,
         ],
       );
       return {
@@ -564,24 +927,49 @@ export class EntitlementRepository {
     readonly householdId: string;
     readonly personId: string;
     readonly actorPersonId: string;
+    readonly actorIssuer?: string;
+    readonly sessionId?: string;
+    readonly correlationId?: string;
     readonly now: Date;
   }): Promise<boolean> {
     if (input.actorPersonId !== input.personId) {
       throw new DomainError('not_authorized', 'Only the protected member may withdraw consent');
     }
     return this.database.transaction(async (transaction) => {
-      const current = await protectedEnrollment(
+      const current = await protectedConsentForWithdrawal(
         transaction,
         input.householdId,
         input.personId,
-        true,
       );
       if (current === null) return false;
+      const actorIdentity = await identityEvidenceForPerson(
+        transaction,
+        input.actorPersonId,
+        input.actorIssuer,
+      );
+      if (actorIdentity === null) {
+        throw new DomainError('not_authenticated', 'An active identity is required');
+      }
+      const consentEvidenceId = await appendConsentEvidence(transaction, this.idFactory, {
+        householdId: input.householdId,
+        consentId: current.consent_id,
+        actorPersonId: input.actorPersonId,
+        subjectPersonId: input.personId,
+        purpose: 'protected_enrollment',
+        scope: { protectedEnrollment: true },
+        action: 'withdraw',
+        sourceInteraction: 'protected_enrollment_withdraw',
+        actorIdentity,
+        ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
+        ...(input.correlationId === undefined ? {} : { correlationId: input.correlationId }),
+        effectiveAt: input.now,
+      });
       await transaction.query(
         `UPDATE protected_members
-         SET status = 'revoked', revoked_at = $3, updated_at = $3
+         SET status = 'revoked', revoked_at = $3, updated_at = $3,
+             latest_consent_evidence_id = $4
          WHERE household_id = $1 AND person_id = $2 AND status = 'accepted'`,
-        [input.householdId, input.personId, input.now.toISOString()],
+        [input.householdId, input.personId, input.now.toISOString(), consentEvidenceId],
       );
       await releaseCommerceAllowance(transaction, {
         householdId: input.householdId,

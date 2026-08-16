@@ -1,5 +1,7 @@
 import type { CheckResult } from '@boomerbuddy/contracts';
 
+export type NativeEntrySignal = 'none' | 'route_only_check' | 'rejected_payload';
+
 export type RootStackParamList = {
   SignIn: undefined;
   Home: undefined;
@@ -8,4 +10,5 @@ export type RootStackParamList = {
   History: undefined;
   Family: undefined;
   Orientation: undefined;
+  NativeProof: undefined;
 };

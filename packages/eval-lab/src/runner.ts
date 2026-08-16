@@ -4,6 +4,7 @@ import {
   type FraudAssessment,
   type FraudProvider,
   LocalUnknownProvider,
+  type ProviderManifest,
   type RiskBand,
 } from '@boomerbuddy/fraud';
 import { evaluationCorpusSchema, type EvaluationCase, type EvaluationCorpus } from './schema';
@@ -51,6 +52,21 @@ export interface EvaluationReport {
 }
 
 class OutageProvider implements FraudProvider {
+  readonly manifest: ProviderManifest = {
+    providerName: 'synthetic-outage',
+    providerVersion: '1',
+    role: 'structural_reputation',
+    capabilityId: 'outage-harness',
+    dataPolicyVersion: 'least-data-v1',
+    inputFields: ['artifactKind', 'signals', 'urlStructure'],
+    deployment: 'local_unknown',
+    networkEgress: 'none',
+    retention: 'none',
+    trainingUse: 'prohibited',
+    timeoutMs: 50,
+    costUnits: 0,
+  };
+
   async inspect(): Promise<never> {
     throw new Error('Synthetic provider outage');
   }
@@ -84,10 +100,7 @@ function evaluateCase(
   if (!testCase.allowedRiskBands.includes(assessment.risk)) {
     failures.push(`risk:${assessment.risk}`);
   }
-  if (
-    testCase.groundTruth === 'malicious' &&
-    (assessment.risk === 'unknown' || assessment.risk === 'lower_concern')
-  ) {
+  if (testCase.groundTruth === 'malicious' && assessment.risk === 'unknown') {
     failures.push('malicious_not_flagged');
   }
   const signals = new Set(

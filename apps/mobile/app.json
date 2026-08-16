@@ -2,6 +2,7 @@
   "expo": {
     "name": "BoomerBuddy",
     "slug": "boomerbuddy-2-local",
+    "scheme": "boomerbuddy-local",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -17,7 +18,8 @@
     },
     "plugins": ["expo-secure-store"],
     "extra": {
-      "nativeSharingStatus": "not_implemented",
+      "deepLinkStatus": "scaffolded_not_device_verified",
+      "nativeSharingStatus": "blocked_not_device_verified",
       "providerMode": "local_unknown"
     }
   }

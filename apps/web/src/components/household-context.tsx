@@ -29,6 +29,18 @@ function fallbackName(index: number): string {
   return `Household ${index + 1}`;
 }
 
+export function householdScopeSummary(scope: HouseholdScope): string {
+  return [
+    'member',
+    scope.isAdministrator ? 'administrator' : '',
+    scope.isProtectedMember ? 'protected adult' : '',
+    scope.isPayer ? 'payer' : '',
+    scope.isBillingManager ? 'billing manager' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 export function HouseholdProvider({ children }: { children: React.ReactNode }) {
   const [me, setMe] = useState<MeResponse>();
   const [selectedHouseholdId, setSelectedId] = useState('');
@@ -141,8 +153,7 @@ export function HouseholdScopeBanner() {
   return (
     <p className="scope-banner" data-testid="active-household">
       Active household: <strong>{selectedHouseholdName}</strong> ·{' '}
-      {selectedScope.role.replaceAll('_', ' ')}
-      {selectedScope.isProtectedMember ? ' · protected adult' : ''}
+      {householdScopeSummary(selectedScope)}
     </p>
   );
 }

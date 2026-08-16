@@ -1,0 +1,80 @@
+name: boomerbuddy-portable
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: development
+  BB_DATABASE_DRIVER: postgres
+  DATABASE_URL: postgresql://boomerbuddy:local-compose-password@postgres:5432/boomerbuddy
+  BB_RUN_MIGRATIONS: 'false'
+  BB_SEED_DEMO: 'false'
+  BB_ALLOW_DEV_IDENTITY: 'true'
+  BB_CUSTOMER_ORIGINS: http://127.0.0.1:3000
+  BB_HQ_ORIGINS: http://127.0.0.1:3001
+  BB_SESSION_SECRET: local-compose-session-secret-not-for-production
+  BB_ARTIFACT_KEY_BASE64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+  BB_FINGERPRINT_KEY_BASE64: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
+  BB_SAFE_WORD_PEPPER: local-compose-safe-word-pepper
+  BB_LOG_LEVEL: info
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_USER: boomerbuddy
+      POSTGRES_PASSWORD: local-compose-password
+      POSTGRES_DB: boomerbuddy
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U boomerbuddy -d boomerbuddy']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - boomerbuddy-postgres:/var/lib/postgresql/data
+
+  migrate:
+    build: .
+    user: node
+    command: ['node', 'apps/worker/dist/migrate.js']
+    environment:
+      <<: *runtime-environment
+      BB_RUN_MIGRATIONS: 'true'
+      BB_API_HOST: 127.0.0.1
+      BB_API_PORT: '4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  api:
+    build: .
+    command: ['node', 'apps/api/dist/server.js']
+    environment:
+      <<: *runtime-environment
+      BB_API_HOST: 0.0.0.0
+      BB_API_PORT: '4000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - '4000:4000'
+
+  worker:
+    build: .
+    command: ['node', 'apps/worker/dist/server.js']
+    environment:
+      <<: *runtime-environment
+      BB_API_HOST: 127.0.0.1
+      BB_API_PORT: '4000'
+      BB_WORKER_ID: compose-worker-1
+      BB_WORKER_POLL_MS: '1000'
+      BB_WORKER_LEASE_MS: '30000'
+      BB_WORKER_HEARTBEAT_MS: '10000'
+      BB_WORKER_SHUTDOWN_MS: '20000'
+      BB_WORKER_BATCH_SIZE: '10'
+      BB_WORKER_RETRY_BASE_MS: '1000'
+      BB_WORKER_RETRY_MAX_MS: '300000'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  boomerbuddy-postgres:

@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema, providerStateSchema } from './common';
 
 export const checkKindSchema = z.enum(['text', 'url']);
-export const riskSchema = z.enum(['lower_concern', 'caution', 'high_concern', 'unknown']);
+export const riskSchema = z.enum(['unknown', 'caution', 'high_concern']);
+export const reservedRiskSchema = z.literal('lower_concern');
 export const evidenceSufficiencySchema = z.enum(['limited', 'moderate', 'strong']);
 
 function boundedContent(maxCharacters: number, maxBytes: number) {

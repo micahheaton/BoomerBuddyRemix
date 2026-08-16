@@ -12,12 +12,12 @@ export default function HomePage() {
             <h1>From suspicious to a safer next step—together.</h1>
             <p className="lede">
               BoomerBuddy helps you slow down, check a suspicious text or link, and involve someone
-              you trust. This build runs locally with rules-only analysis and no live reputation
-              provider.
+              you trust. Public Check works without an account in this local rules-only build; no
+              live reputation provider is connected.
             </p>
             <div className="button-row">
-              <Link className="button button-primary" href="/sign-in">
-                Try the local build
+              <Link className="button button-primary" href="/check">
+                Check something now
               </Link>
               <Link className="button button-secondary" href="/how-it-works">
                 See how it works
@@ -42,7 +42,8 @@ export default function HomePage() {
                 <div className="step-number">1</div>
                 <h3>Share safely</h3>
                 <p>
-                  Paste text or a URL. Never include passwords, access codes, or financial details.
+                  Use Public Check without signing in. Never include passwords, access codes, or
+                  financial details.
                 </p>
               </article>
               <article className="card">

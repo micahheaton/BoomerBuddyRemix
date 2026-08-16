@@ -9,8 +9,9 @@ export default function HowItWorksPage() {
         <span className="eyebrow">How it works</span>
         <h1 className="page-title">A calmer way to handle something suspicious</h1>
         <p className="lede">
-          BoomerBuddy is decision support, not a guarantee. The local build stores a minimized
-          record of each check and never returns the text or URL you submitted.
+          BoomerBuddy is decision support, not a guarantee. Anonymous Public Check uses a temporary
+          conversion record; a longer-lived member record is created only after an authenticated,
+          explicit save or member Check.
         </p>
         <div className="card-grid" style={{ marginTop: '2rem' }}>
           <article className="card">
@@ -22,8 +23,8 @@ export default function HowItWorksPage() {
             <div className="step-number">2</div>
             <h2>Check</h2>
             <p>
-              Choose text or URL. The result names its risk level, confidence, provider state, and
-              limitations.
+              Choose text or URL. The result names its risk level, evidence sufficiency, calibration
+              limit, and safer actions.
             </p>
           </article>
           <article className="card">
@@ -40,12 +41,17 @@ export default function HowItWorksPage() {
           <ul className="plain-list">
             <li>It does not visit URLs or contact live reputation services.</li>
             <li>It does not prove a message is safe or identify every scam.</li>
-            <li>It does not send invitations, alerts, or native share-sheet content.</li>
-            <li>Its confidence labels have not been empirically calibrated.</li>
+            <li>It does not ingest native share-sheet content or send invitations or alerts.</li>
+            <li>Its result labels have not been empirically calibrated.</li>
           </ul>
-          <Link className="button button-primary" href="/sign-in">
-            Continue to development sign in
-          </Link>
+          <div className="button-row">
+            <Link className="button button-primary" href="/check">
+              Use anonymous Public Check
+            </Link>
+            <Link className="button button-secondary" href="/sign-in">
+              Development sign in
+            </Link>
+          </div>
         </section>
       </main>
       <PublicFooter />

@@ -32,6 +32,7 @@ describe('typed configuration', () => {
     });
     expect(config.identity.customerOrigins).toEqual(['http://127.0.0.1:3000']);
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
+    expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
   });
 
   it('keeps demo bootstrap opt-in when the switch is omitted', () => {
@@ -110,5 +111,24 @@ describe('typed configuration', () => {
         BB_HQ_ORIGINS: 'http://127.0.0.1:3000',
       }),
     ).toThrow('must be disjoint');
+  });
+
+  it('requires a complete test-only Stripe configuration when enabled', () => {
+    expect(() => loadConfig({ ...developmentEnvironment(), BB_STRIPE_MODE: 'test' })).toThrow(
+      'complete test credentials',
+    );
+    const config = loadConfig({
+      ...developmentEnvironment(),
+      BB_STRIPE_MODE: 'test',
+      BB_STRIPE_SECRET_KEY: 'sk_test_fixture_12345678',
+      BB_STRIPE_WEBHOOK_SECRET: 'whsec_fixture_12345678',
+      BB_STRIPE_API_VERSION: '2026-07-29.fixture',
+      BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
+      BB_STRIPE_PLUS_MONTHLY_PRICE_ID: 'price_plus_month_fixture',
+      BB_STRIPE_PLUS_ANNUAL_PRICE_ID: 'price_plus_year_fixture',
+      BB_STRIPE_FAMILY_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+      BB_STRIPE_FAMILY_ANNUAL_PRICE_ID: 'price_family_year_fixture',
+    });
+    expect(config.commerce.stripe).toMatchObject({ mode: 'test' });
   });
 });

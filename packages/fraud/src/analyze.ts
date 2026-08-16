@@ -1,13 +1,14 @@
 import { isIP } from 'node:net';
 import { parse as parseDomain } from 'tldts';
 import { DomainError } from '@boomerbuddy/domain';
-import { minimizeRestrictedInput } from '@boomerbuddy/security';
-import { LocalUnknownProvider } from './provider';
+import { redactSensitiveInput } from '@boomerbuddy/security';
+import { LocalUnknownProvider, localOnlyProviderPolicy, ProviderDispatcher } from './provider';
 import type {
   FeatureVector,
   FraudAssessment,
   FraudEvidence,
   FraudProvider,
+  PreparedCheckInput,
   ProviderResult,
   RiskBand,
   SafeAction,
@@ -225,16 +226,7 @@ function normalizeProviderResult(result: ProviderResult): ProviderResult {
     providerVersion: result.providerVersion,
     observations,
     limitation,
-  };
-}
-
-function providerFailure(): ProviderResult {
-  return {
-    status: 'unavailable',
-    providerName: 'configured-provider',
-    providerVersion: 'unknown',
-    observations: [],
-    limitation: 'The configured provider failed; its error details were withheld.',
+    provenance: result.provenance,
   };
 }
 
@@ -265,20 +257,18 @@ function actionsFor(risk: RiskBand, signals: ReadonlySet<SignalKind>): readonly 
     instruction:
       'Find the organization’s official contact information independently; do not use this message or link.',
   });
-  if (risk !== 'lower_concern') {
-    add({
-      id: 'do_not_interact',
-      priority: 1,
-      title: 'Do not reply or click',
-      instruction: 'Do not reply, click, call, or download from the suspicious item.',
-    });
-    add({
-      id: 'contact_trusted_person',
-      priority: 2,
-      title: 'Ask someone you trust',
-      instruction: 'Review the situation with a trusted person before continuing.',
-    });
-  }
+  add({
+    id: 'do_not_interact',
+    priority: 1,
+    title: 'Do not reply or click',
+    instruction: 'Do not reply, click, call, or download from the suspicious item.',
+  });
+  add({
+    id: 'contact_trusted_person',
+    priority: 2,
+    title: 'Ask someone you trust',
+    instruction: 'Review the situation with a trusted person before continuing.',
+  });
   if (signals.has('unusual_payment') || risk === 'high_concern') {
     add({
       id: 'do_not_pay',
@@ -336,41 +326,67 @@ function actionsFor(risk: RiskBand, signals: ReadonlySet<SignalKind>): readonly 
   return [...actions.values()].sort((left, right) => left.priority - right.priority);
 }
 
-export async function analyzeCheck(
-  input: { readonly kind: 'text' | 'url'; readonly content: string },
-  options: { readonly provider?: FraudProvider; readonly now?: Date } = {},
-): Promise<FraudAssessment> {
-  const minimized = minimizeRestrictedInput(input.content);
+export function prepareCheckInput(input: {
+  readonly kind: 'text' | 'url';
+  readonly content: string;
+}): PreparedCheckInput {
+  const minimized = redactSensitiveInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
   if (minimized.status === 'rejected') {
     throw new DomainError(
       'restricted_input',
-      'Remove payment-card, credential, private-key, or one-time-code values before checking',
-      {
-        categoryCount: minimized.detected.length,
-      },
+      'The submitted item contains a secret that cannot be safely analyzed',
+      { categoryCount: minimized.detected.length, reason: minimized.reason },
     );
   }
-  if (minimized.minimized.length === 0)
+  if (minimized.minimized.length === 0) {
     throw new DomainError('invalid_input', 'Check content cannot be empty');
+  }
+  return {
+    kind: input.kind,
+    redactedContent: minimized.minimized,
+    redactions: minimized.redactions,
+    safetyFlags: minimized.safetyFlags,
+  };
+}
+
+export async function analyzePreparedCheck(
+  input: PreparedCheckInput,
+  options: {
+    readonly dispatcher?: ProviderDispatcher;
+    readonly provider?: FraudProvider;
+    readonly now?: Date;
+  } = {},
+): Promise<FraudAssessment> {
   const observedAt = (options.now ?? new Date()).toISOString();
   const textSignals = signalRules
-    .filter((rule) => rule.pattern.test(minimized.minimized))
+    .filter((rule) => rule.pattern.test(input.redactedContent))
     .map((rule) => rule.signal);
-  const urlResult = input.kind === 'url' ? analyzeUrl(minimized.minimized) : undefined;
+  const urlResult = input.kind === 'url' ? analyzeUrl(input.redactedContent) : undefined;
   const signals = new Set<SignalKind>([...textSignals, ...(urlResult?.signals ?? [])]);
   const features: FeatureVector = {
     artifactKind: input.kind,
     signals: [...signals].sort(),
-    byteLengthBucket: byteLengthBucket(minimized.minimized),
+    byteLengthBucket: byteLengthBucket(input.redactedContent),
     ...(urlResult === undefined ? {} : { url: urlResult.url }),
   };
   const provider = options.provider ?? new LocalUnknownProvider();
-  let providerResult: ProviderResult;
-  try {
-    providerResult = normalizeProviderResult(await provider.inspect(features));
-  } catch {
-    providerResult = providerFailure();
-  }
+  const dispatcher =
+    options.dispatcher ?? new ProviderDispatcher([provider], localOnlyProviderPolicy([provider]));
+  const dispatched = await dispatcher.inspect(features);
+  const providerResults = dispatched.map((result) => {
+    try {
+      return normalizeProviderResult(result);
+    } catch {
+      return {
+        status: 'unavailable' as const,
+        providerName: result.provenance.providerName,
+        providerVersion: result.provenance.providerVersion,
+        observations: [],
+        limitation: 'Provider evidence was unavailable or refused by execution policy.',
+        provenance: result.provenance,
+      };
+    }
+  });
 
   const evidence: FraudEvidence[] = [];
   for (const rule of signalRules) {
@@ -383,7 +399,7 @@ export async function analyzeCheck(
       source: {
         kind: 'artifact_derived',
         name: 'deterministic-signals',
-        version: 'signals-v1',
+        version: 'signals-v2',
         status: 'observed',
       },
       observedAt,
@@ -400,7 +416,7 @@ export async function analyzeCheck(
       source: {
         kind: 'artifact_derived',
         name: 'url-string-signals',
-        version: 'signals-v1',
+        version: 'signals-v2',
         status: 'observed',
       },
       observedAt,
@@ -408,28 +424,52 @@ export async function analyzeCheck(
         'Only URL characters were inspected; the destination was not fetched, resolved, or verified.',
     });
   }
-  if (providerResult.status === 'observed') {
-    for (const observation of providerResult.observations) {
-      const providerWeight =
-        observation.disposition === 'not_found'
-          ? 0
-          : Math.min(100, Math.max(0, observation.weight));
-      evidence.push({
-        code: `provider.${observation.code}`,
-        label: observation.label,
-        weight: providerWeight,
-        source: {
-          kind: 'provider',
-          name: providerResult.providerName,
-          version: providerResult.providerVersion,
-          status: providerResult.status,
-        },
-        observedAt,
-        ...(observation.validUntil === undefined ? {} : { validUntil: observation.validUntil }),
-        limitation: observation.limitation,
-      });
+  for (const redaction of input.redactions) {
+    const label =
+      redaction.class === 'payment_card'
+        ? 'Payment-card characters were removed before analysis.'
+        : redaction.class === 'one_time_code'
+          ? 'One-time-code characters were removed before analysis.'
+          : 'Authentication-credential characters were removed before analysis.';
+    evidence.push({
+      code: `redaction.${redaction.class}`,
+      label,
+      weight: 0,
+      source: {
+        kind: 'artifact_derived',
+        name: 'typed-redaction',
+        version: 'redaction-v1',
+        status: 'observed',
+      },
+      observedAt,
+      limitation: `Only the sensitive class and bounded count (${redaction.count}) were retained.`,
+    });
+  }
+  for (const providerResult of providerResults) {
+    if (providerResult.status === 'observed') {
+      for (const observation of providerResult.observations) {
+        const providerWeight =
+          observation.disposition === 'not_found'
+            ? 0
+            : Math.min(100, Math.max(0, observation.weight));
+        evidence.push({
+          code: `provider.${observation.code}`,
+          label: observation.label,
+          weight: providerWeight,
+          source: {
+            kind: 'provider',
+            name: providerResult.providerName,
+            version: providerResult.providerVersion,
+            status: providerResult.status,
+            provenance: providerResult.provenance,
+          },
+          observedAt,
+          ...(observation.validUntil === undefined ? {} : { validUntil: observation.validUntil }),
+          limitation: observation.limitation,
+        });
+      }
+      continue;
     }
-  } else {
     evidence.push({
       code: `provider.${providerResult.status}`,
       label: 'Live external reputation evidence is not available for this Check.',
@@ -439,20 +479,38 @@ export async function analyzeCheck(
         name: providerResult.providerName,
         version: providerResult.providerVersion,
         status: providerResult.status,
+        provenance: providerResult.provenance,
       },
       observedAt,
       limitation: providerResult.limitation,
+    });
+  }
+  if (providerResults.length === 0) {
+    evidence.push({
+      code: 'provider.disabled',
+      label: 'Provider execution is disabled for this Check.',
+      weight: 0,
+      source: {
+        kind: 'missing_or_failed',
+        name: 'provider-policy',
+        version: 'least-data-v1',
+        status: 'unavailable',
+      },
+      observedAt,
+      limitation: 'A provider kill switch or zero-provider policy prevented external evidence.',
     });
   }
 
   const baseScore = evidence.reduce((sum, item) => sum + item.weight, 0);
   const score = Math.min(100, baseScore + scoreCombinations(signals));
   const risk: RiskBand = score >= 50 ? 'high_concern' : score > 0 ? 'caution' : 'unknown';
-  const providerVerified =
-    providerResult.status === 'observed' &&
-    providerResult.observations.some(
-      (observation) => observation.disposition !== 'not_found' && observation.weight > 0,
-    );
+  const providerVerified = providerResults.some(
+    (result) =>
+      result.status === 'observed' &&
+      result.observations.some(
+        (observation) => observation.disposition !== 'not_found' && observation.weight > 0,
+      ),
+  );
   const confidence: FraudAssessment['confidence'] =
     providerVerified && evidence.length >= 4
       ? 'strong'
@@ -460,9 +518,17 @@ export async function analyzeCheck(
         ? 'moderate'
         : 'limited';
   const uncertaintyReasons = [
-    'This initial ruleset has not been empirically calibrated on a representative corpus.',
-    ...(providerVerified ? [] : [providerResult.limitation]),
-    ...(input.kind === 'url' ? ['The URL was analyzed as text only and was never contacted.'] : []),
+    ...new Set([
+      'This initial ruleset has not been empirically calibrated on a representative corpus.',
+      ...(providerVerified
+        ? []
+        : providerResults.length === 0
+          ? ['Provider execution is disabled or no provider is allowed.']
+          : providerResults.map((result) => result.limitation)),
+      ...(input.kind === 'url'
+        ? ['The URL was analyzed as text only and was never contacted.']
+        : []),
+    ]),
   ];
   const positiveReasons = evidence.filter((item) => item.weight > 0).map((item) => item.label);
   const headline =
@@ -477,8 +543,10 @@ export async function analyzeCheck(
     score,
     confidence,
     calibration: 'not_calibrated',
+    inputSafety: { redactions: input.redactions, flags: input.safetyFlags },
     uncertaintyReasons,
     evidence,
+    providerRuns: providerResults.map((result) => result.provenance),
     explanation: {
       headline,
       reasons:
@@ -490,10 +558,21 @@ export async function analyzeCheck(
     },
     actions: actionsFor(risk, signals),
     versions: {
-      normalization: 'normalize-v1',
-      signals: 'signals-v1',
-      scoring: 'score-v1',
+      normalization: 'normalize-v2',
+      signals: 'signals-v2',
+      scoring: 'score-v2',
       actions: 'actions-v1',
     },
   };
+}
+
+export async function analyzeCheck(
+  input: { readonly kind: 'text' | 'url'; readonly content: string },
+  options: {
+    readonly dispatcher?: ProviderDispatcher;
+    readonly provider?: FraudProvider;
+    readonly now?: Date;
+  } = {},
+): Promise<FraudAssessment> {
+  return analyzePreparedCheck(prepareCheckInput(input), options);
 }

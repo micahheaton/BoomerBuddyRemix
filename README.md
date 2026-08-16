@@ -1,8 +1,8 @@
 # BoomerBuddy 2.0
 
-BoomerBuddy 2.0 is a local, trust-first foundation for helping a consenting household decide what to do with a suspicious message or URL string. Build Run 1 includes a customer web app, a separate HQ app, an Expo mobile shell, a Fastify API, deterministic local fraud rules, consented redacted-result sharing, orientation, and provider-neutral entitlement foundations.
+BoomerBuddy 2.0 is a trust-first commercialization foundation for helping a consenting household decide what to do with a suspicious message or URL string. Run 2 adds a privacy-bounded Public Check, orthogonal Family authority and append-only consent, test-mode commerce adapters, durable jobs, governed fraud evidence, and an owner-only HQ Business OS to the Run 1 product slice.
 
-This is **not a production service**. It performs no live URL fetch, sends no email/SMS/push notification, processes no payment, and uses no production credentials. Fraud results are rules-based, explicitly not calibrated, and must not be treated as authoritative.
+This is **not a production service**. It performs no live URL fetch, sends no email/SMS/push notification, takes no real payment, and uses no production credentials. Production startup deliberately fails closed until managed identity and KMS exist. Fraud results are rules-based, explicitly not calibrated, and must not be treated as authoritative.
 
 ## Local setup
 
@@ -26,6 +26,8 @@ Demo seeding is deliberately opt-in and one-shot. `npm run db:seed` creates synt
 
 Start the mobile shell separately with `npm run dev:mobile`. This Windows host verifies its TypeScript and Expo web export, but not native iOS/Android bundles, SecureStore behavior, or device accessibility.
 
+Start the database-backed job runner separately with `npm run dev:worker`. Stripe remains disabled unless a complete test-only configuration is supplied; signed fixtures are not provider-executed transactions.
+
 ## Verification
 
 ```powershell
@@ -35,7 +37,7 @@ npm run test:coverage
 npm run test:eval
 ```
 
-`npm run verify` runs type checks, lint, formatting, unit/integration/security/evaluation tests, and production builds. The Playwright suite starts isolated test services on ports 3100, 3101, and 4100. See [Build Run 1 evidence](docs/BUILD-RUN-1-REPORT.md) for exact results and host-specific caveats.
+`npm run verify` runs type checks, lint, formatting, unit/integration/security/evaluation tests, and production-shaped builds. The Playwright suite starts isolated test services on ports 3100, 3101, and 4100. See the [Build Run 2 report](docs/BUILD-RUN-2-REPORT.md) for exact results and evidence boundaries.
 
 ## Repository map
 
@@ -43,9 +45,10 @@ npm run test:eval
 - `apps/web` — customer Next.js experience
 - `apps/hq` — separately authenticated operations surface
 - `apps/mobile` — Expo/React Native shell
-- `packages` — contracts, domain, authorization, security, fraud, persistence, and shared support
+- `apps/worker` — portable database-backed jobs and reconciliation
+- `packages` — contracts, domain, authorization, security, fraud, persistence, integrations, platform, and Business OS logic
 - `tests` — integration, security, and Playwright/axe journeys
 - `docs` — master specification, ADRs, evidence, risks, and founder decisions
 - `reference/boomerbuddy-v1` — read-only legacy evidence; never imported by 2.0
 
-Start with the [Master Spec](docs/BOOMERBUDDY-2.0-MASTER-SPEC.md), [local development guide](docs/build-run-1/03-local-development.md), and [known limitations](docs/build-run-1/12-known-limitations.md).
+Start with the [Master Spec](docs/BOOMERBUDDY-2.0-MASTER-SPEC.md), [Run 2 report](docs/BUILD-RUN-2-REPORT.md), [local development guide](docs/build-run-1/03-local-development.md), and [Run 2 limitations](docs/run-2/32-known-limitations.md).

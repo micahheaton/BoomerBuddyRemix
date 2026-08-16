@@ -7,7 +7,6 @@ import { useHousehold } from '../../../components/household-context';
 import { apiRequest, readableError } from '../../../lib/api';
 
 const riskText: Record<CheckResult['risk'], string> = {
-  lower_concern: 'Lower concern',
   caution: 'Use caution',
   high_concern: 'High concern',
   unknown: 'Unknown risk',
@@ -28,7 +27,10 @@ export default function HistoryPage() {
   const [announcement, setAnnouncement] = useState('');
   const canReadHistory =
     selectedScope?.capabilities.includes('history:read') === true &&
-    (selectedScope.isProtectedMember || selectedScope.permissions.includes('view_shared_checks'));
+    (selectedScope.isProtectedMember ||
+      selectedScope.trustedCircleGrants.some((grant) =>
+        grant.permissions.includes('view_shared_checks'),
+      ));
 
   useEffect(() => {
     if (!canReadHistory) return;

@@ -90,8 +90,9 @@ describe('one-shot local demo bootstrap', () => {
     >(
       `SELECT
          (SELECT status FROM identities WHERE id = 'identity-trusted-terry') AS identity_status,
-         (SELECT state FROM consents
-          WHERE household_id = 'household-sunrise' AND id = 'consent-sunrise-pat-circle')
+         (SELECT state FROM consent_current_projections
+          WHERE household_id = 'household-sunrise'
+            AND consent_id = 'consent-sunrise-pat-circle')
            AS consent_state,
          (SELECT state FROM trusted_circle_relationships
           WHERE household_id = 'household-sunrise'
@@ -188,10 +189,10 @@ describe('one-shot local demo bootstrap', () => {
     const before = await authoritySnapshot(first.database);
     expect(before).toMatchObject({
       identity_status: 'disabled',
-      consent_state: 'revoked',
-      relationship_state: 'revoked',
-      membership_status: 'revoked',
-      invitation_state: 'revoked',
+      consent_state: 'withdrawn',
+      relationship_state: 'withdrawn',
+      membership_status: 'active',
+      invitation_state: 'withdrawn',
       grant_revoked: true,
       subscription_lifecycle: 'expired',
       subscription_verified: false,

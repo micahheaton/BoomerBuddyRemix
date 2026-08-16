@@ -8,6 +8,8 @@ import {
   type HouseholdMembershipScope,
   type Role,
   type SessionPrincipal,
+  type SupportCaseScope,
+  type RestrictedAccessScope,
   type TrustedCirclePermission,
 } from '@boomerbuddy/domain';
 import type { Database } from './database';
@@ -33,16 +35,41 @@ interface SessionRow extends Record<string, unknown> {
 interface MembershipRow extends Record<string, unknown> {
   readonly household_id: string;
   readonly id: string;
-  readonly role: string;
+  readonly membership_kind: string;
   readonly status: string;
-  readonly permissions: unknown;
+  readonly is_administrator: boolean;
+  readonly is_payer: boolean;
+  readonly is_billing_manager: boolean;
   readonly protected_grant_id: string | null;
 }
 
+interface TrustedGrantRow extends Record<string, unknown> {
+  readonly household_id: string;
+  readonly relationship_id: string;
+  readonly protected_person_id: string;
+  readonly entitlement_grant_id: string;
+  readonly permissions: unknown;
+}
+
 interface EmployeeRow extends Record<string, unknown> {
+  readonly assignment_id: string;
   readonly organization_id: string | null;
   readonly role: string;
   readonly status: string;
+}
+
+interface SupportCaseRow extends Record<string, unknown> {
+  readonly household_id: string;
+  readonly case_id: string;
+  readonly employee_assignment_id: string;
+  readonly purpose: string;
+}
+
+interface RestrictedAccessRow extends SupportCaseRow {
+  readonly grant_id: string;
+  readonly resource_type: 'artifact' | 'analysis' | 'family';
+  readonly resource_id: string;
+  readonly expires_at: unknown;
 }
 
 function isRole(value: string): value is Role {
@@ -137,7 +164,23 @@ export class SessionRepository {
     if (expiresAt.getTime() <= now.getTime()) return null;
 
     const membershipsResult = await this.database.query<MembershipRow>(
-      `SELECT m.household_id, m.id, m.role, m.status, m.permissions,
+      `SELECT m.household_id, m.id, m.membership_kind, m.status,
+              EXISTS (
+                SELECT 1 FROM household_administrator_assignments administrator
+                WHERE administrator.household_id = m.household_id
+                  AND administrator.person_id = m.person_id
+                  AND administrator.status = 'active'
+              ) AS is_administrator,
+              EXISTS (
+                SELECT 1 FROM household_payers payer
+                WHERE payer.household_id = m.household_id AND payer.person_id = m.person_id
+                  AND payer.status = 'active'
+              ) AS is_payer,
+              EXISTS (
+                SELECT 1 FROM household_billing_authorities billing
+                WHERE billing.household_id = m.household_id AND billing.person_id = m.person_id
+                  AND billing.status = 'active'
+              ) AS is_billing_manager,
               a.entitlement_grant_id AS protected_grant_id
        FROM household_memberships m
        LEFT JOIN protected_members p
@@ -151,32 +194,66 @@ export class SessionRepository {
        ORDER BY m.household_id, m.id`,
       [session.person_id],
     );
+    const trustedResult = await this.database.query<TrustedGrantRow>(
+      `SELECT t.household_id, t.id AS relationship_id, t.protected_person_id, t.permissions,
+              allowance.entitlement_grant_id
+       FROM trusted_circle_relationships t
+       JOIN household_memberships m
+         ON m.household_id = t.household_id AND m.person_id = t.trusted_person_id
+        AND m.status = 'active'
+       JOIN commerce_allowance_allocations allowance
+         ON allowance.household_id = t.household_id
+        AND allowance.allowance_key = 'trusted_circle_participants'
+        AND allowance.subject_kind = 'trusted_circle_person'
+        AND allowance.subject_id = t.trusted_person_id AND allowance.state = 'active'
+       JOIN consent_current_projections consent
+         ON consent.household_id = t.household_id AND consent.consent_id = t.consent_id
+        AND consent.latest_evidence_id = t.latest_consent_evidence_id
+        AND consent.state = 'active'
+       WHERE t.trusted_person_id = $1 AND t.state = 'active'
+       ORDER BY t.household_id, t.id`,
+      [session.person_id],
+    );
+    const grantsByHousehold = new Map<string, HouseholdMembershipScope['trustedCircleGrants']>();
+    const trustedEntitlementGrantByRelationship = new Map<string, string>();
+    for (const row of trustedResult.rows) {
+      const permissionValues = stringArray(jsonValue(row.permissions), 'relationship.permissions');
+      if (permissionValues.some((permission) => !isPermission(permission))) {
+        throw new TypeError('Invalid Trusted Circle permission in database');
+      }
+      const existing = grantsByHousehold.get(row.household_id) ?? [];
+      grantsByHousehold.set(row.household_id, [
+        ...existing,
+        {
+          relationshipId: ids.relationship(row.relationship_id),
+          protectedPersonId: ids.person(row.protected_person_id),
+          permissions: permissionValues as TrustedCirclePermission[],
+        },
+      ]);
+      trustedEntitlementGrantByRelationship.set(row.relationship_id, row.entitlement_grant_id);
+    }
     const membershipScopesWithoutCapabilities: (Omit<
       HouseholdMembershipScope,
       'capabilities' | 'isProtectedMember'
     > & { readonly protectedGrantId: string | null })[] = membershipsResult.rows.map((row) => {
-      if (
-        !isRole(row.role) ||
-        !['household_owner', 'protected_member', 'trusted_circle'].includes(row.role)
-      ) {
-        throw new TypeError('Invalid household role in database');
-      }
-      const permissionValues = stringArray(jsonValue(row.permissions), 'membership.permissions');
-      if (permissionValues.some((permission) => !isPermission(permission))) {
-        throw new TypeError('Invalid Trusted Circle permission in database');
-      }
+      if (row.membership_kind !== 'member')
+        throw new TypeError('Invalid household membership kind');
       return {
         householdId: ids.household(row.household_id),
         membershipId: ids.membership(row.id),
-        role: row.role as HouseholdMembershipScope['role'],
+        membershipKind: 'member',
         status: row.status === 'active' ? 'active' : 'revoked',
-        permissions: permissionValues as TrustedCirclePermission[],
+        isAdministrator: row.is_administrator,
+        trustedCircleGrants: grantsByHousehold.get(row.household_id) ?? [],
+        isPayer: row.is_payer,
+        isBillingManager: row.is_billing_manager,
         protectedGrantId: row.protected_grant_id,
       };
     });
 
     const employeeResult = await this.database.query<EmployeeRow>(
-      'SELECT organization_id, role, status FROM employee_assignments WHERE person_id = $1',
+      `SELECT id AS assignment_id, organization_id, role, status
+       FROM employee_assignments WHERE person_id = $1`,
       [session.person_id],
     );
     const employeeScopes: EmployeeScope[] = employeeResult.rows.map((row) => {
@@ -184,6 +261,7 @@ export class SessionRepository {
         throw new TypeError('Invalid employee role in database');
       }
       const base = {
+        employeeAssignmentId: row.assignment_id,
         role: row.role as EmployeeScope['role'],
         status: row.status === 'active' ? ('active' as const) : ('suspended' as const),
       };
@@ -191,6 +269,57 @@ export class SessionRepository {
         ? base
         : { ...base, organizationId: ids.organization(row.organization_id) };
     });
+    const supportCasesResult = await this.database.query<SupportCaseRow>(
+      `SELECT c.household_id, c.id AS case_id,
+              assignment.employee_assignment_id, c.purpose
+       FROM support_case_assignments assignment
+       JOIN support_cases c
+         ON c.household_id = assignment.household_id AND c.id = assignment.case_id
+       JOIN employee_assignments employee ON employee.id = assignment.employee_assignment_id
+       WHERE employee.person_id = $1 AND employee.status = 'active'
+         AND employee.role = 'hq_support'
+         AND assignment.status = 'active' AND c.status = 'open'
+       ORDER BY c.household_id, c.id`,
+      [session.person_id],
+    );
+    const supportCaseScopes: SupportCaseScope[] = supportCasesResult.rows.map((row) => ({
+      householdId: ids.household(row.household_id),
+      caseId: ids.supportCase(row.case_id),
+      employeeAssignmentId: row.employee_assignment_id,
+      purpose: row.purpose,
+    }));
+    const restrictedResult = await this.database.query<RestrictedAccessRow>(
+      `SELECT access_grant.household_id, access_grant.id AS grant_id, access_grant.case_id,
+              access_grant.employee_assignment_id, access_grant.purpose,
+              access_grant.resource_type, access_grant.resource_id, access_grant.expires_at
+       FROM restricted_access_grants access_grant
+       JOIN support_case_assignments assignment
+         ON assignment.household_id = access_grant.household_id
+        AND assignment.case_id = access_grant.case_id
+        AND assignment.employee_assignment_id = access_grant.employee_assignment_id
+       JOIN support_cases c
+         ON c.household_id = access_grant.household_id AND c.id = access_grant.case_id
+       JOIN employee_assignments employee
+         ON employee.id = access_grant.employee_assignment_id
+       WHERE employee.person_id = $1 AND employee.status = 'active'
+         AND employee.role = 'hq_support'
+         AND assignment.status = 'active' AND c.status = 'open'
+         AND access_grant.status = 'active'
+         AND access_grant.assurance = 'step_up_verified'
+         AND access_grant.expires_at > $2
+       ORDER BY access_grant.household_id, access_grant.id`,
+      [session.person_id, now.toISOString()],
+    );
+    const restrictedAccessScopes: RestrictedAccessScope[] = restrictedResult.rows.map((row) => ({
+      householdId: ids.household(row.household_id),
+      caseId: ids.supportCase(row.case_id),
+      employeeAssignmentId: row.employee_assignment_id,
+      purpose: row.purpose,
+      grantId: ids.restrictedAccessGrant(row.grant_id),
+      resourceType: row.resource_type,
+      resourceId: row.resource_id,
+      expiresAt: asDate(row.expires_at, 'restricted_access_grants.expires_at'),
+    }));
 
     const householdIds = membershipScopesWithoutCapabilities
       .filter((membership) => membership.status === 'active')
@@ -219,30 +348,51 @@ export class SessionRepository {
     }));
     const householdMemberships: HouseholdMembershipScope[] =
       membershipScopesWithoutCapabilities.map(({ protectedGrantId, ...membership }) => {
+        const effectiveGrantIds = protectedGrantIdsByHousehold.get(membership.householdId);
+        const trustedCircleGrants = membership.trustedCircleGrants.filter((grant) => {
+          const entitlementGrantId = trustedEntitlementGrantByRelationship.get(
+            grant.relationshipId,
+          );
+          return entitlementGrantId !== undefined && effectiveGrantIds?.has(entitlementGrantId);
+        });
         const isProtectedMember =
           membership.status === 'active' &&
           protectedGrantId !== null &&
-          protectedGrantIdsByHousehold.get(membership.householdId)?.has(protectedGrantId) === true;
+          effectiveGrantIds?.has(protectedGrantId) === true;
         const householdCapabilities = capabilitiesByHousehold.get(membership.householdId);
         const capabilitiesForActor =
           householdCapabilities === undefined
             ? []
             : isProtectedMember
               ? [...householdCapabilities]
-              : membership.role === 'trusted_circle'
+              : trustedCircleGrants.length > 0
                 ? [...householdCapabilities].filter(
                     (capability) =>
                       (capability === 'history:read' &&
-                        membership.permissions.includes('view_shared_checks')) ||
+                        trustedCircleGrants.some((grant) =>
+                          grant.permissions.includes('view_shared_checks'),
+                        )) ||
                       (capability === 'orientation:use' &&
-                        membership.permissions.includes('help_with_orientation')),
+                        trustedCircleGrants.some((grant) =>
+                          grant.permissions.includes('help_with_orientation'),
+                        )),
                   )
                 : [];
-        return { ...membership, isProtectedMember, capabilities: capabilitiesForActor };
+        return {
+          ...membership,
+          trustedCircleGrants,
+          isProtectedMember,
+          capabilities: capabilitiesForActor,
+        };
       });
     const principalRoles = new Set<Role>();
     for (const membership of householdMemberships) {
-      if (membership.status === 'active') principalRoles.add(membership.role);
+      if (membership.status !== 'active') continue;
+      if (membership.isAdministrator) principalRoles.add('household_administrator');
+      if (membership.isProtectedMember) principalRoles.add('protected_member');
+      if (membership.trustedCircleGrants.length > 0) principalRoles.add('trusted_circle');
+      if (membership.isPayer) principalRoles.add('payer');
+      if (membership.isBillingManager) principalRoles.add('billing_manager');
     }
     for (const employee of employeeScopes) {
       if (employee.status === 'active') principalRoles.add(employee.role);
@@ -256,6 +406,8 @@ export class SessionRepository {
         roles: [...principalRoles],
         householdMemberships,
         employeeScopes,
+        supportCaseScopes,
+        restrictedAccessScopes,
         expiresAt,
       },
       displayName: session.display_name,

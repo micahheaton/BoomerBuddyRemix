@@ -35,7 +35,10 @@ export default function MemberHomePage() {
     }
     if (
       selectedScope?.capabilities.includes('history:read') &&
-      (isProtectedMember || selectedScope.permissions.includes('view_shared_checks'))
+      (isProtectedMember ||
+        selectedScope.trustedCircleGrants.some((grant) =>
+          grant.permissions.includes('view_shared_checks'),
+        ))
     ) {
       tasks.push(
         apiRequest<CheckListResponse>('/v1/checks', { headers: scopedHeaders }).then((response) =>
@@ -43,7 +46,7 @@ export default function MemberHomePage() {
         ),
       );
     }
-    if (selectedScope?.role === 'household_owner') {
+    if (selectedScope?.isBillingManager) {
       void apiRequest<EntitlementResponse>('/v1/entitlements', { headers: scopedHeaders })
         .then((response) => {
           setEntitlements({ householdId: selectedHouseholdId, value: response });
@@ -64,7 +67,15 @@ export default function MemberHomePage() {
     isProtectedMember && selectedScope?.capabilities.includes('orientation:use');
   const canReadHistory =
     selectedScope?.capabilities.includes('history:read') &&
-    (isProtectedMember || selectedScope.permissions.includes('view_shared_checks'));
+    (isProtectedMember ||
+      selectedScope.trustedCircleGrants.some((grant) =>
+        grant.permissions.includes('view_shared_checks'),
+      ));
+  const canUseFamily =
+    isUnassigned ||
+    selectedScope?.isAdministrator === true ||
+    selectedScope?.isProtectedMember === true ||
+    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
   const selectedEntitlements =
     entitlements?.householdId === selectedHouseholdId ? entitlements.value : undefined;
   const protectedAllowance = selectedEntitlements?.commerce.allowances.find(
@@ -176,11 +187,13 @@ export default function MemberHomePage() {
               <p className="meta">History is unavailable in this household scope.</p>
             )}
           </section>
-          <section className="card">
-            <h2>Need another person?</h2>
-            <p>See who is in your household and which Trusted Circle permissions are active.</p>
-            <Link href="/member/family">Open Family</Link>
-          </section>
+          {canUseFamily ? (
+            <section className="card">
+              <h2>Need another person?</h2>
+              <p>See who is in your household and which Trusted Circle permissions are active.</p>
+              <Link href="/member/family">Open Family</Link>
+            </section>
+          ) : null}
           <section className="card" data-testid="local-access-summary">
             <span className="dev-pill">Local access hypothesis</span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
@@ -188,10 +201,10 @@ export default function MemberHomePage() {
               This development-only access record is a product hypothesis. There is no billing,
               purchase, upgrade, or charge in this build.
             </p>
-            {selectedScope?.role !== 'household_owner' ? (
+            {!selectedScope?.isBillingManager ? (
               <p className="meta">
-                Household plan totals are owner-only in this local build. Your available actions
-                still follow the permissions for this selected household.
+                Household plan totals are billing-manager-only in this local build. Your available
+                actions still follow the permissions for this selected household.
               </p>
             ) : selectedEntitlements ? (
               <>

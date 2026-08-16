@@ -5,14 +5,15 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type {
   BrowserSessionResponse,
   DevPersonaId,
-  HqOverviewResponse,
   HqRevenueResponse,
   MeResponse,
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
+import { BusinessOsContent, type BusinessOsView } from './business-os';
 import { hqRequest, readableError } from '../lib/api';
 
-export type HqView = 'overview' | 'customers' | 'fraud' | 'revenue' | 'system';
+export type HqView =
+  'overview' | 'customers' | 'fraud' | 'revenue' | 'system' | Exclude<BusinessOsView, 'owner'>;
 type HouseholdResponse = {
   households: Array<{
     id: string;
@@ -58,8 +59,7 @@ type AuditResponse = {
 const titles: Record<HqView, { title: string; subtitle: string }> = {
   overview: {
     title: 'Owner operating view',
-    subtitle:
-      'Local development data combines seed fixtures with this run. Nothing here is production evidence.',
+    subtitle: 'Local and explicitly imported evidence only. Nothing here is production evidence.',
   },
   customers: {
     title: 'Customers and access',
@@ -77,6 +77,22 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   system: {
     title: 'System and audit',
     subtitle: 'Local provider states and metadata-only audit events.',
+  },
+  targets: {
+    title: 'Credit-union segmentation',
+    subtitle: 'Official fixed-snapshot evidence for explainable fit—not leads or buyer intent.',
+  },
+  pipeline: {
+    title: 'Opportunity control plane',
+    subtitle: 'Local opportunity state, stale reasons, and accountable next human actions.',
+  },
+  attention: {
+    title: 'Owner attention',
+    subtitle: 'Only decisions that require founder judgment, with consequence and deadline.',
+  },
+  autonomy: {
+    title: 'Autonomy controls',
+    subtitle: 'Per-action classes, budgets, audit requirements, and kill-switch state.',
   },
 };
 
@@ -166,11 +182,52 @@ function Shell({
       </header>
       <div className="hq-layout">
         <nav className="hq-nav" aria-label="HQ navigation">
-          {!reviewerOnly && <Link href="/">Overview</Link>}
-          {!reviewerOnly && <Link href="/customers">Customers</Link>}
-          <Link href="/fraud">Fraud & review</Link>
-          {!reviewerOnly && <Link href="/revenue">Revenue</Link>}
-          {!reviewerOnly && <Link href="/system">System & audit</Link>}
+          {!reviewerOnly && <span className="nav-heading">Operate</span>}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'overview' ? 'page' : undefined} href="/">
+              Overview
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'customers' ? 'page' : undefined} href="/customers">
+              Customers
+            </Link>
+          )}
+          <Link aria-current={view === 'fraud' ? 'page' : undefined} href="/fraud">
+            Fraud & review
+          </Link>
+          {!reviewerOnly && <span className="nav-heading">Build revenue</span>}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'targets' ? 'page' : undefined} href="/targets">
+              Credit-union targets
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'pipeline' ? 'page' : undefined} href="/pipeline">
+              Opportunity pipeline
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'revenue' ? 'page' : undefined} href="/revenue">
+              Revenue research
+            </Link>
+          )}
+          {!reviewerOnly && <span className="nav-heading">Govern</span>}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'attention' ? 'page' : undefined} href="/attention">
+              Owner attention
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'autonomy' ? 'page' : undefined} href="/autonomy">
+              Autonomy controls
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'system' ? 'page' : undefined} href="/system">
+              System & audit
+            </Link>
+          )}
           <button className="secondary" type="button" onClick={onSignOut}>
             Sign out
           </button>
@@ -187,65 +244,6 @@ function Shell({
             {children}
           </div>
         </main>
-      </div>
-    </>
-  );
-}
-
-function Overview() {
-  const [data, setData] = useState<HqOverviewResponse>();
-  const [error, setError] = useState('');
-  useEffect(() => {
-    hqRequest<HqOverviewResponse>(apiPaths.hqOverview)
-      .then(setData)
-      .catch((caught) => setError(readableError(caught)));
-  }, []);
-  if (error)
-    return (
-      <p className="error" role="alert">
-        {error}
-      </p>
-    );
-  if (!data) return <p role="status">Loading local development overview…</p>;
-  return (
-    <>
-      <section className="metric-grid" aria-label="Local development owner metrics">
-        {data.metrics.map((metric) => (
-          <article className="hq-card" key={metric.key}>
-            <DataLabel />
-            <h2>{metric.label}</h2>
-            <p className="metric-value">{metric.value.toLocaleString()}</p>
-            <p className="source">
-              Source: {metric.source}
-              <br />
-              Updated {new Date(metric.updatedAt).toLocaleString()}
-            </p>
-          </article>
-        ))}
-      </section>
-      <section className="section">
-        <div className="section-heading">
-          <h2>Owner attention queue</h2>
-          <DataLabel />
-        </div>
-        {data.alerts.length ? (
-          <ul className="alert-list">
-            {data.alerts.map((alert) => (
-              <li className={`hq-card alert alert-${alert.severity}`} key={alert.key}>
-                <DataLabel />
-                <strong>{alert.severity.toUpperCase()}</strong>
-                <p>{alert.message}</p>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="empty">No local development alerts.</p>
-        )}
-      </section>
-      <div className="notice">
-        <strong>Run 1 measurement limit:</strong> verified safe-action completion and
-        time-to-first-safe-action are not instrumented. These counts are local operational proof,
-        not outcome evidence; closing that metric gap remains a first-dollar blocker.
       </div>
     </>
   );
@@ -560,10 +558,16 @@ export function HqScreen({ view }: { view: HqView }) {
       </main>
     );
   if (!me) return <SignIn onSuccess={setMe} />;
+  const businessOsView: BusinessOsView | undefined =
+    view === 'overview'
+      ? 'owner'
+      : view === 'targets' || view === 'pipeline' || view === 'attention' || view === 'autonomy'
+        ? view
+        : undefined;
   return (
     <Shell me={me} view={view} onSignOut={() => void signOut()}>
-      {view === 'overview' ? (
-        <Overview />
+      {businessOsView ? (
+        <BusinessOsContent view={businessOsView} />
       ) : view === 'customers' ? (
         <Customers />
       ) : view === 'fraud' ? (

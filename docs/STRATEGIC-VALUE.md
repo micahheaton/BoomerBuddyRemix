@@ -40,3 +40,20 @@ Clean source/IP ownership; dependency licensing/SBOM; documented architecture de
 ## Acquisition thesis
 
 Likely strategic categories include identity/cybersecurity, telecommunications, financial institutions, insurers, caregiver/senior platforms, and consumer trust vendors. The thesis remains a hypothesis: build an independent business whose data rights, quality evidence, relationships, and recurring economics are useful across categories rather than tailoring the company to one imagined acquirer.
+
+## Run 2 implementation delta — 2026-08-16
+
+Run 2 increased diligence readiness and option value, not demonstrated enterprise value:
+
+| New or strengthened foundation | Potential strategic value | Evidence still absent |
+| --- | --- | --- |
+| Orthogonal authority, append-only consent, provider-neutral entitlements and allowance reconciliation | Cleaner family/sponsor integration and lower authority-migration risk | Managed identity, real relationships, legal sufficiency, recovery/coercion evidence |
+| Least-data provider policy, typed redaction, governed knowledge/evaluation contracts | A credible path to a rights-cleared compounding safety corpus | Representative independent corpus, calibration, provider lift, incident learning |
+| Privacy-bounded Public Check and content-free attribution | A low-authority acquisition surface that can hand off with consent | Public edge controls, conversion, CAC, retained use, abuse behavior |
+| Provenance-bound official NCUA import and owner-only opportunity workflow | Reproducible sponsor-market segmentation foundation | Contacts, intent, permission, discovery, proposal, contract, activation, revenue |
+| Portable jobs, configuration, deployment/recovery contracts and CI scaffold | Reduced Replit/provider lock-in and stronger future diligence | External remote, deployed reliability, independent restore, RPO/RTO, remote CI |
+| HQ Attention/Brief/autonomy policy and staffing/founder models | Explicit operating control and succession design | Staffed owners, delegated execution, measured queues, founder-absence proof |
+
+The base economics scenario produces `$102.352788` contribution per average paid household-year and about `$1.018M` operating profit at 50,000 average paid households with a `$4.1M` fixed-cost envelope. That is a condition for a potentially valuable independent business, not revenue, valuation, or acquisition evidence. Direct households, protected people, sponsor eligibility/activation, and revenue-bearing equivalents remain separate; see the [50K Subscriber Model](./run-2/50K-SUBSCRIBER-MODEL.md).
+
+No paying cohort, retention curve, brand evidence, customer network, sponsor agreement, proprietary reviewed corpus, verified safe-action history, staffed operation, or production reliability record was created. The definitive review closed all in-scope Critical/High local defects, but every external blocker remains a diligence liability. The next compounding asset is trustworthy longitudinal evidence from consenting households and professionally governed safety operations—not additional unvalidated surface area.

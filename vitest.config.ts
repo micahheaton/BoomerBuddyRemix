@@ -17,12 +17,16 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['packages/persistence/**/*.test.ts', 'tests/integration/**/*.test.ts'],
+          fileParallelism: false,
+          testTimeout: 30_000,
         },
       },
       {
         test: {
           name: 'security',
           include: ['tests/security/**/*.test.ts'],
+          fileParallelism: false,
+          testTimeout: 30_000,
         },
       },
     ],

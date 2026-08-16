@@ -1,5 +1,9 @@
-export const riskBands = ['lower_concern', 'caution', 'high_concern', 'unknown'] as const;
+import type { SafeRedaction, SensitiveSafetyFlag } from '@boomerbuddy/security';
+
+export const riskBands = ['unknown', 'caution', 'high_concern'] as const;
 export type RiskBand = (typeof riskBands)[number];
+export const reservedRiskBands = ['lower_concern'] as const;
+export type ReservedRiskBand = (typeof reservedRiskBands)[number];
 export type EvidenceSufficiency = 'limited' | 'moderate' | 'strong';
 
 export const signalKinds = [
@@ -35,6 +39,62 @@ export interface FeatureVector {
   };
 }
 
+export interface PreparedCheckInput {
+  readonly kind: 'text' | 'url';
+  readonly redactedContent: string;
+  readonly redactions: readonly SafeRedaction[];
+  readonly safetyFlags: readonly SensitiveSafetyFlag[];
+}
+
+export const providerRoles = [
+  'structural_reputation',
+  'campaign_intelligence',
+  'language_pattern',
+] as const;
+export type ProviderRole = (typeof providerRoles)[number];
+
+export const providerInputFields = [
+  'artifactKind',
+  'signals',
+  'byteLengthBucket',
+  'urlStructure',
+] as const;
+export type ProviderInputField = (typeof providerInputFields)[number];
+
+export type ProviderRequest =
+  | {
+      readonly role: 'structural_reputation';
+      readonly artifactKind: FeatureVector['artifactKind'];
+      readonly signals: readonly SignalKind[];
+      readonly urlStructure?: FeatureVector['url'];
+    }
+  | {
+      readonly role: 'campaign_intelligence';
+      readonly artifactKind: FeatureVector['artifactKind'];
+      readonly signals: readonly SignalKind[];
+    }
+  | {
+      readonly role: 'language_pattern';
+      readonly artifactKind: FeatureVector['artifactKind'];
+      readonly signals: readonly SignalKind[];
+      readonly byteLengthBucket: FeatureVector['byteLengthBucket'];
+    };
+
+export interface ProviderManifest {
+  readonly providerName: string;
+  readonly providerVersion: string;
+  readonly role: ProviderRole;
+  readonly capabilityId: string;
+  readonly dataPolicyVersion: string;
+  readonly inputFields: readonly ProviderInputField[];
+  readonly deployment: 'local_unknown' | 'deterministic_mock' | 'live';
+  readonly networkEgress: 'none' | 'declared_provider_only';
+  readonly retention: 'none' | 'ephemeral' | 'provider_declared';
+  readonly trainingUse: 'prohibited' | 'provider_declared';
+  readonly timeoutMs: number;
+  readonly costUnits: number;
+}
+
 export interface ProviderObservation {
   readonly code: string;
   readonly label: string;
@@ -44,16 +104,51 @@ export interface ProviderObservation {
   readonly limitation: string;
 }
 
+export interface ProviderRawResult {
+  readonly status: 'unknown' | 'mock' | 'observed';
+  readonly observations: readonly ProviderObservation[];
+  readonly limitation: string;
+}
+
+export interface ProviderProvenance {
+  readonly providerName: string;
+  readonly providerVersion: string;
+  readonly role: ProviderRole;
+  readonly capabilityId: string;
+  readonly dataPolicyVersion: string;
+  readonly deployment: ProviderManifest['deployment'];
+  readonly networkEgress: ProviderManifest['networkEgress'];
+  readonly retention: ProviderManifest['retention'];
+  readonly trainingUse: ProviderManifest['trainingUse'];
+  readonly inputFields: readonly ProviderInputField[];
+  readonly policyVersion: string;
+}
+
 export interface ProviderResult {
   readonly status: 'unknown' | 'unavailable' | 'mock' | 'observed';
   readonly providerName: string;
   readonly providerVersion: string;
   readonly observations: readonly ProviderObservation[];
   readonly limitation: string;
+  readonly provenance: ProviderProvenance;
 }
 
 export interface FraudProvider {
-  readonly inspect: (features: FeatureVector) => Promise<ProviderResult>;
+  readonly manifest: ProviderManifest;
+  readonly inspect: (request: ProviderRequest, signal: AbortSignal) => Promise<ProviderRawResult>;
+}
+
+export interface ProviderDispatchPolicy {
+  readonly policyVersion: string;
+  readonly allowedProviders: readonly string[];
+  readonly allowedRoles: readonly ProviderRole[];
+  readonly maximumProviders: number;
+  readonly maximumTotalCostUnits: number;
+  readonly maximumTimeoutMs: number;
+  readonly allowNetworkEgress: boolean;
+  readonly allowProviderRetention: boolean;
+  readonly allowProviderTraining: boolean;
+  readonly killSwitch: () => boolean;
 }
 
 export interface FraudEvidence {
@@ -66,6 +161,7 @@ export interface FraudEvidence {
     readonly name: string;
     readonly version: string;
     readonly status: ProviderResult['status'] | 'observed';
+    readonly provenance?: ProviderProvenance;
   };
   readonly observedAt: string;
   readonly validUntil?: string;
@@ -99,8 +195,13 @@ export interface FraudAssessment {
   readonly score: number;
   readonly confidence: EvidenceSufficiency;
   readonly calibration: 'not_calibrated';
+  readonly inputSafety: {
+    readonly redactions: readonly SafeRedaction[];
+    readonly flags: readonly SensitiveSafetyFlag[];
+  };
   readonly uncertaintyReasons: readonly string[];
   readonly evidence: readonly FraudEvidence[];
+  readonly providerRuns: readonly ProviderProvenance[];
   readonly explanation: {
     readonly headline: string;
     readonly reasons: readonly string[];
@@ -108,9 +209,9 @@ export interface FraudAssessment {
   };
   readonly actions: readonly SafeAction[];
   readonly versions: {
-    readonly normalization: 'normalize-v1';
-    readonly signals: 'signals-v1';
-    readonly scoring: 'score-v1';
+    readonly normalization: 'normalize-v2';
+    readonly signals: 'signals-v2';
+    readonly scoring: 'score-v2';
     readonly actions: 'actions-v1';
   };
 }

@@ -63,33 +63,39 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
     [now.toISOString()],
   );
   const memberships = [
-    ['household-sunrise', 'membership-sunrise-alice', 'person-owner-alice', 'household_owner', []],
-    ['household-sunrise', 'membership-sunrise-pat', 'person-protected-pat', 'protected_member', []],
-    [
-      'household-sunrise',
-      'membership-sunrise-terry',
-      'person-trusted-terry',
-      'trusted_circle',
-      ['view_shared_checks'],
-    ],
-    ['household-harbor', 'membership-harbor-bob', 'person-owner-bob', 'household_owner', []],
-    [
-      'household-harbor',
-      'membership-harbor-olivia',
-      'person-protected-olivia',
-      'protected_member',
-      [],
-    ],
+    ['household-sunrise', 'membership-sunrise-alice', 'person-owner-alice'],
+    ['household-sunrise', 'membership-sunrise-pat', 'person-protected-pat'],
+    ['household-sunrise', 'membership-sunrise-terry', 'person-trusted-terry'],
+    ['household-harbor', 'membership-harbor-bob', 'person-owner-bob'],
+    ['household-harbor', 'membership-harbor-olivia', 'person-protected-olivia'],
   ] as const;
-  for (const [householdId, membershipId, personId, role, permissions] of memberships) {
+  for (const [householdId, membershipId, personId] of memberships) {
     await transaction.query(
       `INSERT INTO household_memberships(
-         household_id, id, person_id, role, status, permissions, created_at
-       ) VALUES ($1,$2,$3,$4,'active',$5::jsonb,$6)
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES ($1,$2,$3,'member','active',$4)
        ON CONFLICT (household_id, id) DO NOTHING`,
-      [householdId, membershipId, personId, role, JSON.stringify(permissions), now.toISOString()],
+      [householdId, membershipId, personId, now.toISOString()],
     );
   }
+  await transaction.query(
+    `INSERT INTO household_administrator_assignments(
+       household_id, person_id, status, granted_by_person_id, granted_at
+     ) VALUES
+       ('household-sunrise','person-owner-alice','active','person-owner-alice',$1),
+       ('household-harbor','person-owner-bob','active','person-owner-bob',$1)
+     ON CONFLICT (household_id, person_id) DO NOTHING`,
+    [now.toISOString()],
+  );
+  await transaction.query(
+    `INSERT INTO household_billing_authorities(
+       household_id, person_id, status, granted_by_person_id, granted_at
+     ) VALUES
+       ('household-sunrise','person-owner-alice','active','person-owner-alice',$1),
+       ('household-harbor','person-owner-bob','active','person-owner-bob',$1)
+     ON CONFLICT (household_id, person_id) DO NOTHING`,
+    [now.toISOString()],
+  );
   await transaction.query(
     `INSERT INTO employee_assignments(id, person_id, organization_id, role, status, created_at) VALUES
        ('employee-hq-heidi','person-hq-heidi','organization-boomerbuddy','hq_owner','active',$1),
@@ -103,19 +109,85 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
        consent_version, state, granted_at
      ) VALUES
        ('household-sunrise','consent-sunrise-pat-circle','person-protected-pat',
-        'person-protected-pat','trusted_circle','2026-08-15','active',$1),
-       ('household-harbor','consent-harbor-olivia-circle','person-protected-olivia',
-        'person-protected-olivia','trusted_circle','2026-08-15','active',$1)
+        'person-protected-pat','trusted_circle_relationship','2026-08-15','active',$1),
+       ('household-sunrise','consent-protected-sunrise-alice','person-owner-alice',
+        'person-owner-alice','protected_enrollment','protected-self-v1','active',$1),
+       ('household-sunrise','consent-protected-sunrise-pat','person-protected-pat',
+        'person-protected-pat','protected_enrollment','protected-self-v1','active',$1),
+       ('household-harbor','consent-protected-harbor-olivia','person-protected-olivia',
+        'person-protected-olivia','protected_enrollment','protected-self-v1','active',$1)
      ON CONFLICT (household_id, id) DO NOTHING`,
     [now.toISOString()],
   );
   await transaction.query(
+    `INSERT INTO consent_evidence(
+       household_id, id, consent_id, actor_person_id, subject_person_id,
+       recipient_person_id, purpose, scope, action, disclosure_version,
+       disclosure_digest, policy_version, policy_digest, source_interaction,
+       actor_identity_id, actor_identity_issuer, actor_identity_subject, assurance,
+       effective_at, recorded_at
+     ) VALUES
+       ('household-sunrise','evidence-sunrise-pat-terry','consent-sunrise-pat-circle',
+        'person-protected-pat','person-protected-pat','person-trusted-terry',
+        'trusted_circle_relationship',$1::jsonb,'accept','trusted-circle-disclosure-v2',
+        repeat('1',64),'trusted-circle-policy-v2',repeat('2',64),'local_seed',
+        'identity-protected-pat','boomerbuddy-dev','protected-pat','development',$2,$2),
+       ('household-sunrise','evidence-protected-sunrise-alice',
+        'consent-protected-sunrise-alice','person-owner-alice','person-owner-alice',NULL,
+        'protected_enrollment',$3::jsonb,'accept','protected-enrollment-disclosure-v2',
+        repeat('1',64),'protected-enrollment-policy-v2',repeat('2',64),'local_seed',
+        'identity-owner-alice','boomerbuddy-dev','owner-alice','development',$2,$2),
+       ('household-sunrise','evidence-protected-sunrise-pat',
+        'consent-protected-sunrise-pat','person-protected-pat','person-protected-pat',NULL,
+        'protected_enrollment',$3::jsonb,'accept','protected-enrollment-disclosure-v2',
+        repeat('1',64),'protected-enrollment-policy-v2',repeat('2',64),'local_seed',
+        'identity-protected-pat','boomerbuddy-dev','protected-pat','development',$2,$2),
+       ('household-harbor','evidence-protected-harbor-olivia',
+        'consent-protected-harbor-olivia','person-protected-olivia',
+        'person-protected-olivia',NULL,'protected_enrollment',$3::jsonb,'accept',
+        'protected-enrollment-disclosure-v2',repeat('1',64),
+        'protected-enrollment-policy-v2',repeat('2',64),'local_seed',
+        'identity-protected-olivia','boomerbuddy-dev','protected-olivia','development',$2,$2)
+     ON CONFLICT (household_id, id) DO NOTHING`,
+    [
+      JSON.stringify({ permissions: ['view_shared_checks'] }),
+      now.toISOString(),
+      JSON.stringify({ protectedEnrollment: true }),
+    ],
+  );
+  await transaction.query(
+    `INSERT INTO consent_current_projections(
+       household_id, consent_id, latest_evidence_id, actor_person_id,
+       subject_person_id, recipient_person_id, purpose, scope, state,
+       effective_at, updated_at
+     ) VALUES
+       ('household-sunrise','consent-sunrise-pat-circle','evidence-sunrise-pat-terry',
+        'person-protected-pat','person-protected-pat','person-trusted-terry',
+        'trusted_circle_relationship',$1::jsonb,'active',$2,$2),
+       ('household-sunrise','consent-protected-sunrise-alice',
+        'evidence-protected-sunrise-alice','person-owner-alice','person-owner-alice',NULL,
+        'protected_enrollment',$3::jsonb,'active',$2,$2),
+       ('household-sunrise','consent-protected-sunrise-pat',
+        'evidence-protected-sunrise-pat','person-protected-pat','person-protected-pat',NULL,
+        'protected_enrollment',$3::jsonb,'active',$2,$2),
+       ('household-harbor','consent-protected-harbor-olivia',
+        'evidence-protected-harbor-olivia','person-protected-olivia',
+        'person-protected-olivia',NULL,'protected_enrollment',$3::jsonb,'active',$2,$2)
+     ON CONFLICT (household_id, consent_id) DO NOTHING`,
+    [
+      JSON.stringify({ permissions: ['view_shared_checks'] }),
+      now.toISOString(),
+      JSON.stringify({ protectedEnrollment: true }),
+    ],
+  );
+  await transaction.query(
     `INSERT INTO trusted_circle_relationships(
        household_id, id, protected_person_id, trusted_person_id, permissions,
-       consent_id, consent_version, state, created_at
+       consent_id, consent_version, state, created_at, latest_consent_evidence_id
      ) VALUES (
        'household-sunrise','relationship-sunrise-pat-terry','person-protected-pat',
-       'person-trusted-terry',$1::jsonb,'consent-sunrise-pat-circle','2026-08-15','active',$2
+       'person-trusted-terry',$1::jsonb,'consent-sunrise-pat-circle','2026-08-15','active',$2,
+       'evidence-sunrise-pat-terry'
      ) ON CONFLICT (household_id, id) DO NOTHING`,
     [JSON.stringify(['view_shared_checks']), now.toISOString()],
   );
@@ -215,6 +287,15 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
     [now.toISOString(), periodEnd],
   );
   await transaction.query(
+    `INSERT INTO household_payers(
+       household_id, person_id, source, status, effective_at
+     ) VALUES
+       ('household-sunrise','person-owner-alice','local','active',$1),
+       ('household-harbor','person-owner-bob','local','active',$1)
+     ON CONFLICT (household_id, person_id) DO NOTHING`,
+    [now.toISOString()],
+  );
+  await transaction.query(
     `INSERT INTO commerce_provider_subscription_records(
        id, household_id, subscription_id, provider, environment,
        external_subscription_id, raw_state, provider_version, observed_at, verified_at
@@ -299,14 +380,18 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
   await transaction.query(
     `INSERT INTO protected_members(
        household_id, person_id, status, consented_by_person_id, consent_version,
-       allowance_allocation_id, accepted_at, created_at, updated_at
+       allowance_allocation_id, accepted_at, created_at, updated_at,
+       consent_id, latest_consent_evidence_id
      ) VALUES
        ('household-sunrise','person-owner-alice','accepted','person-owner-alice',
-        'protected-self-v1','allocation-sunrise-alice',$1,$1,$1),
+        'protected-self-v1','allocation-sunrise-alice',$1,$1,$1,
+        'consent-protected-sunrise-alice','evidence-protected-sunrise-alice'),
        ('household-sunrise','person-protected-pat','accepted','person-protected-pat',
-        'protected-self-v1','allocation-sunrise-pat',$1,$1,$1),
+        'protected-self-v1','allocation-sunrise-pat',$1,$1,$1,
+        'consent-protected-sunrise-pat','evidence-protected-sunrise-pat'),
        ('household-harbor','person-protected-olivia','accepted','person-protected-olivia',
-        'protected-self-v1','allocation-harbor-olivia',$1,$1,$1)
+        'protected-self-v1','allocation-harbor-olivia',$1,$1,$1,
+        'consent-protected-harbor-olivia','evidence-protected-harbor-olivia')
      ON CONFLICT (household_id, person_id) DO NOTHING`,
     [now.toISOString()],
   );

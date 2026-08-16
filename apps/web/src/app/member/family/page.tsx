@@ -172,7 +172,14 @@ export default function FamilyPage() {
         headers: { 'X-BB-Household-Id': selectedHouseholdId },
       });
       const refreshed = await refreshPrincipal();
-      if (refreshed.me.principal.households.some((scope) => scope.id === selectedHouseholdId)) {
+      const refreshedScope = refreshed.me.principal.households.find(
+        (scope) => scope.id === selectedHouseholdId,
+      );
+      const canStillViewFamily =
+        refreshedScope?.isAdministrator === true ||
+        refreshedScope?.isProtectedMember === true ||
+        (refreshedScope?.trustedCircleGrants.length ?? 0) > 0;
+      if (canStillViewFamily) {
         await load(selectedHouseholdId);
       } else {
         setFamily(undefined);
@@ -187,7 +194,7 @@ export default function FamilyPage() {
 
   const currentHouseholdScope =
     selectedScope?.id === family?.household.id ? selectedScope : undefined;
-  const isHouseholdOwner = currentHouseholdScope?.role === 'household_owner';
+  const isHouseholdAdministrator = currentHouseholdScope?.isAdministrator === true;
   const isProtectedMember =
     currentHouseholdScope?.isProtectedMember === true &&
     currentHouseholdScope.capabilities.includes('family:manage');
@@ -313,16 +320,9 @@ export default function FamilyPage() {
             <ul className="plain-list">
               {family.members.map((member) => (
                 <li key={member.membershipId}>
-                  <strong>{member.displayName}</strong> — {member.role.replaceAll('_', ' ')} (
-                  {member.status}){member.isProtectedMember ? ' · protected adult' : ''}
-                  {member.permissions.length ? (
-                    <div className="meta">
-                      Permissions:{' '}
-                      {member.permissions
-                        .map((permission) => permissionLabels[permission])
-                        .join('; ')}
-                    </div>
-                  ) : null}
+                  <strong>{member.displayName}</strong> — member ({member.status})
+                  {member.isAdministrator ? ' · administrator' : ''}
+                  {member.isProtectedMember ? ' · protected adult' : ''}
                 </li>
               ))}
             </ul>
@@ -342,7 +342,7 @@ export default function FamilyPage() {
                             .map((permission) => permissionLabels[permission])
                             .join('; ')}
                         </div>
-                        {(isHouseholdOwner ||
+                        {(isHouseholdAdministrator ||
                           item.protectedPersonId === me.principal.personId ||
                           item.trustedPersonId === me.principal.personId) && (
                           <button
@@ -373,7 +373,8 @@ export default function FamilyPage() {
                         <div className="meta">
                           Expires {new Date(item.expiresAt).toLocaleDateString()} · Local only
                         </div>
-                        {isHouseholdOwner || item.protectedPersonId === me.principal.personId ? (
+                        {isHouseholdAdministrator ||
+                        item.protectedPersonId === me.principal.personId ? (
                           confirmingInvitationId === item.id ? (
                             <div className="form-stack">
                               <p>
@@ -420,8 +421,8 @@ export default function FamilyPage() {
             <form className="card form-stack" onSubmit={createInvite} style={{ marginTop: '1rem' }}>
               <h2>Invite a trusted person</h2>
               <p>
-                You are inviting a person into a relationship with you. An owner cannot consent on
-                your behalf, and the invited person must separately accept.
+                You are inviting a person into a relationship with you. An administrator cannot
+                consent on your behalf, and the invited person must separately accept.
               </p>
               <label htmlFor="invitee-name">Trusted person’s display name</label>
               <input

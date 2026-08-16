@@ -397,9 +397,6 @@ textarea {
 .risk {
   border-left: 0.55rem solid var(--bb-muted);
 }
-.risk-lower_concern {
-  border-left-color: var(--bb-success);
-}
 .risk-caution {
   border-left-color: var(--bb-warning);
 }

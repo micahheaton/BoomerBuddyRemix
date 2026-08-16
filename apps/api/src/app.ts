@@ -4,6 +4,7 @@ import helmet from '@fastify/helmet';
 import type { AppConfig } from '@boomerbuddy/config';
 import { publicConfigResponseSchema } from '@boomerbuddy/contracts';
 import { DomainError, seededCommercePlanVersions } from '@boomerbuddy/domain';
+import { StripeHttpTransport, type StripeTransport } from '@boomerbuddy/integrations';
 import { createLogger, createRequestId, type Logger } from '@boomerbuddy/observability';
 import {
   createPGliteDatabase,
@@ -16,9 +17,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { createRepositories, type ApiContext } from './context';
 import { registerCheckRoutes } from './routes/checks';
+import { registerBusinessOsRoutes } from './routes/business-os';
+import { registerCommerceRoutes } from './routes/commerce';
 import { registerFamilyRoutes } from './routes/family';
 import { registerHqRoutes } from './routes/hq';
 import { registerOrientationRoutes } from './routes/orientation';
+import { registerPublicCheckRoutes } from './routes/public-checks';
+import { registerPrivacyRoutes } from './routes/privacy';
 import { registerSessionRoutes } from './routes/sessions';
 
 export interface BuildAppOptions {
@@ -30,11 +35,12 @@ export interface BuildAppOptions {
   readonly closeDatabase?: boolean;
   /** Test/local override; production scheduling is deliberately blocked in Build Run 1. */
   readonly retentionSweepIntervalMs?: number;
+  /** Deterministic fixture transport for tests; runtime otherwise uses Stripe HTTPS in test mode. */
+  readonly stripeTransport?: StripeTransport;
 }
 
 const retentionBatchSize = 100;
 const retentionMaxBatchesPerSweep = 10;
-const defaultRetentionSweepIntervalMs = 60 * 60 * 1_000;
 
 export async function connectDatabase(config: AppConfig): Promise<Database> {
   return config.database.driver === 'pglite'
@@ -174,14 +180,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     now: options.now ?? (() => new Date()),
   };
   const drainDueRetention = async (): Promise<boolean> => {
+    let moreDue = false;
     for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
       const deleted = await context.repositories.checks.purgeDue({
         now: context.now(),
         limit: retentionBatchSize,
       });
-      if (deleted.length < retentionBatchSize) return false;
+      if (deleted.length < retentionBatchSize) break;
+      moreDue = batch === retentionMaxBatchesPerSweep - 1;
     }
-    return true;
+    await context.repositories.publicChecks.purgeExpired(context.now());
+    return moreDue;
   };
   let retentionNeedsContinuation = false;
   try {
@@ -240,17 +249,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         retentionSweep = undefined;
       });
   };
-  const retentionInterval = setInterval(
-    runRetentionSweep,
-    options.retentionSweepIntervalMs ?? defaultRetentionSweepIntervalMs,
-  );
+  const retentionInterval =
+    options.retentionSweepIntervalMs === undefined
+      ? undefined
+      : setInterval(runRetentionSweep, options.retentionSweepIntervalMs);
   if (retentionNeedsContinuation) scheduleRetentionContinuation();
-  retentionInterval.unref();
+  retentionInterval?.unref();
   await app.register(cookie);
   await app.register(cors, {
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-BB-Household-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-BB-Household-Id', 'Idempotency-Key'],
     origin: (origin, callback) => {
       callback(null, origin === undefined || allowedOrigins.has(origin));
     },
@@ -271,7 +280,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   app.addHook('onClose', async () => {
     closing = true;
-    clearInterval(retentionInterval);
+    if (retentionInterval !== undefined) clearInterval(retentionInterval);
     if (retentionContinuation !== undefined) clearTimeout(retentionContinuation);
     await retentionSweep;
     if (closeDatabase) {
@@ -280,10 +289,24 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   installErrors(app, logger);
   registerBaseRoutes(app, context);
+  registerPublicCheckRoutes(app, context, context.repositories.publicChecks);
+  registerPrivacyRoutes(app, context);
   registerSessionRoutes(app, context);
   registerCheckRoutes(app, context);
   registerFamilyRoutes(app, context);
   registerOrientationRoutes(app, context);
+  registerCommerceRoutes(
+    app,
+    context,
+    options.stripeTransport ??
+      (context.config.commerce.stripe.mode === 'test'
+        ? new StripeHttpTransport(
+            context.config.commerce.stripe.secretKey,
+            context.config.commerce.stripe.apiVersion,
+          )
+        : undefined),
+  );
   registerHqRoutes(app, context);
+  registerBusinessOsRoutes(app, context);
   return app;
 }

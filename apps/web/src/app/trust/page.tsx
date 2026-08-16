@@ -8,15 +8,17 @@ export default function TrustPage() {
         <span className="eyebrow">Trust and safety</span>
         <h1 className="page-title">Designed to show its limits</h1>
         <p className="lede">
-          A reassuring answer can still be wrong. BoomerBuddy pairs every result with a provider
-          state, evidence sufficiency, explicit limitations, and safer next actions.
+          A reassuring answer can still be wrong. BoomerBuddy pairs results with evidence
+          sufficiency, an explicit calibration limit, and safer next actions. Authenticated results
+          also expose provider and ruleset provenance.
         </p>
         <div className="card-grid two" style={{ marginTop: '2rem' }}>
           <article className="card">
             <h2>Minimal records</h2>
             <p>
-              Check responses do not echo submitted content. Records retain result metadata until
-              their displayed deletion time, and you can delete a check sooner.
+              Check responses do not echo submitted content. Anonymous conversion payloads expire
+              after 15 minutes; authenticated records show their deletion time and can be deleted
+              sooner by the check owner.
             </p>
           </article>
           <article className="card">

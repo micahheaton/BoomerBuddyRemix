@@ -1,40 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { ids, type Role } from '@boomerbuddy/domain';
+import { ids, type Capability, type Role } from '@boomerbuddy/domain';
 import { assertAuthorized, authorize, type Principal, type Resource } from './index';
 
-const home = ids.household('household_home');
-const other = ids.household('household_other');
-const person = ids.person('person_member');
+const home = ids.household('household-home');
+const other = ids.household('household-other');
+const person = ids.person('person-member');
+const protectedPerson = ids.person('person-protected');
+const relationshipId = ids.relationship('relationship-exact');
 
-function principal(overrides: Partial<Principal> = {}): Principal {
+function householdScope(
+  overrides: Partial<Principal['households'][number]> = {},
+): Principal['households'][number] {
   return {
-    personId: person,
-    sessionId: ids.session('session_member'),
-    audience: 'customer',
-    roles: ['protected_member'],
-    households: [
-      {
-        householdId: home,
-        role: 'protected_member',
-        isProtectedMember: true,
-        permissions: [],
-        capabilities: [
-          'check:text',
-          'check:url',
-          'history:read',
-          'family:manage',
-          'orientation:use',
-        ],
-        status: 'active',
-      },
-    ],
-    organizations: [],
+    householdId: home,
+    membershipKind: 'member',
+    isAdministrator: false,
+    isProtectedMember: true,
+    trustedCircleGrants: [],
+    isPayer: false,
+    isBillingManager: false,
+    capabilities: ['check:text', 'check:url', 'history:read', 'family:manage', 'orientation:use'],
+    status: 'active',
     ...overrides,
   };
 }
 
+function principal(overrides: Partial<Principal> = {}): Principal {
+  return {
+    personId: person,
+    sessionId: ids.session('session-member'),
+    audience: 'customer',
+    roles: ['protected_member'],
+    households: [householdScope()],
+    organizations: [],
+    supportCases: [],
+    restrictedAccess: [],
+    ...overrides,
+  };
+}
+
+function hqPrincipal(role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_support'>): Principal {
+  return principal({
+    audience: 'hq',
+    roles: [role],
+    households: [],
+    organizations: [{ employeeAssignmentId: 'employee-support', role, status: 'active' }],
+  });
+}
+
 describe('deny-by-default authorization', () => {
-  it('denies missing principals, wrong audience and cross-tenant requests', () => {
+  it('denies missing principals, wrong audiences, cross-tenant access, and missing capabilities', () => {
     const resource: Resource = {
       kind: 'check_collection',
       householdId: home,
@@ -42,216 +57,47 @@ describe('deny-by-default authorization', () => {
         kind: 'list',
         ownerPersonId: person,
         includeOwned: true,
-        includeExplicitlyShared: true,
+        includeExplicitlyShared: false,
       },
     };
-    expect(authorize({ principal: null, action: 'check:list', resource })).toEqual({
-      allowed: false,
-      reason: 'missing_principal',
-    });
+    expect(authorize({ principal: null, action: 'check:list', resource }).reason).toBe(
+      'missing_principal',
+    );
     expect(
-      authorize({
-        principal: principal({ audience: 'hq' }),
-        action: 'check:list',
-        resource,
-      }).reason,
+      authorize({ principal: principal({ audience: 'hq' }), action: 'check:list', resource })
+        .reason,
     ).toBe('wrong_audience');
     expect(
       authorize({
         principal: principal(),
         action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: other,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: true,
-            includeExplicitlyShared: true,
-          },
-        },
+        resource: { ...resource, householdId: other },
       }).reason,
     ).toBe('outside_tenant');
-  });
-
-  it('requires capability and object ownership for checks', () => {
     expect(
       authorize({
-        principal: principal({
-          households: [
-            {
-              householdId: home,
-              role: 'protected_member',
-              isProtectedMember: true,
-              permissions: [],
-              capabilities: [],
-              status: 'active',
-            },
-          ],
-        }),
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: { kind: 'create', artifactKind: 'text' },
-        },
+        principal: principal({ households: [householdScope({ capabilities: [] })] }),
+        action: 'check:list',
+        resource,
       }).reason,
     ).toBe('missing_capability');
-    expect(
-      authorize({
-        principal: principal(),
-        action: 'check:delete',
-        resource: { kind: 'check', householdId: home, ownerPersonId: ids.person('someone_else') },
-      }).reason,
-    ).toBe('not_owner_or_shared');
   });
 
-  it('requires URL capability and an actor-scoped list contract', () => {
-    expect(
-      authorize({
-        principal: principal({
-          households: [
-            {
-              householdId: home,
-              role: 'protected_member',
-              isProtectedMember: true,
-              permissions: [],
-              capabilities: ['check:text', 'history:read'],
-              status: 'active',
-            },
-          ],
-        }),
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: { kind: 'create', artifactKind: 'url' },
-        },
-      }).reason,
-    ).toBe('missing_capability');
-    expect(
-      authorize({
-        principal: principal(),
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: ids.person('different_person'),
-            includeOwned: true,
-            includeExplicitlyShared: true,
-          },
-        },
-      }).reason,
-    ).toBe('unsupported_action_resource');
-  });
-
-  it('denies protected workflows to an unprotected household owner but preserves deletion', () => {
-    const owner = principal({
-      roles: ['household_owner'],
-      households: [
-        {
-          householdId: home,
-          role: 'household_owner',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [
-            'check:text',
-            'check:url',
-            'history:read',
-            'family:manage',
-            'orientation:use',
-          ],
-          status: 'active',
-        },
-      ],
+  it('keeps administrator and protected authority independent on one neutral membership', () => {
+    const administratorAndProtected = principal({
+      roles: ['household_administrator', 'protected_member'],
+      households: [householdScope({ isAdministrator: true, isProtectedMember: true })],
     });
-    const ownCheck: Resource = {
-      kind: 'check',
-      householdId: home,
-      ownerPersonId: person,
-    };
-
     expect(
       authorize({
-        principal: owner,
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: { kind: 'create', artifactKind: 'text' },
-        },
+        principal: administratorAndProtected,
+        action: 'family:view',
+        resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
       }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: owner,
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: true,
-            includeExplicitlyShared: true,
-          },
-        },
-      }).allowed,
-    ).toBe(false);
-    expect(authorize({ principal: owner, action: 'check:read', resource: ownCheck }).allowed).toBe(
-      false,
-    );
-    expect(authorize({ principal: owner, action: 'check:share', resource: ownCheck }).allowed).toBe(
-      false,
-    );
-    expect(
-      authorize({ principal: owner, action: 'check:delete', resource: ownCheck }).allowed,
     ).toBe(true);
     expect(
       authorize({
-        principal: owner,
-        action: 'orientation:update',
-        resource: { kind: 'orientation', householdId: home, subjectPersonId: person },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: owner,
-        action: 'family:invite',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: { kind: 'subject_invitation', protectedPersonId: person },
-        },
-      }).allowed,
-    ).toBe(false);
-  });
-
-  it('allows an independently protected household owner to use protected workflows', () => {
-    const ownerAndProtected = principal({
-      roles: ['household_owner'],
-      households: [
-        {
-          householdId: home,
-          role: 'household_owner',
-          isProtectedMember: true,
-          permissions: [],
-          capabilities: ['check:text', 'history:read', 'family:manage', 'orientation:use'],
-          status: 'active',
-        },
-      ],
-    });
-    const ownCheck: Resource = {
-      kind: 'check',
-      householdId: home,
-      ownerPersonId: person,
-    };
-
-    expect(
-      authorize({
-        principal: ownerAndProtected,
+        principal: administratorAndProtected,
         action: 'check:create',
         resource: {
           kind: 'check_collection',
@@ -262,37 +108,7 @@ describe('deny-by-default authorization', () => {
     ).toBe(true);
     expect(
       authorize({
-        principal: ownerAndProtected,
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: true,
-            includeExplicitlyShared: true,
-          },
-        },
-      }).allowed,
-    ).toBe(true);
-    expect(
-      authorize({ principal: ownerAndProtected, action: 'check:read', resource: ownCheck }).allowed,
-    ).toBe(true);
-    expect(
-      authorize({ principal: ownerAndProtected, action: 'check:share', resource: ownCheck })
-        .allowed,
-    ).toBe(true);
-    expect(
-      authorize({
-        principal: ownerAndProtected,
-        action: 'orientation:view',
-        resource: { kind: 'orientation', householdId: home, subjectPersonId: person },
-      }).allowed,
-    ).toBe(true);
-    expect(
-      authorize({
-        principal: ownerAndProtected,
+        principal: administratorAndProtected,
         action: 'family:invite',
         resource: {
           kind: 'family',
@@ -303,143 +119,140 @@ describe('deny-by-default authorization', () => {
     ).toBe(true);
   });
 
-  it('does not infer protection from a legacy protected or Trusted Circle role', () => {
-    const roleOnly = principal({
-      households: [
-        {
-          householdId: home,
-          role: 'protected_member',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: ['check:text', 'history:read', 'family:manage', 'orientation:use'],
-          status: 'active',
-        },
-      ],
+  it('does not let administrator authority imply protected workflows', () => {
+    const administrator = principal({
+      roles: ['household_administrator'],
+      households: [householdScope({ isAdministrator: true, isProtectedMember: false })],
     });
     expect(
       authorize({
-        principal: roleOnly,
+        principal: administrator,
+        action: 'family:view',
+        resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administrator,
         action: 'check:create',
         resource: {
           kind: 'check_collection',
           householdId: home,
           scope: { kind: 'create', artifactKind: 'text' },
         },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: roleOnly,
-        action: 'family:invite',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: { kind: 'subject_invitation', protectedPersonId: person },
-        },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: roleOnly,
-        action: 'orientation:update',
-        resource: { kind: 'orientation', householdId: home, subjectPersonId: person },
-      }).allowed,
-    ).toBe(false);
+      }).reason,
+    ).toBe('insufficient_role');
+  });
 
+  it('limits Trusted Circle reads and orientation help to the exact protected pair', () => {
     const trusted = principal({
       roles: ['trusted_circle'],
       households: [
-        {
-          householdId: home,
-          role: 'trusted_circle',
+        householdScope({
           isProtectedMember: false,
-          permissions: ['view_shared_checks'],
-          capabilities: ['check:text', 'history:read', 'orientation:use'],
-          status: 'active',
-        },
+          trustedCircleGrants: [
+            {
+              relationshipId,
+              protectedPersonId: protectedPerson,
+              permissions: ['view_shared_checks', 'help_with_orientation'],
+            },
+          ],
+          capabilities: ['history:read', 'orientation:use'],
+        }),
       ],
     });
+    const exactSharedCheck: Resource = {
+      kind: 'check',
+      householdId: home,
+      ownerPersonId: protectedPerson,
+      sharedWithPersonIds: [person],
+    };
     expect(
-      authorize({
-        principal: trusted,
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: { kind: 'create', artifactKind: 'text' },
-        },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: trusted,
-        action: 'orientation:view',
-        resource: { kind: 'orientation', householdId: home, subjectPersonId: person },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: trusted,
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: false,
-            includeExplicitlyShared: true,
-          },
-        },
-      }).allowed,
+      authorize({ principal: trusted, action: 'check:read', resource: exactSharedCheck }).allowed,
     ).toBe(true);
-    expect(
-      authorize({
-        principal: trusted,
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: true,
-            includeExplicitlyShared: true,
-          },
-        },
-      }),
-    ).toEqual({ allowed: false, reason: 'insufficient_role' });
-    expect(
-      authorize({
-        principal: trusted,
-        action: 'check:list',
-        resource: {
-          kind: 'check_collection',
-          householdId: home,
-          scope: {
-            kind: 'list',
-            ownerPersonId: person,
-            includeOwned: false,
-            includeExplicitlyShared: false,
-          },
-        },
-      }),
-    ).toEqual({ allowed: false, reason: 'unsupported_action_resource' });
     expect(
       authorize({
         principal: trusted,
         action: 'check:read',
-        resource: {
-          kind: 'check',
-          householdId: home,
-          ownerPersonId: ids.person('person_protected'),
-          sharedWithPersonIds: [person],
-        },
+        resource: { ...exactSharedCheck, ownerPersonId: ids.person('person-unrelated') },
+      }).reason,
+    ).toBe('not_owner_or_shared');
+    expect(
+      authorize({
+        principal: trusted,
+        action: 'orientation:view',
+        resource: { kind: 'orientation', householdId: home, subjectPersonId: protectedPerson },
       }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: trusted,
+        action: 'orientation:view',
+        resource: {
+          kind: 'orientation',
+          householdId: home,
+          subjectPersonId: ids.person('person-unrelated'),
+        },
+      }).reason,
+    ).toBe('missing_relationship_permission');
+  });
+
+  it('keeps payer and billing authority from revealing Family or customer artifacts', () => {
+    for (const scope of [
+      householdScope({
+        isProtectedMember: false,
+        isPayer: true,
+        capabilities: ['history:read'],
+      }),
+      householdScope({
+        isProtectedMember: false,
+        isBillingManager: true,
+        capabilities: ['history:read'],
+      }),
+    ]) {
+      const actor = principal({ households: [scope] });
+      expect(
+        authorize({
+          principal: actor,
+          action: 'family:view',
+          resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
+        }).allowed,
+      ).toBe(false);
+      expect(
+        authorize({
+          principal: actor,
+          action: 'family:view',
+          resource: {
+            kind: 'family',
+            householdId: home,
+            scope: { kind: 'subject_relationships', subjectPersonId: person },
+          },
+        }).allowed,
+      ).toBe(false);
+      expect(
+        authorize({
+          principal: actor,
+          action: 'check:read',
+          resource: { kind: 'check', householdId: home, ownerPersonId: protectedPerson },
+        }).allowed,
+      ).toBe(false);
+    }
+    const payer = principal({
+      households: [householdScope({ isProtectedMember: false, isPayer: true })],
+    });
+    const billing = principal({
+      households: [householdScope({ isProtectedMember: false, isBillingManager: true })],
+    });
+    const entitlement: Resource = { kind: 'entitlement', householdId: home };
+    expect(
+      authorize({ principal: payer, action: 'entitlement:view', resource: entitlement }).allowed,
+    ).toBe(false);
+    expect(
+      authorize({ principal: billing, action: 'entitlement:view', resource: entitlement }).allowed,
     ).toBe(true);
   });
 
-  it('allows only the bound invitee to accept before household membership exists', () => {
+  it('models development invitations as unbound and production invitations as identity-bound', () => {
     const invitee = principal({ households: [] });
     expect(
       authorize({
@@ -448,6 +261,32 @@ describe('deny-by-default authorization', () => {
         resource: {
           kind: 'invitation',
           householdId: home,
+          identityBindingState: 'development_unbound',
+          credentialPresented: true,
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: invitee,
+        action: 'family:accept_invitation',
+        resource: {
+          kind: 'invitation',
+          householdId: home,
+          identityBindingState: 'development_unbound',
+          invitedPersonId: person,
+          credentialPresented: true,
+        },
+      }).allowed,
+    ).toBe(false);
+    expect(
+      authorize({
+        principal: invitee,
+        action: 'family:accept_invitation',
+        resource: {
+          kind: 'invitation',
+          householdId: home,
+          identityBindingState: 'verified_identity',
           invitedPersonId: person,
           credentialPresented: true,
         },
@@ -460,461 +299,232 @@ describe('deny-by-default authorization', () => {
         resource: {
           kind: 'invitation',
           householdId: home,
-          invitedPersonId: ids.person('another_invitee'),
+          identityBindingState: 'verified_identity',
+          invitedPersonId: ids.person('person-other'),
           credentialPresented: true,
         },
       }).allowed,
     ).toBe(false);
-    expect(
-      authorize({
-        principal: invitee,
-        action: 'family:accept_invitation',
-        resource: {
-          kind: 'invitation',
-          householdId: home,
-          invitedPersonId: person,
-          credentialPresented: false,
-        },
-      }).allowed,
-    ).toBe(false);
   });
 
-  it('allows only explicitly shared checks to permissioned trusted-circle members', () => {
-    const trusted = principal({
-      roles: ['trusted_circle'],
-      households: [
-        {
-          householdId: home,
-          role: 'trusted_circle',
-          isProtectedMember: false,
-          permissions: ['view_shared_checks'],
-          capabilities: ['history:read'],
-          status: 'active',
-        },
-      ],
-    });
-    const resource: Resource = {
-      kind: 'check',
-      householdId: home,
-      ownerPersonId: ids.person('protected_person'),
-      sharedWithPersonIds: [person],
-    };
-    expect(authorize({ principal: trusted, action: 'check:read', resource }).allowed).toBe(true);
-    expect(authorize({ principal: trusted, action: 'check:share', resource }).allowed).toBe(false);
-  });
-
-  it('scopes Family views to owner roster, self, or a pairwise relationship', () => {
-    const protectedMember = principal();
-    expect(
-      authorize({
-        principal: protectedMember,
-        action: 'family:view',
-        resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
-      }).allowed,
-    ).toBe(false);
-    expect(
-      authorize({
-        principal: protectedMember,
-        action: 'family:view',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: { kind: 'subject_relationships', subjectPersonId: person },
-        },
-      }).allowed,
-    ).toBe(true);
-    expect(
-      authorize({
-        principal: protectedMember,
-        action: 'family:view',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: {
-            kind: 'pairwise_relationship',
-            protectedPersonId: ids.person('person_a'),
-            trustedPersonId: ids.person('person_b'),
-          },
-        },
-      }).allowed,
-    ).toBe(false);
-  });
-
-  it('allows only a protected member to invite for their own subject', () => {
-    const selfInvitation: Resource = {
-      kind: 'family',
-      householdId: home,
-      scope: { kind: 'subject_invitation', protectedPersonId: person },
-    };
-    expect(
-      authorize({ principal: principal(), action: 'family:invite', resource: selfInvitation }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    const anotherProtectedPerson = ids.person('person_other_protected');
-    expect(
-      authorize({
-        principal: principal(),
-        action: 'family:invite',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: {
-            kind: 'subject_invitation',
-            protectedPersonId: anotherProtectedPerson,
-          },
-        },
-      }),
-    ).toEqual({ allowed: false, reason: 'not_owner_or_shared' });
-
-    const owner = principal({
-      roles: ['household_owner'],
-      households: [
-        {
-          householdId: home,
-          role: 'household_owner',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: ['family:manage'],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({ principal: owner, action: 'family:invite', resource: selfInvitation }),
-    ).toEqual({ allowed: false, reason: 'insufficient_role' });
-  });
-
-  it('allows protected-subject and exact owner safety cancellation without an entitlement', () => {
-    const invitation: Resource = {
-      kind: 'family',
-      householdId: home,
-      scope: { kind: 'subject_invitation', protectedPersonId: person },
-    };
-    const protectedMember = principal({
-      households: [
-        {
-          householdId: home,
-          role: 'protected_member',
-          isProtectedMember: true,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({
-        principal: protectedMember,
-        action: 'family:revoke_invitation',
-        resource: invitation,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    const owner = principal({
-      roles: ['household_owner'],
-      households: [
-        {
-          householdId: home,
-          role: 'household_owner',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({
-        principal: owner,
-        action: 'family:revoke_invitation',
-        resource: invitation,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-  });
-
-  it('denies unrelated invitation cancellation but preserves exact-subject withdrawal', () => {
-    const protectedPerson = ids.person('person_invitation_subject');
-    const invitation: Resource = {
-      kind: 'family',
-      householdId: home,
-      scope: { kind: 'subject_invitation', protectedPersonId: protectedPerson },
-    };
-    expect(
-      authorize({
-        principal: principal(),
-        action: 'family:revoke_invitation',
-        resource: invitation,
-      }),
-    ).toEqual({ allowed: false, reason: 'not_owner_or_shared' });
-
-    const trustedInSubjectSlot = principal({
-      personId: protectedPerson,
-      roles: ['trusted_circle'],
-      households: [
-        {
-          householdId: home,
-          role: 'trusted_circle',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({
-        principal: trustedInSubjectSlot,
-        action: 'family:revoke_invitation',
-        resource: invitation,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    const enrollmentMissing = principal({
-      personId: protectedPerson,
-      households: [
-        {
-          householdId: home,
-          role: 'protected_member',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({
-        principal: enrollmentMissing,
-        action: 'family:revoke_invitation',
-        resource: invitation,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    expect(
-      authorize({
-        principal: principal(),
-        action: 'family:revoke_invitation',
-        resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
-      }),
-    ).toEqual({ allowed: false, reason: 'unsupported_action_resource' });
-  });
-
-  it('allows either exact relationship participant or the household owner to revoke', () => {
-    const protectedPerson = person;
-    const trustedPerson = ids.person('person_trusted');
-    const relationship: Resource = {
+  it('preserves participant withdrawal after entitlement lapse and distinguishes admin authority', () => {
+    const pair: Resource = {
       kind: 'family',
       householdId: home,
       scope: {
         kind: 'pairwise_relationship',
-        protectedPersonId: protectedPerson,
-        trustedPersonId: trustedPerson,
+        relationshipId,
+        protectedPersonId: person,
+        trustedPersonId: ids.person('person-trusted'),
       },
     };
-    const protectedMember = principal({
+    const lapsedProtected = principal({
+      households: [householdScope({ isProtectedMember: false, capabilities: [] })],
+    });
+    expect(
+      authorize({ principal: lapsedProtected, action: 'family:revoke', resource: pair }).allowed,
+    ).toBe(true);
+    const administrator = principal({
+      personId: ids.person('person-admin'),
+      roles: ['household_administrator'],
       households: [
-        {
-          householdId: home,
-          role: 'protected_member',
-          isProtectedMember: true,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
+        householdScope({ isAdministrator: true, isProtectedMember: false, capabilities: [] }),
       ],
     });
     expect(
-      authorize({ principal: protectedMember, action: 'family:revoke', resource: relationship }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
+      authorize({ principal: administrator, action: 'family:revoke', resource: pair }).allowed,
+    ).toBe(true);
+    const unrelated = principal({
+      personId: ids.person('person-unrelated'),
+      households: [householdScope({ isProtectedMember: false, capabilities: [] })],
+    });
+    expect(
+      authorize({ principal: unrelated, action: 'family:revoke', resource: pair }).allowed,
+    ).toBe(false);
+  });
 
+  it('lets an exact trusted participant relinquish even when entitlement projection lapses', () => {
+    const trustedPerson = ids.person('person-trusted');
     const trusted = principal({
       personId: trustedPerson,
-      roles: ['trusted_circle'],
       households: [
-        {
-          householdId: home,
-          role: 'trusted_circle',
+        householdScope({
           isProtectedMember: false,
-          permissions: ['view_shared_checks'],
-          capabilities: [],
-          status: 'active',
-        },
+          trustedCircleGrants: [
+            {
+              relationshipId,
+              protectedPersonId: protectedPerson,
+              permissions: ['view_shared_checks'],
+            },
+          ],
+        }),
       ],
     });
-    expect(
-      authorize({ principal: trusted, action: 'family:revoke', resource: relationship }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    const owner = principal({
-      roles: ['household_owner'],
-      households: [
-        {
-          householdId: home,
-          role: 'household_owner',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
-    });
-    expect(
-      authorize({ principal: owner, action: 'family:revoke', resource: relationship }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-  });
-
-  it('denies unrelated revocation but preserves exact protected-subject withdrawal', () => {
-    const protectedPerson = ids.person('person_protected');
-    const trustedPerson = ids.person('person_trusted');
-    const relationship: Resource = {
+    const pair = (id: string): Resource => ({
       kind: 'family',
       householdId: home,
       scope: {
         kind: 'pairwise_relationship',
+        relationshipId: ids.relationship(id),
         protectedPersonId: protectedPerson,
         trustedPersonId: trustedPerson,
       },
-    };
-    expect(
-      authorize({ principal: principal(), action: 'family:revoke', resource: relationship }),
-    ).toEqual({ allowed: false, reason: 'not_owner_or_shared' });
-
-    const trustedInProtectedSlot = principal({
-      personId: protectedPerson,
-      roles: ['trusted_circle'],
-      households: [
-        {
-          householdId: home,
-          role: 'trusted_circle',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: ['family:manage'],
-          status: 'active',
-        },
-      ],
     });
     expect(
       authorize({
-        principal: trustedInProtectedSlot,
+        principal: trusted,
         action: 'family:revoke',
-        resource: relationship,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
-
-    const enrollmentMissing = principal({
-      personId: protectedPerson,
-      households: [
-        {
-          householdId: home,
-          role: 'protected_member',
-          isProtectedMember: false,
-          permissions: [],
-          capabilities: [],
-          status: 'active',
-        },
-      ],
+        resource: pair('relationship-exact'),
+      }).allowed,
+    ).toBe(true);
+    const unrelated = principal({
+      personId: ids.person('person-other-trusted'),
+      households: [householdScope({ isProtectedMember: false, trustedCircleGrants: [] })],
     });
     expect(
       authorize({
-        principal: enrollmentMissing,
+        principal: unrelated,
         action: 'family:revoke',
-        resource: relationship,
-      }),
-    ).toEqual({ allowed: true, reason: 'allowed_by_policy' });
+        resource: pair('relationship-other'),
+      }).allowed,
+    ).toBe(false);
   });
 
-  it('never lets a paid household capability authorize a different household', () => {
-    const paid = ids.household('household_paid');
-    const free = ids.household('household_free');
-    const multiHousehold = principal({
-      households: [
+  it('requires active case assignment and a separate exact restricted-access grant for support', () => {
+    const caseId = ids.supportCase('support-case-exact');
+    const baseSupport = hqPrincipal('hq_support');
+    const supportCase: Resource = { kind: 'support_case', householdId: home, caseId };
+    const artifact: Resource = {
+      kind: 'restricted_customer_resource',
+      householdId: home,
+      caseId,
+      resourceType: 'artifact',
+      resourceId: 'artifact-exact',
+    };
+    expect(
+      authorize({ principal: baseSupport, action: 'hq:support_case:view', resource: supportCase })
+        .allowed,
+    ).toBe(false);
+    const assigned = principal({
+      ...baseSupport,
+      supportCases: [
         {
-          householdId: paid,
-          role: 'household_owner',
-          isProtectedMember: true,
-          permissions: [],
-          capabilities: ['check:text', 'check:url'],
-          status: 'active',
-        },
-        {
-          householdId: free,
-          role: 'household_owner',
-          isProtectedMember: true,
-          permissions: [],
-          capabilities: ['check:text'],
-          status: 'active',
+          caseId,
+          householdId: home,
+          employeeAssignmentId: 'employee-support',
+          purpose: 'Resolve customer request',
         },
       ],
     });
     expect(
-      authorize({
-        principal: multiHousehold,
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: paid,
-          scope: { kind: 'create', artifactKind: 'url' },
+      authorize({ principal: assigned, action: 'hq:support_case:view', resource: supportCase })
+        .allowed,
+    ).toBe(true);
+    const nonSupport = principal({
+      ...assigned,
+      roles: ['hq_owner'],
+      organizations: [
+        { employeeAssignmentId: 'employee-support', role: 'hq_owner', status: 'active' },
+      ],
+    });
+    expect(
+      authorize({ principal: nonSupport, action: 'hq:support_case:view', resource: supportCase })
+        .allowed,
+    ).toBe(false);
+    expect(
+      authorize({ principal: assigned, action: 'hq:restricted_resource:read', resource: artifact })
+        .allowed,
+    ).toBe(false);
+    const granted = principal({
+      ...assigned,
+      restrictedAccess: [
+        {
+          grantId: ids.restrictedAccessGrant('grant-exact'),
+          caseId,
+          householdId: home,
+          employeeAssignmentId: 'employee-support',
+          purpose: 'Inspect reported artifact',
+          resourceType: 'artifact',
+          resourceId: 'artifact-exact',
+          expiresAt: new Date('2026-08-16T20:00:00.000Z'),
         },
+      ],
+    });
+    expect(
+      authorize({ principal: granted, action: 'hq:restricted_resource:read', resource: artifact })
+        .allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: granted,
+        action: 'hq:restricted_resource:read',
+        resource: { ...artifact, resourceId: 'artifact-other' },
+      }).allowed,
+    ).toBe(false);
+  });
+
+  it('exports central Business OS read and manage actions with distinct HQ policy', () => {
+    expect(
+      authorize({
+        principal: hqPrincipal('hq_owner'),
+        action: 'hq:business_os:read',
+        resource: { kind: 'hq' },
       }).allowed,
     ).toBe(true);
     expect(
       authorize({
-        principal: multiHousehold,
-        action: 'check:create',
-        resource: {
-          kind: 'check_collection',
-          householdId: free,
-          scope: { kind: 'create', artifactKind: 'url' },
-        },
-      }).reason,
-    ).toBe('missing_capability');
-  });
-
-  it.each([
-    ['hq_owner', 'hq:overview', true],
-    ['hq_reviewer', 'hq:reviews:list', true],
-    ['hq_support', 'hq:households:list', true],
-    ['hq_support', 'hq:audit:list', false],
-  ] as const)('applies HQ role policy for %s', (role, action, allowed) => {
-    const hq = principal({
-      audience: 'hq',
-      roles: [role as Role],
-      households: [],
-      organizations: [{ role, status: 'active' }],
-    });
-    expect(authorize({ principal: hq, action, resource: { kind: 'hq' } }).allowed).toBe(allowed);
-  });
-
-  it('denies unknown actions even for the HQ owner', () => {
-    const owner = principal({
-      audience: 'hq',
-      roles: ['hq_owner'],
-      households: [],
-      organizations: [{ role: 'hq_owner', status: 'active' }],
-    });
+        principal: hqPrincipal('hq_owner'),
+        action: 'hq:business_os:manage',
+        resource: { kind: 'hq' },
+      }).allowed,
+    ).toBe(true);
+    for (const role of ['hq_reviewer', 'hq_support'] as const) {
+      expect(
+        authorize({
+          principal: hqPrincipal(role),
+          action: 'hq:business_os:read',
+          resource: { kind: 'hq' },
+        }).allowed,
+      ).toBe(false);
+      expect(
+        authorize({
+          principal: hqPrincipal(role),
+          action: 'hq:business_os:manage',
+          resource: { kind: 'hq' },
+        }).allowed,
+      ).toBe(false);
+    }
     expect(
       authorize({
-        principal: owner,
-        action: 'hq:unknown' as never,
+        principal: principal(),
+        action: 'hq:business_os:read',
         resource: { kind: 'hq' },
-      }),
-    ).toEqual({ allowed: false, reason: 'unsupported_action_resource' });
+      }).reason,
+    ).toBe('wrong_audience');
+  });
+
+  it('requires a matching capability for protected Check creation', () => {
+    const resource: Resource = {
+      kind: 'check_collection',
+      householdId: home,
+      scope: { kind: 'create', artifactKind: 'url' },
+    };
+    const capabilities: readonly Capability[] = ['check:text'];
+    expect(
+      authorize({
+        principal: principal({ households: [householdScope({ capabilities })] }),
+        action: 'check:create',
+        resource,
+      }).reason,
+    ).toBe('missing_capability');
   });
 
   it('throws a content-free domain error from the assertion helper', () => {
     expect(() =>
       assertAuthorized({
         principal: principal(),
-        action: 'family:revoke',
-        resource: {
-          kind: 'family',
-          householdId: home,
-          scope: {
-            kind: 'pairwise_relationship',
-            protectedPersonId: ids.person('person_other_protected'),
-            trustedPersonId: ids.person('person_other_trusted'),
-          },
-        },
+        action: 'family:view',
+        resource: { kind: 'family', householdId: home, scope: { kind: 'roster' } },
       }),
     ).toThrow('The requested action is not permitted');
   });

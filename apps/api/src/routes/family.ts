@@ -37,10 +37,9 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       resource: {
         kind: 'family',
         householdId: household.householdId,
-        scope:
-          household.role === 'household_owner'
-            ? { kind: 'roster' }
-            : { kind: 'subject_relationships', subjectPersonId: auth.principal.personId },
+        scope: household.isAdministrator
+          ? { kind: 'roster' }
+          : { kind: 'subject_relationships', subjectPersonId: auth.principal.personId },
       },
     });
     const family = await context.repositories.family.list(
@@ -83,6 +82,8 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       inviteeDisplayName: body.inviteeDisplayName,
       permissions: body.permissions,
       audience: auth.audience,
+      actorIssuer: auth.resolved.principal.issuer,
+      sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
     });
@@ -125,6 +126,10 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       resource: {
         kind: 'invitation',
         householdId: ids.household(preview.household.id),
+        identityBindingState: preview.identityBindingState,
+        ...(preview.invitedPersonId === undefined
+          ? {}
+          : { invitedPersonId: ids.person(preview.invitedPersonId) }),
         credentialPresented: true,
       },
     });
@@ -162,6 +167,10 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       resource: {
         kind: 'invitation',
         householdId: ids.household(invitation.householdId),
+        identityBindingState: invitation.identityBindingState,
+        ...(invitation.invitedPersonId === undefined
+          ? {}
+          : { invitedPersonId: ids.person(invitation.invitedPersonId) }),
         credentialPresented: true,
       },
     });
@@ -171,6 +180,8 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       previewVersion: body.previewVersion,
       acceptingPersonId: auth.principal.personId,
       audience: auth.audience,
+      actorIssuer: auth.resolved.principal.issuer,
+      sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
     });
@@ -218,15 +229,18 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       protectedPersonId,
       actorPersonId: auth.principal.personId,
       audience: auth.audience,
+      actorIssuer: auth.resolved.principal.issuer,
+      sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
     });
-    if (!revoked) throw new DomainError('not_found', 'Invitation is invalid or unavailable');
+    if (revoked === null)
+      throw new DomainError('not_found', 'Invitation is invalid or unavailable');
     return reply.send(
       revokeInvitationResponseSchema.parse({
         id: invitationId,
-        state: 'revoked',
-        revokedAt: now.toISOString(),
+        state: revoked,
+        endedAt: now.toISOString(),
       }),
     );
   });
@@ -258,7 +272,12 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       resource: {
         kind: 'family',
         householdId: household.householdId,
-        scope: { kind: 'pairwise_relationship', protectedPersonId, trustedPersonId },
+        scope: {
+          kind: 'pairwise_relationship',
+          relationshipId: ids.relationship(relationship.id),
+          protectedPersonId,
+          trustedPersonId,
+        },
       },
     });
     const revoked = await context.repositories.family.revokeRelationship({
@@ -268,15 +287,18 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       trustedPersonId,
       actorPersonId: auth.principal.personId,
       audience: auth.audience,
+      actorIssuer: auth.resolved.principal.issuer,
+      sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
     });
-    if (!revoked) throw new DomainError('not_found', 'Trusted Circle relationship is unavailable');
+    if (revoked === null)
+      throw new DomainError('not_found', 'Trusted Circle relationship is unavailable');
     return reply.send(
       revokeRelationshipResponseSchema.parse({
         id: relationshipId,
-        state: 'revoked',
-        revokedAt: now.toISOString(),
+        state: revoked,
+        endedAt: now.toISOString(),
       }),
     );
   });

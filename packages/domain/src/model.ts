@@ -6,16 +6,21 @@ import type {
   MembershipId,
   OrganizationId,
   PersonId,
+  RelationshipId,
+  RestrictedAccessGrantId,
   SessionId,
+  SupportCaseId,
 } from './identifiers';
 
 export const audiences = ['customer', 'mobile', 'hq'] as const;
 export type Audience = (typeof audiences)[number];
 
 export const roles = [
-  'household_owner',
+  'household_administrator',
   'protected_member',
   'trusted_circle',
+  'payer',
+  'billing_manager',
   'hq_owner',
   'hq_reviewer',
   'hq_support',
@@ -45,17 +50,27 @@ export interface SessionPrincipal {
   readonly roles: readonly Role[];
   readonly householdMemberships: readonly HouseholdMembershipScope[];
   readonly employeeScopes: readonly EmployeeScope[];
+  readonly supportCaseScopes: readonly SupportCaseScope[];
+  readonly restrictedAccessScopes: readonly RestrictedAccessScope[];
   readonly expiresAt: Date;
+}
+
+export interface PairwiseTrustedCircleGrant {
+  readonly relationshipId: RelationshipId;
+  readonly protectedPersonId: PersonId;
+  readonly permissions: readonly TrustedCirclePermission[];
 }
 
 export interface HouseholdMembershipScope {
   readonly householdId: HouseholdId;
   readonly membershipId: MembershipId;
-  readonly role: Extract<Role, 'household_owner' | 'protected_member' | 'trusted_circle'>;
+  readonly membershipKind: 'member';
   readonly status: 'active' | 'revoked';
-  /** Accepted, active protected enrollment projected independently from the household role. */
+  readonly isAdministrator: boolean;
   readonly isProtectedMember: boolean;
-  readonly permissions: readonly TrustedCirclePermission[];
+  readonly trustedCircleGrants: readonly PairwiseTrustedCircleGrant[];
+  readonly isPayer: boolean;
+  readonly isBillingManager: boolean;
   readonly capabilities: readonly Capability[];
 }
 
@@ -66,9 +81,38 @@ export function hasActiveProtectedEnrollment(
 }
 
 export interface EmployeeScope {
+  readonly employeeAssignmentId: string;
   readonly organizationId?: OrganizationId;
   readonly role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_support'>;
   readonly status: 'active' | 'suspended';
+}
+
+export interface SupportCaseScope {
+  readonly caseId: SupportCaseId;
+  readonly householdId: HouseholdId;
+  readonly employeeAssignmentId: string;
+  readonly purpose: string;
+}
+
+export interface RestrictedAccessScope extends SupportCaseScope {
+  readonly grantId: RestrictedAccessGrantId;
+  readonly resourceType: 'artifact' | 'analysis' | 'family';
+  readonly resourceId: string;
+  readonly expiresAt: Date;
+}
+
+export function hasTrustedCirclePermission(
+  scope: Pick<HouseholdMembershipScope, 'status' | 'trustedCircleGrants'>,
+  protectedPersonId: PersonId,
+  permission: TrustedCirclePermission,
+): boolean {
+  return (
+    scope.status === 'active' &&
+    scope.trustedCircleGrants.some(
+      (grant) =>
+        grant.protectedPersonId === protectedPersonId && grant.permissions.includes(permission),
+    )
+  );
 }
 
 export interface Artifact {

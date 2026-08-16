@@ -12,7 +12,6 @@ import { useHousehold } from '../../../components/household-context';
 import { apiRequest, readableError } from '../../../lib/api';
 
 const riskText: Record<CheckResult['risk'], string> = {
-  lower_concern: 'Lower concern',
   caution: 'Use caution',
   high_concern: 'High concern',
   unknown: 'Unknown risk',
@@ -124,7 +123,7 @@ export default function CheckPage() {
           <h2>Protected-adult enrollment required</h2>
           <p>
             Creating and owning a Check requires an active protected-adult enrollment in the
-            selected household. Household owner access alone does not grant this workflow.
+            selected household. Household administrator access alone does not grant this workflow.
           </p>
         </section>
       </main>

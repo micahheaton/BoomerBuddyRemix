@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+      - run: npm ci
+      - run: node scripts/verify-portability.mjs
+      - run: npm run format:check
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run build -w @boomerbuddy/worker
+      - run: npm audit --omit=dev --audit-level=critical
+
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_USER: boomerbuddy
+          POSTGRES_PASSWORD: local-ci-password
+          POSTGRES_DB: boomerbuddy_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U boomerbuddy -d boomerbuddy_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://boomerbuddy:local-ci-password@127.0.0.1:5432/boomerbuddy_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.1
+          cache: npm
+      - run: npm ci
+      - run: npx tsx scripts/verify-postgres.ts
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: boomerbuddy/run2-ci:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

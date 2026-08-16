@@ -21,6 +21,18 @@ function fallbackName(index: number): string {
   return `Household ${index + 1}`;
 }
 
+export function mobileHouseholdScopeSummary(scope: HouseholdScope): string {
+  return [
+    'member',
+    scope.isAdministrator ? 'administrator' : '',
+    scope.isProtectedMember ? 'protected adult' : '',
+    scope.isPayer ? 'payer' : '',
+    scope.isBillingManager ? 'billing manager' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 export function MobileHouseholdProvider({
   children,
   principal,

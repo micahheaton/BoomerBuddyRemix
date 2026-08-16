@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
+  Platform,
   Pressable,
   ScrollView,
+  Share,
   Text,
   TextInput,
   View,
@@ -28,8 +31,12 @@ import type {
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
 import { mobileRequest, readableError } from './api';
-import { useMobileHousehold, useOptionalMobileHousehold } from './household';
-import type { RootStackParamList } from './navigation';
+import {
+  mobileHouseholdScopeSummary,
+  useMobileHousehold,
+  useOptionalMobileHousehold,
+} from './household';
+import type { NativeEntrySignal, RootStackParamList } from './navigation';
 import {
   clearSessionToken,
   sessionStorageDisclosure,
@@ -90,7 +97,7 @@ function Screen({ children }: { children: React.ReactNode }) {
       {household?.selectedScope ? (
         <View style={s.scopeBanner}>
           <Text style={s.label}>Active household: {household.selectedHouseholdName}</Text>
-          <Text style={s.muted}>{household.selectedScope.role.replaceAll('_', ' ')}</Text>
+          <Text style={s.muted}>{mobileHouseholdScopeSummary(household.selectedScope)}</Text>
         </View>
       ) : null}
       {children}
@@ -122,11 +129,11 @@ export function SignInScreen({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const personas: Array<{ id: DevPersonaId; label: string }> = [
-    { id: 'owner-alice', label: 'Alice — Sunrise owner and protected adult' },
+    { id: 'owner-alice', label: 'Alice — Sunrise administrator and protected adult' },
     { id: 'protected-pat', label: 'Pat — Sunrise protected member' },
     { id: 'trusted-terry', label: 'Terry — seeded trusted person' },
     { id: 'trusted-jordan', label: 'Jordan — unassigned trusted person' },
-    { id: 'owner-bob', label: 'Bob — Harbor owner without protected enrollment' },
+    { id: 'owner-bob', label: 'Bob — Harbor administrator without protected enrollment' },
     { id: 'protected-olivia', label: 'Olivia — Harbor protected member' },
   ];
   async function signIn() {
@@ -188,8 +195,10 @@ export function SignInScreen({
 
 export function HomeScreen({
   navigation,
+  nativeEntrySignal,
   onSignOut,
 }: NativeStackScreenProps<RootStackParamList, 'Home'> & {
+  nativeEntrySignal: NativeEntrySignal;
   onSignOut: () => void;
 }) {
   const { principal, selectedHouseholdId, selectedScope, selectHousehold, householdName } =
@@ -200,7 +209,7 @@ export function HomeScreen({
   }>();
   const [entitlementsUnavailableFor, setEntitlementsUnavailableFor] = useState('');
   useEffect(() => {
-    if (!selectedHouseholdId || selectedScope?.role !== 'household_owner') return;
+    if (!selectedHouseholdId || !selectedScope?.isBillingManager) return;
     let active = true;
     void mobileRequest<EntitlementResponse>('/v1/entitlements')
       .then((response) => {
@@ -214,7 +223,7 @@ export function HomeScreen({
     return () => {
       active = false;
     };
-  }, [selectedHouseholdId, selectedScope?.role]);
+  }, [selectedHouseholdId, selectedScope?.isBillingManager]);
   const isUnassigned = principal.households.length === 0;
   const isProtectedMember = selectedScope?.isProtectedMember === true;
   const canCheck =
@@ -223,9 +232,17 @@ export function HomeScreen({
       selectedScope?.capabilities.includes('check:url'));
   const canReadHistory =
     selectedScope?.capabilities.includes('history:read') === true &&
-    (isProtectedMember || selectedScope.permissions.includes('view_shared_checks'));
+    (isProtectedMember ||
+      selectedScope.trustedCircleGrants.some((grant) =>
+        grant.permissions.includes('view_shared_checks'),
+      ));
   const canUseOrientation =
     isProtectedMember && selectedScope?.capabilities.includes('orientation:use');
+  const canUseFamily =
+    isUnassigned ||
+    selectedScope?.isAdministrator === true ||
+    selectedScope?.isProtectedMember === true ||
+    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
   const selectedEntitlements =
     entitlements?.householdId === selectedHouseholdId ? entitlements.value : undefined;
   const protectedAllowance = selectedEntitlements?.commerce.allowances.find(
@@ -266,20 +283,50 @@ export function HomeScreen({
             >
               <View style={[s.radio, selectedHouseholdId === scope.id && s.radioSelected]} />
               <Text style={s.body}>
-                {householdName(scope.id, index)} — {scope.role.replaceAll('_', ' ')}
-                {scope.isProtectedMember ? ' · protected adult' : ''}
+                {householdName(scope.id, index)} — {mobileHouseholdScopeSummary(scope)}
               </Text>
             </Pressable>
           ))}
         </View>
       ) : null}
       <View style={s.banner}>
-        <Text style={s.label}>Native sharing is not implemented</Text>
+        <Text style={s.label}>Native intake is blocked pending device verification</Text>
         <Text style={s.muted}>
-          This build does not read the share sheet, messages, notifications, contacts, or clipboard.
-          Paste an item manually in Check.
+          Route-only deep-link observation is scaffolded. Inbound share targets are not configured,
+          and this build does not read messages, notifications, contacts, or the clipboard. Paste an
+          item manually in Check.
         </Text>
+        <ActionButton
+          kind="secondary"
+          title="Review native proof status"
+          onPress={() => navigation.navigate('NativeProof')}
+        />
       </View>
+      {nativeEntrySignal === 'route_only_check' ? (
+        <View style={s.card}>
+          <Text style={s.pill}>Route-only deep link observed</Text>
+          <Text style={s.body}>
+            The link requested the Check screen without carrying an artifact. Nothing was pasted or
+            analyzed automatically.
+          </Text>
+          {canCheck ? (
+            <ActionButton
+              title="Continue to empty Check"
+              onPress={() => navigation.navigate('Check')}
+            />
+          ) : (
+            <Text style={s.muted}>Check is unavailable in this household scope.</Text>
+          )}
+        </View>
+      ) : nativeEntrySignal === 'rejected_payload' ? (
+        <View style={s.banner}>
+          <Text style={s.label}>Deep-link payload rejected</Text>
+          <Text style={s.muted}>
+            BoomerBuddy accepts only the empty route signal. Suspicious content in a URL is not
+            ingested because links may leak through operating-system and app history.
+          </Text>
+        </View>
+      ) : null}
       <View style={s.navGrid}>
         {!isUnassigned && canCheck ? (
           <ActionButton
@@ -301,11 +348,13 @@ export function HomeScreen({
         ) : !isUnassigned ? (
           <Text style={s.muted}>History is unavailable in this household scope.</Text>
         ) : null}
-        <ActionButton
-          kind="secondary"
-          title="Open Family"
-          onPress={() => navigation.navigate('Family')}
-        />
+        {canUseFamily ? (
+          <ActionButton
+            kind="secondary"
+            title="Open Family"
+            onPress={() => navigation.navigate('Family')}
+          />
+        ) : null}
         {!isUnassigned && canUseOrientation ? (
           <ActionButton
             kind="secondary"
@@ -329,10 +378,10 @@ export function HomeScreen({
             This development-only access record is a product hypothesis. There is no billing,
             purchase, upgrade, or charge in this build.
           </Text>
-          {selectedScope?.role !== 'household_owner' ? (
+          {!selectedScope?.isBillingManager ? (
             <Text style={s.muted}>
-              Household plan totals are owner-only in this local build. Your available actions still
-              follow the permissions for this selected household.
+              Household plan totals are billing-manager-only in this local build. Your available
+              actions still follow the permissions for this selected household.
             </Text>
           ) : selectedEntitlements ? (
             <>
@@ -362,6 +411,103 @@ export function HomeScreen({
         <Text style={s.body}>
           Stop contact and verify through an official phone number you find independently. Call
           emergency services if someone is in immediate danger.
+        </Text>
+      </View>
+    </Screen>
+  );
+}
+
+export function NativeProofScreen(): React.ReactElement {
+  const [routeStatus, setRouteStatus] = useState('Not checked on this runtime.');
+  const [shareStatus, setShareStatus] = useState('No share sheet opened.');
+  const isWebPreview = Platform.OS === 'web';
+
+  async function checkRouteRegistration() {
+    try {
+      const supported = await Linking.canOpenURL('boomerbuddy-local://check');
+      setRouteStatus(
+        supported
+          ? 'This runtime reports a handler for the route-only scheme. End-to-end device intake is still not verified.'
+          : 'This runtime did not report a handler. Native deep-link intake remains blocked.',
+      );
+    } catch (caught) {
+      setRouteStatus(readableError(caught));
+    }
+  }
+
+  async function shareSafeGuidance() {
+    try {
+      const outcome = await Share.share({
+        message:
+          'Pause before you click, reply, pay, or share a code. Verify through an official contact channel you find independently.',
+        title: 'BoomerBuddy safer next step',
+      });
+      setShareStatus(
+        outcome.action === Share.sharedAction
+          ? 'The operating system reported an outbound share action for fixed guidance only.'
+          : 'The outbound share sheet closed without a reported share action.',
+      );
+    } catch (caught) {
+      setShareStatus(readableError(caught));
+    }
+  }
+
+  return (
+    <Screen>
+      <Text style={s.pill}>Blocked · not device-verified</Text>
+      <Text accessibilityRole="header" style={s.title}>
+        Native intake proof
+      </Text>
+      <Text style={s.body}>
+        This screen records what is scaffolded and what remains unproven. A web export, simulator
+        render, or successful typecheck is not native-device evidence.
+      </Text>
+      <View style={s.card}>
+        <Text style={s.heading}>Route-only deep link</Text>
+        <Text style={s.body}>
+          The app manifest registers <Text style={s.label}>boomerbuddy-local://check</Text>. The
+          listener accepts only that empty route signal; query strings and fragments are rejected so
+          the app does not ingest artifacts that may already be exposed in operating-system link
+          history.
+        </Text>
+        <ActionButton
+          kind="secondary"
+          title="Check scheme on this runtime"
+          disabled={isWebPreview}
+          onPress={() => void checkRouteRegistration()}
+        />
+        <Text accessibilityLiveRegion="polite" style={s.muted}>
+          {isWebPreview ? 'Blocked in the web preview; use a native device build.' : routeStatus}
+        </Text>
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Inbound share intake</Text>
+        <Text style={s.body}>
+          Blocked. No Android share intent or iOS share extension is configured, and no physical
+          device flow has been verified. The app does not claim to receive content from another app.
+        </Text>
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Outbound fixed guidance</Text>
+        <Text style={s.body}>
+          React Native can open the system share sheet for a fixed safety reminder. This proof never
+          includes submitted text, a Check result, a person, or a household identifier.
+        </Text>
+        <ActionButton
+          kind="secondary"
+          title="Share fixed safety reminder"
+          disabled={isWebPreview}
+          onPress={() => void shareSafeGuidance()}
+        />
+        <Text accessibilityLiveRegion="polite" style={s.muted}>
+          {isWebPreview ? 'Blocked in the web preview; use a native device build.' : shareStatus}
+        </Text>
+      </View>
+      <View style={s.banner}>
+        <Text style={s.label}>Still outside this proof</Text>
+        <Text style={s.muted}>
+          Push notifications, contacts, clipboard reads, background monitoring, and automatic
+          artifact import are not implemented or represented as working.
         </Text>
       </View>
     </Screen>
@@ -411,7 +557,7 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
           <Text style={s.heading}>Protected-adult enrollment required</Text>
           <Text style={s.body}>
             Creating and owning a Check requires an active protected-adult enrollment. Household
-            owner access alone does not grant this workflow.
+            administrator access alone does not grant this workflow.
           </Text>
         </View>
       </Screen>
@@ -491,19 +637,12 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
 }
 
 const riskLabels: Record<CheckResult['risk'], string> = {
-  lower_concern: 'Lower concern',
   caution: 'Use caution',
   high_concern: 'High concern',
   unknown: 'Unknown risk',
 };
 function riskStyle(risk: CheckResult['risk']): ViewStyle {
-  return risk === 'lower_concern'
-    ? s.riskLower
-    : risk === 'caution'
-      ? s.riskCaution
-      : risk === 'high_concern'
-        ? s.riskHigh
-        : s.riskUnknown;
+  return risk === 'caution' ? s.riskCaution : risk === 'high_concern' ? s.riskHigh : s.riskUnknown;
 }
 
 type ResultScreenProps = NativeStackScreenProps<RootStackParamList, 'Result'>;
@@ -717,7 +856,10 @@ export function HistoryScreen({
   const [announcement, setAnnouncement] = useState('');
   const canReadHistory =
     selectedScope?.capabilities.includes('history:read') === true &&
-    (selectedScope.isProtectedMember || selectedScope.permissions.includes('view_shared_checks'));
+    (selectedScope.isProtectedMember ||
+      selectedScope.trustedCircleGrants.some((grant) =>
+        grant.permissions.includes('view_shared_checks'),
+      ));
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -925,7 +1067,7 @@ export function FamilyScreen({
   }, [load, selectedHouseholdId]);
   const currentHouseholdScope =
     selectedScope?.id === family?.household.id ? selectedScope : undefined;
-  const isHouseholdOwner = currentHouseholdScope?.role === 'household_owner';
+  const isHouseholdAdministrator = currentHouseholdScope?.isAdministrator === true;
   const isProtectedMember =
     currentHouseholdScope?.isProtectedMember === true &&
     currentHouseholdScope.capabilities.includes('family:manage');
@@ -1167,7 +1309,8 @@ export function FamilyScreen({
               <View key={member.membershipId}>
                 <Text style={s.label}>{member.displayName}</Text>
                 <Text style={s.muted}>
-                  {member.role.replaceAll('_', ' ')} · {member.status}
+                  member · {member.status}
+                  {member.isAdministrator ? ' · administrator' : ''}
                   {member.isProtectedMember ? ' · protected adult' : ''}
                 </Text>
               </View>
@@ -1187,7 +1330,7 @@ export function FamilyScreen({
                         {trustedPermissionLabels[permission]}
                       </Text>
                     ))}
-                    {isHouseholdOwner ||
+                    {isHouseholdAdministrator ||
                     relationship.protectedPersonId === principal.personId ||
                     relationship.trustedPersonId === principal.personId ? (
                       <ActionButton
@@ -1214,7 +1357,8 @@ export function FamilyScreen({
                     <Text style={s.muted}>
                       Expires {new Date(invitation.expiresAt).toLocaleString()} · Local only
                     </Text>
-                    {isHouseholdOwner || invitation.protectedPersonId === principal.personId ? (
+                    {isHouseholdAdministrator ||
+                    invitation.protectedPersonId === principal.personId ? (
                       confirmingInvitationId === invitation.id ? (
                         <>
                           <Text style={s.body}>
@@ -1253,8 +1397,8 @@ export function FamilyScreen({
             <View style={s.card}>
               <Text style={s.heading}>Create local invitation</Text>
               <Text style={s.body}>
-                You are inviting a trusted person into a relationship with you. An owner cannot
-                consent on your behalf, and the invited person must separately accept.
+                You are inviting a trusted person into a relationship with you. An administrator
+                cannot consent on your behalf, and the invited person must separately accept.
               </Text>
               <Text style={s.label}>Trusted person’s display name</Text>
               <TextInput
@@ -1304,8 +1448,16 @@ export function FamilyScreen({
 }
 
 const orientationSteps = [
-  ['protection_subject', 'Who is being protected?', 'Review who this setup is meant to help.'],
-  ['trusted_circle', 'Choose trusted helpers', 'Use explicit permissions and informed consent.'],
+  [
+    'protection_subject',
+    'Confirm the protected person',
+    'This setup belongs to the enrolled protected adult; household administration does not replace that person’s choice.',
+  ],
+  [
+    'trusted_circle',
+    'Consent and Trusted Circle',
+    'Each pairwise permission requires review and acceptance, can be ended, and does not send a notification in this build.',
+  ],
   [
     'safe_word',
     'Plan a family safe word',
@@ -1313,8 +1465,8 @@ const orientationSteps = [
   ],
   [
     'practice_check',
-    'Practice a safe response',
-    'Try a synthetic suspicious-bank-message scenario.',
+    'Practice a safer response',
+    'Use a synthetic suspicious-bank-message scenario to practice pausing and verifying independently.',
   ],
   [
     'capabilities_and_limits',
@@ -1324,7 +1476,7 @@ const orientationSteps = [
   [
     'review',
     'Review the plan',
-    'Confirm the people, permissions, safe-word choice, and verification steps.',
+    'Confirm protected-person scope, consent choices, permissions, safe-word choice, and verification steps.',
   ],
 ] as const;
 type OrientationKey = (typeof orientationSteps)[number][0];
@@ -1432,7 +1584,7 @@ export function OrientationScreen(): React.ReactElement {
           <Text style={s.heading}>Protected-adult enrollment required</Text>
           <Text style={s.body}>
             Self-orientation and safe-word setup require an active protected-adult enrollment.
-            Household owner access alone does not grant these protected workflows.
+            Household administrator access alone does not grant these protected workflows.
           </Text>
         </View>
       ) : !visibleState ? (
@@ -1442,6 +1594,12 @@ export function OrientationScreen(): React.ReactElement {
           <View style={s.card}>
             <Text style={s.heading}>{visibleState.completedSteps.length} of 6 complete</Text>
             <Text style={s.body}>Status: {visibleState.status.replaceAll('_', ' ')}</Text>
+            <Text style={s.muted}>
+              Safe-word choice: {visibleState.safeWordDisposition.replaceAll('_', ' ')} · Attention:{' '}
+              {visibleState.needsAttention
+                ? 'setup still needs review'
+                : 'no incomplete stage flagged'}
+            </Text>
             {visibleState.status === 'not_started' ? (
               <ActionButton
                 title={busy === 'start' ? 'Starting…' : 'Start orientation'}
@@ -1458,6 +1616,13 @@ export function OrientationScreen(): React.ReactElement {
                 <Text style={s.pill}>{done ? 'Complete' : `Step ${index + 1}`}</Text>
                 <Text style={s.heading}>{title}</Text>
                 <Text style={s.body}>{detail}</Text>
+                {key === 'trusted_circle' ? (
+                  <Text style={s.muted}>
+                    Completing this stage records review only. It does not create a relationship,
+                    grant permission, or send a notification; those actions remain explicit in
+                    Family.
+                  </Text>
+                ) : null}
                 {!done && !isCurrent ? (
                   <Text style={s.muted}>Complete the earlier steps before this one.</Text>
                 ) : !done && key === 'safe_word' ? (

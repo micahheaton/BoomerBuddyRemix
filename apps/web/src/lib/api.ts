@@ -27,7 +27,9 @@ export class ApiError extends Error {
 }
 
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const selectedHouseholdId = path === '/v1/me' ? '' : readSelectedHouseholdId();
+  const anonymousPublicCheck = path === '/v1/public/check-contexts' || path === '/v1/public/checks';
+  const selectedHouseholdId =
+    path === '/v1/me' || anonymousPublicCheck ? '' : readSelectedHouseholdId();
   const callerSignal = init.signal ?? undefined;
   const timeoutController = callerSignal ? undefined : new AbortController();
   const timeout = timeoutController
@@ -37,7 +39,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       ...init,
-      credentials: 'include',
+      credentials: anonymousPublicCheck ? 'omit' : 'include',
       signal: requestSignal,
       headers: {
         Accept: 'application/json',

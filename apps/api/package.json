@@ -16,6 +16,7 @@
     "@boomerbuddy/contracts": "*",
     "@boomerbuddy/domain": "*",
     "@boomerbuddy/fraud": "*",
+    "@boomerbuddy/integrations": "*",
     "@boomerbuddy/observability": "*",
     "@boomerbuddy/persistence": "*",
     "@boomerbuddy/security": "*",

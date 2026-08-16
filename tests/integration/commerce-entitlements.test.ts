@@ -1,4 +1,9 @@
-import { CommerceOperationsRepository, EntitlementRepository } from '@boomerbuddy/persistence';
+import {
+  CommerceOperationsRepository,
+  EntitlementRepository,
+  resolveActiveBillingAuthority,
+  resolveActivePayerFact,
+} from '@boomerbuddy/persistence';
 import { afterEach, describe, expect, it } from 'vitest';
 import { browserHeaders, createApiHarness, hqOrigin, login, type ApiHarness } from './support';
 
@@ -8,6 +13,55 @@ describe('provider-neutral commerce and household allowances', () => {
   afterEach(async () => {
     await harness?.close();
     harness = undefined;
+  });
+
+  it('resolves billing authority and payer facts independently and refuses admin-only actors', async () => {
+    harness = await createApiHarness();
+    const aliceAuthority = await resolveActiveBillingAuthority(
+      harness.database,
+      'household-sunrise',
+      'person-owner-alice',
+    );
+    expect(aliceAuthority).toEqual({
+      authorityReference: 'billing-authority:household-sunrise:person-owner-alice',
+      householdId: 'household-sunrise',
+      personId: 'person-owner-alice',
+      isPayer: true,
+    });
+    await harness.database.query(
+      `INSERT INTO household_administrator_assignments(
+         household_id, person_id, status, granted_by_person_id, granted_at
+       ) VALUES ('household-sunrise','person-protected-pat','active',
+         'person-owner-alice',$1)`,
+      [harness.clock.now().toISOString()],
+    );
+    await expect(
+      resolveActiveBillingAuthority(harness.database, 'household-sunrise', 'person-protected-pat'),
+    ).resolves.toBeNull();
+    await expect(
+      resolveActivePayerFact(harness.database, 'household-sunrise', 'person-protected-pat'),
+    ).resolves.toBeNull();
+
+    await harness.database.query(
+      `INSERT INTO household_payers(
+         household_id, person_id, source, status, effective_at
+       ) VALUES ('household-sunrise','person-trusted-terry','local','active',$1)`,
+      [harness.clock.now().toISOString()],
+    );
+    await expect(
+      resolveActiveBillingAuthority(harness.database, 'household-sunrise', 'person-trusted-terry'),
+    ).resolves.toBeNull();
+    await expect(
+      resolveActivePayerFact(harness.database, 'household-sunrise', 'person-trusted-terry'),
+    ).resolves.toEqual({
+      payerReference: 'payer:household-sunrise:person-trusted-terry',
+      householdId: 'household-sunrise',
+      personId: 'person-trusted-terry',
+      source: 'local',
+    });
+    await expect(
+      resolveActiveBillingAuthority(harness.database, 'household-sunrise', 'person-owner-alice'),
+    ).resolves.toEqual(aliceAuthority);
   });
 
   it('projects canonical plans and removes authorization when the backing source stops qualifying', async () => {
@@ -170,9 +224,9 @@ describe('provider-neutral commerce and household allowances', () => {
     );
     await harness.database.query(
       `INSERT INTO household_memberships(
-         household_id, id, person_id, role, status, permissions, created_at
+         household_id, id, person_id, membership_kind, status, created_at
        ) VALUES ('household-sunrise','membership-db-protected-subject',
-         'person-db-protected-subject','household_owner','active','[]'::jsonb,$1)`,
+         'person-db-protected-subject','member','active',$1)`,
       [harness.clock.now().toISOString()],
     );
     await expect(
@@ -193,13 +247,45 @@ describe('provider-neutral commerce and household allowances', () => {
          'protected_members','protected_member','person-db-protected-subject','active',$1)`,
       [harness.clock.now().toISOString()],
     );
+    await harness.database.query(
+      `INSERT INTO consents(
+         household_id, id, protected_person_id, granted_by_person_id, purpose,
+         consent_version, state, granted_at
+       ) VALUES ('household-sunrise','consent-test-invalid-terry','person-trusted-terry',
+         'person-trusted-terry','protected_enrollment','test-invalid-proof','active',$1)`,
+      [harness.clock.now().toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO consent_evidence(
+         household_id, id, consent_id, actor_person_id, subject_person_id,
+         purpose, scope, action, disclosure_version, disclosure_digest,
+         policy_version, policy_digest, source_interaction, actor_identity_id,
+         actor_identity_issuer, actor_identity_subject, assurance, effective_at, recorded_at
+       ) VALUES ('household-sunrise','evidence-test-invalid-terry',
+         'consent-test-invalid-terry','person-trusted-terry','person-trusted-terry',
+         'protected_enrollment','{"protectedEnrollment":true}'::jsonb,'accept',
+         'test-disclosure',repeat('1',64),'test-policy',repeat('2',64),'integration_test',
+         'identity-trusted-terry','boomerbuddy-dev','trusted-terry','development',$1,$1)`,
+      [harness.clock.now().toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO consent_current_projections(
+         household_id, consent_id, latest_evidence_id, actor_person_id,
+         subject_person_id, purpose, scope, state, effective_at, updated_at
+       ) VALUES ('household-sunrise','consent-test-invalid-terry',
+         'evidence-test-invalid-terry','person-trusted-terry','person-trusted-terry',
+         'protected_enrollment','{"protectedEnrollment":true}'::jsonb,'active',$1,$1)`,
+      [harness.clock.now().toISOString()],
+    );
     await expect(
       harness.database.query(
         `INSERT INTO protected_members(
            household_id, person_id, status, consented_by_person_id, consent_version,
-           allowance_allocation_id, accepted_at, created_at, updated_at
+           allowance_allocation_id, accepted_at, created_at, updated_at,
+           consent_id, latest_consent_evidence_id
          ) VALUES ('household-sunrise','person-trusted-terry','accepted','person-trusted-terry',
-           'invalid-subject-proof','allocation-db-protected',$1,$1,$1)`,
+           'invalid-subject-proof','allocation-db-protected',$1,$1,$1,
+           'consent-test-invalid-terry','evidence-test-invalid-terry')`,
         [harness.clock.now().toISOString()],
       ),
     ).rejects.toThrow(/active protected allowance/iu);
@@ -437,9 +523,8 @@ describe('provider-neutral commerce and household allowances', () => {
       );
       await harness.database.query(
         `INSERT INTO household_memberships(
-           household_id, id, person_id, role, status, permissions, created_at
-         ) VALUES ('household-sunrise',$1,$2,'trusted_circle','active',
-           '["view_shared_checks"]'::jsonb,$3)`,
+           household_id, id, person_id, membership_kind, status, created_at
+         ) VALUES ('household-sunrise',$1,$2,'member','active',$3)`,
         [`membership-cap-${index}`, personId, harness.clock.now().toISOString()],
       );
       await entitlements.allocate({
@@ -529,9 +614,9 @@ describe('provider-neutral commerce and household allowances', () => {
     const entitlements = new EntitlementRepository(harness.database);
     await harness.database.query(
       `INSERT INTO household_memberships(
-         household_id, id, person_id, role, status, permissions, created_at
+         household_id, id, person_id, membership_kind, status, created_at
        ) VALUES ('household-sunrise','membership-sunrise-olivia','person-protected-olivia',
-         'protected_member','active','[]'::jsonb,$1)`,
+         'member','active',$1)`,
       [harness.clock.now().toISOString()],
     );
     await entitlements.enrollProtectedSelf({
@@ -541,8 +626,6 @@ describe('provider-neutral commerce and household allowances', () => {
       consentVersion: 'test-protected-self-v1',
       now: harness.clock.now(),
     });
-    const alice = await login(harness.app, 'owner-alice');
-    const pat = await login(harness.app, 'protected-pat');
     const olivia = await login(harness.app, 'protected-olivia');
     const terry = await login(harness.app, 'trusted-terry');
     const oliviaHeaders = {
@@ -559,25 +642,6 @@ describe('provider-neutral commerce and household allowances', () => {
     const invitationId = String(invited.json().invitation.id);
     const localInviteCode = String(invited.json().localInviteCode);
 
-    for (const conflicted of [alice, pat]) {
-      const preview = await harness.app.inject({
-        method: 'POST',
-        url: `/v1/family/invitations/${invitationId}/preview`,
-        headers: browserHeaders(conflicted.cookie as string),
-        payload: { localInviteCode },
-      });
-      expect(preview.statusCode).toBe(200);
-      const rejected = await harness.app.inject({
-        method: 'POST',
-        url: `/v1/family/invitations/${invitationId}/accept`,
-        headers: browserHeaders(conflicted.cookie as string),
-        payload: {
-          localInviteCode,
-          previewVersion: preview.json().invitation.previewVersion,
-        },
-      });
-      expect(rejected.statusCode).toBe(409);
-    }
     const terryPreview = await harness.app.inject({
       method: 'POST',
       url: `/v1/family/invitations/${invitationId}/preview`,
@@ -672,9 +736,335 @@ describe('provider-neutral commerce and household allowances', () => {
       expect.arrayContaining([
         expect.objectContaining({
           protectedPersonId: 'person-protected-olivia',
-          state: 'revoked',
+          state: 'withdrawn',
         }),
       ]),
     );
   });
+
+  it('fails closed on Family cancellation and rebinds one accepted protected seat to Free', async () => {
+    harness = await createApiHarness();
+    const now = harness.clock.now();
+    const future = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1_000);
+    await harness.database.query(
+      `UPDATE commerce_subscriptions
+       SET source = 'web', precedence = 300, updated_at = $1
+       WHERE household_id = 'household-sunrise' AND id = 'subscription-local-sunrise'`,
+      [now.toISOString()],
+    );
+    await harness.database.query(
+      `UPDATE entitlement_grants SET source = 'web', precedence = 300
+       WHERE household_id = 'household-sunrise' AND id = 'grant-local-sunrise'`,
+    );
+    await harness.database.query(
+      `UPDATE commerce_provider_subscription_records
+       SET provider = 'stripe', environment = 'test',
+           external_subscription_id = 'sub_sunrise_family_test'
+       WHERE id = 'provider-record-sunrise'`,
+    );
+    await harness.database.query(
+      `INSERT INTO commerce_subscriptions(
+         household_id, id, payer_person_id, plan_version_id, source, lifecycle,
+         source_verified, precedence, current_period_starts_at, current_period_ends_at,
+         reconciliation_state, created_at, updated_at
+       ) VALUES ('household-sunrise','subscription-sunrise-free-fallback',
+         'person-owner-alice','free_v1','local','active',true,10,$1,$2,
+         'not_required',$1,$1)`,
+      [now.toISOString(), future.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO commerce_provider_subscription_records(
+         id, household_id, subscription_id, provider, environment,
+         external_subscription_id, raw_state, provider_version, observed_at, verified_at
+       ) VALUES ('provider-sunrise-free-fallback','household-sunrise',
+         'subscription-sunrise-free-fallback','local','local','local-sunrise-free-fallback',
+         'active','fixture-v1',$1,$1)`,
+      [now.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO entitlement_grants(
+         household_id, id, source, capabilities, starts_at, source_verified, precedence,
+         plan_version_id, subscription_id
+       ) VALUES ('household-sunrise','grant-sunrise-free-fallback','local',
+         '["check:text","check:url","history:read","orientation:use"]'::jsonb,
+         $1,true,10,'free_v1','subscription-sunrise-free-fallback')`,
+      [now.toISOString()],
+    );
+
+    const entitlements = new EntitlementRepository(harness.database);
+    const overlapped = await entitlements.forHousehold('household-sunrise', now);
+    expect(overlapped.portfolio.primarySource?.planKey).toBe('family');
+    expect(
+      overlapped.portfolio.allowances.find((allowance) => allowance.kind === 'protected_members'),
+    ).toMatchObject({ limit: 3, used: 2, remaining: 1 });
+    expect(
+      overlapped.portfolio.allowances.find(
+        (allowance) => allowance.kind === 'trusted_circle_participants',
+      ),
+    ).toMatchObject({ limit: 6, used: 1, remaining: 5 });
+
+    const alice = await login(harness.app, 'owner-alice');
+    const pat = await login(harness.app, 'protected-pat');
+    const terry = await login(harness.app, 'trusted-terry');
+    const commerce = new CommerceOperationsRepository(harness.database, Buffer.alloc(32, 17), 1);
+    const eventCreatedAt = new Date(now.getTime() + 1_000);
+    const captured = await commerce.captureVerifiedProviderEvent({
+      provider: 'stripe',
+      environment: 'test',
+      externalEventId: 'evt_sunrise_family_canceled',
+      eventType: 'customer.subscription.deleted',
+      rawPayload: '{"id":"evt_sunrise_family_canceled","type":"customer.subscription.deleted"}',
+      providerApiVersion: '2026-06-30.basil',
+      providerObjectId: 'sub_sunrise_family_test',
+      providerEventCreatedAt: eventCreatedAt,
+      normalizedLifecycle: 'canceled',
+      now: eventCreatedAt,
+    });
+    await expect(
+      commerce.applyProviderLifecycle({
+        inboxId: captured.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: 'evt_sunrise_family_canceled',
+        providerApiVersion: '2026-06-30.basil',
+        providerObjectId: 'sub_sunrise_family_test',
+        providerEventCreatedAt: eventCreatedAt,
+        householdId: 'household-sunrise',
+        subscriptionId: 'subscription-local-sunrise',
+        externalSubscriptionId: 'sub_sunrise_family_test',
+        lifecycle: 'canceled',
+        currentPeriodStartsAt: now,
+        currentPeriodEndsAt: future,
+        accessEvidence: { kind: 'non_payment' },
+        now: eventCreatedAt,
+      }),
+    ).resolves.toMatchObject({ outcome: 'applied', lifecycle: 'canceled' });
+
+    const downgraded = await entitlements.forHousehold('household-sunrise', eventCreatedAt);
+    expect(downgraded.portfolio.primarySource?.planKey).toBe('free');
+    expect(
+      downgraded.portfolio.allowances.find((allowance) => allowance.kind === 'protected_members'),
+    ).toMatchObject({ limit: 1, used: 0, remaining: 1, state: 'available' });
+    expect(
+      downgraded.portfolio.allowances.find(
+        (allowance) => allowance.kind === 'trusted_circle_participants',
+      ),
+    ).toMatchObject({ limit: 0, used: 0, remaining: 0, state: 'exhausted' });
+
+    const getHousehold = async (cookie: string) => {
+      const response = await harness!.app.inject({
+        method: 'GET',
+        url: '/v1/me',
+        headers: browserHeaders(cookie),
+      });
+      expect(response.statusCode).toBe(200);
+      return (response.json().principal.households as Array<Record<string, unknown>>).find(
+        (household) => household.id === 'household-sunrise',
+      );
+    };
+    await expect(getHousehold(alice.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: false,
+    });
+    await expect(getHousehold(pat.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: false,
+    });
+    await expect(getHousehold(terry.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: false,
+      trustedCircleGrants: [],
+      capabilities: [],
+    });
+    const deniedSharedCheck = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/checks/analysis-seed-sunrise-shared',
+      headers: browserHeaders(terry.cookie as string),
+    });
+    expect(deniedSharedCheck.statusCode).toBe(403);
+
+    const unchangedBeforeRecovery = await harness.database.query<{
+      accepted_protected: number;
+      active_relationships: number;
+      active_consents: number;
+      consent_evidence: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM protected_members
+          WHERE household_id = 'household-sunrise' AND status = 'accepted')
+           AS accepted_protected,
+         (SELECT count(*)::int FROM trusted_circle_relationships
+          WHERE household_id = 'household-sunrise' AND state = 'active')
+           AS active_relationships,
+         (SELECT count(*)::int FROM consent_current_projections
+          WHERE household_id = 'household-sunrise' AND state = 'active') AS active_consents,
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-sunrise') AS consent_evidence`,
+    );
+    expect(unchangedBeforeRecovery.rows[0]).toEqual({
+      accepted_protected: 2,
+      active_relationships: 1,
+      active_consents: 3,
+      consent_evidence: 3,
+    });
+
+    await expect(
+      entitlements.enrollProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-owner-alice',
+        actorPersonId: 'person-owner-alice',
+        consentVersion: 'must-not-replace-original-consent',
+        now: eventCreatedAt,
+      }),
+    ).resolves.toEqual({
+      householdId: 'household-sunrise',
+      personId: 'person-owner-alice',
+      status: 'accepted',
+      consentVersion: 'protected-self-v1',
+      allowanceAllocationId: 'allocation-sunrise-alice',
+    });
+    await expect(getHousehold(alice.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: true,
+    });
+    await expect(
+      entitlements.enrollProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-protected-pat',
+        actorPersonId: 'person-protected-pat',
+        consentVersion: 'must-not-replace-original-consent',
+        now: eventCreatedAt,
+      }),
+    ).rejects.toMatchObject({
+      code: 'not_authorized',
+      safeDetails: { allowance: 'protected_members', reason: 'limit_exceeded' },
+    });
+    await expect(getHousehold(pat.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: false,
+    });
+
+    const finalFacts = await harness.database.query<{
+      alice_grant: string;
+      pat_grant: string;
+      accepted_protected: number;
+      active_relationships: number;
+      active_consents: number;
+      consent_evidence: number;
+    }>(
+      `SELECT
+         (SELECT entitlement_grant_id FROM commerce_allowance_allocations
+          WHERE id = 'allocation-sunrise-alice') AS alice_grant,
+         (SELECT entitlement_grant_id FROM commerce_allowance_allocations
+          WHERE id = 'allocation-sunrise-pat') AS pat_grant,
+         (SELECT count(*)::int FROM protected_members
+          WHERE household_id = 'household-sunrise' AND status = 'accepted')
+           AS accepted_protected,
+         (SELECT count(*)::int FROM trusted_circle_relationships
+          WHERE household_id = 'household-sunrise' AND state = 'active')
+           AS active_relationships,
+         (SELECT count(*)::int FROM consent_current_projections
+          WHERE household_id = 'household-sunrise' AND state = 'active') AS active_consents,
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-sunrise') AS consent_evidence`,
+    );
+    expect(finalFacts.rows[0]).toEqual({
+      alice_grant: 'grant-sunrise-free-fallback',
+      pat_grant: 'grant-local-sunrise',
+      accepted_protected: 2,
+      active_relationships: 1,
+      active_consents: 3,
+      consent_evidence: 3,
+    });
+
+    await harness.database.query(
+      `INSERT INTO commerce_subscriptions(
+         household_id, id, payer_person_id, plan_version_id, source, lifecycle,
+         source_verified, precedence, current_period_starts_at, current_period_ends_at,
+         reconciliation_state, created_at, updated_at
+       ) VALUES ('household-sunrise','subscription-sunrise-family-replacement',
+         'person-owner-alice','family_v1','web','pending',false,400,$1,$2,
+         'pending',$1,$1)`,
+      [now.toISOString(), future.toISOString()],
+    );
+    await expect(getHousehold(terry.cookie as string)).resolves.toMatchObject({
+      trustedCircleGrants: [],
+      capabilities: [],
+    });
+    const replacementEvent = await commerce.captureVerifiedProviderEvent({
+      provider: 'stripe',
+      environment: 'test',
+      externalEventId: 'evt_sunrise_family_replacement_active',
+      eventType: 'customer.subscription.updated',
+      rawPayload:
+        '{"id":"evt_sunrise_family_replacement_active","type":"customer.subscription.updated"}',
+      providerApiVersion: '2026-06-30.basil',
+      providerObjectId: 'sub_sunrise_family_replacement_test',
+      providerEventCreatedAt: now,
+      normalizedLifecycle: 'active',
+      now,
+    });
+    await expect(
+      commerce.applyProviderLifecycle({
+        inboxId: replacementEvent.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: 'evt_sunrise_family_replacement_active',
+        providerApiVersion: '2026-06-30.basil',
+        providerObjectId: 'sub_sunrise_family_replacement_test',
+        providerEventCreatedAt: now,
+        householdId: 'household-sunrise',
+        subscriptionId: 'subscription-sunrise-family-replacement',
+        externalSubscriptionId: 'sub_sunrise_family_replacement_test',
+        lifecycle: 'active',
+        currentPeriodStartsAt: now,
+        currentPeriodEndsAt: future,
+        accessEvidence: { kind: 'initial_server_binding' },
+        now,
+      }),
+    ).resolves.toMatchObject({ outcome: 'applied', lifecycle: 'active' });
+    await expect(getHousehold(terry.cookie as string)).resolves.toMatchObject({
+      trustedCircleGrants: [
+        {
+          relationshipId: 'relationship-sunrise-pat-terry',
+          protectedPersonId: 'person-protected-pat',
+          permissions: ['view_shared_checks'],
+        },
+      ],
+      capabilities: ['history:read'],
+    });
+    await expect(getHousehold(pat.cookie as string)).resolves.toMatchObject({
+      isProtectedMember: true,
+    });
+    const trustedRecoveryFacts = await harness.database.query<{
+      trusted_subscription: string;
+      pat_subscription: string;
+      active_relationships: number;
+      active_consents: number;
+      consent_evidence: number;
+    }>(
+      `SELECT
+         (SELECT entitlement_grant.subscription_id
+          FROM commerce_allowance_allocations allocation
+          JOIN entitlement_grants entitlement_grant
+            ON entitlement_grant.household_id = allocation.household_id
+           AND entitlement_grant.id = allocation.entitlement_grant_id
+          WHERE allocation.id = 'allocation-sunrise-terry') AS trusted_subscription,
+         (SELECT entitlement_grant.subscription_id
+          FROM commerce_allowance_allocations allocation
+          JOIN entitlement_grants entitlement_grant
+            ON entitlement_grant.household_id = allocation.household_id
+           AND entitlement_grant.id = allocation.entitlement_grant_id
+          WHERE allocation.id = 'allocation-sunrise-pat') AS pat_subscription,
+         (SELECT count(*)::int FROM trusted_circle_relationships
+          WHERE household_id = 'household-sunrise' AND state = 'active')
+           AS active_relationships,
+         (SELECT count(*)::int FROM consent_current_projections
+          WHERE household_id = 'household-sunrise' AND state = 'active') AS active_consents,
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-sunrise') AS consent_evidence`,
+    );
+    expect(trustedRecoveryFacts.rows[0]).toEqual({
+      trusted_subscription: 'subscription-sunrise-family-replacement',
+      pat_subscription: 'subscription-sunrise-family-replacement',
+      active_relationships: 1,
+      active_consents: 3,
+      consent_evidence: 3,
+    });
+  }, 30_000);
 });

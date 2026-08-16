@@ -9,7 +9,7 @@ import { apiRequest, readableError, setSelectedHouseholdId } from '../../lib/api
 const personas: Array<{ id: DevPersonaId; name: string; detail: string }> = [
   {
     id: 'owner-alice',
-    name: 'Alice — owner and protected adult',
+    name: 'Alice — administrator and protected adult',
     detail:
       'Sunrise household; independent protected enrollment enables Checks and self-orientation.',
   },
@@ -30,9 +30,8 @@ const personas: Array<{ id: DevPersonaId; name: string; detail: string }> = [
   },
   {
     id: 'owner-bob',
-    name: 'Bob — owner without protected enrollment',
-    detail:
-      'Harbor household; owner safety administration remains separate from protected workflows.',
+    name: 'Bob — administrator without protected enrollment',
+    detail: 'Harbor household; safety administration remains separate from protected workflows.',
   },
   {
     id: 'protected-olivia',

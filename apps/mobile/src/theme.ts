@@ -101,7 +101,6 @@ export const appStyles = StyleSheet.create({
   radio: { borderColor: c.primary, borderRadius: 10, borderWidth: 2, height: 20, width: 20 },
   radioSelected: { backgroundColor: c.primary, borderColor: c.surface, borderWidth: 4 },
   risk: { borderLeftWidth: 8 },
-  riskLower: { borderLeftColor: c.lowerConcern },
   riskCaution: { borderLeftColor: c.caution },
   riskHigh: { borderLeftColor: c.highConcern },
   riskUnknown: { borderLeftColor: c.unknown },

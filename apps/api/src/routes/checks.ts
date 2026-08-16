@@ -11,8 +11,7 @@ import {
   shareCheckResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError, ids } from '@boomerbuddy/domain';
-import { analyzeCheck, LocalUnknownProvider } from '@boomerbuddy/fraud';
-import { minimizeRestrictedInput } from '@boomerbuddy/security';
+import { analyzePreparedCheck, LocalUnknownProvider, prepareCheckInput } from '@boomerbuddy/fraud';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { assertMutationOrigin, authenticate, correlationId, selectedHousehold } from '../auth';
@@ -43,16 +42,8 @@ export function registerCheckRoutes(app: FastifyInstance, context: ApiContext): 
         scope: { kind: 'create', artifactKind: body.kind },
       },
     });
-    const minimized = minimizeRestrictedInput(body.content, body.kind === 'url' ? 4_096 : 16_384);
-    if (minimized.status === 'rejected') {
-      throw new DomainError(
-        'restricted_input',
-        'Remove credentials or payment details before checking',
-        { detected: minimized.detected.join(',') },
-      );
-    }
-    const acceptedInput = { kind: body.kind, content: minimized.minimized } as const;
-    const assessment = await analyzeCheck(acceptedInput, {
+    const prepared = prepareCheckInput(body);
+    const assessment = await analyzePreparedCheck(prepared, {
       provider: new LocalUnknownProvider(),
       now,
     });
@@ -61,7 +52,7 @@ export function registerCheckRoutes(app: FastifyInstance, context: ApiContext): 
       actorPersonId: auth.principal.personId,
       audience: auth.audience,
       kind: body.kind,
-      content: acceptedInput.content,
+      content: prepared.redactedContent,
       decision: decisionFromAssessment(assessment),
       correlationId: correlationId(request),
       now,
@@ -82,8 +73,9 @@ export function registerCheckRoutes(app: FastifyInstance, context: ApiContext): 
     );
     const household = selectedHousehold(auth, request);
     const includeOwned = household.isProtectedMember;
-    const includeExplicitlyShared =
-      household.role === 'trusted_circle' && household.permissions.includes('view_shared_checks');
+    const includeExplicitlyShared = household.trustedCircleGrants.some((grant) =>
+      grant.permissions.includes('view_shared_checks'),
+    );
     assertAuthorized({
       principal: auth.principal,
       action: 'check:list',

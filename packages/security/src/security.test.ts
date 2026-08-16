@@ -9,6 +9,7 @@ import {
   fingerprintMinimized,
   minimizeRestrictedInput,
   parseEncryptedField,
+  redactSensitiveInput,
   redactForLog,
   serializeEncryptedField,
   verifyDevSession,
@@ -79,8 +80,8 @@ describe('keyed minimized fingerprints', () => {
   });
 });
 
-describe('secret minimization', () => {
-  it('rejects private keys, credentials, contextual OTPs and Luhn-valid cards', () => {
+describe('typed secret minimization', () => {
+  it('redacts clearly typed credentials, contextual OTPs and Luhn-valid cards', () => {
     const generatedPrivateKey = [
       '-----BEGIN ' + 'PRIVATE KEY-----',
       'generated-test-body',
@@ -96,39 +97,69 @@ describe('secret minimization', () => {
     expect(detectRestrictedInput(generatedPassword)).toContain('authorization_credential');
     expect(detectRestrictedInput(generatedOtp)).toContain('one_time_code');
     expect(detectRestrictedInput(generatedCard)).toContain('payment_card');
-    for (const value of [
-      generatedPrivateKey,
-      generatedCredential,
-      generatedPassword,
-      generatedOtp,
-      generatedCard,
-    ]) {
-      const result = minimizeRestrictedInput(value);
-      expect(result.status).toBe('rejected');
+    for (const value of [generatedCredential, generatedPassword, generatedOtp, generatedCard]) {
+      const result = redactSensitiveInput(`Scam message contained ${value}; stop and verify.`);
+      expect(result.status).toBe('accepted');
       expect(JSON.stringify(result)).not.toContain(value);
     }
+    expect(redactSensitiveInput(generatedPrivateKey)).toEqual(
+      expect.objectContaining({ status: 'rejected', reason: 'restricted_input' }),
+    );
   });
 
-  it('normalizes benign bounded text and rejects oversize input', () => {
+  it('normalizes benign bounded text and keeps legacy reject-mode fail closed', () => {
     expect(minimizeRestrictedInput('  hello   there\r\n\r\n\r\nfriend  ')).toEqual({
       status: 'accepted',
       minimized: 'hello there\n\nfriend',
       detected: [],
+      redactions: [],
+      safetyFlags: [],
     });
+    expect(minimizeRestrictedInput('verification code 102345').status).toBe('rejected');
+    expect(redactSensitiveInput('Skateboarding lessons start at noon.').status).toBe('accepted');
     expect(() => minimizeRestrictedInput('long input', 2)).toThrow(RangeError);
   });
 
-  it('rejects URL user-info and sensitive query or fragment values before fingerprinting', () => {
+  it('hard-rejects URL secrets, ambiguous credentials, overlap and unusable results', () => {
     const values = [
       ['https://', 'generated-user', ':', 'generated-password', '@example.test/path'].join(''),
       ['https://example.test/path?', 'access_token', '=', 'generated-value'].join(''),
       ['https://example.test/path#', 'verification_code', '=', String(100_000 + 2345)].join(''),
     ];
     for (const value of values) {
-      const result = minimizeRestrictedInput(value);
+      const result = redactSensitiveInput(`Please inspect ${value}`);
       expect(result.status).toBe('rejected');
       expect(JSON.stringify(result)).not.toContain(value);
     }
+    const jwt = ['eyJgeneratedheader', 'generatedpayload1', 'generatedsignature1'].join('.');
+    expect(redactSensitiveInput(`Received ${jwt}`).status).toBe('rejected');
+    expect(redactSensitiveInput('verification code 4242 4242 4242 4242').status).toBe('rejected');
+    expect(redactSensitiveInput(['4242', '4242', '4242', '4242'].join(' '))).toEqual(
+      expect.objectContaining({ status: 'rejected', reason: 'unusable_after_redaction' }),
+    );
+  });
+
+  it('returns only class/count metadata and never a redacted original', () => {
+    const first = String(100_000 + 2345);
+    const second = String(200_000 + 3456);
+    const result = redactSensitiveInput(
+      `The caller gave verification code ${first} and OTP ${second}; do not use either.`,
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        status: 'accepted',
+        redactions: [
+          {
+            class: 'one_time_code',
+            placeholder: '[ONE_TIME_CODE]',
+            count: 2,
+          },
+        ],
+        safetyFlags: ['contained_one_time_code'],
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain(first);
+    expect(JSON.stringify(result)).not.toContain(second);
   });
 });
 

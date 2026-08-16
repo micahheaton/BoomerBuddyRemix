@@ -1,0 +1,24 @@
+{
+  "expo": {
+    "name": "BoomerBuddy",
+    "slug": "boomerbuddy-2-local",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "net.boomerbuddy.local"
+    },
+    "android": {
+      "package": "net.boomerbuddy.local"
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": ["expo-secure-store"],
+    "extra": {
+      "nativeSharingStatus": "not_implemented",
+      "providerMode": "local_unknown"
+    }
+  }
+}

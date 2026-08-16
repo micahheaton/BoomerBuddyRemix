@@ -1,0 +1,62 @@
+{
+  "name": "boomerbuddy-2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Trust-first household scam response foundation",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "npm@10.9.3",
+  "engines": {
+    "node": ">=22.13.0",
+    "npm": ">=10.9.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web,hq -c blue,green,magenta \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:hq\"",
+    "dev:api": "tsx watch apps/api/src/server.ts",
+    "dev:web": "npm run dev -w @boomerbuddy/web",
+    "dev:hq": "npm run dev -w @boomerbuddy/hq",
+    "dev:mobile": "npm run dev -w @boomerbuddy/mobile",
+    "build": "npm run typecheck && npm run build -w @boomerbuddy/api && npm run build -w @boomerbuddy/web && npm run build -w @boomerbuddy/hq && npm run build -w @boomerbuddy/mobile",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tsconfig.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "db:migrate": "tsx scripts/run-sql-migrations.ts",
+    "db:seed": "tsx scripts/seed-local.ts",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "test:security": "vitest run --project security",
+    "test:eval": "tsx scripts/eval-report.ts",
+    "test:e2e": "playwright test",
+    "test:coverage": "vitest run --coverage",
+    "test": "npm run test:unit && npm run test:integration && npm run test:security && npm run test:eval",
+    "audit:deps": "npm audit --audit-level=high",
+    "verify": "npm run typecheck && npm run lint && npm run format:check && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.62.1",
+    "@types/node": "22.20.1",
+    "@types/pg": "8.21.0",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitest/coverage-v8": "4.1.10",
+    "concurrently": "10.0.5",
+    "cross-env": "10.1.0",
+    "eslint": "9.39.5",
+    "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "prettier": "3.9.6",
+    "tsup": "8.5.1",
+    "tsx": "4.23.12",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.67.0",
+    "vitest": "4.1.10",
+    "wait-on": "9.1.0"
+  }
+}

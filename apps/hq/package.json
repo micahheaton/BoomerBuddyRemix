@@ -1,0 +1,19 @@
+{
+  "name": "@boomerbuddy/hq",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "dev:e2e": "cross-env NEXT_PUBLIC_API_URL=http://127.0.0.1:4100 next dev -p 3101",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@boomerbuddy/contracts": "*",
+    "@boomerbuddy/design": "*",
+    "next": "16.3.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  }
+}

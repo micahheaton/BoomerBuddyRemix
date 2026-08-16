@@ -2,12 +2,18 @@ import { isIP } from 'node:net';
 import { parse as parseDomain } from 'tldts';
 import { DomainError } from '@boomerbuddy/domain';
 import { redactSensitiveInput } from '@boomerbuddy/security';
-import { LocalUnknownProvider, localOnlyProviderPolicy, ProviderDispatcher } from './provider';
+import {
+  LocalUnknownProvider,
+  localOnlyProviderPolicy,
+  prepareProviderDispatchInput,
+  ProviderDispatcher,
+} from './provider';
 import type {
   FeatureVector,
   FraudAssessment,
   FraudEvidence,
   FraudProvider,
+  OrganizationCandidateId,
   PreparedCheckInput,
   ProviderResult,
   RiskBand,
@@ -87,6 +93,24 @@ const signalRules: readonly {
   },
 ];
 
+const organizationCandidateRules: readonly {
+  readonly identifier: OrganizationCandidateId;
+  readonly pattern: RegExp;
+}[] = [
+  { identifier: 'us-internal-revenue-service', pattern: /\birs\b/iu },
+  {
+    identifier: 'us-social-security-administration',
+    pattern: /\bsocial security administration\b/iu,
+  },
+  { identifier: 'us-medicare', pattern: /\bmedicare\b/iu },
+  { identifier: 'us-federal-bureau-of-investigation', pattern: /\bfbi\b/iu },
+  { identifier: 'local-law-enforcement', pattern: /\b(?:police|sheriff)\b/iu },
+  { identifier: 'financial-institution', pattern: /\bbank fraud department\b/iu },
+  { identifier: 'technology-support', pattern: /\btech support\b/iu },
+];
+
+const preparedInputs = new WeakSet<object>();
+
 function byteLengthBucket(value: string): FeatureVector['byteLengthBucket'] {
   const length = Buffer.byteLength(value, 'utf8');
   if (length === 0) return 'empty';
@@ -98,6 +122,8 @@ function byteLengthBucket(value: string): FeatureVector['byteLengthBucket'] {
 function analyzeUrl(value: string): {
   readonly url: NonNullable<FeatureVector['url']>;
   readonly signals: readonly SignalKind[];
+  readonly registrableDomain?: string;
+  readonly normalizedUrl: string;
 } {
   let parsed: URL;
   try {
@@ -124,10 +150,19 @@ function analyzeUrl(value: string): {
   if (hasNonstandardPort) signals.push('url_nonstandard_port');
   if (subdomainCount >= 4) signals.push('url_excessive_subdomains');
 
-  // Deliberately emit no URL, host, path, query, or credential. This is a bounded
-  // structural representation, and this module performs no DNS or network I/O.
+  const reputationUrl = new URL(parsed.href);
+  reputationUrl.username = '';
+  reputationUrl.password = '';
+  reputationUrl.search = '';
+  reputationUrl.hash = '';
+
+  // The default local-signals role receives only the structural representation.
+  // Role-specific reputation ports may receive a registrable domain or this
+  // query/fragment/credential-free URL only when their manifest and policy allow it.
   return {
     signals,
+    ...(domain.domain === null ? {} : { registrableDomain: domain.domain.toLowerCase() }),
+    normalizedUrl: reputationUrl.toString(),
     url: {
       scheme: parsed.protocol === 'https:' ? 'https' : 'http',
       hasCredentials,
@@ -167,7 +202,7 @@ function urlEvidence(signal: SignalKind): { readonly weight: number; readonly la
 
 const providerIdentifier = /^[a-z0-9][a-z0-9_.-]{0,63}$/u;
 
-function normalizeProviderResult(result: ProviderResult): ProviderResult {
+function normalizeProviderResult(result: ProviderResult, evaluatedAt: Date): ProviderResult {
   if (
     !['unknown', 'unavailable', 'mock', 'observed'].includes(result.status) ||
     !providerIdentifier.test(result.providerName) ||
@@ -191,9 +226,13 @@ function normalizeProviderResult(result: ProviderResult): ProviderResult {
     ) {
       throw new TypeError('Invalid provider observation');
     }
+    const providerObservedAt = Date.parse(observation.observedAt);
+    const validUntil = Date.parse(observation.validUntil);
     if (
-      observation.validUntil !== undefined &&
-      !Number.isFinite(Date.parse(observation.validUntil))
+      !Number.isFinite(providerObservedAt) ||
+      !Number.isFinite(validUntil) ||
+      validUntil <= providerObservedAt ||
+      providerObservedAt > evaluatedAt.getTime() + 5 * 60_000
     ) {
       throw new TypeError('Invalid provider observation freshness');
     }
@@ -208,18 +247,23 @@ function normalizeProviderResult(result: ProviderResult): ProviderResult {
       label,
       disposition: observation.disposition,
       weight: observation.weight,
-      ...(observation.validUntil === undefined ? {} : { validUntil: observation.validUntil }),
+      observedAt: new Date(providerObservedAt).toISOString(),
+      validUntil: new Date(validUntil).toISOString(),
       limitation: 'External provider coverage, freshness, and error rates limit this observation.',
     };
   });
   const limitation =
-    result.status === 'unknown'
+    result.status === 'unknown' && result.provenance.deployment === 'local_unknown'
       ? 'No live reputation provider is configured; no URL or external resource was contacted.'
-      : result.status === 'unavailable'
-        ? 'The external provider was unavailable; missing evidence cannot lower concern.'
-        : result.status === 'mock'
-          ? 'Mock provider output is not live safety evidence.'
-          : 'External intelligence is limited and cannot establish that an item is safe.';
+      : result.status === 'unknown' && result.provenance.networkEgress === 'declared_provider_only'
+        ? 'The live provider returned no usable observation; its declared endpoint may have been contacted.'
+        : result.status === 'unknown'
+          ? 'The configured provider returned no usable observation; missing evidence cannot lower concern.'
+          : result.status === 'unavailable'
+            ? 'The external provider was unavailable; missing evidence cannot lower concern.'
+            : result.status === 'mock'
+              ? 'Mock provider output is not live safety evidence.'
+              : 'External intelligence is limited and cannot establish that an item is safe.';
   return {
     status: result.status,
     providerName: result.providerName,
@@ -228,6 +272,19 @@ function normalizeProviderResult(result: ProviderResult): ProviderResult {
     limitation,
     provenance: result.provenance,
   };
+}
+
+function providerObservationFreshness(
+  result: ProviderResult,
+  observation: ProviderResult['observations'][number],
+  evaluatedAt: Date,
+): 'current' | 'stale' {
+  const observedAt = Date.parse(observation.observedAt);
+  const validUntil = Date.parse(observation.validUntil);
+  return validUntil <= evaluatedAt.getTime() ||
+    evaluatedAt.getTime() - observedAt > result.provenance.maximumEvidenceAgeMs
+    ? 'stale'
+    : 'current';
 }
 
 function scoreCombinations(signals: ReadonlySet<SignalKind>): number {
@@ -341,12 +398,32 @@ export function prepareCheckInput(input: {
   if (minimized.minimized.length === 0) {
     throw new DomainError('invalid_input', 'Check content cannot be empty');
   }
-  return {
+  const prepared = Object.freeze({
     kind: input.kind,
     redactedContent: minimized.minimized,
-    redactions: minimized.redactions,
-    safetyFlags: minimized.safetyFlags,
-  };
+    redactions: Object.freeze(
+      minimized.redactions.map((redaction) => Object.freeze({ ...redaction })),
+    ),
+    safetyFlags: Object.freeze([...minimized.safetyFlags]),
+  }) as PreparedCheckInput;
+  preparedInputs.add(prepared);
+  return prepared;
+}
+
+function assertPreparedInput(input: PreparedCheckInput): void {
+  const limit = input.kind === 'url' ? 4_096 : 16_384;
+  const rechecked = redactSensitiveInput(input.redactedContent, limit);
+  if (
+    !preparedInputs.has(input) ||
+    rechecked.status === 'rejected' ||
+    rechecked.minimized !== input.redactedContent ||
+    rechecked.redactions.length !== 0
+  ) {
+    throw new DomainError(
+      'restricted_input',
+      'Check input was not produced by the typed-redaction boundary',
+    );
+  }
 }
 
 export async function analyzePreparedCheck(
@@ -357,7 +434,9 @@ export async function analyzePreparedCheck(
     readonly now?: Date;
   } = {},
 ): Promise<FraudAssessment> {
-  const observedAt = (options.now ?? new Date()).toISOString();
+  assertPreparedInput(input);
+  const evaluatedAt = options.now ?? new Date();
+  const observedAt = evaluatedAt.toISOString();
   const textSignals = signalRules
     .filter((rule) => rule.pattern.test(input.redactedContent))
     .map((rule) => rule.signal);
@@ -372,10 +451,23 @@ export async function analyzePreparedCheck(
   const provider = options.provider ?? new LocalUnknownProvider();
   const dispatcher =
     options.dispatcher ?? new ProviderDispatcher([provider], localOnlyProviderPolicy([provider]));
-  const dispatched = await dispatcher.inspect(features);
+  const organizationCandidates = organizationCandidateRules
+    .filter((candidate) => candidate.pattern.test(input.redactedContent))
+    .map((candidate) => candidate.identifier);
+  const dispatched = await dispatcher.inspect(
+    prepareProviderDispatchInput({
+      features,
+      redactedContent: input.redactedContent,
+      organizationCandidates,
+      ...(urlResult?.registrableDomain === undefined
+        ? {}
+        : { registrableDomain: urlResult.registrableDomain }),
+      ...(urlResult === undefined ? {} : { normalizedUrl: urlResult.normalizedUrl }),
+    }),
+  );
   const providerResults = dispatched.map((result) => {
     try {
-      return normalizeProviderResult(result);
+      return normalizeProviderResult(result, evaluatedAt);
     } catch {
       return {
         status: 'unavailable' as const,
@@ -448,13 +540,17 @@ export async function analyzePreparedCheck(
   for (const providerResult of providerResults) {
     if (providerResult.status === 'observed') {
       for (const observation of providerResult.observations) {
+        const freshness = providerObservationFreshness(providerResult, observation, evaluatedAt);
         const providerWeight =
-          observation.disposition === 'not_found'
+          freshness === 'stale' || observation.disposition === 'not_found'
             ? 0
             : Math.min(100, Math.max(0, observation.weight));
         evidence.push({
           code: `provider.${observation.code}`,
-          label: observation.label,
+          label:
+            freshness === 'stale'
+              ? 'Expired external evidence was retained for provenance but not used.'
+              : observation.label,
           weight: providerWeight,
           source: {
             kind: 'provider',
@@ -463,9 +559,13 @@ export async function analyzePreparedCheck(
             status: providerResult.status,
             provenance: providerResult.provenance,
           },
-          observedAt,
-          ...(observation.validUntil === undefined ? {} : { validUntil: observation.validUntil }),
-          limitation: observation.limitation,
+          observedAt: observation.observedAt,
+          validUntil: observation.validUntil,
+          freshness,
+          limitation:
+            freshness === 'stale'
+              ? 'This observation was expired or older than the provider declared; it cannot change risk.'
+              : observation.limitation,
         });
       }
       continue;
@@ -504,29 +604,55 @@ export async function analyzePreparedCheck(
   const baseScore = evidence.reduce((sum, item) => sum + item.weight, 0);
   const score = Math.min(100, baseScore + scoreCombinations(signals));
   const risk: RiskBand = score >= 50 ? 'high_concern' : score > 0 ? 'caution' : 'unknown';
-  const providerVerified = providerResults.some(
-    (result) =>
-      result.status === 'observed' &&
-      result.observations.some(
-        (observation) => observation.disposition !== 'not_found' && observation.weight > 0,
-      ),
+  const positiveArtifactEvidence = evidence.filter(
+    (item) => item.source.kind === 'artifact_derived' && item.weight > 0,
   );
+  const currentPositiveProviderCapabilities = new Set(
+    evidence.flatMap((item) =>
+      item.source.kind === 'provider' &&
+      item.freshness === 'current' &&
+      item.weight > 0 &&
+      item.source.provenance !== undefined
+        ? [
+            `${item.source.provenance.providerName}:${item.source.provenance.capabilityId}:${item.source.provenance.role}`,
+          ]
+        : [],
+    ),
+  );
+  const staleProviderEvidence = evidence.some(
+    (item) => item.source.kind === 'provider' && item.freshness === 'stale',
+  );
+  const externalUrlProviderConfigured = providerResults.some(
+    (result) =>
+      ['domain_reputation', 'url_reputation'].includes(result.provenance.role) &&
+      result.provenance.networkEgress === 'declared_provider_only',
+  );
+  const independentPositiveEvidence =
+    positiveArtifactEvidence.length + currentPositiveProviderCapabilities.size;
   const confidence: FraudAssessment['confidence'] =
-    providerVerified && evidence.length >= 4
+    currentPositiveProviderCapabilities.size >= 2 && positiveArtifactEvidence.length >= 2
       ? 'strong'
-      : evidence.filter((item) => item.weight > 0).length >= 2
+      : independentPositiveEvidence >= 2
         ? 'moderate'
         : 'limited';
   const uncertaintyReasons = [
     ...new Set([
       'This initial ruleset has not been empirically calibrated on a representative corpus.',
-      ...(providerVerified
-        ? []
-        : providerResults.length === 0
-          ? ['Provider execution is disabled or no provider is allowed.']
-          : providerResults.map((result) => result.limitation)),
+      ...(providerResults.length === 0
+        ? ['Provider execution is disabled or no provider is allowed.']
+        : providerResults.map((result) => result.limitation)),
+      ...(staleProviderEvidence
+        ? ['Expired provider evidence was retained for provenance but treated as unknown.']
+        : []),
       ...(input.kind === 'url'
-        ? ['The URL was analyzed as text only and was never contacted.']
+        ? [
+            'BoomerBuddy did not fetch or resolve the submitted destination.',
+            ...(externalUrlProviderConfigured
+              ? [
+                  'An allowlisted provider may have received the least-data registrable domain or normalized URL; vendor destination contact is not established.',
+                ]
+              : []),
+          ]
         : []),
     ]),
   ];

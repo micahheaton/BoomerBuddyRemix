@@ -124,10 +124,13 @@ describe('portable worker leases', () => {
       jobs as unknown as DurableJobRepository,
       outbox as unknown as OutboxDeliveryRepository,
       {},
-      async () =>
-        new Promise<void>((resolve) => {
-          releaseHandler = resolve;
-        }),
+      {
+        eventTypes: [event.eventType],
+        handle: async () =>
+          new Promise<void>((resolve) => {
+            releaseHandler = resolve;
+          }),
+      },
       config,
       createLogger({ sink: () => undefined, clock: () => now }),
       () => now,
@@ -162,7 +165,7 @@ describe('portable worker leases', () => {
       jobs as unknown as DurableJobRepository,
       outbox as unknown as OutboxDeliveryRepository,
       {},
-      async () => undefined,
+      { eventTypes: [event.eventType], handle: async () => undefined },
       config,
       createLogger({ sink: (record) => records.push(record), clock: () => now }),
       () => now,

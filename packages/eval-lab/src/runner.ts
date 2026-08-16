@@ -55,16 +55,20 @@ class OutageProvider implements FraudProvider {
   readonly manifest: ProviderManifest = {
     providerName: 'synthetic-outage',
     providerVersion: '1',
-    role: 'structural_reputation',
+    role: 'local_signals',
     capabilityId: 'outage-harness',
     dataPolicyVersion: 'least-data-v1',
-    inputFields: ['artifactKind', 'signals', 'urlStructure'],
+    supportedArtifactKinds: ['text', 'url'],
+    inputFields: ['artifactKind', 'signals', 'byteLengthBucket', 'urlStructure'],
     deployment: 'local_unknown',
     networkEgress: 'none',
     retention: 'none',
     trainingUse: 'prohibited',
     timeoutMs: 50,
     costUnits: 0,
+    maximumEvidenceAgeMs: 60_000,
+    maximumRequestsPerMinute: 600,
+    failureSemantics: 'unknown',
   };
 
   async inspect(): Promise<never> {

@@ -1,21 +1,23 @@
 # Public Check
 
-Status: **useful anonymous local flow and atomic consented save implemented; public staging abuse controls and acquisition outcomes are blocked**.
+Status: **useful anonymous local flow, privacy-preserving application abuse controls, and atomic consented save are implemented; external public-edge proof and acquisition outcomes are blocked**.
 
 ## What works locally
 
-An anonymous visitor can request a 10-minute opaque context, perform up to three text or URL-string Checks, receive the same full deterministic safety result as a member, and optionally save it after authenticating. The API performs no URL fetch. Safe redaction happens before analysis; unsafe URL credentials and ambiguous secrets fail closed.
+An anonymous visitor can request a short-lived opaque context, perform a bounded number of text or URL-string Checks, receive the same deterministic safety result as a member, and optionally save once after authentication and consent. The API performs no URL fetch. Safe redaction precedes analysis; unsafe URL credentials and ambiguous secrets fail closed.
 
-The context secret and one-time conversion secret are stored only as keyed HMACs. The redacted result is encrypted for a 15-minute handoff and is not added to customer history, analytics, audit, or outbox before consent. Attribution is allowlisted to coarse source/campaign values and daily aggregate counts; it contains no submission-derived value.
+Context and conversion secrets are stored only as keyed HMACs. A normalized network address is also converted to a per-client HMAC; the raw address is not stored as the quota identity. Atomic database buckets enforce global and per-client context/Check budgets. Expiring database leases enforce global and per-client analysis concurrency. Per-context use limits still apply. The transient redacted result is encrypted for the handoff and is excluded from customer history, analytics, audit, and outbox before consent.
 
-Save requires customer/mobile authentication, exact household authorization, `public-check-save-v1` consent, and the matching one-time grant. Check creation, immutable conversion evidence, grant consumption, content-free audit/outbox, and rollback occur in one transaction. A repeat by the same actor returns the same owned Check; a different actor, household, result, or credential gets the same non-enumerating failure. Terminal anonymous rows are physically removed after a 24-hour horizon.
+`BB_TRUSTED_PROXY_HOPS` is bounded to zero through two hops. Zero trusts only Fastify's direct peer; a nonzero value must match a reviewed deployment topology. This prevents implicit trust of arbitrary forwarding headers, but configuration is not evidence that any real proxy is correct.
 
-## Focused evidence
+Save requires customer/mobile authentication, exact household authorization, `public-check-save-v1` consent, and the matching one-time grant. Check creation, immutable conversion evidence, grant consumption, content-free audit/outbox, and rollback occur in one transaction. Terminal anonymous rows are physically purged after their maximum horizon.
 
-`tests/integration/public-checks.test.ts` covers transient redaction, zero customer persistence, one-time actor-owned save, transaction rollback, retry, and unsafe URL rejection. `tests/security/public-check-conversion.test.ts` proves immutable consent evidence and content-free operations. `packages/persistence/src/public-checks.test.ts` covers token storage, encryption, source binding, reserved-risk refusal, expiry, and physical purge. The public Playwright journey exists but is not production evidence.
+## Local evidence
 
-## Staging blockers
+Integration, repository, security, and browser tests cover transient redaction, client binding, atomic global/per-client quotas, concurrency acquisition/release/expiry, one-time actor-owned save, rollback/retry, non-enumeration, unsafe URL rejection, immutable consent evidence, and physical purge. These prove local application/database behavior only.
 
-The repository has database-global per-minute quotas (60 contexts and 30 Checks) and per-context use limits. It does **not** yet have a privacy-preserving per-client/edge limiter, concurrency budget, bot defense, trusted-proxy design, distributed quota, or edge-level body controls. A bot could exhaust the global budget for everyone. Signup/activation/paid conversion measurement is not connected to Public Check; only context and completion aggregates exist.
+## External boundary
 
-Production edge behavior, retention observation, accessibility/comprehension research, conversion, CAC, and safety effectiveness are **blocked by staging infrastructure and consented research**. Public staging is not approved, and Run 2 does not launch. See [ADR-0014](../adr/0014-privacy-bounded-public-check-and-attribution.md).
+No CDN, WAF, bot/challenge service, public proxy topology, distributed-region budget, edge body limit, load test, or internet-abuse exercise has been configured or observed. The HMAC database controls reduce local abuse risk; they do **not** prove public-edge protection, correct production client attribution, or resistance to address rotation and distributed attacks.
+
+Content-free growth projections now connect save and subsequent product milestones locally, but no public traffic, real conversion, CAC, comprehension, accessibility, or safety-effectiveness result exists. Public staging remains unauthorized. See [ADR-0014](../adr/0014-privacy-bounded-public-check-and-attribution.md) and [acquisition attribution](./13-acquisition-attribution.md). Run 2 does not launch.

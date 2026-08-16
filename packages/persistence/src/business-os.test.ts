@@ -162,12 +162,104 @@ describe('Business OS persistence', () => {
         unresolvedIncident: false,
       },
     });
-    await repository.createPrivacyRequest({
+    const privacyRequestId = await repository.createPrivacyRequest({
       dueAt: new Date('2026-09-15T12:00:00Z'),
       householdId: 'household-business-test',
       now,
       requestKind: 'export',
+      context: {
+        householdId: 'household-business-test',
+        actorPersonId: 'person-business-owner',
+        audience: 'hq',
+        correlationId: 'correlation-privacy-request',
+        now,
+      },
     });
+    await expect(
+      repository.advancePrivacyRequest({
+        requestId: privacyRequestId,
+        action: 'verify_identity',
+        evidenceReference: '4242424242424242',
+        context: {
+          householdId: 'household-business-test',
+          actorPersonId: 'person-business-owner',
+          audience: 'hq',
+          correlationId: 'correlation-privacy-sensitive-evidence',
+          now,
+        },
+      }),
+    ).rejects.toThrow('must not contain sensitive values');
+    await repository.advancePrivacyRequest({
+      requestId: privacyRequestId,
+      action: 'verify_identity',
+      evidenceReference: 'identity:local-fixture-v1',
+      context: {
+        householdId: 'household-business-test',
+        actorPersonId: 'person-business-owner',
+        audience: 'hq',
+        correlationId: 'correlation-privacy-verify',
+        now,
+      },
+    });
+    await repository.advancePrivacyRequest({
+      requestId: privacyRequestId,
+      action: 'begin_review',
+      evidenceReference: 'review:local-fixture-v1',
+      context: {
+        householdId: 'household-business-test',
+        actorPersonId: 'person-business-owner',
+        audience: 'hq',
+        correlationId: 'correlation-privacy-review',
+        now,
+      },
+    });
+    const plannedPrivacyRequest = await repository.advancePrivacyRequest({
+      requestId: privacyRequestId,
+      action: 'record_plan',
+      evidenceReference: 'plan:local-fixture-v1',
+      context: {
+        householdId: 'household-business-test',
+        actorPersonId: 'person-business-owner',
+        audience: 'hq',
+        correlationId: 'correlation-privacy-plan',
+        now,
+      },
+    });
+    expect(plannedPrivacyRequest).toEqual(
+      expect.objectContaining({
+        id: privacyRequestId,
+        state: 'in_progress',
+        identityVerificationState: 'verified',
+        plan: expect.objectContaining({
+          kind: 'export_manifest',
+          requiresProfessionalReview: true,
+        }),
+      }),
+    );
+    await expect(
+      repository.advancePrivacyRequest({
+        requestId: privacyRequestId,
+        action: 'record_plan',
+        evidenceReference: 'plan:local-fixture-retry-v1',
+        context: {
+          householdId: 'household-business-test',
+          actorPersonId: 'person-business-owner',
+          audience: 'hq',
+          correlationId: 'correlation-privacy-plan-retry',
+          now,
+        },
+      }),
+    ).resolves.toEqual(plannedPrivacyRequest);
+    const privacyEvidence = await database.query<{ total: number } & Record<string, unknown>>(
+      'SELECT count(*)::int AS total FROM privacy_request_events WHERE request_id = $1',
+      [privacyRequestId],
+    );
+    expect(privacyEvidence.rows[0]?.total).toBe(4);
+    await expect(
+      database.query('DELETE FROM privacy_request_events WHERE request_id = $1', [
+        privacyRequestId,
+      ]),
+    ).rejects.toThrow('append-only');
 
     await repository.putAutomationPolicy({
       now,

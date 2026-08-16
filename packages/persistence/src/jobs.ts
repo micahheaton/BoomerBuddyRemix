@@ -26,6 +26,21 @@ export interface DurableJob {
   readonly correlationId: string;
 }
 
+export interface DurableJobEnqueueInput {
+  readonly type: string;
+  readonly version?: number;
+  readonly householdId?: string;
+  readonly classification?: DurableJob['classification'];
+  readonly payload: DurableJobPayload;
+  readonly idempotencyKey: string;
+  readonly deduplicationKey?: string;
+  readonly priority?: number;
+  readonly scheduledAt: Date;
+  readonly maxAttempts?: number;
+  readonly correlationId: string;
+  readonly causationId?: string;
+}
+
 interface JobRow extends Record<string, unknown> {
   readonly id: string;
   readonly job_type: string;
@@ -162,94 +177,91 @@ async function recordAttempt(
   );
 }
 
+export async function enqueueDurableJobWithExecutor(
+  executor: SqlExecutor,
+  idFactory: IdFactory,
+  input: DurableJobEnqueueInput,
+): Promise<{ readonly job: DurableJob; readonly duplicate: boolean }> {
+  assertJobPayload(input.payload);
+  const version = input.version ?? 1;
+  const priority = input.priority ?? 0;
+  const maxAttempts = input.maxAttempts ?? 8;
+  if (
+    !jobName.test(input.type) ||
+    !stableKey.test(input.idempotencyKey) ||
+    !stableKey.test(input.correlationId) ||
+    (input.deduplicationKey !== undefined && !stableKey.test(input.deduplicationKey)) ||
+    (input.causationId !== undefined && !stableKey.test(input.causationId)) ||
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    !Number.isSafeInteger(priority) ||
+    priority < -100 ||
+    priority > 100 ||
+    !Number.isSafeInteger(maxAttempts) ||
+    maxAttempts < 1 ||
+    maxAttempts > 50 ||
+    !Number.isFinite(input.scheduledAt.getTime())
+  ) {
+    throw new DomainError('invalid_input', 'Invalid durable job envelope');
+  }
+  const id = idFactory.next('job');
+  const canonical = canonicalPayload(input.payload);
+  const hash = payloadHash(input.payload);
+  const inserted = await executor.query(
+    `INSERT INTO durable_jobs(
+       id, job_type, job_version, household_id, classification, payload, payload_hash,
+       idempotency_key, deduplication_key, state, priority, scheduled_at, next_attempt_at,
+       max_attempts, correlation_id, causation_id, created_at
+     ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,'queued',$10,$11,$11,$12,$13,$14,$11)
+     ON CONFLICT (job_type, idempotency_key) DO NOTHING`,
+    [
+      id,
+      input.type,
+      version,
+      input.householdId ?? null,
+      input.classification ?? 'internal',
+      canonical,
+      hash,
+      input.idempotencyKey,
+      input.deduplicationKey ?? null,
+      priority,
+      input.scheduledAt.toISOString(),
+      maxAttempts,
+      input.correlationId,
+      input.causationId ?? null,
+    ],
+  );
+  const result = await executor.query<JobRow>(
+    `${jobProjection} WHERE job_type = $1 AND idempotency_key = $2`,
+    [input.type, input.idempotencyKey],
+  );
+  const row = result.rows[0];
+  if (row === undefined) throw new Error('Durable job enqueue did not persist');
+  if (
+    row.payload_hash !== hash ||
+    row.job_version !== version ||
+    row.household_id !== (input.householdId ?? null) ||
+    row.classification !== (input.classification ?? 'internal') ||
+    row.deduplication_key !== (input.deduplicationKey ?? null) ||
+    row.priority !== priority ||
+    row.max_attempts !== maxAttempts
+  ) {
+    throw new DomainError('conflict', 'Job idempotency key has conflicting evidence');
+  }
+  // A duplicate delivery keeps the first schedule and trace context; retries cannot move work.
+  return { job: mapJob(row), duplicate: inserted.rowCount === 0 };
+}
+
 export class DurableJobRepository {
   constructor(
     private readonly database: Database,
     private readonly idFactory: IdFactory = randomIdFactory,
   ) {}
 
-  async enqueue(input: {
-    readonly type: string;
-    readonly version?: number;
-    readonly householdId?: string;
-    readonly classification?: DurableJob['classification'];
-    readonly payload: DurableJobPayload;
-    readonly idempotencyKey: string;
-    readonly deduplicationKey?: string;
-    readonly priority?: number;
-    readonly scheduledAt: Date;
-    readonly maxAttempts?: number;
-    readonly correlationId: string;
-    readonly causationId?: string;
-  }): Promise<{ readonly job: DurableJob; readonly duplicate: boolean }> {
-    assertJobPayload(input.payload);
-    const version = input.version ?? 1;
-    const priority = input.priority ?? 0;
-    const maxAttempts = input.maxAttempts ?? 8;
-    if (
-      !jobName.test(input.type) ||
-      !stableKey.test(input.idempotencyKey) ||
-      !stableKey.test(input.correlationId) ||
-      (input.deduplicationKey !== undefined && !stableKey.test(input.deduplicationKey)) ||
-      (input.causationId !== undefined && !stableKey.test(input.causationId)) ||
-      !Number.isSafeInteger(version) ||
-      version < 1 ||
-      !Number.isSafeInteger(priority) ||
-      priority < -100 ||
-      priority > 100 ||
-      !Number.isSafeInteger(maxAttempts) ||
-      maxAttempts < 1 ||
-      maxAttempts > 50 ||
-      !Number.isFinite(input.scheduledAt.getTime())
-    ) {
-      throw new DomainError('invalid_input', 'Invalid durable job envelope');
-    }
-    const id = this.idFactory.next('job');
-    const canonical = canonicalPayload(input.payload);
-    const hash = payloadHash(input.payload);
-    const inserted = await this.database.query(
-      `INSERT INTO durable_jobs(
-         id, job_type, job_version, household_id, classification, payload, payload_hash,
-         idempotency_key, deduplication_key, state, priority, scheduled_at, next_attempt_at,
-         max_attempts, correlation_id, causation_id, created_at
-       ) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,'queued',$10,$11,$11,$12,$13,$14,$11)
-       ON CONFLICT (job_type, idempotency_key) DO NOTHING`,
-      [
-        id,
-        input.type,
-        version,
-        input.householdId ?? null,
-        input.classification ?? 'internal',
-        canonical,
-        hash,
-        input.idempotencyKey,
-        input.deduplicationKey ?? null,
-        priority,
-        input.scheduledAt.toISOString(),
-        maxAttempts,
-        input.correlationId,
-        input.causationId ?? null,
-      ],
-    );
-    const result = await this.database.query<JobRow>(
-      `${jobProjection} WHERE job_type = $1 AND idempotency_key = $2`,
-      [input.type, input.idempotencyKey],
-    );
-    const row = result.rows[0];
-    if (row === undefined) throw new Error('Durable job enqueue did not persist');
-    if (
-      row.payload_hash !== hash ||
-      row.job_version !== version ||
-      row.household_id !== (input.householdId ?? null) ||
-      row.classification !== (input.classification ?? 'internal') ||
-      row.deduplication_key !== (input.deduplicationKey ?? null) ||
-      row.priority !== priority ||
-      row.max_attempts !== maxAttempts
-    ) {
-      throw new DomainError('conflict', 'Job idempotency key has conflicting evidence');
-    }
-    // A duplicate delivery keeps the first schedule and trace context; retries cannot move work.
-    return { job: mapJob(row), duplicate: inserted.rowCount === 0 };
+  async enqueue(
+    input: DurableJobEnqueueInput,
+  ): Promise<{ readonly job: DurableJob; readonly duplicate: boolean }> {
+    return enqueueDurableJobWithExecutor(this.database, this.idFactory, input);
   }
 
   async claim(input: {

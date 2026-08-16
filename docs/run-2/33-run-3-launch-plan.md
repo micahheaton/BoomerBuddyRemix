@@ -10,7 +10,7 @@ Run 3 should convert Run 2’s local/staging foundation into a dated launch-deci
 
 **Founder decisions:** initial U.S. geography, working brand, offer/price candidates, web/mobile channel order, device matrix, truthful support hours, test/research budget, safety/evaluation thresholds, acceptable residual risk, and whether direct-family or sponsor discovery is primary.
 
-**Actions:** reproduce the closed Run 2 integrated test/security gate against a tagged candidate; obtain the authorized machine-readable advisory inventory and identify, reachability-review, fix, or explicitly risk-accept the 11 high and 7 moderate findings reported by the Run 2 install summary; inventory every environment variable, data class, provider, owner, professional dependency, and rollback. Assign one accountable human and backup per launch-critical queue.
+**Actions:** freeze a tagged candidate, reproduce the full Run 2 type/lint/format/test/coverage/build/browser gate, and record current machine-readable dependency evidence rather than carrying forward earlier counts. Execute the expanded clean-clone, V1-runtime guard, disposable PostgreSQL verifier, and required OCI path. Inventory every environment variable, data class, provider, owner, professional dependency, migration, and rollback. Assign one accountable human and backup per launch-critical queue.
 
 **Exit evidence:** signed scope/budget, risk acceptance boundaries, clean build provenance/SBOM, no open in-scope Critical/High defect, and a stop list. If authority or budget is missing, stop before creating accounts.
 
@@ -31,9 +31,10 @@ Create only founder-approved, BoomerBuddy LLC-owned accounts with phishing-resis
 ## Gate 2 — Prove staging, data, and recovery
 
 - Deploy an access-restricted staging stack from the canonical tag, not a developer workstation.
-- Run migrations and concurrency/locking tests on real PostgreSQL; test pooled/direct connections and least-privilege database roles.
+- Run migrations and the expanded queue/outbox verifier on real PostgreSQL; test pooled/direct connections, least-privilege roles, competing claims, lease loss/reclaim, receipts, causal order, poison-event blocking, audited replay chains, and reconciliation intent.
 - Back up, destroy a disposable staging copy, restore to a clean project, and reconcile row counts/checksums, grants, consent projections, jobs, and deletion state.
-- Exercise worker crash/lease recovery, duplicate consumers, retry/dead letter/replay, retention recurrence, outbox failure, shutdown, provider timeout, and monitoring alerts under multi-instance load.
+- Exercise worker crash/lease recovery, duplicate consumers, retention, commerce, growth projections, lifecycle/health, notification, intelligence/evaluation, retry/dead letter/replay, shutdown, provider timeout, and monitoring under multi-instance load. Prove that an approved lifecycle message reaches only the intended reviewed sandbox destination, or keep external delivery disabled.
+- Put Public Check behind the selected CDN/WAF/challenge layer; verify real proxy topology, client attribution, global/per-client quotas, concurrency, address rotation, distributed load, body limits, redacted telemetry, purge, and fail-closed behavior. Application HMAC controls alone do not pass this gate.
 - Complete the Replit-loss drill from external source, environment inventory, database/object backups, DNS plan, and mobile build ownership.
 
 **Exit evidence:** timed restore/RPO/RTO result, migration/rollback decision, alert delivery to a named owner/backup, redacted logs, and a signed loss-drill record. Configuration alone does not pass.
@@ -58,7 +59,7 @@ Commission qualified, independent work within the approved budget:
 - independently double-reviewed, rights-cleared fraud/action corpus and agreed release thresholds; and
 - Philippines employment/privacy/security advice only if that operating option remains in scope.
 
-Prepare incident response, breach notification, customer rights, deletion verification, refund, complaint, vulnerability disclosure, accessibility support, and vendor-failure runbooks. Buy neither a compliance badge nor a broad intelligence contract as a substitute for evidence.
+Prepare incident response, breach notification, customer rights, deletion verification, refund, complaint, vulnerability disclosure, accessibility support, and vendor-failure runbooks. Execute privacy request verification/review against consented synthetic records, then prove legally reviewed export/deletion/correction/restriction fulfillment and processor/backup reconciliation; Run 2's content-free evidence plan alone does not pass. Buy neither a compliance badge nor a broad intelligence contract as a substitute for evidence.
 
 **Exit evidence:** dated professional reports, remediation traceability, accepted residual-risk owner, approved disclosures/contracts, insurance decision, data/processor register, and current tax/store analysis.
 
@@ -66,13 +67,15 @@ Prepare incident response, breach notification, customer rights, deletion verifi
 
 With separate research authorization and consent—not marketing—run moderated studies with older adults and adult-child pairs on comprehension, self-serve orientation, Check, consent, Trusted Circle, recovery, pricing language, and name trust. Record failures and uncertainty; do not fabricate conversion or safety outcomes.
 
+Execute the versioned [Human Research Protocol](./HUMAN-RESEARCH-PROTOCOL.md), [Moderator Guides](./HUMAN-RESEARCH-MODERATOR-GUIDES.md), and [Research Forms](./HUMAN-RESEARCH-FORMS.md). Freeze recruiting quotas, consent/privacy handling, concept order, task versions, instrumentation, independent coding/adjudication, and stop rules before the first participant; a session may not double as marketing, support, or sales outreach.
+
 Rehearse operations using synthetic and consented research cases:
 
 - support taxonomy, routing, truthful hours, senior safety escalation, and incident commander;
-- billing reconciliation, refunds, privacy requests, account recovery, provider outage, and status communications;
+- billing reconciliation, refunds, end-to-end privacy fulfillment, account recovery, provider outage, and status communications;
 - Owner Brief/Attention noise, approval expiry, global kill-switch drill, and two-week founder-absence tabletop;
 - monthly close, revenue/deferred-revenue/tax/refund reconciliation, spend alerts, and runway; and
-- B2B discovery protocol using official institution data without enrichment or outreach unless separately approved.
+- B2B discovery protocol using official institution data and the fixture-only [Apollo Enrichment Setup](./APOLLO-ENRICHMENT-SETUP.md) to rehearse minimization, provenance, cost/rate-limit handling, and the kill switch. Real enrichment, persistence, or outreach remains separately approved and externally blocked.
 
 Update the [50K economics](./50K-SUBSCRIBER-MODEL.md) with current quotes and research observations, the [staffing model](./STAFFING-AND-PHILIPPINES-OPS.md) with measured handle times, and the [Founder Dependency Score](./FOUNDER-DEPENDENCY-MODEL.md) with a four-week time study.
 

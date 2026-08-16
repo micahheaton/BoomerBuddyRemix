@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { PublicCheckRepository } from '@boomerbuddy/persistence';
+import { GrowthRuntimeRepository, PublicCheckRepository } from '@boomerbuddy/persistence';
 import {
   browserHeaders,
   createApiHarness,
@@ -172,6 +172,31 @@ describe('privacy-bounded public Check journey', () => {
     expect(serializedOperational).not.toContain(publicContent);
     expect(serializedOperational).not.toContain(result.conversionGrant.token);
     expect(serializedOperational).toContain('public-check-save-v1');
+
+    const growth = new GrowthRuntimeRepository(harness.database);
+    await growth.projectPending({ limit: 100, now: harness.clock.now() });
+    const acquisition = await harness.database.query<{
+      channel: string;
+      milestone: string;
+      workflow_state: string;
+    }>(
+      `SELECT touchpoint.channel, touchpoint.milestone, workflow.state AS workflow_state
+       FROM acquisition_touchpoints touchpoint
+       JOIN lifecycle_workflows workflow ON workflow.household_id = touchpoint.subject_id
+       WHERE touchpoint.subject_kind = 'household'
+         AND touchpoint.subject_id = 'household-sunrise'
+         AND touchpoint.milestone = 'signup'
+         AND workflow.trigger_event_id = (
+           SELECT id FROM outbox_events
+           WHERE event_type = 'public_check.saved.v1' AND aggregate_id = $1
+         )`,
+      [result.id],
+    );
+    expect(acquisition.rows[0]).toEqual({
+      channel: 'direct',
+      milestone: 'signup',
+      workflow_state: 'completed',
+    });
 
     const repeated = await harness.app.inject({
       method: 'POST',

@@ -30,6 +30,22 @@ export default tseslint.config(
       ...reactHooks.configs.flat.recommended.rules,
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [
+                '**/reference/boomerbuddy-v1',
+                '**/reference/boomerbuddy-v1/**',
+                '**/reference/**/boomerbuddy-v1',
+                '**/reference/**/boomerbuddy-v1/**',
+              ],
+              message: 'BoomerBuddy 2.0 runtime code must not import the read-only V1 reference.',
+            },
+          ],
+        },
+      ],
     },
   },
 );

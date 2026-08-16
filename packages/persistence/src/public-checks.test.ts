@@ -60,13 +60,16 @@ describe('privacy-bounded public Check persistence', () => {
   async function interaction(
     attribution: PublicCheckAttribution = { source: 'direct', campaign: 'none' },
   ): Promise<PublicCheckInteraction> {
-    const context = await repository.createContext({ attribution, now });
-    return repository.consumeContext({ token: context.token, now });
+    const clientKey = repository.clientKeyForNetworkAddress('198.51.100.10');
+    const context = await repository.createContext({ attribution, clientKey, now });
+    return repository.consumeContext({ token: context.token, clientKey, now });
   }
 
   it('mints a short-lived context and stores only content-free attribution and quota data', async () => {
+    const clientKey = repository.clientKeyForNetworkAddress('198.51.100.10');
     const context = await repository.createContext({
       attribution: { source: 'campaign', campaign: 'launch_2026' },
+      clientKey,
       now,
     });
     expect(context.remainingChecks).toBe(3);
@@ -77,14 +80,96 @@ describe('privacy-bounded public Check persistence', () => {
     expect(serialized).not.toContain(context.token);
     expect(serialized).not.toContain('content');
 
-    await expect(repository.consumeContext({ token: context.token, now })).resolves.toEqual(
-      expect.objectContaining({ source: 'campaign', campaign: 'launch_2026' }),
-    );
+    await expect(
+      repository.consumeContext({ token: context.token, clientKey, now }),
+    ).resolves.toEqual(expect.objectContaining({ source: 'campaign', campaign: 'launch_2026' }));
     const quota = await database.query<{ used_count: number } & Record<string, unknown>>(
       `SELECT used_count FROM public_check_quota_buckets
        WHERE scope = 'global_public_check'`,
     );
     expect(quota.rows[0]?.used_count).toBe(1);
+  });
+
+  it('binds grants to privacy-HMAC clients and enforces client quotas independently', async () => {
+    repository = new PublicCheckRepository(
+      database,
+      {
+        encryptionKey: Buffer.alloc(32, 21),
+        encryptionKeyVersion: 1,
+        hmacKey: Buffer.alloc(32, 22),
+        hmacKeyVersion: 1,
+      },
+      sequentialIds(),
+      10,
+      10,
+      10,
+      1,
+    );
+    const firstAddress = '198.51.100.21';
+    const secondAddress = '198.51.100.22';
+    const firstKey = repository.clientKeyForNetworkAddress(firstAddress);
+    const secondKey = repository.clientKeyForNetworkAddress(secondAddress);
+    const first = await repository.createContext({
+      attribution: { source: 'direct', campaign: 'none' },
+      clientKey: firstKey,
+      now,
+    });
+    await expect(
+      repository.createContext({
+        attribution: { source: 'direct', campaign: 'none' },
+        clientKey: firstKey,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    await expect(
+      repository.createContext({
+        attribution: { source: 'direct', campaign: 'none' },
+        clientKey: secondKey,
+        now,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ remainingChecks: 3 }));
+    await expect(
+      repository.consumeContext({ token: first.token, clientKey: secondKey, now }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    const stored = JSON.stringify(
+      await database.query<Record<string, unknown>>(
+        'SELECT client_key_hmac FROM public_check_contexts ORDER BY id',
+      ),
+    );
+    expect(stored).not.toContain(firstAddress);
+    expect(stored).not.toContain(secondAddress);
+  });
+
+  it('holds bounded expiring analysis leases per client and globally', async () => {
+    repository = new PublicCheckRepository(
+      database,
+      {
+        encryptionKey: Buffer.alloc(32, 21),
+        encryptionKeyVersion: 1,
+        hmacKey: Buffer.alloc(32, 22),
+        hmacKeyVersion: 1,
+      },
+      sequentialIds(),
+      10,
+      10,
+      10,
+      10,
+      2,
+      1,
+    );
+    const firstKey = repository.clientKeyForNetworkAddress('198.51.100.31');
+    const secondKey = repository.clientKeyForNetworkAddress('198.51.100.32');
+    const firstLease = await repository.acquireAnalysisLease({ clientKey: firstKey, now });
+    await expect(
+      repository.acquireAnalysisLease({ clientKey: firstKey, now }),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    await expect(repository.acquireAnalysisLease({ clientKey: secondKey, now })).resolves.toMatch(
+      /^public_analysis_lease_/u,
+    );
+    await repository.releaseAnalysisLease({ leaseId: firstLease, clientKey: firstKey });
+    await expect(repository.acquireAnalysisLease({ clientKey: firstKey, now })).resolves.toMatch(
+      /^public_analysis_lease_/u,
+    );
   });
 
   it('encrypts a redacted transient result and stores neither content nor bearer token', async () => {

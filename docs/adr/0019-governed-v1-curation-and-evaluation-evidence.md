@@ -26,6 +26,18 @@ Release reporting includes coverage gaps, critical false negatives, false positi
 
 Knowledge improves slowly but remains explainable, reviewable, and portable. Rights and freshness work may reject many V1 candidates. Separating editorial assets, provider evidence, evaluation labels, and runtime decisions prevents source counts or test passes from being misrepresented as a moat, calibration, or prevented loss.
 
+Run 2 adds durable `intelligence.refresh` and `evaluation.run` work. Refresh records source freshness and governed draft state but cannot publish or activate an asset. Evaluation runs the governed local synthetic corpus and stores only a content-free summary. The portability guard also rejects direct imports and statically decodable normalized, concatenated, or URI-encoded paths into the V1 reference tree.
+
+## Migration and rollback
+
+Curation is one-way proposal creation: V1 candidates are copied only after schema validation into new draft 2.0 records with their own provenance and rights fields. Nothing points runtime resolution into the V1 tree, and no bulk activation occurs. A runtime release pins exact active asset and evaluation versions; migration checks reject missing review, expiry, rights, conflicts, or reviewer/adjudicator separation.
+
+Rollback moves the runtime pointer to the last accepted 2.0 version and deprecates or rejects the faulty candidate through a new lifecycle record. It preserves source, review, disagreement, adjudication, run, and adverse-case evidence; it never deletes a failed evaluation, changes a sealed label to improve a score, or restores a V1 runtime import. Customer-derived material remains excluded unless a separately consented, rights-reviewed process exists.
+
+## Security and privacy consequences
+
+Source assets and evaluation cases require explicit rights, purpose, provenance, sanitization, retention, access, and deletion policy. Sealed cases are separated from tuning access; reviewer identity and disagreement records are protected from inappropriate editing while remaining auditable. Fixtures, reports, logs, and provider prompts must exclude live secrets and unnecessary personal data. Official-source status does not authorize unrestricted reuse, and model-generated or single-author labels are never independent ground truth.
+
 ## Rejected alternatives
 
 - Runtime imports or bulk copy from V1.
@@ -36,11 +48,11 @@ Knowledge improves slowly but remains explainable, reviewable, and portable. Rig
 
 ## Verification
 
-Static checks reject imports from `reference/boomerbuddy-v1/`. Schema tests require provenance, rights, version, lifecycle, dates, intended use, and reviewer evidence; duplicate/conflict/deprecation tests prove deterministic behavior. Evaluation tests enforce sealed-split isolation, reviewer/adjudicator separation, rules/provider version capture, required/prohibited actions, critical-case release blocking, reproducibility, and truthful `not_calibrated` labeling.
+AST/static-string checks reject direct imports and statically decodable path construction into `reference/boomerbuddy-v1/`. Schema tests require provenance, rights, version, lifecycle, dates, intended use, and reviewer evidence; duplicate/conflict/deprecation tests prove deterministic behavior. Operational tests prove durable refresh/evaluation receipts, retry/dead-letter behavior, no publication/activation, and content-free summary evidence. Evaluation tests enforce sealed-split isolation, reviewer/adjudicator separation, rules/provider version capture, required/prohibited actions, critical-case release blocking, reproducibility, and truthful `not_calibrated` labeling.
 
 ## Evidence boundary
 
-Schemas, curation proposals, repository rules, and the evaluation harness are not account-blocked. Reuse rights, official-source currency, jurisdictional applicability, expert adjudication, and a representative corpus are **BLOCKED BY SOURCE EVIDENCE / PROFESSIONAL REVIEW / DATASET** until recorded. Curated-item totals are not commercial or quality evidence.
+Schemas, curation proposals, repository rules, durable local refresh/evaluation jobs, and the expanded V1 guard are implemented without provider accounts. No job publishes content, activates a draft, or calls a live intelligence provider. Reuse rights, official-source currency, jurisdictional applicability, expert adjudication, and a representative corpus are **BLOCKED BY SOURCE EVIDENCE / PROFESSIONAL REVIEW / DATASET** until recorded. Curated-item totals and local runs are not commercial or quality evidence.
 
 ## Primary sources
 

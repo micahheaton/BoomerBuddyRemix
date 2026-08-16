@@ -235,6 +235,53 @@ export const createPrivacyRequestResponseSchema = z.object({
   dueAt: isoDateTimeSchema,
 });
 
+export const privacyRequestSchema = z.object({
+  id: opaqueIdSchema,
+  personId: opaqueIdSchema.optional(),
+  householdId: opaqueIdSchema.optional(),
+  requestKind: z.enum(['access', 'export', 'delete', 'correct', 'restrict']),
+  identityVerificationState: z.enum(['pending', 'verified', 'failed']),
+  state: z.enum(['received', 'verified', 'in_progress', 'completed', 'denied']),
+  dueAt: isoDateTimeSchema,
+  createdAt: isoDateTimeSchema,
+  updatedAt: isoDateTimeSchema,
+  completedAt: isoDateTimeSchema.optional(),
+  plan: z
+    .object({
+      kind: z.enum([
+        'access_summary',
+        'export_manifest',
+        'deletion_plan',
+        'correction_plan',
+        'restriction_plan',
+      ]),
+      dataCategories: z.array(attributionTokenSchema).max(50),
+      recordCounts: z.record(z.string(), z.number().int().nonnegative()),
+      containsCustomerContent: z.literal(false),
+      requiresProfessionalReview: z.boolean(),
+      createdAt: isoDateTimeSchema,
+    })
+    .optional(),
+});
+
+export const privacyRequestListResponseSchema = z.object({
+  requests: z.array(privacyRequestSchema),
+  fulfillmentMode: z.literal('evidence_plan_only'),
+  limitation: z.literal(
+    'Run 2 records identity review and a content-free fulfillment plan; it does not claim completed export or erasure.',
+  ),
+});
+
+export const privacyRequestParamsSchema = z.object({ requestId: opaqueIdSchema }).strict();
+
+export const advancePrivacyRequestSchema = z
+  .object({
+    action: z.enum(['verify_identity', 'begin_review', 'record_plan', 'deny']),
+    evidenceReference: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._/-]{2,199}$/u),
+  })
+  .strict();
+
 export type CreditUnionTargetsResponse = z.infer<typeof creditUnionTargetsResponseSchema>;
 export type OpportunityQueueResponse = z.infer<typeof opportunityQueueResponseSchema>;
 export type OwnerBriefResponse = z.infer<typeof ownerBriefResponseSchema>;
+export type PrivacyRequestDto = z.infer<typeof privacyRequestSchema>;

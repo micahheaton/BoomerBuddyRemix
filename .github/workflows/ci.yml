@@ -47,6 +47,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql://boomerbuddy:local-ci-password@127.0.0.1:5432/boomerbuddy_ci
+      BB_ALLOW_POSTGRES_VERIFICATION: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

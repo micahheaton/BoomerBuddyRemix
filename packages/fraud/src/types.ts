@@ -39,7 +39,10 @@ export interface FeatureVector {
   };
 }
 
+declare const preparedCheckInputBrand: unique symbol;
+
 export interface PreparedCheckInput {
+  readonly [preparedCheckInputBrand]: true;
   readonly kind: 'text' | 'url';
   readonly redactedContent: string;
   readonly redactions: readonly SafeRedaction[];
@@ -47,9 +50,13 @@ export interface PreparedCheckInput {
 }
 
 export const providerRoles = [
-  'structural_reputation',
+  'local_signals',
+  'domain_reputation',
+  'url_reputation',
+  'message_reasoning',
+  'verified_organization',
   'campaign_intelligence',
-  'language_pattern',
+  'recovery_authority',
 ] as const;
 export type ProviderRole = (typeof providerRoles)[number];
 
@@ -58,26 +65,75 @@ export const providerInputFields = [
   'signals',
   'byteLengthBucket',
   'urlStructure',
+  'registrableDomain',
+  'normalizedUrl',
+  'redactedContent',
+  'organizationCandidates',
 ] as const;
 export type ProviderInputField = (typeof providerInputFields)[number];
 
+export const organizationCandidateIds = [
+  'us-internal-revenue-service',
+  'us-social-security-administration',
+  'us-medicare',
+  'us-federal-bureau-of-investigation',
+  'local-law-enforcement',
+  'financial-institution',
+  'technology-support',
+] as const;
+export type OrganizationCandidateId = (typeof organizationCandidateIds)[number];
+
+declare const providerDispatchInputBrand: unique symbol;
+
+export interface ProviderDispatchInput {
+  readonly [providerDispatchInputBrand]: true;
+  readonly features: FeatureVector;
+  /** Typed-redacted representation; never the original submitted value. */
+  readonly redactedContent: string;
+  /** Registrable domain only; excludes subdomain, path, query, fragment, and credentials. */
+  readonly registrableDomain?: string;
+  /** Normalized URL with credentials, query, and fragment removed. */
+  readonly normalizedUrl?: string;
+  /** Controlled identifiers derived locally, never arbitrary organization prose. */
+  readonly organizationCandidates: readonly OrganizationCandidateId[];
+}
+
 export type ProviderRequest =
   | {
-      readonly role: 'structural_reputation';
-      readonly artifactKind: FeatureVector['artifactKind'];
-      readonly signals: readonly SignalKind[];
-      readonly urlStructure?: FeatureVector['url'];
-    }
-  | {
-      readonly role: 'campaign_intelligence';
-      readonly artifactKind: FeatureVector['artifactKind'];
-      readonly signals: readonly SignalKind[];
-    }
-  | {
-      readonly role: 'language_pattern';
+      readonly role: 'local_signals';
       readonly artifactKind: FeatureVector['artifactKind'];
       readonly signals: readonly SignalKind[];
       readonly byteLengthBucket: FeatureVector['byteLengthBucket'];
+      readonly urlStructure?: FeatureVector['url'];
+    }
+  | {
+      readonly role: 'domain_reputation';
+      readonly registrableDomain: string;
+    }
+  | {
+      readonly role: 'url_reputation';
+      readonly normalizedUrl: string;
+    }
+  | {
+      readonly role: 'message_reasoning';
+      readonly redactedContent: string;
+      readonly signals: readonly SignalKind[];
+    }
+  | {
+      readonly role: 'verified_organization';
+      readonly organizationCandidates: readonly OrganizationCandidateId[];
+    }
+  | {
+      readonly role: 'campaign_intelligence';
+      readonly redactedContent: string;
+      readonly signals: readonly SignalKind[];
+    }
+  | {
+      readonly role: 'recovery_authority';
+      readonly artifactKind: FeatureVector['artifactKind'];
+      readonly signals: readonly SignalKind[];
+      readonly organizationCandidates: readonly OrganizationCandidateId[];
+      readonly registrableDomain?: string;
     };
 
 export interface ProviderManifest {
@@ -86,6 +142,7 @@ export interface ProviderManifest {
   readonly role: ProviderRole;
   readonly capabilityId: string;
   readonly dataPolicyVersion: string;
+  readonly supportedArtifactKinds: readonly FeatureVector['artifactKind'][];
   readonly inputFields: readonly ProviderInputField[];
   readonly deployment: 'local_unknown' | 'deterministic_mock' | 'live';
   readonly networkEgress: 'none' | 'declared_provider_only';
@@ -93,6 +150,9 @@ export interface ProviderManifest {
   readonly trainingUse: 'prohibited' | 'provider_declared';
   readonly timeoutMs: number;
   readonly costUnits: number;
+  readonly maximumEvidenceAgeMs: number;
+  readonly maximumRequestsPerMinute: number;
+  readonly failureSemantics: 'unknown';
 }
 
 export interface ProviderObservation {
@@ -100,7 +160,8 @@ export interface ProviderObservation {
   readonly label: string;
   readonly disposition: 'malicious' | 'suspicious' | 'not_found';
   readonly weight: number;
-  readonly validUntil?: string;
+  readonly observedAt: string;
+  readonly validUntil: string;
   readonly limitation: string;
 }
 
@@ -116,11 +177,15 @@ export interface ProviderProvenance {
   readonly role: ProviderRole;
   readonly capabilityId: string;
   readonly dataPolicyVersion: string;
+  readonly supportedArtifactKinds: readonly FeatureVector['artifactKind'][];
   readonly deployment: ProviderManifest['deployment'];
   readonly networkEgress: ProviderManifest['networkEgress'];
   readonly retention: ProviderManifest['retention'];
   readonly trainingUse: ProviderManifest['trainingUse'];
   readonly inputFields: readonly ProviderInputField[];
+  readonly maximumEvidenceAgeMs: number;
+  readonly maximumRequestsPerMinute: number;
+  readonly failureSemantics: ProviderManifest['failureSemantics'];
   readonly policyVersion: string;
 }
 
@@ -145,10 +210,29 @@ export interface ProviderDispatchPolicy {
   readonly maximumProviders: number;
   readonly maximumTotalCostUnits: number;
   readonly maximumTimeoutMs: number;
+  readonly maximumEvidenceAgeMs: number;
+  readonly maximumRequestsPerProviderPerMinute: number;
   readonly allowNetworkEgress: boolean;
   readonly allowProviderRetention: boolean;
   readonly allowProviderTraining: boolean;
   readonly killSwitch: () => boolean;
+  /** Code-owned capability revocation; provider manifests cannot override it. */
+  readonly capabilityKillSwitch: (capability: {
+    readonly providerName: string;
+    readonly providerVersion: string;
+    readonly capabilityId: string;
+  }) => boolean;
+  /** Required for live adapters; implementation must reserve atomically across processes. */
+  readonly reserveDurableRateLimit?: (request: {
+    /** Stable account/vendor bucket shared by all adapter versions and capabilities. */
+    readonly providerRateLimitKey: string;
+    readonly providerName: string;
+    readonly providerVersion: string;
+    readonly capabilityId: string;
+    readonly providerMaximumPerMinute: number;
+    readonly capabilityMaximumPerMinute: number;
+    readonly requestedAtEpochMs: number;
+  }) => Promise<boolean>;
 }
 
 export interface FraudEvidence {
@@ -165,6 +249,7 @@ export interface FraudEvidence {
   };
   readonly observedAt: string;
   readonly validUntil?: string;
+  readonly freshness?: 'current' | 'stale';
   readonly limitation: string;
 }
 

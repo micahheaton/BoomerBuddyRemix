@@ -1,6 +1,6 @@
 # Founder Decision Register
 
-Last updated: 2026-08-16 after Build Run 1. The deeper decision analysis remains in [Gauntlet Zero — Founder Decisions](./gauntlet-zero/42-founder-decisions.md).
+Last updated: 2026-08-16 after bounded Run 2 reconciliation. The deeper decision analysis remains in [Gauntlet Zero — Founder Decisions](./gauntlet-zero/42-founder-decisions.md).
 
 Build Run 1 used reversible local hypotheses, so none of these decisions blocked it. They do govern research, spending, or external commitments; the implementation does not decide them by default.
 

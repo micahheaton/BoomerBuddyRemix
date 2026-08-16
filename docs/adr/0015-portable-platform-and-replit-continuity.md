@@ -26,6 +26,16 @@ CI is host-independent and runs locked install, formatting/lint/types, unit/inte
 
 The architecture accepts adapter and documentation overhead in exchange for avoiding a workspace/vendor single point of failure. Preferred vendors can still accelerate staging. Some vendor-specific features may be used behind ports, but only with export and fallback evidence.
 
+## Migration and rollback
+
+Platform migration is staged by surface: establish the external source and recovery owners, reproduce locked builds, provision non-public environments, restore a disposable database/object copy, validate identity/DNS/telemetry boundaries, then move one traffic or worker role at a time. No provider metadata replaces canonical IDs or PostgreSQL state, and no production cutover occurs until rollback evidence exists.
+
+Rollback uses the last verified image/config plus independently controlled database/object recovery and DNS records. A provider change must preserve export, credential rotation, schema compatibility, and an explicit return path; Replit is never the rollback system of record. Database rollback prefers restore to a disposable verified point or a forward corrective migration over destructive down-migration. Failed recovery or missing custody leaves the affected surface unavailable rather than silently falling back to development identity, secrets, or storage.
+
+## Security and privacy consequences
+
+Every provider adds account ownership, region, subprocessor, DPA, retention, access, secret, billing, export, and termination risk. Company-owned MFA/recovery, least privilege, environment separation, KMS/rotation, private storage, encrypted backups, redacted telemetry, incident notification, and access review are launch gates. Backup copies and source bundles need their own encryption, retention, custody, and restore audit. Portability must not become uncontrolled replication of customer data or secrets.
+
 ## Rejected alternatives
 
 - Replit checkpoints, workspace storage, database, secrets, or deployments as the only copy.

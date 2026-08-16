@@ -23,7 +23,12 @@ export function registerPublicCheckRoutes(
   app.post('/v1/public/check-contexts', async (request, reply) => {
     const now = context.now();
     const body = createPublicCheckContextRequestSchema.parse(request.body ?? {});
-    const grant = await publicChecks.createContext({ attribution: body.attribution, now });
+    const clientKey = publicChecks.clientKeyForNetworkAddress(request.ip);
+    const grant = await publicChecks.createContext({
+      attribution: body.attribution,
+      clientKey,
+      now,
+    });
     return reply.code(201).send(
       createPublicCheckContextResponseSchema.parse({
         context: {
@@ -38,45 +43,55 @@ export function registerPublicCheckRoutes(
   app.post('/v1/public/checks', async (request, reply) => {
     const now = context.now();
     const body = createPublicCheckRequestSchema.parse(request.body);
-    const interaction = await publicChecks.consumeContext({ token: body.contextToken, now });
-    const prepared = prepareCheckInput({ kind: body.kind, content: body.content });
-    const assessment = await analyzePreparedCheck(prepared, {
-      provider: new LocalUnknownProvider(),
-      now,
-    });
-    const decision = decisionFromAssessment(assessment);
-    const grant = await publicChecks.createResult({
-      kind: prepared.kind,
-      redactedContent: prepared.redactedContent,
-      decision,
-      inputSafety: {
-        redactions: prepared.redactions,
-        flags: prepared.safetyFlags,
-      },
-      interaction,
-      now,
-    });
-    await publicChecks.recordCompleted(interaction, now);
-    return reply.code(201).send(
-      createPublicCheckResponseSchema.parse({
-        result: {
-          id: grant.id,
-          kind: prepared.kind,
-          risk: assessment.risk,
-          evidenceSufficiency: assessment.confidence,
-          calibration: assessment.calibration,
-          summary: decision.summary,
-          actions: decision.actions,
-          inputSafety: assessment.inputSafety,
-          expiresAt: grant.expiresAt.toISOString(),
-          conversionGrant: {
-            token: grant.conversionToken,
-            expiresAt: grant.expiresAt.toISOString(),
-            oneTime: true,
-          },
+    const clientKey = publicChecks.clientKeyForNetworkAddress(request.ip);
+    const leaseId = await publicChecks.acquireAnalysisLease({ clientKey, now });
+    try {
+      const interaction = await publicChecks.consumeContext({
+        token: body.contextToken,
+        clientKey,
+        now,
+      });
+      const prepared = prepareCheckInput({ kind: body.kind, content: body.content });
+      const assessment = await analyzePreparedCheck(prepared, {
+        provider: new LocalUnknownProvider(),
+        now,
+      });
+      const decision = decisionFromAssessment(assessment);
+      const grant = await publicChecks.createResult({
+        kind: prepared.kind,
+        redactedContent: prepared.redactedContent,
+        decision,
+        inputSafety: {
+          redactions: prepared.redactions,
+          flags: prepared.safetyFlags,
         },
-      }),
-    );
+        interaction,
+        now,
+      });
+      await publicChecks.recordCompleted(interaction, now);
+      return reply.code(201).send(
+        createPublicCheckResponseSchema.parse({
+          result: {
+            id: grant.id,
+            kind: prepared.kind,
+            risk: assessment.risk,
+            evidenceSufficiency: assessment.confidence,
+            calibration: assessment.calibration,
+            summary: decision.summary,
+            actions: decision.actions,
+            inputSafety: assessment.inputSafety,
+            expiresAt: grant.expiresAt.toISOString(),
+            conversionGrant: {
+              token: grant.conversionToken,
+              expiresAt: grant.expiresAt.toISOString(),
+              oneTime: true,
+            },
+          },
+        }),
+      );
+    } finally {
+      await publicChecks.releaseAnalysisLease({ leaseId, clientKey });
+    }
   });
 
   app.post('/v1/public/checks/:resultId/save', async (request, reply) => {

@@ -10,6 +10,9 @@ import {
   createPGliteDatabase,
   createPostgresDatabase,
   DurableJobRepository,
+  GrowthRuntimeRepository,
+  growthProjectionEventTypes,
+  OperationalWorkRepository,
   OutboxDeliveryRepository,
   PublicCheckRepository,
   runMigrations,
@@ -22,6 +25,8 @@ import {
   type JobHandler,
 } from '@boomerbuddy/platform';
 import { createStripeReconciliationHandler } from './commerce-reconciliation';
+import { createGrowthRuntimeHandlers, enqueueGrowthRuntimeJobs } from './growth-runtime';
+import { createOperationalHandlers, seedOperationalSchedules } from './operational-handlers';
 
 if (existsSync('.env')) loadEnvironmentFile();
 const appConfig = loadConfig();
@@ -53,6 +58,8 @@ const publicChecks = new PublicCheckRepository(database, {
 const commerce = new CommerceOperationsRepository(database, appConfig.secrets.fingerprintKey, 1);
 const commerceRuntime = new CommerceRuntimeRepository(database);
 const businessOs = new BusinessOsRepository(database);
+const growth = new GrowthRuntimeRepository(database);
+const operations = new OperationalWorkRepository(database);
 const retentionIntervalMs = 5 * 60_000;
 
 const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
@@ -89,8 +96,18 @@ await jobs.enqueue({
   maxAttempts: 8,
   correlationId: retentionIntervalKey(now, retentionIntervalMs),
 });
+await enqueueGrowthRuntimeJobs({ jobs, now, batch: 100 });
+await seedOperationalSchedules({ jobs, now });
 
-const handlers: Record<string, JobHandler> = { 'retention.sweep': retentionHandler };
+const handlers: Record<string, JobHandler> = {
+  'retention.sweep': retentionHandler,
+  ...createGrowthRuntimeHandlers({ growth, jobs }),
+  ...createOperationalHandlers({
+    jobs,
+    operations,
+    fingerprintKey: appConfig.secrets.fingerprintKey,
+  }),
+};
 if (appConfig.commerce.stripe.mode === 'test') {
   handlers['commerce.reconcile'] = createStripeReconciliationHandler({
     businessOs,
@@ -108,20 +125,32 @@ if (appConfig.commerce.stripe.mode === 'test') {
   });
 }
 
-const worker = new PortableWorker(jobs, outbox, handlers, undefined, workerConfig, logger);
+const worker = new PortableWorker(
+  jobs,
+  outbox,
+  handlers,
+  {
+    eventTypes: growthProjectionEventTypes,
+    handle: async ({ event, heartbeat }) => {
+      await growth.projectEventById({ eventId: event.id, now: new Date() });
+      await heartbeat();
+    },
+  },
+  workerConfig,
+  logger,
+);
 
-let closing = false;
-const close = async (): Promise<void> => {
-  if (closing) return;
-  closing = true;
-  await worker.stop();
+let stopPromise: Promise<void> | undefined;
+const stopWorker = (): Promise<void> => {
+  stopPromise ??= worker.stop();
+  return stopPromise;
 };
-process.once('SIGINT', () => void close());
-process.once('SIGTERM', () => void close());
+process.once('SIGINT', () => void stopWorker());
+process.once('SIGTERM', () => void stopWorker());
 
 try {
   await worker.start();
 } finally {
-  await worker.stop();
+  await stopWorker();
   await database.close();
 }

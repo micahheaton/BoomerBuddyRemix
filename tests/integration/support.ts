@@ -30,7 +30,7 @@ export function createMutableClock(initial = new Date('2026-08-15T12:00:00.000Z'
 export function testConfig(): AppConfig {
   return {
     environment: 'test',
-    api: { host: '127.0.0.1', port: 4100 },
+    api: { host: '127.0.0.1', port: 4100, trustedProxyHops: 0 },
     database: {
       driver: 'pglite',
       path: ':memory:',

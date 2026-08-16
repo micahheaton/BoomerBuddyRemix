@@ -22,8 +22,9 @@ import {
   type ReferralRewardPolicy,
   type ReferralState,
 } from '@boomerbuddy/business-os';
+import { detectRestrictedInput } from '@boomerbuddy/security';
 
-import type { Database } from './database';
+import type { Database, SqlExecutor } from './database';
 import { writeAuditAndOutbox, type OperationalEventContext } from './events';
 import {
   asDate,
@@ -106,6 +107,52 @@ interface AttentionRow extends Record<string, unknown> {
   readonly updated_at: unknown;
 }
 
+export type PrivacyPlanKind =
+  'access_summary' | 'export_manifest' | 'deletion_plan' | 'correction_plan' | 'restriction_plan';
+
+export interface PrivacyRequestRecord {
+  readonly id: string;
+  readonly personId?: string;
+  readonly householdId?: string;
+  readonly requestKind: 'access' | 'export' | 'delete' | 'correct' | 'restrict';
+  readonly identityVerificationState: 'pending' | 'verified' | 'failed';
+  readonly state: 'received' | 'verified' | 'in_progress' | 'completed' | 'denied';
+  readonly dueAt: Date;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
+  readonly completedAt?: Date;
+  readonly plan?: {
+    readonly kind: PrivacyPlanKind;
+    readonly dataCategories: readonly string[];
+    readonly recordCounts: Readonly<Record<string, number>>;
+    readonly requiresProfessionalReview: boolean;
+    readonly createdAt: Date;
+  };
+}
+
+interface PrivacyRequestRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly person_id: string | null;
+  readonly household_id: string | null;
+  readonly request_kind: PrivacyRequestRecord['requestKind'];
+  readonly identity_verification_state: PrivacyRequestRecord['identityVerificationState'];
+  readonly state: PrivacyRequestRecord['state'];
+  readonly due_at: unknown;
+  readonly created_at: unknown;
+  readonly updated_at: unknown;
+  readonly completed_at: unknown | null;
+  readonly plan_kind: PrivacyPlanKind | null;
+  readonly data_categories: unknown | null;
+  readonly record_counts: unknown | null;
+  readonly requires_professional_review: boolean | null;
+  readonly plan_created_at: unknown | null;
+}
+
+type PrivacyEventContext = OperationalEventContext & {
+  readonly actorPersonId: string;
+  readonly audience: 'customer' | 'mobile' | 'hq';
+};
+
 interface PolicyRow extends Record<string, unknown> {
   readonly id: string;
   readonly action_key: string;
@@ -143,6 +190,60 @@ function mapCreditUnion(row: CreditUnionRow): CreditUnionRecord {
     sourceTypeCode: row.source_type_code,
     state: row.state,
     zipCode: row.zip_code,
+  };
+}
+
+function numericRecord(value: unknown, field: string): Readonly<Record<string, number>> {
+  const parsed = jsonValue(value);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new TypeError(`Invalid ${field}`);
+  }
+  const result: Record<string, number> = {};
+  for (const [key, count] of Object.entries(parsed)) {
+    if (typeof count !== 'number' || !Number.isSafeInteger(count) || count < 0) {
+      throw new TypeError(`Invalid ${field}`);
+    }
+    result[key] = count;
+  }
+  return result;
+}
+
+function mapPrivacyRequest(row: PrivacyRequestRow): PrivacyRequestRecord {
+  const base: PrivacyRequestRecord = {
+    id: row.id,
+    ...(row.person_id === null ? {} : { personId: row.person_id }),
+    ...(row.household_id === null ? {} : { householdId: row.household_id }),
+    requestKind: row.request_kind,
+    identityVerificationState: row.identity_verification_state,
+    state: row.state,
+    dueAt: asDate(row.due_at, 'privacy_requests.due_at'),
+    createdAt: asDate(row.created_at, 'privacy_requests.created_at'),
+    updatedAt: asDate(row.updated_at, 'privacy_requests.updated_at'),
+    ...(row.completed_at === null
+      ? {}
+      : { completedAt: asDate(row.completed_at, 'privacy_requests.completed_at') }),
+  };
+  if (
+    row.plan_kind === null ||
+    row.data_categories === null ||
+    row.record_counts === null ||
+    row.requires_professional_review === null ||
+    row.plan_created_at === null
+  ) {
+    return base;
+  }
+  return {
+    ...base,
+    plan: {
+      kind: row.plan_kind,
+      dataCategories: stringArray(
+        jsonValue(row.data_categories),
+        'privacy_request_plans.data_categories',
+      ),
+      recordCounts: numericRecord(row.record_counts, 'privacy_request_plans.record_counts'),
+      requiresProfessionalReview: row.requires_professional_review,
+      createdAt: asDate(row.plan_created_at, 'privacy_request_plans.created_at'),
+    },
   };
 }
 
@@ -1291,26 +1392,298 @@ export class BusinessOsRepository {
     readonly now: Date;
     readonly personId?: string;
     readonly requestKind: 'access' | 'export' | 'delete' | 'correct' | 'restrict';
+    readonly context: PrivacyEventContext;
   }): Promise<string> {
     if (input.personId === undefined && input.householdId === undefined) {
       throw new TypeError('Privacy request needs a person or household subject');
     }
     const id = this.ids.next('privacy_request');
-    await this.database.query(
-      `INSERT INTO privacy_requests(
-         id, person_id, household_id, request_kind, identity_verification_state,
-         state, due_at, created_at, updated_at
-       ) VALUES ($1,$2,$3,$4,'pending','received',$5,$6,$6)`,
+    await this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO privacy_requests(
+           id, person_id, household_id, request_kind, identity_verification_state,
+           state, due_at, created_at, updated_at
+         ) VALUES ($1,$2,$3,$4,'pending','received',$5,$6,$6)`,
+        [
+          id,
+          input.personId ?? null,
+          input.householdId ?? null,
+          input.requestKind,
+          input.dueAt.toISOString(),
+          input.now.toISOString(),
+        ],
+      );
+      await this.appendPrivacyRequestEvent(transaction, {
+        requestId: id,
+        eventKind: 'received',
+        context: input.context,
+        evidence: { requestKind: input.requestKind },
+      });
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        input.context,
+        {
+          action: 'privacy.request_received',
+          resourceType: 'privacy_request',
+          resourceId: id,
+          outcome: 'completed',
+          metadata: { requestKind: input.requestKind },
+        },
+        {
+          eventType: 'privacy.request_received.v1',
+          aggregateType: 'privacy_request',
+          aggregateId: id,
+          payload: { requestKind: input.requestKind },
+        },
+      );
+    });
+    return id;
+  }
+
+  async listPrivacyRequests(
+    input: {
+      readonly personId?: string;
+      readonly limit?: number;
+    } = {},
+  ): Promise<readonly PrivacyRequestRecord[]> {
+    const limit = input.limit ?? 100;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
+      throw new TypeError('Privacy request limit must be between 1 and 500');
+    }
+    const rows = await this.database.query<PrivacyRequestRow>(
+      `SELECT request.id, request.person_id, request.household_id, request.request_kind,
+              request.identity_verification_state, request.state, request.due_at,
+              request.created_at, request.updated_at, request.completed_at,
+              plan.plan_kind, plan.data_categories, plan.record_counts,
+              plan.requires_professional_review, plan.created_at AS plan_created_at
+       FROM privacy_requests AS request
+       LEFT JOIN privacy_request_plans AS plan ON plan.request_id = request.id
+       WHERE ($1::text IS NULL OR request.person_id = $1)
+       ORDER BY request.created_at DESC, request.id DESC
+       LIMIT $2`,
+      [input.personId ?? null, limit],
+    );
+    return rows.rows.map(mapPrivacyRequest);
+  }
+
+  async getPrivacyRequest(requestId: string): Promise<PrivacyRequestRecord | undefined> {
+    const rows = await this.database.query<PrivacyRequestRow>(
+      `SELECT request.id, request.person_id, request.household_id, request.request_kind,
+              request.identity_verification_state, request.state, request.due_at,
+              request.created_at, request.updated_at, request.completed_at,
+              plan.plan_kind, plan.data_categories, plan.record_counts,
+              plan.requires_professional_review, plan.created_at AS plan_created_at
+       FROM privacy_requests AS request
+       LEFT JOIN privacy_request_plans AS plan ON plan.request_id = request.id
+       WHERE request.id = $1`,
+      [requestId],
+    );
+    const row = rows.rows[0];
+    return row === undefined ? undefined : mapPrivacyRequest(row);
+  }
+
+  async advancePrivacyRequest(input: {
+    readonly requestId: string;
+    readonly action: 'verify_identity' | 'begin_review' | 'record_plan' | 'deny';
+    readonly evidenceReference: string;
+    readonly context: PrivacyEventContext;
+  }): Promise<PrivacyRequestRecord> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9:._/-]{2,199}$/u.test(input.evidenceReference)) {
+      throw new TypeError('Privacy evidence reference must be a bounded opaque reference');
+    }
+    if (detectRestrictedInput(input.evidenceReference).length > 0) {
+      throw new TypeError('Privacy evidence reference must not contain sensitive values');
+    }
+    await this.database.transaction(async (transaction) => {
+      const selected = await transaction.query<PrivacyRequestRow>(
+        `SELECT request.id, request.person_id, request.household_id, request.request_kind,
+                request.identity_verification_state, request.state, request.due_at,
+                request.created_at, request.updated_at, request.completed_at,
+                NULL::text AS plan_kind, NULL::jsonb AS data_categories,
+                NULL::jsonb AS record_counts, NULL::boolean AS requires_professional_review,
+                NULL::timestamptz AS plan_created_at
+         FROM privacy_requests AS request WHERE request.id = $1 FOR UPDATE`,
+        [input.requestId],
+      );
+      const current = selected.rows[0];
+      if (current === undefined) throw new Error('Privacy request not found');
+      let eventKind: 'identity_verified' | 'review_started' | 'plan_recorded' | 'denied';
+      let nextState = current.state;
+      let nextIdentityState = current.identity_verification_state;
+      if (input.action === 'verify_identity') {
+        if (current.state !== 'received' || current.identity_verification_state !== 'pending') {
+          throw new Error('Privacy request identity transition is unavailable');
+        }
+        eventKind = 'identity_verified';
+        nextState = 'verified';
+        nextIdentityState = 'verified';
+      } else if (input.action === 'begin_review') {
+        if (current.state !== 'verified' || current.identity_verification_state !== 'verified') {
+          throw new Error('Privacy request review transition is unavailable');
+        }
+        eventKind = 'review_started';
+        nextState = 'in_progress';
+      } else if (input.action === 'record_plan') {
+        if (current.state !== 'in_progress' || current.identity_verification_state !== 'verified') {
+          throw new Error('Privacy request plan transition is unavailable');
+        }
+        const existingPlan = await transaction.query(
+          'SELECT request_id FROM privacy_request_plans WHERE request_id = $1',
+          [input.requestId],
+        );
+        if (existingPlan.rows[0] !== undefined) return;
+        eventKind = 'plan_recorded';
+        await this.createPrivacyPlan(transaction, current, input.context);
+      } else {
+        if (current.state === 'completed' || current.state === 'denied') {
+          throw new Error('Privacy request is already terminal');
+        }
+        eventKind = 'denied';
+        nextState = 'denied';
+      }
+      await transaction.query(
+        `UPDATE privacy_requests
+         SET state = $2, identity_verification_state = $3, updated_at = $4,
+             completed_at = CASE WHEN $2 = 'denied' THEN $4 ELSE completed_at END
+         WHERE id = $1`,
+        [input.requestId, nextState, nextIdentityState, input.context.now.toISOString()],
+      );
+      await this.appendPrivacyRequestEvent(transaction, {
+        requestId: input.requestId,
+        eventKind,
+        context: input.context,
+        evidenceReference: input.evidenceReference,
+        evidence: { requestKind: current.request_kind },
+      });
+      await writeAuditAndOutbox(
+        transaction,
+        this.ids,
+        input.context,
+        {
+          action: `privacy.${eventKind}`,
+          resourceType: 'privacy_request',
+          resourceId: input.requestId,
+          outcome: 'completed',
+          metadata: { requestKind: current.request_kind },
+        },
+        {
+          eventType: `privacy.${eventKind}.v1`,
+          aggregateType: 'privacy_request',
+          aggregateId: input.requestId,
+          payload: { requestKind: current.request_kind },
+        },
+      );
+    });
+    const request = await this.getPrivacyRequest(input.requestId);
+    if (request === undefined) throw new Error('Privacy request not found after update');
+    return request;
+  }
+
+  private async createPrivacyPlan(
+    transaction: SqlExecutor,
+    request: PrivacyRequestRow,
+    context: PrivacyEventContext,
+  ): Promise<void> {
+    const counts = await transaction.query<
+      {
+        artifacts: number;
+        analyses: number;
+        consent_events: number;
+        relationships: number;
+        orientation_states: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM artifacts artifact
+           WHERE ($1::text IS NULL OR artifact.owner_person_id = $1)
+             AND ($2::text IS NULL OR artifact.household_id = $2)) AS artifacts,
+         (SELECT count(*)::int FROM analyses analysis
+           WHERE ($1::text IS NULL OR analysis.requested_by = $1)
+             AND ($2::text IS NULL OR analysis.household_id = $2)) AS analyses,
+         (SELECT count(*)::int FROM consent_evidence evidence
+           WHERE ($1::text IS NULL OR $1 IN (
+             evidence.actor_person_id, evidence.subject_person_id,
+             COALESCE(evidence.recipient_person_id, '')
+           )) AND ($2::text IS NULL OR evidence.household_id = $2)) AS consent_events,
+         (SELECT count(*)::int FROM trusted_circle_relationships relationship
+           WHERE ($1::text IS NULL OR $1 IN (
+             relationship.protected_person_id, relationship.trusted_person_id
+           )) AND ($2::text IS NULL OR relationship.household_id = $2)) AS relationships,
+         (SELECT count(*)::int FROM orientation_states orientation
+           WHERE ($1::text IS NULL OR orientation.person_id = $1)
+             AND ($2::text IS NULL OR orientation.household_id = $2)) AS orientation_states`,
+      [request.person_id, request.household_id],
+    );
+    const recordCounts = counts.rows[0];
+    if (recordCounts === undefined) throw new Error('Privacy record inventory is unavailable');
+    const planKind: Record<PrivacyRequestRecord['requestKind'], PrivacyPlanKind> = {
+      access: 'access_summary',
+      export: 'export_manifest',
+      delete: 'deletion_plan',
+      correct: 'correction_plan',
+      restrict: 'restriction_plan',
+    };
+    await transaction.query(
+      `INSERT INTO privacy_request_plans(
+         id, request_id, plan_kind, data_categories, record_counts,
+         contains_customer_content, requires_professional_review,
+         created_by_person_id, created_at
+       ) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,false,true,$6,$7)`,
       [
-        id,
-        input.personId ?? null,
-        input.householdId ?? null,
-        input.requestKind,
-        input.dueAt.toISOString(),
-        input.now.toISOString(),
+        this.ids.next('privacy_plan'),
+        request.id,
+        planKind[request.request_kind],
+        jsonParameter([
+          'submitted_artifacts',
+          'analysis_results',
+          'consent_evidence',
+          'trusted_circle_relationships',
+          'orientation_state',
+        ]),
+        jsonParameter(recordCounts),
+        context.actorPersonId,
+        context.now.toISOString(),
       ],
     );
-    return id;
+  }
+
+  private async appendPrivacyRequestEvent(
+    transaction: SqlExecutor,
+    input: {
+      readonly requestId: string;
+      readonly eventKind:
+        | 'received'
+        | 'identity_verified'
+        | 'review_started'
+        | 'plan_recorded'
+        | 'completed'
+        | 'denied';
+      readonly context: PrivacyEventContext;
+      readonly evidenceReference?: string;
+      readonly evidence: Readonly<Record<string, string | number | boolean>>;
+    },
+  ): Promise<void> {
+    await transaction.query(
+      `INSERT INTO privacy_request_events(
+         id, request_id, sequence, event_kind, actor_person_id, actor_audience,
+         evidence_reference, evidence, created_at
+       ) VALUES (
+         $1,$2,
+         (SELECT COALESCE(max(sequence),0) + 1 FROM privacy_request_events WHERE request_id = $2),
+         $3,$4,$5,$6,$7::jsonb,$8
+       )`,
+      [
+        this.ids.next('privacy_event'),
+        input.requestId,
+        input.eventKind,
+        input.context.actorPersonId,
+        input.context.audience,
+        input.evidenceReference ?? null,
+        jsonParameter(input.evidence),
+        input.context.now.toISOString(),
+      ],
+    );
   }
 
   async rawAutomationPolicy(

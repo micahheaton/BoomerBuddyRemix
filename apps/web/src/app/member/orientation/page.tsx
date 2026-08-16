@@ -8,15 +8,15 @@ import { apiRequest, readableError } from '../../../lib/api';
 const steps = [
   {
     key: 'protection_subject',
-    title: 'Confirm the protected person',
+    title: 'Confirm identity, enrollment, and consent',
     detail:
-      'This setup belongs to the enrolled protected adult. Household administration does not replace that person’s choice.',
+      'Confirm whose identity and safety plan this is. This review does not verify identity. The protected adult must hold an accepted self-enrollment; household administration or payment never substitutes for that person’s consent.',
   },
   {
     key: 'trusted_circle',
     title: 'Consent and Trusted Circle',
     detail:
-      'Invite only people you know. Each pairwise permission requires review and acceptance, can be ended, and does not send a notification in this build.',
+      'Invite only people you know. Review the exact person, sharing permission, and withdrawal path. Each pairwise permission requires acceptance and can be ended independently. Notifications are unavailable in this build, so agree on a manual contact method instead.',
   },
   {
     key: 'safe_word',
@@ -26,20 +26,21 @@ const steps = [
   },
   {
     key: 'practice_check',
-    title: 'Practice a safer response',
-    detail: 'Use a synthetic scenario to practice pausing and verifying independently.',
+    title: 'Practice the Check and sharing workflow',
+    detail:
+      'Use a synthetic scenario to practice pausing, putting the suspicious text or URL into Check, reading evidence and limits, choosing a safe action, and sharing only the redacted result when you deliberately want help.',
   },
   {
     key: 'capabilities_and_limits',
-    title: 'Understand the limits',
+    title: 'Understand limits and the recovery path',
     detail:
-      'Local rules-only analysis can be wrong, does not fetch URLs or use a live reputation provider, and is not a monitoring or emergency service.',
+      'Local rules-only analysis can be wrong, does not fetch URLs or use a live reputation provider, and is not a monitoring or emergency service. If money, access, or credentials were already exposed, stop contact, use independently found official channels, secure the affected account, and seek qualified help; do not wait for another Check.',
   },
   {
     key: 'review',
     title: 'Review the plan',
     detail:
-      'Confirm the protected-person scope, consent choices, permissions, safe-word choice, and independent verification steps.',
+      'Confirm identity and protected-person scope, consent choices, pairwise permissions, manual notification/contact plan, safe-word choice, Check and sharing workflow, recovery contacts, and independent verification steps.',
   },
 ] as const;
 
@@ -148,7 +149,8 @@ export default function OrientationPage() {
       <span className="eyebrow">Guided setup</span>
       <h1 className="member-heading">Orientation</h1>
       <p className="lede">
-        Six short steps make the people, permissions, boundaries, and product limits explicit.
+        Six guided stages cover identity, protected-person consent, Trusted Circle sharing,
+        notification limits, a realistic Check, recovery, and product boundaries.
       </p>
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}

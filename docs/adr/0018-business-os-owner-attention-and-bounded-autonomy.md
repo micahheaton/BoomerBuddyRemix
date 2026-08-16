@@ -35,6 +35,18 @@ Every recurring workflow is registered as `AUTO`, `APPROVAL`, `HUMAN`, or `PROFE
 
 BoomerBuddy gains one operational context without creating a commodity SaaS clone. Explicit provenance, ownership, due-state, and audit add schema and workflow cost. Tight autonomy boundaries may leave more human work initially; measured workflows can move modes only through a reviewed policy change.
 
+Run 2 now projects allowlisted product outbox facts into content-free acquisition, referral, orientation, lifecycle, and customer-health records with idempotent receipts and causal predecessor blocking. It may create bounded HQ intervention work and materialize an allowlisted lifecycle message only to a local test sink. HQ privacy actions can verify, begin review, and freeze a content-free evidence plan; they cannot fulfill a request. These additions make the local control plane executable without turning it into customer contact or business traction.
+
+## Migration and rollback
+
+Business OS records are additive and enter as `seeded`, `local`, `imported`, or otherwise explicit evidence states; no fixture is relabeled as observed. Owner-only read paths precede delegated mutation paths, and each external connector is enabled independently after provenance, suppression, idempotency, and reconciliation tests. Existing HQ audience separation remains active throughout migration.
+
+Rollback engages the global automation stop, disables the affected connector or mutation route, and returns work to a named human queue. It preserves attention, approval, run, stage-history, audit, and outbox evidence; it does not delete unfavorable pipeline/health history or reclassify an executed action as a draft. External systems remain their commodity systems of record, so connector rollback must reconcile provider state and retain a minimal link rather than copy the provider wholesale into HQ.
+
+## Security and privacy consequences
+
+HQ aggregates relationship, contact, safety, financial, and operating metadata and therefore requires a distinct audience, least privilege, case/resource scope, step-up for restricted access, expiry, immutable audit, and periodic review. Lists and briefs exclude customer artifacts, secrets, destinations, and small-cell sponsor data. Automation is limited by code-owned action/tool/data tuples, budgets, approvals, idempotency, audit, and an engaged-by-default kill switch. Business contact enrichment, employee access, support cases, professional records, and external messages require lawful purpose, minimization, retention, suppression, and accountable humans.
+
 ## Rejected alternatives
 
 - A generic CRM clone or one dashboard that owns every business record.
@@ -45,11 +57,11 @@ BoomerBuddy gains one operational context without creating a commodity SaaS clon
 
 ## Verification
 
-Tests cover audience, role, tenant, case, resource, step-up, expiry, and content-exclusion boundaries; state-machine idempotency; due/stale transitions; provenance; small-cell suppression; owner-queue deduplication; and truthful evidence labels. Automation tests prove data/action allowlists, budgets, approvals, kill switches, revoked authority at execution, and no external side effect in Run 2.
+Tests cover audience, role, tenant, case, resource, step-up, expiry, and content-exclusion boundaries; state-machine idempotency; causal projection/replay; due/stale transitions; provenance; small-cell suppression; owner-queue deduplication; privacy evidence planning; and truthful labels. Automation tests prove data/action allowlists, budgets, approvals, kill switches, revoked authority at execution, local-test notification receipts, and no external side effect in Run 2.
 
 ## Evidence boundary
 
-The bounded local graph and queues are not account-blocked. Live enrichment, communications, finance/accounting synchronization, customer outcomes, and production support access require accounts, contracts, lawful purpose/consent, data owners, staging assurance, and human approval. Legal, tax, accounting, security, and high-risk fraud decisions remain `PROFESSIONAL`; agent output is not professional evidence.
+The bounded local graph, product projections, content-free privacy planning, and local test sink are not account-blocked. They are not external delivery, privacy fulfillment, customer health outcome, or revenue evidence. Live enrichment, communications, finance/accounting synchronization, customer outcomes, and production support access require accounts, contracts, lawful purpose/consent, data owners, staging assurance, and human approval. Legal, tax, accounting, security, and high-risk fraud decisions remain `PROFESSIONAL`; agent output is not professional evidence.
 
 ## Primary sources
 

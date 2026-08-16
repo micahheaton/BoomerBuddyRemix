@@ -22,6 +22,11 @@ export type OutboxHandler = (context: {
   readonly heartbeat: () => Promise<boolean>;
 }) => Promise<void>;
 
+export interface SelectiveOutboxHandler {
+  readonly eventTypes: readonly string[];
+  readonly handle: OutboxHandler;
+}
+
 export class JobExecutionError extends Error {
   constructor(
     readonly code: string,
@@ -104,7 +109,7 @@ export class PortableWorker {
     private readonly jobs: DurableJobRepository,
     private readonly outbox: OutboxDeliveryRepository,
     private readonly handlers: Readonly<Record<string, JobHandler>>,
-    private readonly outboxHandler: OutboxHandler | undefined,
+    private readonly outboxHandler: SelectiveOutboxHandler | undefined,
     private readonly config: WorkerRuntimeConfig,
     private readonly logger: Logger,
     private readonly clock: () => Date = () => new Date(),
@@ -236,7 +241,7 @@ export class PortableWorker {
     const timer = setInterval(() => void lease.heartbeat(), this.config.heartbeatIntervalMs);
     timer.unref();
     try {
-      await this.outboxHandler({
+      await this.outboxHandler.handle({
         event,
         idempotencyKey: event.id,
         signal: this.controller.signal,
@@ -299,6 +304,7 @@ export class PortableWorker {
         ? Promise.resolve([])
         : this.outbox.claim({
             workerId: this.config.workerId,
+            eventTypes: this.outboxHandler.eventTypes,
             limit: this.config.batchSize,
             leaseDurationMs: this.config.leaseDurationMs,
             now: this.clock(),

@@ -114,4 +114,4 @@ Do not reduce the score by deleting a necessary workflow, undercounting frequenc
 
 Re-engage the global kill switch on policy drift, unauthorized data/tool use, repeated incorrect actions, budget breach, audit failure, or incident investigation. Preserve records, move affected work to a named human queue, and require a new versioned policy plus replay-safe test before re-enabling. A founder vacation drill should demonstrate that routine work continues for two weeks while consequential decisions wait safely or escalate to a named backup.
 
-Related: [Run 2 founder-dependency review](./31-founder-dependency.md), [Staffing and Philippines Operations](./STAFFING-AND-PHILIPPINES-OPS.md), [50K Subscriber Model](./50K-SUBSCRIBER-MODEL.md), and [Master Spec autonomy contract](../BOOMERBUDDY-2.0-MASTER-SPEC.md#analytics-autonomy-and-owner-attention).
+Related: [Run 2 founder-dependency review](./31-founder-dependency.md), [Staffing and Philippines Operations](./STAFFING-AND-PHILIPPINES-OPS.md), [50K Subscriber Model](./50K-SUBSCRIBER-MODEL.md), and [Master Spec autonomy contract](../BOOMERBUDDY-2.0-MASTER-SPEC.md#analytics-and-operating-metrics).

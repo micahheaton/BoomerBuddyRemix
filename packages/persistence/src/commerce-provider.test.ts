@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createSeededTestDatabase, fixedTestNow } from '@boomerbuddy/testkit';
 import { CommerceOperationsRepository } from './commerce';
 import type { Database } from './database';
+import { GrowthRuntimeRepository } from './growth-runtime';
 import type { IdFactory } from './values';
 
 function sequentialIds(): IdFactory {
@@ -130,6 +131,28 @@ describe('verified provider commerce inbox', () => {
        WHERE household_id = 'household-sunrise' AND id = 'subscription-stripe-test'`,
     );
     expect(canonical.rows[0]).toMatchObject({ lifecycle: 'active', source_verified: true });
+    const growthEvent = await database.query<{ id: string; payload: unknown }>(
+      `SELECT id, payload FROM outbox_events
+       WHERE event_type = 'commerce.lifecycle_applied.v1'
+         AND aggregate_id = 'subscription-stripe-test'`,
+    );
+    expect(growthEvent.rows[0]?.payload).toEqual({
+      lifecycle: 'active',
+      previousLifecycle: 'pending',
+      providerEventKind: 'customer.subscription.updated',
+    });
+    const growth = new GrowthRuntimeRepository(database, sequentialIds());
+    await growth.projectPending({ limit: 100, now: new Date(newerAt.getTime() + 1_000) });
+    const growthFacts = await database.query<{ paid: number; converted: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM acquisition_touchpoints
+          WHERE subject_kind = 'household' AND subject_id = 'household-sunrise'
+            AND milestone = 'paid') AS paid,
+         (SELECT count(*)::int FROM lifecycle_workflows
+          WHERE trigger_event_id = $1 AND state = 'completed') AS converted`,
+      [growthEvent.rows[0]?.id],
+    );
+    expect(growthFacts.rows[0]).toEqual({ paid: 1, converted: 1 });
   });
 
   it('binds one Stripe customer to exactly one household', async () => {
@@ -207,5 +230,115 @@ describe('verified provider commerce inbox', () => {
         now: new Date(fixedTestNow.getTime() + 1_000),
       }),
     ).rejects.toMatchObject({ code: 'conflict' });
+  });
+
+  it('projects verified trial, failed-payment, and recovery states without sending customer contact', async () => {
+    const apply = async (input: {
+      externalEventId: string;
+      eventType: string;
+      lifecycle: 'trialing' | 'delinquent' | 'active';
+      at: Date;
+      accessEvidence: 'initial' | 'non_payment' | 'payment';
+      periodEndsAt: Date;
+    }): Promise<void> => {
+      const captured = await repository.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: input.externalEventId,
+        eventType: input.eventType,
+        rawPayload: JSON.stringify({ id: input.externalEventId, status: input.lifecycle }),
+        providerApiVersion: '2026-07-29.fixture',
+        providerObjectId: 'sub-growth-lifecycle',
+        providerEventCreatedAt: input.at,
+        normalizedLifecycle: input.lifecycle,
+        now: input.at,
+      });
+      const accessEvidence =
+        input.accessEvidence === 'initial'
+          ? ({ kind: 'initial_server_binding' } as const)
+          : input.accessEvidence === 'payment'
+            ? ({ kind: 'payment_confirmed', sourceInboxId: captured.id } as const)
+            : ({ kind: 'non_payment' } as const);
+      await repository.applyProviderLifecycle({
+        inboxId: captured.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: input.externalEventId,
+        providerApiVersion: '2026-07-29.fixture',
+        providerObjectId: 'sub-growth-lifecycle',
+        providerEventCreatedAt: input.at,
+        householdId: 'household-sunrise',
+        subscriptionId: 'subscription-stripe-test',
+        externalSubscriptionId: 'sub-growth-lifecycle',
+        lifecycle: input.lifecycle,
+        currentPeriodStartsAt: fixedTestNow,
+        currentPeriodEndsAt: input.periodEndsAt,
+        accessEvidence,
+        now: input.at,
+      });
+    };
+    await apply({
+      externalEventId: 'evt-growth-trial',
+      eventType: 'customer.subscription.updated',
+      lifecycle: 'trialing',
+      at: new Date(fixedTestNow.getTime() + 60_000),
+      accessEvidence: 'initial',
+      periodEndsAt: new Date(fixedTestNow.getTime() + 7 * 86_400_000),
+    });
+    await apply({
+      externalEventId: 'evt-growth-payment-failed',
+      eventType: 'invoice.payment_failed',
+      lifecycle: 'delinquent',
+      at: new Date(fixedTestNow.getTime() + 120_000),
+      accessEvidence: 'non_payment',
+      periodEndsAt: new Date(fixedTestNow.getTime() + 7 * 86_400_000),
+    });
+    await apply({
+      externalEventId: 'evt-growth-payment-recovered',
+      eventType: 'invoice.paid',
+      lifecycle: 'active',
+      at: new Date(fixedTestNow.getTime() + 180_000),
+      accessEvidence: 'payment',
+      periodEndsAt: new Date(fixedTestNow.getTime() + 14 * 86_400_000),
+    });
+
+    const growth = new GrowthRuntimeRepository(database, sequentialIds());
+    await growth.projectPending({
+      limit: 100,
+      now: new Date(fixedTestNow.getTime() + 180_000),
+    });
+    const facts = await database.query<{
+      trial: number;
+      paid: number;
+      trial_workflow: number;
+      failed_payment_workflow: number;
+      recovery_workflow: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM acquisition_touchpoints
+          WHERE subject_id = 'household-sunrise' AND milestone = 'trial') AS trial,
+         (SELECT count(*)::int FROM acquisition_touchpoints
+          WHERE subject_id = 'household-sunrise' AND milestone = 'paid') AS paid,
+         (SELECT count(*)::int FROM lifecycle_workflows workflow
+          JOIN lifecycle_steps step ON step.workflow_id = workflow.id
+          WHERE workflow.workflow_kind = 'trial' AND workflow.state = 'active'
+            AND step.action_kind = 'wait' AND step.state = 'ready') AS trial_workflow,
+         (SELECT count(*)::int FROM lifecycle_workflows workflow
+          JOIN lifecycle_steps step ON step.workflow_id = workflow.id
+          WHERE workflow.workflow_kind = 'payment_recovery' AND workflow.state = 'active'
+            AND step.step_key = 'payment_recovery' AND step.state = 'ready') AS failed_payment_workflow,
+         (SELECT count(*)::int FROM lifecycle_workflows workflow
+          JOIN lifecycle_steps step ON step.workflow_id = workflow.id
+          WHERE workflow.workflow_kind = 'payment_recovery' AND workflow.state = 'completed'
+            AND step.step_key = 'payment_recovery_recorded'
+            AND step.state = 'completed') AS recovery_workflow`,
+    );
+    expect(facts.rows[0]).toEqual({
+      trial: 1,
+      paid: 1,
+      trial_workflow: 1,
+      failed_payment_workflow: 1,
+      recovery_workflow: 1,
+    });
   });
 });

@@ -227,4 +227,82 @@ describe('HQ Business OS API', () => {
       ).statusCode,
     ).toBe(403);
   });
+
+  it('records self-service privacy intake and an owner-audited content-free fulfillment plan', async () => {
+    const protectedMember = await login(harness.app, 'protected-pat');
+    const customerHeaders = browserHeaders(protectedMember.cookie as string);
+    const created = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: customerHeaders,
+      payload: { requestKind: 'export' },
+    });
+    expect(created.statusCode, created.body).toBe(202);
+    const requestId = created.json<{ id: string }>().id;
+    const duplicate = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: customerHeaders,
+      payload: { requestKind: 'export' },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    const selfList = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/privacy-requests',
+      headers: customerHeaders,
+    });
+    expect(selfList.statusCode).toBe(200);
+    expect(selfList.json()).toMatchObject({
+      fulfillmentMode: 'evidence_plan_only',
+      requests: [{ id: requestId, state: 'received', requestKind: 'export' }],
+    });
+
+    const owner = await login(harness.app, 'hq-heidi', 'hq');
+    const hqHeaders = browserHeaders(owner.cookie as string, hqOrigin);
+    for (const [action, evidenceReference] of [
+      ['verify_identity', 'identity:fixture-reviewed-v1'],
+      ['begin_review', 'review:fixture-started-v1'],
+      ['record_plan', 'plan:fixture-generated-v1'],
+    ] as const) {
+      const response = await harness.app.inject({
+        method: 'POST',
+        url: `/v1/hq/business-os/privacy-requests/${requestId}/actions`,
+        headers: hqHeaders,
+        payload: { action, evidenceReference },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json()).toMatchObject({ fulfillmentPerformed: false });
+    }
+    const queue = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/hq/business-os/privacy-requests',
+      headers: hqHeaders,
+    });
+    expect(queue.statusCode).toBe(200);
+    expect(queue.json()).toMatchObject({
+      requests: [
+        {
+          id: requestId,
+          state: 'in_progress',
+          identityVerificationState: 'verified',
+          plan: {
+            kind: 'export_manifest',
+            containsCustomerContent: false,
+            requiresProfessionalReview: true,
+          },
+        },
+      ],
+    });
+    const serialized = JSON.stringify(queue.json());
+    expect(serialized).not.toContain('encrypted_content');
+    expect(serialized).not.toContain('input_fingerprint');
+
+    const reviewer = await login(harness.app, 'hq-riley', 'hq');
+    const denied = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/hq/business-os/privacy-requests',
+      headers: browserHeaders(reviewer.cookie as string, hqOrigin),
+    });
+    expect(denied.statusCode).toBe(403);
+  });
 });

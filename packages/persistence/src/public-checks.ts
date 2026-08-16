@@ -62,6 +62,7 @@ export interface PublicCheckResultGrant {
 interface ContextRow extends Record<string, unknown> {
   readonly id: string;
   readonly token_hmac: string;
+  readonly client_key_hmac: string;
   readonly remaining_checks: number;
   readonly state: 'active' | 'exhausted' | 'expired';
   readonly attribution_source: PublicAttributionSource;
@@ -165,17 +166,18 @@ async function incrementAttribution(
 async function consumeQuota(
   executor: SqlExecutor,
   scope: 'global_public_context' | 'global_public_check',
+  scopeKey: string,
   maximum: number,
   now: Date,
 ): Promise<void> {
   const quota = await executor.query<Record<string, unknown>>(
-    `INSERT INTO public_check_quota_buckets(bucket_start, scope, used_count)
-     VALUES ($1,$2,1)
-     ON CONFLICT (bucket_start, scope) DO UPDATE
+    `INSERT INTO public_check_quota_buckets(bucket_start, scope, scope_key, used_count)
+     VALUES ($1,$2,$3,1)
+     ON CONFLICT (bucket_start, scope, scope_key) DO UPDATE
      SET used_count = public_check_quota_buckets.used_count + 1
-     WHERE public_check_quota_buckets.used_count < $3
+     WHERE public_check_quota_buckets.used_count < $4
      RETURNING used_count`,
-    [minuteBucket(now), scope, maximum],
+    [minuteBucket(now), scope, scopeKey, maximum],
   );
   if (quota.rowCount !== 1) {
     throw new DomainError('conflict', 'Public Check capacity is temporarily exhausted');
@@ -206,22 +208,53 @@ export class PublicCheckRepository {
     private readonly idFactory: IdFactory = randomIdFactory,
     private readonly maximumChecksPerMinute = 30,
     private readonly maximumContextsPerMinute = 60,
+    private readonly maximumChecksPerClientMinute = 6,
+    private readonly maximumContextsPerClientMinute = 12,
+    private readonly maximumConcurrentAnalyses = 20,
+    private readonly maximumConcurrentAnalysesPerClient = 2,
   ) {
     assertProtection(protection);
     if (
       !Number.isSafeInteger(maximumChecksPerMinute) ||
       maximumChecksPerMinute < 1 ||
       !Number.isSafeInteger(maximumContextsPerMinute) ||
-      maximumContextsPerMinute < 1
+      maximumContextsPerMinute < 1 ||
+      !Number.isSafeInteger(maximumChecksPerClientMinute) ||
+      maximumChecksPerClientMinute < 1 ||
+      !Number.isSafeInteger(maximumContextsPerClientMinute) ||
+      maximumContextsPerClientMinute < 1 ||
+      !Number.isSafeInteger(maximumConcurrentAnalyses) ||
+      maximumConcurrentAnalyses < 1 ||
+      !Number.isSafeInteger(maximumConcurrentAnalysesPerClient) ||
+      maximumConcurrentAnalysesPerClient < 1 ||
+      maximumConcurrentAnalysesPerClient > maximumConcurrentAnalyses
     ) {
       throw new TypeError('Public Check quotas must be positive safe integers');
     }
   }
 
+  clientKeyForNetworkAddress(networkAddress: string): string {
+    const normalized = networkAddress.trim().toLowerCase();
+    if (normalized.length === 0 || normalized.length > 256) {
+      throw new DomainError('invalid_input', 'Public Check client address is unavailable');
+    }
+    return createHmac('sha256', this.protection.hmacKey)
+      .update(lengthPrefixed(['boomerbuddy:public-check-client:v1', normalized]))
+      .digest('base64url');
+  }
+
+  private assertClientKey(clientKey: string): void {
+    if (!/^[A-Za-z0-9_-]{43}$/u.test(clientKey)) {
+      throw new DomainError('invalid_input', 'Public Check client identity is invalid');
+    }
+  }
+
   async createContext(input: {
     readonly attribution: PublicCheckAttribution;
+    readonly clientKey: string;
     readonly now: Date;
   }): Promise<PublicCheckContextGrant> {
+    this.assertClientKey(input.clientKey);
     const id = this.idFactory.next('public_context');
     const minted = mintToken(id);
     const expiresAt = new Date(input.now.getTime() + 10 * 60_000);
@@ -229,14 +262,22 @@ export class PublicCheckRepository {
       await consumeQuota(
         transaction,
         'global_public_context',
+        'global',
         this.maximumContextsPerMinute,
+        input.now,
+      );
+      await consumeQuota(
+        transaction,
+        'global_public_context',
+        input.clientKey,
+        this.maximumContextsPerClientMinute,
         input.now,
       );
       await transaction.query(
         `INSERT INTO public_check_contexts(
            id, token_hmac, hmac_key_version, attribution_source, attribution_campaign,
-           remaining_checks, state, expires_at, created_at
-         ) VALUES ($1,$2,$3,$4,$5,3,'active',$6,$7)`,
+           remaining_checks, state, expires_at, created_at, client_key_hmac
+         ) VALUES ($1,$2,$3,$4,$5,3,'active',$6,$7,$8)`,
         [
           id,
           tokenHmac('context', id, minted.secret, this.protection.hmacKey),
@@ -245,6 +286,7 @@ export class PublicCheckRepository {
           input.attribution.campaign,
           expiresAt.toISOString(),
           input.now.toISOString(),
+          input.clientKey,
         ],
       );
       await incrementAttribution(transaction, input.attribution, 'context_issued', input.now);
@@ -254,12 +296,14 @@ export class PublicCheckRepository {
 
   async consumeContext(input: {
     readonly token: string;
+    readonly clientKey: string;
     readonly now: Date;
   }): Promise<PublicCheckInteraction> {
+    this.assertClientKey(input.clientKey);
     const parsed = parseToken(input.token, 'public_context');
     return this.database.transaction(async (transaction) => {
       const selected = await transaction.query<ContextRow>(
-        `SELECT id, token_hmac, remaining_checks, state, attribution_source,
+        `SELECT id, token_hmac, client_key_hmac, remaining_checks, state, attribution_source,
                 attribution_campaign, expires_at
          FROM public_check_contexts WHERE id = $1 FOR UPDATE`,
         [parsed.id],
@@ -270,7 +314,8 @@ export class PublicCheckRepository {
         !constantTimeEqual(
           row.token_hmac,
           tokenHmac('context', parsed.id, parsed.secret, this.protection.hmacKey),
-        )
+        ) ||
+        !constantTimeEqual(row.client_key_hmac, input.clientKey)
       ) {
         throw new DomainError('not_found', 'Public Check grant is invalid or unavailable');
       }
@@ -285,7 +330,15 @@ export class PublicCheckRepository {
       await consumeQuota(
         transaction,
         'global_public_check',
+        'global',
         this.maximumChecksPerMinute,
+        input.now,
+      );
+      await consumeQuota(
+        transaction,
+        'global_public_check',
+        input.clientKey,
+        this.maximumChecksPerClientMinute,
         input.now,
       );
       const remaining = row.remaining_checks - 1;
@@ -301,6 +354,62 @@ export class PublicCheckRepository {
         campaign: row.attribution_campaign,
       };
     });
+  }
+
+  async acquireAnalysisLease(input: {
+    readonly clientKey: string;
+    readonly now: Date;
+    readonly leaseMs?: number;
+  }): Promise<string> {
+    this.assertClientKey(input.clientKey);
+    const leaseMs = input.leaseMs ?? 30_000;
+    if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000 || leaseMs > 120_000) {
+      throw new TypeError('Public Check analysis lease must be between 1 and 120 seconds');
+    }
+    const leaseId = this.idFactory.next('public_analysis_lease');
+    const expiresAt = new Date(input.now.getTime() + leaseMs);
+    return this.database.transaction(async (transaction) => {
+      await transaction.query(
+        'SELECT id FROM public_check_concurrency_gate WHERE id = 1 FOR UPDATE',
+      );
+      await transaction.query('DELETE FROM public_check_analysis_leases WHERE expires_at <= $1', [
+        input.now.toISOString(),
+      ]);
+      const counts = await transaction.query<
+        { global_count: number; client_count: number } & Record<string, unknown>
+      >(
+        `SELECT count(*)::int AS global_count,
+                count(*) FILTER (WHERE client_key_hmac = $1)::int AS client_count
+         FROM public_check_analysis_leases`,
+        [input.clientKey],
+      );
+      const count = counts.rows[0];
+      if (
+        count === undefined ||
+        count.global_count >= this.maximumConcurrentAnalyses ||
+        count.client_count >= this.maximumConcurrentAnalysesPerClient
+      ) {
+        throw new DomainError('conflict', 'Public Check analysis capacity is temporarily busy');
+      }
+      await transaction.query(
+        `INSERT INTO public_check_analysis_leases(id, client_key_hmac, expires_at, created_at)
+         VALUES ($1,$2,$3,$4)`,
+        [leaseId, input.clientKey, expiresAt.toISOString(), input.now.toISOString()],
+      );
+      return leaseId;
+    });
+  }
+
+  async releaseAnalysisLease(input: {
+    readonly leaseId: string;
+    readonly clientKey: string;
+  }): Promise<void> {
+    this.assertClientKey(input.clientKey);
+    await this.database.query(
+      `DELETE FROM public_check_analysis_leases
+       WHERE id = $1 AND client_key_hmac = $2`,
+      [input.leaseId, input.clientKey],
+    );
   }
 
   async recordCompleted(attribution: PublicCheckAttribution, now: Date): Promise<void> {
@@ -582,6 +691,9 @@ export class PublicCheckRepository {
       );
       await transaction.query(`DELETE FROM public_check_quota_buckets WHERE bucket_start < $1`, [
         new Date(now.getTime() - 60 * 60_000).toISOString(),
+      ]);
+      await transaction.query('DELETE FROM public_check_analysis_leases WHERE expires_at <= $1', [
+        now.toISOString(),
       ]);
       await transaction.query(
         `DELETE FROM public_check_attribution_aggregates WHERE bucket_start < $1`,

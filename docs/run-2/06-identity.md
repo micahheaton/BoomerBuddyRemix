@@ -10,7 +10,7 @@ Production invitations require issuer/subject binding in the persistence contrac
 
 ## Evidence
 
-**Tested:** `tests/security/session-origin.test.ts` covers origin, CORS, audience confusion, revocation, expiry, tampering, and disabled identities. `tests/integration/authority-consent.test.ts` covers verified issuer/subject invitation binding. Authorization tests prove current, exact-scope server decisions. The final Run 2 security selection passed 17 tests across five files.
+**Tested:** `tests/security/session-origin.test.ts` covers origin, CORS, audience confusion, revocation, expiry, tampering, and disabled identities. `tests/integration/authority-consent.test.ts` covers verified issuer/subject invitation binding. Authorization tests prove current, exact-scope server decisions. The frozen Run 2 security suite passed 19 tests across six files.
 
 ## Missing production capability
 

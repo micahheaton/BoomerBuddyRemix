@@ -1,25 +1,23 @@
 # 18 — Customer Lifecycle Foundation
 
-Status: **deterministic trigger plans, workflow persistence, explainable health, support routing, and suppression records are implemented and tested in isolation; product events and message delivery are not wired**.
+Status: **product-event lifecycle projection, durable workflow advancement, explainable health, and approved local-test notifications are implemented; external delivery and observed customer outcomes are blocked**.
 
-## Implemented policy layer
+## Implemented runtime
 
-The lifecycle vocabulary covers signup/incomplete signup, first Check, orientation start/abandonment, missing Trusted Circle/practice Check, trial start/end, conversion, failed/recovered payment, renewal, cancellation intent/cancellation, win-back eligibility, and referral success. Each trigger maps to an internal task, approved message, wait, or decision step.
+The lifecycle vocabulary covers signup, first Check, orientation progress/stall, trial/paid states, payment failure/recovery, cancellation, win-back eligibility, and referral milestones. The growth projector consumes allowlisted content-free product outbox facts, idempotently starts or advances the appropriate lifecycle plan, and recalculates transparent customer-health snapshots. Health interventions can create or update HQ work cases from current local product state; they are not opaque scores or observed retention outcomes.
 
-Workflow creation is idempotent when given a trigger event ID. A non-consented win-back produces a suppressed workflow with no steps; marketing consent is required for that path. Communication policy blocks suppression violations, unconsented lifecycle messages, unapproved templates, and unapproved B2B campaigns. Consumer SMS requires professional review; novel safety advice always requires approval.
+Durable `lifecycle.advance` and `customer-health.recalculate` jobs run through the shared queue. Approved-message steps can materialize only allowlisted template keys into `notification.dispatch`. Run 2 permits the `local_test` sink only: it writes a durable content-free test receipt and advances the workflow. Dead-letter replay retains one logical request and audited lineage. There is no external destination or provider call.
 
-Customer health is a transparent ruleset. Orientation, Check completion, Trusted Circle, family participation, mobile installation, payment failure, cancellation intent, unresolved incident, open support, and inactivity contribute named points and an explanation. The result is versioned and persisted as a snapshot, not an opaque AI score. Support routing sends high-severity, fraud, or artifact-access cases to Trust & Safety; billing and security/privacy remain specialist classes.
+Communication policy still blocks suppression violations, unconsented win-back, unapproved templates/campaigns, and novel safety advice. Consumer SMS requires professional review. Worker execution rechecks the stored policy boundary rather than treating an event as permanent authority.
 
-Evidence: [lifecycle and health rules](../../packages/business-os/src/customer-health.ts), [communication policy](../../packages/business-os/src/revenue.ts), [repository](../../packages/persistence/src/business-os.ts), [schema](../../packages/persistence/migrations/0005_run2_business_os.sql), and [tests](../../packages/persistence/src/business-os.test.ts).
+Evidence: [lifecycle rules](../../packages/business-os/src/customer-health.ts), [growth projector](../../packages/persistence/src/growth-runtime.ts), [operational dispatch](../../packages/persistence/src/operational-work.ts), and [worker integration tests](../../tests/integration/operational-worker.test.ts).
 
-## Not yet an operating lifecycle
+## External boundary
 
-No signup, orientation, commerce, retention, referral, or product-activity event currently calls `startLifecycle` or refreshes customer health. No worker advances steps. There are no approved production templates, Postmark/Twilio adapters, consent preference center, delivery receipts, bounce/complaint handling, quiet hours, locale rules, experimentation, intervention queue screen, or staff owner. A suppression row is not yet synchronized with any sender.
+No Postmark/Twilio account, production template approval, external address, provider delivery, bounce/complaint receipt, quiet-hours/locale policy, preference center, production suppression synchronization, staffed queue, or customer outcome exists. A `test_delivered` receipt means only that the local test sink durably completed; it must never be reported as an email, SMS, push, or customer contact.
 
-The Stripe path creates billing-reconciliation attention when evidence is ambiguous, but it does not dispatch customer lifecycle messages. The six-step member orientation is real and documented separately; the lifecycle wrapper around it is not connected.
+Run 3 must select and review a sandbox provider, enforce consent and suppression before enqueue and again before send, prove provider idempotency/reconciliation, and observe delivery/failure without artifact content. Health thresholds need consented research and real workload evidence. Fear, fake urgency, and claims that inactivity makes a household unsafe remain prohibited.
 
-## Launch gate
+See [Member Orientation](./19-member-orientation.md), [Production Data and Jobs](./24-production-data-and-jobs.md), and [Known Limitations](./32-known-limitations.md).
 
-Run 3 must map each product event to a content-free versioned envelope, prove replay/idempotency, obtain template and consent/legal approval, connect a sandbox sender, enforce suppressions before enqueue and again before send, and record delivery/failure without artifact content. Health thresholds require customer research and workload validation. Fear, fake urgency, or claims that inactivity makes a household unsafe are prohibited.
-
-See [Member Orientation](./19-member-orientation.md), [Owner Attention](./21-owner-attention.md), and [Known Limitations](./32-known-limitations.md).
+External delivery and launch remain unauthorized.

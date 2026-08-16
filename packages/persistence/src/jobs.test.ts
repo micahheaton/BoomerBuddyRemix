@@ -368,6 +368,7 @@ describe('leased outbox delivery', () => {
       );
       const claimed = await repository.claim({
         workerId: 'worker-one',
+        eventTypes: ['test.event.v1'],
         limit: 1,
         leaseDurationMs: 5_000,
         now: fixedTestNow,
@@ -384,6 +385,7 @@ describe('leased outbox delivery', () => {
       await expect(
         repository.claim({
           workerId: 'worker-two',
+          eventTypes: ['test.event.v1'],
           limit: 1,
           leaseDurationMs: 5_000,
           now: new Date(fixedTestNow.getTime() + 6_000),
@@ -422,6 +424,7 @@ describe('leased outbox delivery', () => {
       );
       await repository.claim({
         workerId: 'worker-one',
+        eventTypes: ['test.event.v1'],
         limit: 1,
         leaseDurationMs: 5_000,
         now: fixedTestNow,
@@ -437,11 +440,267 @@ describe('leased outbox delivery', () => {
       await expect(
         repository.claim({
           workerId: 'worker-two',
+          eventTypes: ['test.event.v1'],
           limit: 1,
           leaseDurationMs: 5_000,
           now: afterLease,
         }),
       ).resolves.toMatchObject([{ id: 'event-outbox-lost', leaseOwner: 'worker-two' }]);
+    } finally {
+      await database.close();
+    }
+  }, 15_000);
+
+  it('serializes each aggregate and leaves non-allowlisted event types untouched', async () => {
+    const database = await createSeededTestDatabase();
+    const repository = new OutboxDeliveryRepository(database, sequentialIds());
+    try {
+      await database.query(
+        `UPDATE outbox_events SET processed_at = $1, lease_owner = NULL, lease_expires_at = NULL
+         WHERE processed_at IS NULL`,
+        [fixedTestNow.toISOString()],
+      );
+      const expiredAt = new Date(fixedTestNow.getTime() - 1_000);
+      const regressedClock = new Date(fixedTestNow.getTime() - 10_000);
+      await database.query(
+        `INSERT INTO outbox_events(
+           id, event_type, event_version, aggregate_type, aggregate_id, correlation_id,
+           classification, payload, occurred_at, available_at, next_attempt_at, max_attempts,
+           attempts, lease_owner, lease_expires_at
+         ) VALUES
+           ('event-ordered-z-first','test.ordered.v1',1,'test','aggregate-ordered','order-one',
+            'internal','{"sequence":1}'::jsonb,$1,$1,$1,2,0,NULL,NULL),
+           ('event-ordered-a-second','test.ordered.v1',1,'test','aggregate-ordered','order-two',
+            'internal','{"sequence":2}'::jsonb,$2,$1,$1,2,0,NULL,NULL),
+           ('event-external-owned','external.delivery.v1',1,'external','aggregate-external',
+            'external-one','internal','{"state":"pending"}'::jsonb,$1,$1,$1,2,2,
+            'external-worker',$3)`,
+        [fixedTestNow.toISOString(), regressedClock.toISOString(), expiredAt.toISOString()],
+      );
+
+      await expect(
+        repository.claim({
+          workerId: 'worker-empty',
+          eventTypes: [],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 10),
+        }),
+      ).rejects.toThrow('Invalid outbox claim request');
+
+      const claims = await Promise.all([
+        repository.claim({
+          workerId: 'worker-one',
+          eventTypes: ['test.ordered.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 10),
+        }),
+        repository.claim({
+          workerId: 'worker-two',
+          eventTypes: ['test.ordered.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 10),
+        }),
+      ]);
+      expect(claims.flat()).toMatchObject([{ id: 'event-ordered-z-first' }]);
+      const firstOwner = claims.flat()[0]?.leaseOwner;
+      expect(firstOwner).toBeDefined();
+      await expect(
+        repository.complete({
+          eventId: 'event-ordered-z-first',
+          workerId: firstOwner ?? 'missing-owner',
+          now: new Date(fixedTestNow.getTime() + 20),
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        repository.claim({
+          workerId: 'worker-two',
+          eventTypes: ['test.ordered.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 21),
+        }),
+      ).resolves.toMatchObject([{ id: 'event-ordered-a-second' }]);
+
+      const external = await database.query<
+        {
+          readonly dead_lettered_at: unknown;
+          readonly lease_owner: string | null;
+          readonly lease_expires_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT dead_lettered_at, lease_owner, lease_expires_at
+         FROM outbox_events WHERE id = 'event-external-owned'`,
+      );
+      expect(external.rows[0]).toMatchObject({
+        dead_lettered_at: null,
+        lease_owner: 'external-worker',
+      });
+      expect(new Date(String(external.rows[0]?.lease_expires_at)).getTime()).toBe(
+        expiredAt.getTime(),
+      );
+    } finally {
+      await database.close();
+    }
+  }, 15_000);
+
+  it('blocks an aggregate behind poison work until an audited replay chain succeeds in place', async () => {
+    const database = await createSeededTestDatabase();
+    const repository = new OutboxDeliveryRepository(database, sequentialIds());
+    try {
+      await database.query(
+        `UPDATE outbox_events SET processed_at = $1, lease_owner = NULL, lease_expires_at = NULL
+         WHERE processed_at IS NULL`,
+        [fixedTestNow.toISOString()],
+      );
+      const successorAt = new Date(fixedTestNow.getTime() + 1);
+      await database.query(
+        `INSERT INTO outbox_events(
+           id, event_type, event_version, aggregate_type, aggregate_id, correlation_id,
+           classification, payload, occurred_at, available_at, next_attempt_at, max_attempts
+         ) VALUES
+           ('event-poison','test.poison.v1',1,'test','aggregate-poison','poison-one',
+            'internal','{"sequence":1}'::jsonb,$1,$1,$1,1),
+           ('event-after-poison','test.poison.v1',1,'test','aggregate-poison','poison-two',
+            'internal','{"sequence":2}'::jsonb,$2,$1,$1,2)`,
+        [fixedTestNow.toISOString(), successorAt.toISOString()],
+      );
+
+      const first = await repository.claim({
+        workerId: 'worker-poison',
+        eventTypes: ['test.poison.v1'],
+        limit: 1,
+        leaseDurationMs: 5_000,
+        now: new Date(fixedTestNow.getTime() + 10),
+      });
+      expect(first).toMatchObject([{ id: 'event-poison' }]);
+      await expect(
+        repository.fail({
+          eventId: 'event-poison',
+          workerId: 'worker-poison',
+          errorCode: 'poison_payload',
+          nextAttemptAt: new Date(fixedTestNow.getTime() + 20),
+          now: new Date(fixedTestNow.getTime() + 20),
+        }),
+      ).resolves.toBe('dead_letter');
+      await expect(
+        repository.claim({
+          workerId: 'worker-blocked',
+          eventTypes: ['test.poison.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 21),
+        }),
+      ).resolves.toEqual([]);
+
+      const replayId = await repository.replayDeadLetter({
+        eventId: 'event-poison',
+        actorPersonId: 'person-owner-alice',
+        reason: 'payload_corrected',
+        correlationId: 'poison-replay',
+        now: new Date(fixedTestNow.getTime() + 30),
+      });
+      await expect(
+        repository.replayDeadLetter({
+          eventId: 'event-poison',
+          actorPersonId: 'person-owner-alice',
+          reason: 'duplicate_replay',
+          correlationId: 'poison-replay-duplicate',
+          now: new Date(fixedTestNow.getTime() + 31),
+        }),
+      ).rejects.toThrow('Only dead-letter events may replay');
+      const lineage = await database.query<
+        {
+          readonly id: string;
+          readonly causal_order_position: number;
+          readonly replay_of_event_id: string;
+          readonly occurred_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT id, causal_order_position, replay_of_event_id, occurred_at
+         FROM outbox_events WHERE id = $1`,
+        [replayId],
+      );
+      expect(lineage.rows[0]).toMatchObject({
+        id: replayId,
+        replay_of_event_id: 'event-poison',
+      });
+      const originalPosition = await database.query<
+        { readonly causal_order_position: number } & Record<string, unknown>
+      >('SELECT causal_order_position FROM outbox_events WHERE id = $1', ['event-poison']);
+      expect(lineage.rows[0]?.causal_order_position).toBe(
+        originalPosition.rows[0]?.causal_order_position,
+      );
+      expect(new Date(String(lineage.rows[0]?.occurred_at)).getTime()).toBe(fixedTestNow.getTime());
+
+      const replay = await repository.claim({
+        workerId: 'worker-replay',
+        eventTypes: ['test.poison.v1'],
+        limit: 1,
+        leaseDurationMs: 5_000,
+        now: new Date(fixedTestNow.getTime() + 32),
+      });
+      expect(replay).toMatchObject([{ id: replayId }]);
+      await expect(
+        repository.fail({
+          eventId: replayId,
+          workerId: 'worker-replay',
+          errorCode: 'poison_recurred',
+          nextAttemptAt: new Date(fixedTestNow.getTime() + 33),
+          now: new Date(fixedTestNow.getTime() + 33),
+        }),
+      ).resolves.toBe('dead_letter');
+      await expect(
+        repository.claim({
+          workerId: 'worker-still-blocked',
+          eventTypes: ['test.poison.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 34),
+        }),
+      ).resolves.toEqual([]);
+
+      const secondReplayId = await repository.replayDeadLetter({
+        eventId: replayId,
+        actorPersonId: 'person-owner-alice',
+        reason: 'second_payload_correction',
+        correlationId: 'poison-replay-two',
+        now: new Date(fixedTestNow.getTime() + 35),
+      });
+      const secondReplay = await repository.claim({
+        workerId: 'worker-second-replay',
+        eventTypes: ['test.poison.v1'],
+        limit: 1,
+        leaseDurationMs: 5_000,
+        now: new Date(fixedTestNow.getTime() + 36),
+      });
+      expect(secondReplay).toMatchObject([{ id: secondReplayId }]);
+      await expect(
+        repository.complete({
+          eventId: secondReplayId,
+          workerId: 'worker-second-replay',
+          now: new Date(fixedTestNow.getTime() + 37),
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        repository.claim({
+          workerId: 'worker-successor',
+          eventTypes: ['test.poison.v1'],
+          limit: 1,
+          leaseDurationMs: 5_000,
+          now: new Date(fixedTestNow.getTime() + 38),
+        }),
+      ).resolves.toMatchObject([{ id: 'event-after-poison' }]);
+      const replayAudits = await database.query<
+        { readonly total: number } & Record<string, unknown>
+      >(
+        `SELECT count(*)::int AS total FROM audit_events
+         WHERE action = 'outbox.replayed' AND resource_id IN ($1,$2)`,
+        [replayId, secondReplayId],
+      );
+      expect(replayAudits.rows[0]?.total).toBe(2);
     } finally {
       await database.close();
     }

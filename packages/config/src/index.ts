@@ -8,6 +8,7 @@ const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   BB_API_HOST: nonEmpty.default('127.0.0.1'),
   BB_API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
+  BB_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(2).default(0),
   BB_DATABASE_DRIVER: z.enum(['pglite', 'postgres']).default('pglite'),
   BB_PGLITE_PATH: nonEmpty.optional(),
   DATABASE_URL: z.string().url().optional(),
@@ -34,7 +35,12 @@ const environmentSchema = z.object({
 
 export interface AppConfig {
   readonly environment: 'development' | 'test' | 'production';
-  readonly api: { readonly host: string; readonly port: number };
+  readonly api: {
+    readonly host: string;
+    readonly port: number;
+    /** Zero trusts the direct peer only; nonzero must match the reviewed hosting topology. */
+    readonly trustedProxyHops: 0 | 1 | 2;
+  };
   readonly database:
     | {
         readonly driver: 'pglite';
@@ -215,7 +221,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
 
   return {
     environment: parsed.NODE_ENV,
-    api: { host: parsed.BB_API_HOST, port: parsed.BB_API_PORT },
+    api: {
+      host: parsed.BB_API_HOST,
+      port: parsed.BB_API_PORT,
+      trustedProxyHops: parsed.BB_TRUSTED_PROXY_HOPS as 0 | 1 | 2,
+    },
     database,
     identity: {
       allowDevelopmentIssuer: parsed.BB_ALLOW_DEV_IDENTITY,

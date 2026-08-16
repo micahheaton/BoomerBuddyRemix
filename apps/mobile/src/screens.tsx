@@ -1450,13 +1450,13 @@ export function FamilyScreen({
 const orientationSteps = [
   [
     'protection_subject',
-    'Confirm the protected person',
-    'This setup belongs to the enrolled protected adult; household administration does not replace that person’s choice.',
+    'Confirm identity, enrollment, and consent',
+    'Confirm whose identity and plan this is. This review does not verify identity. The protected adult needs accepted self-enrollment; administration or payment never replaces that person’s consent.',
   ],
   [
     'trusted_circle',
     'Consent and Trusted Circle',
-    'Each pairwise permission requires review and acceptance, can be ended, and does not send a notification in this build.',
+    'Review the exact person, sharing permission, and withdrawal path. Pairwise permission requires acceptance and can end independently. Notifications are unavailable in this build, so agree on a manual contact method.',
   ],
   [
     'safe_word',
@@ -1465,18 +1465,18 @@ const orientationSteps = [
   ],
   [
     'practice_check',
-    'Practice a safer response',
-    'Use a synthetic suspicious-bank-message scenario to practice pausing and verifying independently.',
+    'Practice the Check and sharing workflow',
+    'Use a synthetic bank-message scenario to practice pausing, entering suspicious material in Check, reading evidence and limits, taking a safe action, and deliberately sharing only a redacted result.',
   ],
   [
     'capabilities_and_limits',
-    'Understand the limits',
-    'Local rules-only analysis does not fetch URLs, use a live reputation provider, monitor messages, or guarantee safety.',
+    'Understand limits and recovery',
+    'Local rules-only analysis does not fetch URLs, use a live reputation provider, monitor messages, or guarantee safety. If money, access, or credentials were exposed, stop contact, use independently found official channels, secure the account, and seek qualified help.',
   ],
   [
     'review',
     'Review the plan',
-    'Confirm protected-person scope, consent choices, permissions, safe-word choice, and verification steps.',
+    'Confirm identity and protected-person scope, consent, pairwise permissions, manual contact plan, safe word, Check and sharing workflow, recovery contacts, and independent verification steps.',
   ],
 ] as const;
 type OrientationKey = (typeof orientationSteps)[number][0];
@@ -1571,7 +1571,8 @@ export function OrientationScreen(): React.ReactElement {
         Orientation
       </Text>
       <Text style={s.body}>
-        Six short steps make people, permissions, boundaries, and limits explicit.
+        Six guided stages cover identity, protected-person consent, Trusted Circle sharing,
+        notification limits, a realistic Check, recovery, and product boundaries.
       </Text>
       {announcement ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>

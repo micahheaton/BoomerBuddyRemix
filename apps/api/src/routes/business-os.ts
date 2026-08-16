@@ -1,6 +1,7 @@
 import { assertAuthorized, type Action } from '@boomerbuddy/authorization';
 import {
   createOpportunityRequestSchema,
+  advancePrivacyRequestSchema,
   automationGlobalControlResponseSchema,
   creditUnionTargetsQuerySchema,
   creditUnionTargetsResponseSchema,
@@ -9,6 +10,8 @@ import {
   opportunityQueueResponseSchema,
   ownerAttentionResponseSchema,
   ownerBriefResponseSchema,
+  privacyRequestListResponseSchema,
+  privacyRequestParamsSchema,
   putAutonomyPolicyRequestSchema,
   putAutomationGlobalControlRequestSchema,
   setOpportunityNextActionRequestSchema,
@@ -19,6 +22,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { assertMutationOrigin, authenticate, correlationId } from '../auth';
 import type { ApiContext } from '../context';
+import { privacyRequestDto } from './privacy';
 
 const opportunityParamsSchema = z.object({
   opportunityId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:_-]{2,199}$/u),
@@ -173,6 +177,44 @@ export function registerBusinessOsRoutes(app: FastifyInstance, context: ApiConte
         ...(item.deadline === undefined ? {} : { deadline: item.deadline.toISOString() }),
       })),
     });
+  });
+
+  app.get('/v1/hq/business-os/privacy-requests', async (request) => {
+    await authorizeBusinessOs(request, context, 'hq:business_os:manage');
+    return privacyRequestListResponseSchema.parse({
+      requests: (await context.repositories.businessOs.listPrivacyRequests()).map(
+        privacyRequestDto,
+      ),
+      fulfillmentMode: 'evidence_plan_only',
+      limitation:
+        'Run 2 records identity review and a content-free fulfillment plan; it does not claim completed export or erasure.',
+    });
+  });
+
+  app.post('/v1/hq/business-os/privacy-requests/:requestId/actions', async (request) => {
+    const auth = await authorizeBusinessOs(request, context, 'hq:business_os:manage');
+    const { requestId } = privacyRequestParamsSchema.parse(request.params);
+    const body = advancePrivacyRequestSchema.parse(request.body);
+    try {
+      const privacyRequest = await context.repositories.businessOs.advancePrivacyRequest({
+        requestId,
+        action: body.action,
+        evidenceReference: body.evidenceReference,
+        context: operationalContext(request, auth.principal.personId, context.now()),
+      });
+      return { request: privacyRequestDto(privacyRequest), fulfillmentPerformed: false };
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Privacy request not found') {
+        throw new DomainError('not_found', 'Privacy request is unavailable');
+      }
+      if (error instanceof Error && error.message.includes('transition is unavailable')) {
+        throw new DomainError('invalid_transition', 'Privacy request transition is unavailable');
+      }
+      if (error instanceof Error && error.message === 'Privacy request is already terminal') {
+        throw new DomainError('invalid_transition', 'Privacy request is already terminal');
+      }
+      throw error;
+    }
   });
 
   app.put('/v1/hq/business-os/autonomy/policies', async (request, reply) => {

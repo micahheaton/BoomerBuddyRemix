@@ -31,6 +31,16 @@ Production invitations are identity-bound, scope-limited, expiring, single-use, 
 
 Consent becomes explainable and reconstructable, at the cost of more records, versioned disclosures, projection logic, and repair tooling. Corrections append a correcting event rather than editing history. Privacy export may include human-readable consent history while operational telemetry remains content-free.
 
+## Migration and rollback
+
+The forward migration creates append-only evidence and current-projection records, deterministically backfills each legacy consent origin, and binds protected enrollments, invitations, and Trusted Circle relationships to the latest evidence. Before switching reads, migration checks must reconcile origin, evidence, projection, active relationship, and withdrawal counts and prove a projection rebuild produces the stored state.
+
+Rollback must not erase or rewrite consent history. Before any post-migration consent action exists, a tested database restore and compatible prior application may be used. After new evidence exists, rollback means disabling new invitation/consent mutations, retaining the evidence tables, and deploying a forward corrective migration or compatibility reader; it never means dropping evidence or resurrecting withdrawn authority. Any application rollback must understand the migrated neutral-membership and consent references or remain blocked.
+
+## Security and privacy consequences
+
+Consent history is sensitive relationship metadata. Disclosure bodies, invitation secrets, session tokens, and customer content stay out of audit, outbox, logs, analytics, and URLs; only purpose-bound digests and content-free references persist. Invitation tokens use keyed digests, identity binding, expiry, single use, and non-enumerating failures. Export, retention, correction, employee access, coercion response, and legal sufficiency require explicit policy and professional review; append-only does not mean retain every field forever.
+
 ## Rejected alternatives
 
 - A mutable `consent_status` row: destroys evidence and makes races ambiguous.

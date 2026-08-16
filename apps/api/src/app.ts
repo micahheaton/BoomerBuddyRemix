@@ -223,7 +223,8 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     logger: false,
     bodyLimit: 24 * 1_024,
     genReqId: () => createRequestId(),
-    trustProxy: false,
+    trustProxy:
+      options.config.api.trustedProxyHops === 0 ? false : options.config.api.trustedProxyHops,
   });
   let retentionContinuation: ReturnType<typeof setTimeout> | undefined;
   let retentionSweep: Promise<void> | undefined;

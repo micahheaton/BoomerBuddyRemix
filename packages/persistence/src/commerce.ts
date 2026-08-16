@@ -9,6 +9,7 @@ import {
   reconcileProtectedMemberAllowanceBindings,
   reconcileTrustedCircleAllowanceBindings,
 } from './entitlements';
+import { writeAuditAndOutbox } from './events';
 import { randomIdFactory, type IdFactory } from './values';
 
 interface InboxRow extends Record<string, unknown> {
@@ -650,6 +651,36 @@ export class CommerceOperationsRepository {
              applied_at = $3, processed_at = $3
          WHERE id = $1`,
         [input.inboxId, input.lifecycle, input.now.toISOString()],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.idFactory,
+        {
+          householdId: input.householdId,
+          correlationId: `commerce:${input.inboxId}`,
+          now: input.now,
+        },
+        {
+          action: 'commerce.lifecycle_applied',
+          resourceType: 'subscription',
+          resourceId: input.subscriptionId,
+          outcome: 'completed',
+          metadata: {
+            lifecycle: effectiveLifecycle,
+            previousLifecycle: canonicalBefore.lifecycle,
+            providerEventKind: event.event_type,
+          },
+        },
+        {
+          eventType: 'commerce.lifecycle_applied.v1',
+          aggregateType: 'subscription',
+          aggregateId: input.subscriptionId,
+          payload: {
+            lifecycle: effectiveLifecycle,
+            previousLifecycle: canonicalBefore.lifecycle,
+            providerEventKind: event.event_type,
+          },
+        },
       );
       return { eventId: input.inboxId, outcome: 'applied', lifecycle: effectiveLifecycle };
     });

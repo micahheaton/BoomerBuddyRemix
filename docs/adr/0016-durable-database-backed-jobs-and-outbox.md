@@ -18,13 +18,25 @@ Use standard PostgreSQL as the canonical durable work store. A job records type/
 
 Workers claim bounded batches transactionally with ordered `FOR UPDATE SKIP LOCKED`, set an expiring lease, then perform work outside the claim transaction. Heartbeats extend only a still-owned lease. Expired leases are reclaimable. Retry uses bounded exponential backoff with jitter and a type-specific ceiling; poison work enters quarantine/dead letter. Replay requires scoped operator authority, reason, audit, fresh idempotency, and a kill switch. Shutdown stops claims, finishes or relinquishes work within a deadline, and records health.
 
-Outbox delivery uses the same lease discipline. Consumers write an inbox receipt/idempotency record before applying a side effect and reconcile with provider truth where available. Per-aggregate sequence is enforced only where the domain requires it. Scheduled retention, invitation expiry, reconciliation, privacy operations, owner briefs, and approved communications use typed jobs. In-process timers may wake a worker but are never the durable schedule.
+Outbox delivery uses the same lease discipline. Consumers write an inbox receipt/idempotency record before applying a side effect and reconcile with provider truth where available. Where the domain requires ordering, each aggregate has a causal position: an unresolved poison event blocks its successors until an audited replay chain resolves at the original position. Scheduled retention, invitation expiry, reconciliation, privacy operations, owner briefs, growth projections, approved communications, intelligence refresh, and governed evaluation use typed jobs. In-process timers may wake a worker but are never the durable schedule.
 
 Payloads exclude artifact bodies, URLs, contact destinations, tokens, secrets, raw provider payloads, and unnecessary PII. Workers resolve narrowly authorized resources at execution time and fail closed if consent, entitlement, approval, or grant has changed. Run 2 does not enable external messages merely because the job engine exists.
 
 ## Consequences
 
 The team operates a queue schema, worker process, dead-letter tooling, and table retention, but avoids another required service and keeps atomic domain-to-intent writes. At-least-once semantics make idempotency and reconciliation mandatory. `SKIP LOCKED` is suitable for queue-like consumers, not general consistency.
+
+Run 2 registers durable acquisition, lifecycle, customer-health, notification, intelligence-refresh, and evaluation handlers. Approved notifications terminate at a local test sink; intelligence work records governed draft/freshness evidence without activating content; evaluation persists a content-free summary. Durable intent is not external delivery, publication, or provider execution.
+
+## Migration and rollback
+
+The forward migration adds durable job, attempt, receipt, lease, and outbox-delivery state without converting an unrecorded timer into completed work. Any pending legacy outbox intent is claimed only through the new idempotent path, and recurring work is registered once with deterministic keys. Before multiple workers start, schema, claim ordering, lease expiry, receipt uniqueness, and retry/dead-letter behavior must pass against the target PostgreSQL version.
+
+Rollback stops new claims, lets owned work complete or explicitly relinquish, records the last safe cursor, and disables external consumers before changing worker code. Job, attempt, receipt, dead-letter, and outbox history remains available for reconciliation; tables are not dropped while effects may exist. A temporary manual or single-worker path may resume only from canonical queued state and the same idempotency contract—never from process memory or by replaying every row blindly.
+
+## Security and privacy consequences
+
+Queues can become a covert data lake or privilege bypass. Payload schemas exclude artifact content, destinations, credentials, URLs, provider payloads, and unnecessary PII; workers use separate least-privilege credentials and reauthorize the referenced resource at execution. Lease, replay, dead-letter, and cancellation operations require scoped operator identity, reason, immutable audit, and rate limits. Error/observability fields stay content-free, and backups, retention, cross-tenant isolation, poison-work inspection, and provider-side reconciliation require security review.
 
 ## Rejected alternatives
 
@@ -36,11 +48,11 @@ The team operates a queue schema, worker process, dead-letter tooling, and table
 
 ## Verification
 
-Real-PostgreSQL concurrency tests cover competing workers, crash after claim, lease expiry/reclaim, heartbeat ownership, duplicate delivery, ordered aggregates, retries/jitter ceilings, dead-letter isolation, audited replay, shutdown, and reconciliation. Security tests cover tenant scope, revoked authority at execution, minimized payloads, log/error redaction, approval gates, and kill switches. CI exercises migrations and locking on a real server, not only PGlite.
+Real-PostgreSQL verification covers competing workers, crash after claim, lease expiry/reclaim, heartbeat ownership, duplicate delivery, scheduled order, consumer receipts, retries/jitter ceilings, dead-letter isolation, audited replay, causal poison blocking/replay, shutdown, and reconciliation intent. Local integration tests cover growth projections and local-test notification/intelligence/evaluation handlers. Security tests cover tenant scope, revoked authority at execution, minimized payloads, log/error redaction, approval gates, and kill switches. Frozen real-server execution evidence remains a release gate.
 
 ## Evidence boundary
 
-The schema, worker, concurrency tests, and local replay tooling are not account-blocked. Production throughput, failover, alert routing, backup/restore, multi-instance shutdown, and provider-side reconciliation remain blocked until staging infrastructure and provider accounts exist.
+The schema, worker, causal replay tooling, growth projections, and content-free operational handlers are implemented locally. Production throughput, failover, alert routing, backup/restore, multi-instance shutdown, external delivery, live intelligence refresh, and provider-side reconciliation remain blocked until staging infrastructure, accounts, and accountable operators exist.
 
 ## Primary sources
 

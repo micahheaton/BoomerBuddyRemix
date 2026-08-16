@@ -1,14 +1,14 @@
 # 13 — Acquisition Attribution
 
-Status: **privacy-bounded contracts and Public Check counters are implemented and tested locally; the full funnel and external analytics are scaffolded, not operating**.
+Status: **privacy-bounded touchpoints and deterministic local funnel projections are implemented; external analytics, spend, traffic, and causal performance remain blocked**.
 
 ## Implemented boundary
 
-The Business OS defines ten acquisition channels (`organic_search`, `paid_search`, `paid_social`, `referral`, `partner`, `affiliate`, `direct`, `content`, `campaign`, and `newsletter`) and nine milestones from landing through referral. Tokens are length-bounded, restricted to a small character set, normalized, and invalid values are discarded. Referrer input can retain only a syntactically valid hostname. The `acquisition_touchpoints` table and repository can record anonymous-context, person, or household milestones without accepting submitted artifact content.
+The Business OS defines bounded acquisition channels and milestones without accepting submitted artifact content. Tokens are normalized and restricted; referrer input can retain only a syntactically valid hostname. People, households, and anonymous contexts remain distinct, and attribution never grants authority to view a Check or contact anyone.
 
-The wired path is narrower. Public Check accepts only enumerated source/campaign pairs, keeps daily aggregate counts for `context_issued` and `check_completed`, and carries source/campaign evidence into the one-time authenticated save record. Integration and browser tests prove bounded attribution and consented conversion without placing the submitted text, URL, host, or result narrative in analytics.
+The durable growth projector now consumes allowlisted product outbox events and writes content-free acquisition touchpoints. Public Check save can record signup; member Check completion can record first Check; orientation events record progress/completion; Family invitation and relationship events record referral milestones; and canonical commerce lifecycle events record trial/paid states. Projection receipts make replay idempotent. Earlier unresolved events for the same aggregate block later growth projection, preventing a causal successor from overtaking poison work.
 
-Evidence: [acquisition policy](../../packages/business-os/src/acquisition.ts), [Public Check persistence](../../packages/persistence/src/public-checks.ts), [Business OS migration](../../packages/persistence/migrations/0005_run2_business_os.sql), [Public Check integration test](../../tests/integration/public-checks.test.ts), and [browser journey](../../tests/e2e/public-check.spec.ts).
+Evidence: [acquisition policy](../../packages/business-os/src/acquisition.ts), [growth projector](../../packages/persistence/src/growth-runtime.ts), [growth schema](../../packages/persistence/migrations/0009_run2_growth_runtime.sql), and [worker registration](../../apps/worker/src/growth-runtime.ts).
 
 ## Measurement contract
 
@@ -16,17 +16,17 @@ The intended funnel is:
 
 `landing → first Check → signup → activation → orientation → trial → paid → retention → referral`
 
-Count people, households, and anonymous contexts separately. A context is not a person; a signup is not activation; eligibility is not payment. Attribution must never become authority to view a Check or contact a person. Reports should show first-touch and milestone evidence, cohort window, denominator, unknown/direct share, and suppression—not a fabricated single-cause claim.
+A context is not a person; signup is not activation; eligibility is not payment. Reports must state event source, cohort window, denominator, unknown/direct share, identity-merge rule, and suppression. Local deterministic projection establishes event lineage; it does not establish causal marketing credit.
 
 ## Truthful limitations
 
-- Only Public Check context/completion attribution is connected to product traffic. General `acquisition_touchpoints` recording is repository-level and not wired to landing, signup, orientation, commerce, retention, or referral events.
-- Public Check’s current `organic` vocabulary is intentionally smaller than the general `organic_search` vocabulary; no cross-model attribution join exists.
-- There is no PostHog project, ad-platform connector, identity merge policy, consent banner decision, campaign cost import, multi-touch model, dashboard, or production traffic.
-- No conversion, CAC, retention, or channel-performance result exists. Local counters prove mechanics only.
+- No PostHog project, ad connector, consent-banner decision, campaign-cost ledger, production identity merge, small-cell dashboard, or production traffic exists.
+- No campaign, landing experiment, paid impression, customer invoice, channel spend, or externally delivered message has been observed.
+- Projection can calculate local funnel states from product facts, but no conversion, CAC, retention, incremental lift, or channel-performance result exists.
+- Public Check client-HMAC quotas remain application/database controls, not external edge or bot proof.
 
 ## Research gate — awaiting external execution
 
-Recruit, with consent and accessibility accommodations, older adults across supported age, device, and assistance needs; adult-child buyer pairs with separate interviews before joint tasks; and credit-union buyers spanning executive, compliance/risk, and member-service roles. Use moderated, task-based sessions—not marketing outreach—to test name/brand trust, positioning, price and willingness to pay, the Family proposition, accessibility, and comprehension. Instrument completion, time, assistance, error/recovery, abandonment, confidence, and verbatim concerns without collecting Check content in analytics. Predefine sample, scripts, tasks, success thresholds, incentives, consent, retention, and stop rules. No session has run, so there are no findings to report.
+Use the versioned [Human Research Protocol](./HUMAN-RESEARCH-PROTOCOL.md), [Moderator Guides](./HUMAN-RESEARCH-MODERATOR-GUIDES.md), and [Research Forms](./HUMAN-RESEARCH-FORMS.md) for consented older-adult, adult-child purchaser, brand/pricing/Family, and credit-union buyer research. No session has run and there are no findings to report.
 
-Run 3 must obtain privacy/legal review, connect approved content-free event envelopes, define anonymous-to-known merge and deletion behavior, configure small-cell/reporting controls, and validate production bot/edge behavior before any channel comparison. See [known limitations](./32-known-limitations.md) and the [Run 3 research gate](./33-run-3-launch-plan.md).
+Run 3 must obtain privacy/legal review, deploy only content-free approved events, prove merge/deletion/suppression rules, validate edge behavior, and reconcile real costs before comparing channels. See [known limitations](./32-known-limitations.md) and the [Run 3 plan](./33-run-3-launch-plan.md). Run 2 does not launch.

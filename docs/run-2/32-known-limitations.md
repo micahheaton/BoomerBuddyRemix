@@ -4,53 +4,54 @@ Status: **Run 2 commercialization foundation; not launch, first-dollar, or produ
 
 ## Boundary
 
-Run 2 demonstrates local contracts, migrations, deterministic workflows, portable configuration, and staging-oriented architecture. It does not demonstrate demand, safety efficacy, production reliability, regulatory compliance, or a staffed company. The [Master Spec](../BOOMERBUDDY-2.0-MASTER-SPEC.md) still prohibits public launch, live money, outbound campaigns, app submission, hiring, and production customer data.
+Run 2 demonstrates checked-in contracts, migrations, deterministic local workflows, and staging-oriented architecture. The frozen local gate passed, but neither code nor a passing local gate can demonstrate demand, safety efficacy, production reliability, regulatory compliance, or a staffed company. The [Master Spec](../BOOMERBUDDY-2.0-MASTER-SPEC.md) still prohibits public launch, live money, outbound campaigns, app submission, hiring, and production customer data.
 
 ## Product and evidence
 
-- No older adult, adult-child buyer, sponsor, customer, or professional reviewer participated. Name, positioning, pricing, willingness to pay, activation, retention, accessibility, comprehension, and Family value remain unvalidated.
-- Fraud output remains `not_calibrated`. Local/deterministic evidence cannot support accuracy, “safe,” losses-prevented, or comparative-superiority claims. No live reputation/intelligence provider or independently adjudicated representative corpus has been exercised.
-- Public Check is a local privacy-bounded workflow, not a public acquisition result. Bot defense, edge behavior, production quotas, legal disclosures, conversion, and abuse under real traffic remain untested.
-- The orientation workflow and native capture boundaries are implementation evidence only. No iOS/Android device, macOS/Xcode share extension, push notification, app-store review, assistive-technology session, or offline-field study has passed.
+- No older adult, adult-child buyer, sponsor, customer, or professional reviewer has participated. The [research protocol package](./HUMAN-RESEARCH-PROTOCOL.md) is executable preparation, not findings. Name, positioning, price, willingness to pay, activation, retention, accessibility, comprehension, and Family value remain unvalidated.
+- Fraud remains `not_calibrated`. Seven typed provider roles, freshness, and fail-closed durable live limiting work as local contracts, but no live provider or independently adjudicated representative corpus has run. No accuracy, safety, prevented-loss, or superiority claim is supported.
+- Public Check has privacy-preserving application/database client quotas and concurrency, but no CDN/WAF/bot/challenge configuration, deployed proxy proof, public traffic, conversion, or abuse result.
+- Orientation and content-free progress/stall/first-Check projections are implementation evidence. No older-adult comprehension study, supported native device, share extension, push notification, app-store review, assistive-technology session, or offline-field study has passed.
 
 ## Platform and commerce
 
 - Production startup intentionally fails without managed identity and KMS architecture. Development personas and local secrets are not production controls.
-- PGlite and repository/container configuration do not prove managed PostgreSQL connection limits, migration locking, backup integrity, point-in-time recovery, region failure, or real provider networking. A clean-clone or scripted loss drill is not an independent cloud restore.
-- Stripe is disabled by default and test-only when configured. Deterministic signed fixtures do not prove an external Checkout, provider delivery, portal, tax setup, bank settlement, refund, dispute, or reconciliation against a Stripe account.
-- Apple and Google are provider-contract/storefront-policy architecture only. Products, agreements, signing, server notifications, restoration, jurisdiction-specific purchase links, current fees, and device behavior are blocked by accounts and devices.
-- Vercel, Render, Neon, Clerk, Cloudflare, S3-compatible storage, Sentry, PostHog, Postmark, Twilio, and Expo/EAS remain hypotheses until company-owned accounts, contracts, regions, credentials, billing, security review, and staging evidence exist.
-- Durable jobs/outbox/retention behavior can be tested locally, but no externally hosted multi-worker soak, provider outage, dead-letter operations shift, or production alert path exists.
+- PGlite plus the expanded PostgreSQL verifier do not prove a hosted pool, roles, migration lock, backup integrity, point-in-time recovery, regional failure, or multi-worker operation. A scripted clean clone is not an independent cloud restore.
+- Stripe remains disabled by default and test-only when configured. Signed fixtures do not prove an account-owned Checkout, provider delivery, portal, tax, settlement, refund, dispute, or reconciliation against Stripe truth.
+- Apple/Google remain typed policy/provider contracts without products, agreements, signing, notifications, restoration, current jurisdictional purchase proof, or supported-device evidence.
+- Hosting, identity, DNS, storage, telemetry, messaging, intelligence, and EAS providers remain hypotheses until company accounts, contracts, scoped credentials, billing, security review, and staging evidence exist.
+- Durable growth, notification, intelligence, evaluation, retention, and causal outbox work runs locally. No external delivery, provider refresh, publication, managed multi-worker soak, staffed dead-letter shift, or production alert route exists.
 
 ## Family, privacy, and people
 
-- The orthogonal household, payer, billing, protected-person, Trusted Circle, support, and append-only consent model is code/schema evidence. Managed identity assurance, recovery, coercion/usability research, legally sufficient disclosure, and real invitation delivery remain external.
-- Data export/erasure and access-audit foundations are not a complete privacy program. Data inventory, retention schedule, processor agreements, records of processing, DPO/legal review, deletion across vendors/backups, and breach exercises remain required.
-- No customer-support, Trust & Safety, incident, on-call, finance, privacy, security, or accessibility team is staffed. A queue and routing class do not create accountable humans or truthful service hours.
-- The [Philippines operations model](./STAFFING-AND-PHILIPPINES-OPS.md) contains broad planning bands only. It has no vendor quote, applicant, wage offer, entity/EOR decision, counsel opinion, processor agreement, managed-device estate, shift study, training cohort, or authorization to hire.
+- Orthogonal authority, append-only consent, Family lifecycle projection, and referral facts are code/schema evidence. Managed identity assurance, recovery, coercion/usability research, legally sufficient disclosure, and real invitation delivery remain external.
+- Privacy requests can be verified, reviewed, and assigned an immutable content-free evidence plan. They cannot export, delete, correct, restrict, notify, reconcile processors/backups, or complete fulfillment. This is not a complete privacy program.
+- No support, Trust & Safety, incident, on-call, finance, privacy, security, or accessibility team is staffed. A queue, plan, or routing class does not create an accountable person or service hours.
+- The [Philippines model](./STAFFING-AND-PHILIPPINES-OPS.md) contains planning bands only—no quote, applicant, offer, entity/EOR choice, counsel opinion, processor agreement, device estate, shift study, or hiring authority.
 
 ## Business OS and autonomy
 
-- HQ metrics and Owner Briefs are local/runtime projections; they are not MRR, pipeline, prevention, partner intent, or customer-health outcomes. The official NCUA snapshot describes institutions and fit, not contacts, buying intent, or permission to solicit.
-- Acquisition, referral, lifecycle, CRM, content, and attention records do not send messages or create customers. Enrichment, transactional delivery, marketing consent, suppression synchronization, and external reporting remain disabled or unconnected.
-- The global automation kill switch defaults engaged. The policy engine only permits a code-owned list of reversible internal actions. No production agent scheduler, external tool execution, delegation team, or unattended operational track record exists.
-- The [Founder Dependency Score](./FOUNDER-DEPENDENCY-MODEL.md) is a scenario. There is no four-week time study, live queue, staff owner, founder-vacation drill, or measured reduction from 100 to 24.
+- Acquisition, referral, orientation, lifecycle, and customer-health projections now consume real local product events. They are not public traffic, delivered communications, customer outcomes, observed retention, causal attribution, MRR, or CAC.
+- The provider-neutral enrichment contract has deterministic fixtures only. It made no account/network call, verified no person, and remains isolated from customer artifacts and outreach.
+- Approved-message automation terminates at a local test sink. `test_delivered` is a durable fixture receipt, never email/SMS/push delivery. Enrichment, external communications, marketing suppression synchronization, and external reporting remain disabled.
+- HQ can plan content-free privacy evidence and local interventions, but it cannot fulfill privacy rights, execute external outreach, or substitute a staff operation.
+- The global automation stop defaults engaged. No production agent scheduler, external tool executor, delegation team, or unattended track record exists.
+- The [Founder Dependency Score](./FOUNDER-DEPENDENCY-MODEL.md) is a scenario, not measured founder-time reduction.
 
 ## Economics
 
-- The [50K Subscriber Model](./50K-SUBSCRIBER-MODEL.md) uses hypothetical plan/channel mix, 3% monthly churn, `$35` CAC, `$2.25` variable household-month cost, and fixed-cost envelopes. It is not a valuation, budget, forecast, or fundraising model.
-- Its rows assume an average paid balance for a full year. They exclude launch ramp, growth CAC, financing, working-capital timing, deferred annual revenue, income tax, owner distributions, and a full cash-flow/balance-sheet model.
-- Store rules/fees, tax nexus, refunds, bad debt, intelligence, support, payroll, legal/security/privacy, and sponsor contract economics can change the conclusion. At 50K, plausible store, service-cost, or CAC stress individually misses the `$1M` target.
-- Revenue-bearing equivalents require actual settled contribution. Eligible, free, invited, duplicate, protected, and unactivated people cannot be counted.
+- The [50K Subscriber Model](./50K-SUBSCRIBER-MODEL.md) uses hypothetical price, plan/channel mix, churn, CAC, variable cost, and fixed-cost envelopes. It is not a forecast, budget, valuation, or fundraising model.
+- Its average-paid rows exclude launch ramp, growth financing, working-capital timing, deferred annual revenue, income tax, owner distributions, and complete cash-flow/balance-sheet modeling.
+- Store rules/fees, taxes, loss, intelligence, support, payroll, professional work, and sponsor economics can change the conclusion. Eligible, invited, protected, free, duplicate, and unactivated people are not revenue.
 
 ## External and professional blockers
 
-Founder choices remain on geography, price/package, brand commitment, supported channels/devices, support hours, risk thresholds, capital envelope, data/vendor boundaries, and go-to-market sequence. Company-owned vendor/developer accounts, production credentials, DNS, payment/store agreements, devices/toolchains, insurance, contracts/DPAs, and qualified U.S./Philippines legal, privacy, tax, accounting, security, accessibility, employment, and fraud review are external prerequisites.
+Founder choices remain on geography, brand, price/package, channel/device sequence, support hours, risk thresholds, budget, data/vendor boundaries, and GTM priority. Company-owned accounts/credentials, DNS, managed identity/KMS, hosted PostgreSQL and restore, public-edge protection, payment/store agreements, native devices/toolchains, provider accounts, insurance/contracts/DPAs, and qualified U.S./Philippines legal, privacy, tax, accounting, security, accessibility, employment, and fraud review remain prerequisites.
 
 ## Final local reconciliation
 
-The definitive independent review is PASS with no unresolved in-scope Critical or High defect. Frozen evidence includes full workspace typecheck, ESLint, and Prettier PASS; `npm test` PASS across 15 unit files/134 tests, 13 integration files/60 tests, five security files/17 tests, and 12 evaluation cases; coverage across 33 files/211 tests at 89.12% statements, 84.69% branches, 97.93% functions, and 93.02% lines; production builds for API, worker, web, HQ, and Expo web; portability inventory PASS; and committed clean-clone install/type/test/build reconstruction PASS. The evaluation still reports `not_calibrated`, with zero forbidden actions and one provider-failure case.
+The definitive independent review found no unresolved in-scope Critical/High defect. Frozen typecheck, ESLint, and Prettier passed; unit 16 files/165 tests, integration 17/79, security 6/19, and evaluation 12/12 passed; evaluation recorded zero forbidden actions, one intentional provider-outage case, and `not_calibrated`; coverage was 90.20% statements, 88.35% branches, 98.19% functions, and 93.67% lines across 39 files/263 tests. API, worker, web, HQ, and Expo-web builds passed. Edge passed 15/15 in 3.0 minutes; Windows teardown linger required terminating only verified API/web/HQ listeners, and the final ports were clear. Portability and `git diff --check` passed; V1 path status/diff was clean.
 
-The full Edge run displayed 15/15 PASS, including Public Check, Family closure, and axe. On Windows, Playwright then lingered only during dev-server teardown and was manually stopped; no listeners remained. This is not represented as a clean autonomous process exit. Offline cached audits reported zero, but the normal clean-clone install summary reported 19 dependency advisories (1 low, 7 moderate, 11 high). A detailed live advisory/reachability and production/development review remains blocked, so the dependency result is a launch gate.
+Real PostgreSQL verifier execution, OCI build, and a fresh post-closure clean clone remain pending. The prior baseline clean clone reported 19 advisories (1 low, 7 moderate, 11 high). Earlier offline cached audits reported zero but are not fresh registry evidence; live audit escalation was denied. Advisory identity/reachability/prod-dev scope, SBOM/license/provenance, and image review remain launch blockers.
 
-Even this clean bounded local gauntlet is not launch authorization. See the [Run 3 launch-enablement plan](./33-run-3-launch-plan.md) and historical [Run 1 limitations](../build-run-1/12-known-limitations.md).
+This bounded local PASS is not launch authorization. See the [Run 3 plan](./33-run-3-launch-plan.md) and historical [Run 1 limitations](../build-run-1/12-known-limitations.md).

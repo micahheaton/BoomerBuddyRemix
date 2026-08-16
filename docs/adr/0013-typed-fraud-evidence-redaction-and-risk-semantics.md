@@ -14,7 +14,7 @@ This ADR supersedes the restricted-input branch in [ADR-0004](./0004-sensitive-a
 
 ## Decision
 
-Use role-specific evidence-provider contracts, including local signals, domain reputation, URL reputation, message reasoning, verified organization, campaign evidence, and recovery authority. Each capability declares supported artifact classes, exact allowlisted fields/representation, egress, retention/training terms, provenance, freshness, timeout, cost/budget, rate limits, failure semantics, and kill switch. A central dispatcher builds the least-data request; there is no raw-to-all fan-out. Provider evidence can be stale, unavailable, unverified, or conflicting and never chooses the customer action.
+Use exactly seven role-specific evidence-provider contracts: `local_signals`, `domain_reputation`, `url_reputation`, `message_reasoning`, `verified_organization`, `campaign_intelligence`, and `recovery_authority`. Each capability declares supported artifact classes, exact allowlisted fields/representation, egress, retention/training terms, provenance, freshness, timeout, cost/budget, rate limits, failure semantics, and kill switch. A central dispatcher builds the least-data request; there is no raw-to-all fan-out. Provider evidence can be stale, unavailable, unverified, or conflicting and never chooses the customer action.
 
 Before analysis, a bounded deterministic minimizer finds safely span-local sensitive values, derives only non-sensitive safety flags, and replaces exact spans with typed placeholders such as `[ONE_TIME_CODE]`, `[PAYMENT_CARD]`, or `[AUTH_CREDENTIAL]`. Only the redacted representation may be normalized, fingerprinted, persisted, logged, audited, evaluated, or sent to an authorized provider. The UI identifies removed classes without values or positions. Private keys, ambiguous credentials, overlapping/unsafe matches, unusable remnants, oversized input, unsafe URLs, and unsupported modalities are rejected.
 
@@ -23,6 +23,18 @@ The active Run 2 risk contract is `unknown`, `caution`, or `high_concern`. `lowe
 ## Consequences
 
 Adapters are more numerous and provider onboarding requires data-access review, but permissions become testable and a vendor can be removed without changing decision policy. Redaction preserves useful scam cues while narrowing exposure. Conservative abstention may frustrate users; truthful unknowns are preferable to unsupported reassurance.
+
+The Run 2 implementation gives every observation an observed and valid-until horizon. Expired or over-age evidence retains provenance but has zero decision weight. Any adapter declared `live` is also undispatchable unless an atomic shared limiter reserves both its provider-stable and capability budget. A missing limiter, denial, or limiter failure returns unavailable without invoking the provider.
+
+## Migration and rollback
+
+Provider and minimizer versions are introduced alongside existing deterministic evidence; historical runs are not relabeled or reprocessed silently. Existing `lower_concern` schema vocabulary remains dormant, and no migration may convert an earlier unknown or provider no-match into reassurance. Any stored representation created after this decision records its minimizer and evidence-policy versions.
+
+Rollback disables the affected provider capability with its kill switch and returns to local evidence plus honest `unknown`; it does not broaden provider input. If a redaction regression is suspected, new affected input is hard-rejected until a corrected version passes replay-safe tests. A rollback can stop new use of a redacted representation, but it cannot reconstruct or persist the transient original, rewrite historical evidence, or make a later result appear to have used the prior policy.
+
+## Security and privacy consequences
+
+Each provider is a separate data-egress boundary with an exact field allowlist, purpose, retention/training terms, cost ceiling, timeout, rate limit, credential scope, and revocation path. Originals and safely rejected inputs never reach a provider, fingerprint, log, audit/outbox, fixture, or analytic event. Redacted text can still contain personal or sensitive context, so encryption, retention, consent/legal basis, access review, incident response, and vendor terms remain required. Provider output is untrusted evidence and cannot grant authority or choose the customer action.
 
 ## Rejected alternatives
 
@@ -34,11 +46,11 @@ Adapters are more numerous and provider onboarding requires data-access review, 
 
 ## Verification
 
-Contract tests prove per-provider field allowlists, no forbidden egress, timeout/budget/kill-switch behavior, stale and conflicting evidence, and failure-as-unknown. Minimization tests cover Unicode, repeated/overlapping values, URLs, false positives, signal preservation, exceptions, logs, audit/outbox, fingerprints, encrypted persistence, deletion, analytics, and providers. Evaluation tests prove `lower_concern` is unreachable and missing evidence never lowers risk.
+Contract tests prove all seven request shapes, per-provider field allowlists, no forbidden egress, timeout/budget/kill-switch behavior, evidence expiry, stable provider and per-capability durable reservations, limiter deny/throw/missing behavior, stale and conflicting evidence, and failure-as-unknown. Minimization tests cover Unicode, repeated/overlapping values, URLs, false positives, signal preservation, exceptions, logs, audit/outbox, fingerprints, encrypted persistence, deletion, analytics, and providers. Evaluation tests prove `lower_concern` is unreachable and missing evidence never lowers risk.
 
 ## Evidence boundary
 
-Local adapters, redaction, and semantics are implementable without accounts. Live-provider quality, terms, retention/training behavior, freshness, cost, and outage behavior are **BLOCKED BY ACCOUNT / CONTRACT / DATASET**. `lower_concern` is **BLOCKED BY EVIDENCE**; the twelve Run 1 fixtures prove harness behavior only and are not calibration.
+All seven typed contracts, redaction, freshness semantics, and the fail-closed live-limiter port are implemented locally. Only `LocalUnknownProvider` is configured at runtime. Live-provider quality, terms, retention/training behavior, cost, real shared-rate enforcement, freshness, and outage behavior are **BLOCKED BY ACCOUNT / CONTRACT / STAGING / DATASET**. `lower_concern` is **BLOCKED BY EVIDENCE**; project-authored fixtures prove harness behavior only and are not calibration.
 
 ## Primary sources
 

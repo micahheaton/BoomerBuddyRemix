@@ -1,19 +1,26 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type {
   BrowserSessionResponse,
   DevPersonaId,
   HqRevenueResponse,
   MeResponse,
+  PrivacyRequestDto,
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
 import { BusinessOsContent, type BusinessOsView } from './business-os';
 import { hqRequest, readableError } from '../lib/api';
 
 export type HqView =
-  'overview' | 'customers' | 'fraud' | 'revenue' | 'system' | Exclude<BusinessOsView, 'owner'>;
+  | 'overview'
+  | 'customers'
+  | 'fraud'
+  | 'revenue'
+  | 'system'
+  | 'privacy'
+  | Exclude<BusinessOsView, 'owner'>;
 type HouseholdResponse = {
   households: Array<{
     id: string;
@@ -77,6 +84,11 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   system: {
     title: 'System and audit',
     subtitle: 'Local provider states and metadata-only audit events.',
+  },
+  privacy: {
+    title: 'Privacy operations',
+    subtitle:
+      'Identity review and content-free fulfillment planning; Run 2 does not claim completed export or erasure.',
   },
   targets: {
     title: 'Credit-union segmentation',
@@ -221,6 +233,11 @@ function Shell({
           {!reviewerOnly && (
             <Link aria-current={view === 'autonomy' ? 'page' : undefined} href="/autonomy">
               Autonomy controls
+            </Link>
+          )}
+          {!reviewerOnly && (
+            <Link aria-current={view === 'privacy' ? 'page' : undefined} href="/privacy">
+              Privacy requests
             </Link>
           )}
           {!reviewerOnly && (
@@ -523,6 +540,139 @@ function System() {
   );
 }
 
+type PrivacyQueueResponse = {
+  requests: PrivacyRequestDto[];
+  fulfillmentMode: 'evidence_plan_only';
+  limitation: string;
+};
+
+function PrivacyOperations() {
+  const [data, setData] = useState<PrivacyQueueResponse>();
+  const [evidenceReference, setEvidenceReference] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    return hqRequest<PrivacyQueueResponse>('/v1/hq/business-os/privacy-requests')
+      .then(setData)
+      .catch((caught) => setError(readableError(caught)));
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function advance(
+    requestId: string,
+    action: 'verify_identity' | 'begin_review' | 'record_plan' | 'deny',
+  ) {
+    if (!evidenceReference.trim()) {
+      setError('Enter a content-free evidence reference before changing request state.');
+      return;
+    }
+    setBusy(`${requestId}:${action}`);
+    setError('');
+    try {
+      await hqRequest(`/v1/hq/business-os/privacy-requests/${requestId}/actions`, {
+        method: 'POST',
+        body: JSON.stringify({ action, evidenceReference: evidenceReference.trim() }),
+      });
+      setEvidenceReference('');
+      await load();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy('');
+    }
+  }
+
+  if (!data && !error) return <p role="status">Loading privacy operations…</p>;
+  return (
+    <>
+      <div className="control-boundary" role="note">
+        <strong>Run 2 boundary:</strong> this queue records identity-review evidence and creates a
+        content-free data-category/count plan. It does not deliver an export, erase records, or
+        claim legal completion.
+      </div>
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
+      <div className="form-stack section">
+        <label htmlFor="privacy-evidence-reference">Content-free evidence reference</label>
+        <input
+          id="privacy-evidence-reference"
+          value={evidenceReference}
+          maxLength={200}
+          placeholder="case:reviewed-identity-001"
+          onChange={(event) => setEvidenceReference(event.target.value)}
+        />
+        <p className="source">
+          Do not enter identity documents, customer content, URLs, or secrets.
+        </p>
+      </div>
+      <section className="control-grid section" aria-label="Privacy request queue">
+        {(data?.requests ?? []).map((request) => {
+          const nextAction =
+            request.state === 'received'
+              ? 'verify_identity'
+              : request.state === 'verified'
+                ? 'begin_review'
+                : request.state === 'in_progress' && request.plan === undefined
+                  ? 'record_plan'
+                  : undefined;
+          return (
+            <article className="hq-card" key={request.id}>
+              <h2>{request.requestKind.replaceAll('_', ' ')} request</h2>
+              <p>
+                <strong>{request.state.replaceAll('_', ' ')}</strong> · Identity:{' '}
+                {request.identityVerificationState.replaceAll('_', ' ')}
+              </p>
+              <p className="source">
+                Request {request.id} · Due {new Date(request.dueAt).toLocaleString()}
+              </p>
+              {request.plan ? (
+                <div className="notice">
+                  <strong>{request.plan.kind.replaceAll('_', ' ')}</strong>
+                  <p>{request.plan.dataCategories.join(', ')}</p>
+                  <p>
+                    Content included: no · Professional review:{' '}
+                    {request.plan.requiresProfessionalReview ? 'required' : 'not required'}
+                  </p>
+                </div>
+              ) : null}
+              <div className="button-row">
+                {nextAction ? (
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={Boolean(busy)}
+                    onClick={() => void advance(request.id, nextAction)}
+                  >
+                    {nextAction.replaceAll('_', ' ')}
+                  </button>
+                ) : null}
+                {!['completed', 'denied'].includes(request.state) ? (
+                  <button
+                    className="secondary"
+                    type="button"
+                    disabled={Boolean(busy)}
+                    onClick={() => void advance(request.id, 'deny')}
+                  >
+                    Deny with evidence
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          );
+        })}
+        {data?.requests.length === 0 ? <p>No privacy requests are queued.</p> : null}
+      </section>
+    </>
+  );
+}
+
 export function HqScreen({ view }: { view: HqView }) {
   const [me, setMe] = useState<MeResponse>();
   const [checking, setChecking] = useState(true);
@@ -574,6 +724,8 @@ export function HqScreen({ view }: { view: HqView }) {
         <Fraud />
       ) : view === 'revenue' ? (
         <Revenue />
+      ) : view === 'privacy' ? (
+        <PrivacyOperations />
       ) : (
         <System />
       )}

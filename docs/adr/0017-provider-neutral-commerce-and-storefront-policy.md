@@ -28,6 +28,16 @@ Apple and Google adapters use server-side transaction/purchase verification, sig
 
 Commerce can evolve across web, stores, sponsorship, and support without rewriting authorization. The cost is lifecycle mapping, reconciliation, policy operations, and separate sandbox qualification. Storefront presentation can differ lawfully without claiming a permanent global rule.
 
+## Migration and rollback
+
+Provider rollout is source-by-source behind disabled configuration. Existing canonical plans, subscriptions, grants, and allowances remain authoritative; provider customer/subscription bindings and Checkout intents are added without deriving access from a redirect or importing dashboard state as truth. Before enabling a source, deterministic fixtures and an external sandbox must reconcile the same canonical lifecycle, price, customer, service period, and overlap rules.
+
+Rollback disables new Checkout/purchase initiation and event ingestion for the affected source, preserves signed inbox, reconciliation, refund/dispute, and canonical entitlement history, and reconciles every in-flight item before adapter removal. It may restrict or shorten access on verified adverse evidence but cannot extend access from a status snapshot, delete financial evidence, revive a revoked relationship, or revoke an unrelated valid grant. Storefront policy rolls back to default-deny, never to a globally permissive link.
+
+## Security and privacy consequences
+
+BoomerBuddy never handles card credentials. Webhook/server-notification secrets, raw signed bodies, purchase tokens, customer bindings, and financial restrictions are environment separated, access controlled, minimally retained, redacted from telemetry, and rotated. Provider payer/customer facts never imply household, artifact, or Trusted Circle authority. Checkout return URLs, event size/age/version, duplicate/order behavior, refunds/disputes, tax/consumer notices, app-store account custody, and support access require security, privacy, legal, and accounting review.
+
 ## Rejected alternatives
 
 - Stripe/Apple/Google status checks directly in authorization.

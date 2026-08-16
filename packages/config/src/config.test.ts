@@ -6,6 +6,7 @@ function developmentEnvironment(): NodeJS.ProcessEnv {
     NODE_ENV: 'test',
     BB_API_HOST: '127.0.0.1',
     BB_API_PORT: '4000',
+    BB_TRUSTED_PROXY_HOPS: '0',
     BB_DATABASE_DRIVER: 'pglite',
     BB_PGLITE_PATH: 'memory://',
     BB_RUN_MIGRATIONS: 'true',
@@ -31,6 +32,7 @@ describe('typed configuration', () => {
       seedDemo: true,
     });
     expect(config.identity.customerOrigins).toEqual(['http://127.0.0.1:3000']);
+    expect(config.api.trustedProxyHops).toBe(0);
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
   });
@@ -39,6 +41,13 @@ describe('typed configuration', () => {
     const environment = developmentEnvironment();
     delete environment.BB_SEED_DEMO;
     expect(loadConfig(environment).database.seedDemo).toBe(false);
+  });
+
+  it('requires an explicit bounded trusted-proxy hop count', () => {
+    expect(loadConfig({ ...developmentEnvironment(), BB_TRUSTED_PROXY_HOPS: '1' }).api).toEqual(
+      expect.objectContaining({ trustedProxyHops: 1 }),
+    );
+    expect(() => loadConfig({ ...developmentEnvironment(), BB_TRUSTED_PROXY_HOPS: '3' })).toThrow();
   });
 
   it('requires a database URL for PostgreSQL', () => {

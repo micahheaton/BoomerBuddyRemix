@@ -1,6 +1,6 @@
 import type { Audience } from '@boomerbuddy/domain';
 import type { Database, SqlExecutor } from './database';
-import { asDate, jsonValue, randomIdFactory, type IdFactory } from './values';
+import { asDate, jsonValue, placeholders, randomIdFactory, type IdFactory } from './values';
 
 export interface OperationalEventContext {
   readonly householdId?: string;
@@ -69,6 +69,7 @@ export async function writeAuditAndOutbox(
       context.now.toISOString(),
     ],
   );
+  const eventId = ids.next('event');
   await transaction.query(
     `INSERT INTO outbox_events(
        id, event_type, event_version, aggregate_type, aggregate_id, household_id,
@@ -76,7 +77,7 @@ export async function writeAuditAndOutbox(
        next_attempt_at
      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'internal',$9::jsonb,$10,$10,$10)`,
     [
-      ids.next('event'),
+      eventId,
       outbox.eventType,
       outbox.eventVersion ?? 1,
       outbox.aggregateType,
@@ -160,12 +161,17 @@ export class OutboxDeliveryRepository {
 
   async claim(input: {
     readonly workerId: string;
+    readonly eventTypes: readonly string[];
     readonly limit: number;
     readonly leaseDurationMs: number;
     readonly now: Date;
   }): Promise<readonly ClaimedOutboxEvent[]> {
+    const eventTypes = [...new Set(input.eventTypes)];
     if (
       !workerKey.test(input.workerId) ||
+      eventTypes.length === 0 ||
+      eventTypes.length > 100 ||
+      eventTypes.some((eventType) => !operationalCode.test(eventType)) ||
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
       input.limit > 100 ||
@@ -177,22 +183,35 @@ export class OutboxDeliveryRepository {
     }
     const expiresAt = new Date(input.now.getTime() + input.leaseDurationMs);
     return this.database.transaction(async (transaction) => {
+      const maintenanceTypeSlots = placeholders(2, eventTypes.length);
       await transaction.query(
         `UPDATE outbox_events
          SET lease_owner = NULL, lease_expires_at = NULL, dead_lettered_at = $1,
              last_error_code = 'lease_expired_after_final_attempt'
          WHERE processed_at IS NULL AND dead_lettered_at IS NULL
-           AND lease_expires_at <= $1 AND attempts >= max_attempts`,
-        [input.now.toISOString()],
+           AND lease_expires_at <= $1 AND attempts >= max_attempts
+           AND event_type IN (${maintenanceTypeSlots})`,
+        [input.now.toISOString(), ...eventTypes],
       );
+      const claimTypeSlots = placeholders(5, eventTypes.length);
       const claimed = await transaction.query<OutboxRow>(
         `WITH claimable AS (
-           SELECT id FROM outbox_events
-           WHERE processed_at IS NULL AND dead_lettered_at IS NULL
-             AND next_attempt_at <= $1 AND attempts < max_attempts
-             AND (lease_expires_at IS NULL OR lease_expires_at <= $1)
-           ORDER BY next_attempt_at, occurred_at, id
-           LIMIT $4 FOR UPDATE SKIP LOCKED
+           SELECT event.id FROM outbox_events AS event
+           WHERE event.processed_at IS NULL AND event.dead_lettered_at IS NULL
+             AND event.next_attempt_at <= $1 AND event.attempts < event.max_attempts
+             AND (event.lease_expires_at IS NULL OR event.lease_expires_at <= $1)
+             AND event.event_type IN (${claimTypeSlots})
+             AND NOT EXISTS (
+               SELECT 1 FROM outbox_events AS prior
+               WHERE prior.aggregate_type = event.aggregate_type
+                 AND prior.aggregate_id = event.aggregate_id
+                 AND prior.household_id IS NOT DISTINCT FROM event.household_id
+                 AND prior.processed_at IS NULL
+                 AND (prior.dead_lettered_at IS NULL OR prior.replay_resolved_at IS NULL)
+                 AND prior.causal_order_position < event.causal_order_position
+             )
+           ORDER BY event.next_attempt_at, event.causal_order_position
+           LIMIT $4 FOR UPDATE OF event SKIP LOCKED
          )
          UPDATE outbox_events AS event
          SET lease_owner = $2, lease_expires_at = $3, heartbeat_at = $1,
@@ -202,7 +221,13 @@ export class OutboxDeliveryRepository {
                    event.aggregate_id, event.household_id, event.correlation_id,
                    event.classification, event.payload, event.attempts, event.max_attempts,
                    event.lease_owner, event.lease_expires_at`,
-        [input.now.toISOString(), input.workerId, expiresAt.toISOString(), input.limit],
+        [
+          input.now.toISOString(),
+          input.workerId,
+          expiresAt.toISOString(),
+          input.limit,
+          ...eventTypes,
+        ],
       );
       return claimed.rows.map(mapOutbox);
     });
@@ -295,7 +320,8 @@ export class OutboxDeliveryRepository {
         { readonly household_id: string | null } & Record<string, unknown>
       >(
         `SELECT household_id FROM outbox_events
-         WHERE id = $1 AND processed_at IS NULL AND dead_lettered_at IS NOT NULL FOR UPDATE`,
+         WHERE id = $1 AND processed_at IS NULL AND dead_lettered_at IS NOT NULL
+           AND replay_resolved_at IS NULL FOR UPDATE`,
         [input.eventId],
       );
       if (original.rows[0] === undefined) throw new TypeError('Only dead-letter events may replay');
@@ -305,11 +331,12 @@ export class OutboxDeliveryRepository {
            id, event_type, event_version, aggregate_type, aggregate_id, household_id,
            actor_person_id, correlation_id, classification, payload, occurred_at, available_at,
            next_attempt_at, max_attempts, replay_of_event_id, replay_reason,
+           causal_order_position,
            replay_actor_person_id
          )
          SELECT $1, event_type, event_version, aggregate_type, aggregate_id, household_id,
-                actor_person_id, $2, classification, payload, $3, $3, $3, max_attempts,
-                id, $4, $5
+                actor_person_id, $2, classification, payload, occurred_at, $3, $3, max_attempts,
+                id, $4, causal_order_position, $5
          FROM outbox_events WHERE id = $6`,
         [
           replayId,
@@ -319,6 +346,11 @@ export class OutboxDeliveryRepository {
           input.actorPersonId,
           input.eventId,
         ],
+      );
+      await transaction.query(
+        `UPDATE outbox_events SET replay_resolved_at = $2
+         WHERE id = $1 AND replay_resolved_at IS NULL`,
+        [input.eventId, input.now.toISOString()],
       );
       await transaction.query(
         `INSERT INTO audit_events(

@@ -26,6 +26,18 @@ Attribution is a separate privacy-bounded touchpoint: allowlisted campaign/refer
 
 People can receive value before registration, and the product obtains a measurable acquisition path without building a content dossier. Strict limits and ephemeral loss reduce convenience and make abuse controls a production dependency. Attribution is deliberately less granular than common advertising stacks.
 
+The Run 2 application converts a normalized network address to a keyed HMAC and stores no raw address as its quota identity. Atomic database buckets enforce global and per-client context/Check budgets, while expiring leases enforce global and per-client analysis concurrency. Trusted-proxy configuration is bounded to zero through two hops and defaults to the direct peer. These controls narrow local abuse risk; they do not prove a deployed edge, proxy, WAF, challenge service, or distributed defense.
+
+## Migration and rollback
+
+Public contexts, transient results, aggregate attribution, and consented conversions use separate additive records; authenticated Check history is not copied into the anonymous surface. Deployment begins behind a disabled route/feature boundary with retention and quota jobs active before traffic. Conversion backfill is prohibited because explicit save consent must exist at the moment of conversion.
+
+Rollback disables new context issuance first, allows or expires in-flight display windows, runs terminal purge, and preserves only content-free aggregate and immutable consent evidence required by policy. It must not copy transient results into authenticated history, extend expiry to rescue conversion, or request the original submission again. If purge or quota enforcement fails, the public route stays disabled until reconciled.
+
+## Security and privacy consequences
+
+Anonymous does not mean unbounded or non-sensitive. Context tokens are integrity protected and purpose/audience bound; transient results are encrypted, byte/time/use limited, and physically purged. Per-client quota keys use a keyed digest rather than raw network addresses and remain operational abuse data, not identity or attribution. Proxy trust must match reviewed topology. No submission-derived value enters telemetry or attribution, and campaign/referral context grants no content authority. Consent, deletion, non-enumeration, SSRF/no-fetch, bot defense, distributed attacks, and incident behavior still require staging proof.
+
 ## Rejected alternatives
 
 - Anonymous use of authenticated Check routes or a shared service account.
@@ -36,11 +48,11 @@ People can receive value before registration, and the product obtains a measurab
 
 ## Verification
 
-Tests prove context expiry, audience/purpose binding, replay limits, rate/concurrency/body budgets, non-enumerating failures, no network fetch, useful safe actions, and safe provider failure. Persistence-spy tests must show zero artifact/analysis/content fields in database, logs, metrics, audit/outbox, and attribution before consent. Conversion tests prove explicit consent, one-time use, a new actor-owned resource, no secret resubmission, and no access transfer to referrer or payer.
+Tests prove context expiry, audience/purpose binding, replay limits, atomic global/per-client HMAC quotas, global/per-client concurrency leases and expiry, trusted-proxy configuration bounds, body budgets, non-enumerating failures, no network fetch, useful safe actions, and safe provider failure. Persistence-spy tests show zero artifact/analysis/content fields in database, logs, metrics, audit/outbox, and attribution before consent. Conversion tests prove explicit consent, one-time use, a new actor-owned resource, no secret resubmission, and no access transfer to referrer or payer.
 
 ## Evidence boundary
 
-Local transient behavior and abuse fixtures are not account-blocked. Production edge behavior, distributed rate limiting, bot-defense privacy, and retention assertions require staging infrastructure. Comprehension, conversion, acquisition cost, and safety effectiveness require real consented research; no result may be simulated or claimed in Run 2.
+Local transient behavior, per-client/global database quotas, concurrency leases, and bounded proxy configuration are implemented without accounts. No external edge/WAF/challenge service or deployed proxy topology has been configured or proved. Distributed abuse behavior, privacy-reviewed bot defense, and operational retention assertions require staging infrastructure. Comprehension, conversion, acquisition cost, and safety effectiveness require real consented research; no result may be simulated or claimed in Run 2.
 
 ## Primary sources
 

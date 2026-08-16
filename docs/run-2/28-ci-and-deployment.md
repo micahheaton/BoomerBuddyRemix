@@ -10,7 +10,7 @@ Status: **host-independent CI and deployment configuration implemented; remote C
 2. `postgres` runs PostgreSQL 17.6, applies migrations twice to prove forward idempotency, and exercises competing `SKIP LOCKED` worker claims.
 3. `containers` builds the OCI image without pushing it.
 
-Locally, `scripts/verify-portability.mjs` passed; workspace typecheck and lint passed. No GitHub remote is configured, so none of these workflow jobs has external run evidence. Playwright/axe, coverage thresholds, SBOM/license checks, secret scanning, signed releases, artifact attestation, and deployment approvals are not in the workflow.
+Locally, `scripts/verify-portability.mjs` passed, and a committed temporary clean clone completed locked install, typecheck, all test projects, and all production builds. No GitHub remote is configured, so none of these workflow jobs has external run evidence. Playwright/axe, coverage thresholds, SBOM/license checks, secret scanning, signed releases, artifact attestation, and deployment approvals are not in the workflow.
 
 ## Deployment scaffolds
 

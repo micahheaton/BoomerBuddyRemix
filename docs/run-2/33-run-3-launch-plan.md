@@ -10,7 +10,7 @@ Run 3 should convert Run 2’s local/staging foundation into a dated launch-deci
 
 **Founder decisions:** initial U.S. geography, working brand, offer/price candidates, web/mobile channel order, device matrix, truthful support hours, test/research budget, safety/evaluation thresholds, acceptable residual risk, and whether direct-family or sponsor discovery is primary.
 
-**Actions:** reproduce the closed Run 2 integrated test/security gate against a tagged candidate; inventory every environment variable, data class, provider, owner, professional dependency, and rollback. Assign one accountable human and backup per launch-critical queue.
+**Actions:** reproduce the closed Run 2 integrated test/security gate against a tagged candidate; obtain the authorized machine-readable advisory inventory and identify, reachability-review, fix, or explicitly risk-accept the 11 high and 7 moderate findings reported by the Run 2 install summary; inventory every environment variable, data class, provider, owner, professional dependency, and rollback. Assign one accountable human and backup per launch-critical queue.
 
 **Exit evidence:** signed scope/budget, risk acceptance boundaries, clean build provenance/SBOM, no open in-scope Critical/High defect, and a stop list. If authority or budget is missing, stop before creating accounts.
 

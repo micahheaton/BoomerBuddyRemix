@@ -38,7 +38,7 @@ The definitive independent review found no unresolved in-scope Critical or High 
 | Coverage | 33 files/211 tests; statements 89.12%, branches 84.69%, functions 97.93%, lines 93.02% | Aggregate code coverage is not safety efficacy |
 | Production builds | API, worker, web (13 static pages), HQ (11), Expo web export (355 modules) PASS | No deployed host or native device build |
 | Edge browser | 15/15 displayed PASS, including Public Check, Family closure, and axe | On Windows, Playwright lingered only in dev-server teardown; it was manually stopped and no listeners remained |
-| Portability/dependencies | Portability inventory PASS; offline production and full-tree npm audits reported zero vulnerabilities across 1,173 dependencies | No live-registry audit, SBOM/license/provenance review, remote CI, or container scan |
+| Portability/dependencies | Portability inventory and committed clean-clone install/type/test/build reconstruction PASS; the normal install summary reported 19 advisories (1 low, 7 moderate, 11 high) | Offline cache reported zero, but detailed live advisory identity/reachability and prod/dev split remain unreviewed; no SBOM/license/provenance review, remote CI, or container scan |
 
 Detailed status and test references live in [Run 2 documents 03–31](./run-2/03-domain-model-corrections.md) and the integrated [limitations register](./run-2/32-known-limitations.md). These gates close bounded Run 2 implementation, not production or launch evidence.
 
@@ -50,7 +50,7 @@ The following are foundations rather than operating engines: content has provena
 
 ## Replit risk
 
-The codebase is portable in design: standard Node 22/npm workspaces, environment contracts, PostgreSQL migrations, container files, compose, deployment scaffolds, and provider ports. The portability verifier reports no required Replit import. That reduces source/runtime coupling but does not yet prove survival of permanent Replit loss.
+The codebase is portable in design: standard Node 22/npm workspaces, environment contracts, PostgreSQL migrations, container files, compose, deployment scaffolds, and provider ports. The portability verifier reports no required Replit import. A committed temporary clean clone also completed locked install, typecheck, all test projects, and all builds after the drill exposed and fixed a Windows process-launch defect. That proves local source/build reconstruction, not survival of permanent Replit loss.
 
 Required external proof remains a founder-controlled canonical remote, protected release history, independent encrypted source backup, company-owned secrets and identity, independently restorable PostgreSQL/object data, DNS custody, build ownership, and a timed clean-room drill. The [continuity plan](./run-2/REPLIT-CONTINUITY-PLAN.md) assigns those steps; no claim of completed remote restore or RPO/RTO is made.
 
@@ -160,6 +160,7 @@ This is a design target, not measured improvement. The repository has no four-we
 | Devices/stores | Supported iOS/Android matrix, macOS/Xcode, developer organizations, agreements, product/server notification proof | Founder + mobile/store specialists |
 | Product evidence | Paired-family research, name/price/comprehension/activation/retention evidence, disabled-older-adult accessibility audit | Research/accessibility professionals |
 | Safety evidence | Rights-cleared representative double-reviewed corpus, release thresholds, provider marginal lift, incident learning | Fraud professionals |
+| Supply chain | Identify, reachability-review, fix, or explicitly risk-accept the install summary's 11 high and 7 moderate advisories; add SBOM/license/provenance and image scanning | Engineering + security |
 | Legal/finance | U.S. consumer/privacy/marketing/auto-renewal terms, tax/accounting, insurance; Philippines employment/privacy/security if used | Qualified professionals |
 | Founder choices | Geography, brand, price/package, channel/device order, support hours, risk thresholds, capital envelope, GTM priority | Founder |
 

@@ -10,6 +10,8 @@ No application or package imports Replit runtime APIs. `scripts/verify-portabili
 
 ## Loss-drill status
 
+The committed local clean-clone script passed from a temporary clone: locked install, portability inventory, workspace typecheck, 134 unit tests, 60 integration tests, 17 security tests, 12 evaluation cases, and API/worker/web/HQ/Expo web builds all reconstructed successfully. The drill also exposed and fixed a Windows Node 22 process-launch bug in both continuity scripts. This is meaningful source/build portability evidence, not an external recovery test.
+
 `scripts/replit-loss-drill.mjs` is **implemented but not executed successfully against an external remote**. It refuses a Replit URL, clones a supplied external Git remote into a temporary directory, runs locked install, portability checks, types, tests, and builds, then reports only a partial source/build proof. It deliberately reports database restore, object restore, DNS cutover, and mobile signing as unproved.
 
 ## Blocking evidence

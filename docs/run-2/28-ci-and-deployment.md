@@ -1,6 +1,6 @@
 # CI and Deployment
 
-Status: **expanded local verification passed on the frozen tree; remote CI, real PostgreSQL, post-closure clean clone, OCI, and provider deployment remain pending or blocked**.
+Status: **expanded local verification and the post-closure clean clone passed; remote CI, real PostgreSQL, OCI, and provider deployment remain pending or blocked**.
 
 ## Continuous integration
 
@@ -12,7 +12,7 @@ Status: **expanded local verification passed on the frozen tree; remote CI, real
 
 The frozen root run passed workspace typecheck, ESLint, Prettier, all unit/integration/security/evaluation suites, aggregate coverage, API/worker/web/HQ/Expo-web builds, Edge 15/15, portability, `git diff --check`, and the V1 path status/diff check. Exact counts and the honest Windows teardown note are in the [Run 2 report](../BUILD-RUN-2-REPORT.md).
 
-The clean-clone script fails if a required OCI build is unavailable; in optional local mode it records the Docker/Buildx boundary instead of pretending an image was built. A prior baseline clean-clone reconstruction passed and produced the install summary recorded in the [dependency review](./27-dependency-review.md), but the fresh post-closure clean clone has not run. The real-PostgreSQL verifier and OCI build are also pending host/CI evidence. No GitHub-hosted run, release artifact, or registry result is claimed.
+The clean-clone script fails if a required OCI build is unavailable; in optional local mode it records the Docker/Buildx boundary instead of pretending an image was built. Commit `a846eac` passed the post-closure non-local clone, locked install, migrate/seed, portability, typecheck, the unit/integration/security/evaluation suites, and all builds; the current install summary is recorded in the [dependency review](./27-dependency-review.md). The real-PostgreSQL verifier and OCI build remain pending host/CI evidence. No GitHub-hosted run, release artifact, or registry result is claimed.
 
 ## Deployment scaffolds
 

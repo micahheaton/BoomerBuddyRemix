@@ -10,7 +10,7 @@ No application or package imports Replit runtime APIs. `scripts/verify-portabili
 
 ## Loss-drill status
 
-The prior baseline committed clean-clone script passed from a temporary clone: locked install, portability inventory, workspace typecheck, the then-current unit/integration/security/evaluation suites, and API/worker/web/HQ/Expo-web builds reconstructed successfully. The drill also exposed and fixed a Windows Node 22 process-launch bug in both continuity scripts. It predates the final closure changes and is not evidence that the frozen closure tree passed a clean clone; a fresh post-closure run remains pending. Even the baseline result is source/build portability evidence, not an external recovery test.
+The final committed clean-clone drill initially exposed a real fresh-clone defect: PGlite was pointed below an absent `.data` parent. The path was changed to a direct child of the cloned repository, and commit `a846eac` then passed a non-local locked install, portability inventory, all 12 migrations, deterministic seed, workspace typecheck, the frozen unit/integration/security/evaluation suites, and API/worker/web/HQ/Expo-web builds. Docker/Buildx was unavailable, so no OCI artifact was produced. This is meaningful source/build portability evidence, not an external recovery test.
 
 `scripts/replit-loss-drill.mjs` is **implemented but not executed successfully against an external remote**. It refuses a Replit URL, clones a supplied external Git remote into a temporary directory, runs locked install, portability checks, types, tests, and builds, then reports only a partial source/build proof. It deliberately reports database restore, object restore, DNS cutover, and mobile signing as unproved.
 

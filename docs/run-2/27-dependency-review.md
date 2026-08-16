@@ -1,6 +1,6 @@
 # Dependency Review
 
-Status: **a prior baseline locked install and clean-clone reconstruction passed; its advisory summary remains unresolved, a fresh post-closure clean clone is pending, and broader supply-chain evidence is incomplete**.
+Status: **the post-closure locked install and clean-clone reconstruction passed; its 19-advisory summary remains unresolved, and broader supply-chain evidence is incomplete**.
 
 ## Evidence collected
 
@@ -13,7 +13,7 @@ Two cached-advisory scans were run:
 
 Both reported **0 known vulnerabilities** across the locally resolved tree of 1,173 dependencies (719 production, 405 development, and 145 optional classifications; npm categories can overlap). A prior `npm install --offline --ignore-scripts` completed and reported 0 vulnerabilities. That install reduced lifecycle-script exposure for the local check, but it is not a substitute for building and testing normal installs.
 
-The prior committed baseline clean-clone reconstruction then ran a normal `npm ci` against the registry and completed the locked install, portability check, workspace typecheck, all unit/integration/security/evaluation tests, and all production builds. npm's install-time audit summary reported **19 vulnerabilities: 1 low, 7 moderate, and 11 high**. That summary covers the baseline installed tree; it did not provide a production-versus-development split or enough detail to adjudicate advisory identity, reachability, exploitability, or compatible fixes. It predates the final closure changes and is not evidence that the frozen closure tree passed a clean clone; that fresh post-closure run remains pending.
+The committed post-closure clean-clone reconstruction at `a846eac` ran a normal locked `npm ci`, applied all 12 migrations, seeded, passed portability and workspace typecheck, ran all unit/integration/security/evaluation tests, and completed all production builds. npm's install-time audit summary reported **19 vulnerabilities: 1 low, 7 moderate, and 11 high**. That current summary did not provide a production-versus-development split or enough detail to adjudicate advisory identity, reachability, exploitability, or compatible fixes.
 
 ## Evidence boundary
 
@@ -23,4 +23,4 @@ No SBOM, license-policy report, package provenance/signature verification, typos
 
 ## Launch gate
 
-Before launch, run the fresh post-closure clean clone and an authorized current advisory scan in controlled CI; identify, reachability-review, fix, or explicitly risk-accept the prior 11 high and 7 moderate findings plus any current delta; produce and retain an SBOM; review licenses and high-risk maintainers/scripts; scan built OCI images; and define patch SLAs and emergency rollback. A passing clean clone does not clear dependency risk. Run 2 does not launch.
+Before launch, repeat the clean clone in protected external CI and run an authorized detailed advisory scan; identify, reachability-review, fix, or explicitly risk-accept the 11 high and 7 moderate findings plus any current delta; produce and retain an SBOM; review licenses and high-risk maintainers/scripts; scan built OCI images; and define patch SLAs and emergency rollback. A passing clean clone does not clear dependency risk. Run 2 does not launch.

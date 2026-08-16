@@ -10,7 +10,7 @@ Forward SQL migrations remain canonical. PGlite provides deterministic local int
 
 The database queue implements transactional `FOR UPDATE SKIP LOCKED` claims, expiring leases, heartbeats, consumer receipts, bounded retry, content-free attempt history, dead letter, audited replay, and graceful relinquishment. Completion fails if ownership or receipt evidence is lost.
 
-The outbox uses equivalent durability and adds per-aggregate causal positions. A poison predecessor blocks later same-aggregate growth work until an audited replay chain completes; replay preserves original ordering and lineage rather than moving a failure behind its successors. This is at-least-once execution with idempotency, not an exactly-once claim.
+The outbox uses equivalent durability and adds per-aggregate causal positions. A poison predecessor blocks later same-aggregate growth work until an audited replay chain completes; replay preserves original ordering and lineage rather than moving a failure behind its successors. Growth receipts use one deletion-restricted canonical root for every replay generation, preventing an already-projected event from repeating durable effects. This is at-least-once execution with idempotent consumers, not an exactly-once claim.
 
 The worker registers retention and test-mode commerce reconciliation plus durable growth and operational work:
 

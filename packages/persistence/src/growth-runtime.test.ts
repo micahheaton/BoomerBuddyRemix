@@ -8,6 +8,7 @@ import {
 import { BusinessOsRepository } from './business-os';
 import { CheckRepository, type DecisionRecord } from './checks';
 import type { Database } from './database';
+import { OutboxDeliveryRepository } from './events';
 import { FamilyRepository } from './family';
 import { GrowthRuntimeRepository } from './growth-runtime';
 import { OrientationRepository } from './orientation';
@@ -257,6 +258,202 @@ describe('growth runtime projection', () => {
        WHERE event_id IN ('event-z-growth-prior','event-a-growth-after')`,
     );
     expect(receipts.rows[0]?.count).toBe(2);
+  });
+
+  it('deduplicates projected replay lineages and lets an unprojected poison replay once', async () => {
+    database = await createSeededTestDatabase();
+    const replayDatabase = database;
+    const growth = new GrowthRuntimeRepository(database, labeledIds('replay-lineage'));
+    const outbox = new OutboxDeliveryRepository(database, labeledIds('replay-outbox'));
+    await database.query('UPDATE outbox_events SET processed_at = $1 WHERE processed_at IS NULL', [
+      fixedTestNow.toISOString(),
+    ]);
+    await drainGrowthBackfill(database, growth, fixedTestNow);
+    const insertCheckEvent = async (input: {
+      id: string;
+      aggregateId: string;
+      correlationId: string;
+      now: Date;
+    }): Promise<void> => {
+      await replayDatabase.query(
+        `INSERT INTO outbox_events(
+           id, event_type, event_version, aggregate_type, aggregate_id, household_id,
+           actor_person_id, correlation_id, classification, payload, occurred_at,
+           available_at, next_attempt_at, max_attempts
+         ) VALUES ($1,'check.completed.v1',1,'analysis',$2,'household-sunrise',
+                   'person-owner-alice',$3,'internal','{}',$4,$4,$4,1)`,
+        [input.id, input.aggregateId, input.correlationId, input.now.toISOString()],
+      );
+    };
+    const claimOne = async (now: Date): Promise<string> => {
+      const claimed = await outbox.claim({
+        workerId: 'growth-replay-worker',
+        eventTypes: ['check.completed.v1'],
+        limit: 1,
+        leaseDurationMs: 5_000,
+        now,
+      });
+      expect(claimed).toHaveLength(1);
+      return claimed[0]?.id ?? '';
+    };
+
+    const projectedAt = new Date(fixedTestNow.getTime() + 60_000);
+    await insertCheckEvent({
+      id: 'event-growth-projected-root',
+      aggregateId: 'analysis-growth-projected-root',
+      correlationId: 'growth-projected-root',
+      now: projectedAt,
+    });
+    expect(await claimOne(projectedAt)).toBe('event-growth-projected-root');
+    await expect(
+      growth.projectEventById({ eventId: 'event-growth-projected-root', now: projectedAt }),
+    ).resolves.toBe('projected');
+    await expect(
+      outbox.fail({
+        eventId: 'event-growth-projected-root',
+        workerId: 'growth-replay-worker',
+        errorCode: 'completion_lease_lost',
+        nextAttemptAt: new Date(projectedAt.getTime() + 60_000),
+        now: projectedAt,
+      }),
+    ).resolves.toBe('dead_letter');
+    const projectedReplayAt = new Date(projectedAt.getTime() + 1_000);
+    const projectedReplayId = await outbox.replayDeadLetter({
+      eventId: 'event-growth-projected-root',
+      actorPersonId: 'person-owner-alice',
+      reason: 'growth_projection_replay',
+      correlationId: 'growth-projected-replay',
+      now: projectedReplayAt,
+    });
+    await expect(growth.projectPending({ limit: 100, now: projectedReplayAt })).resolves.toBe(0);
+    expect(await claimOne(projectedReplayAt)).toBe(projectedReplayId);
+    await expect(
+      growth.projectEventById({ eventId: projectedReplayId, now: projectedReplayAt }),
+    ).resolves.toBe('already_projected');
+    await expect(
+      outbox.complete({
+        eventId: projectedReplayId,
+        workerId: 'growth-replay-worker',
+        now: projectedReplayAt,
+      }),
+    ).resolves.toBe(true);
+
+    const poisonAt = new Date(projectedAt.getTime() + 2 * 60_000);
+    await insertCheckEvent({
+      id: 'event-growth-unprojected-root',
+      aggregateId: 'analysis-growth-unprojected-root',
+      correlationId: 'growth-unprojected-root',
+      now: poisonAt,
+    });
+    expect(await claimOne(poisonAt)).toBe('event-growth-unprojected-root');
+    await expect(
+      outbox.fail({
+        eventId: 'event-growth-unprojected-root',
+        workerId: 'growth-replay-worker',
+        errorCode: 'growth_projection_poison',
+        nextAttemptAt: new Date(poisonAt.getTime() + 60_000),
+        now: poisonAt,
+      }),
+    ).resolves.toBe('dead_letter');
+    const poisonIntermediateAt = new Date(poisonAt.getTime() + 1_000);
+    const poisonIntermediateId = await outbox.replayDeadLetter({
+      eventId: 'event-growth-unprojected-root',
+      actorPersonId: 'person-owner-alice',
+      reason: 'growth_projection_retry',
+      correlationId: 'growth-unprojected-intermediate',
+      now: poisonIntermediateAt,
+    });
+    expect(await claimOne(poisonIntermediateAt)).toBe(poisonIntermediateId);
+    await expect(
+      outbox.fail({
+        eventId: poisonIntermediateId,
+        workerId: 'growth-replay-worker',
+        errorCode: 'growth_projection_poison_repeated',
+        nextAttemptAt: new Date(poisonIntermediateAt.getTime() + 60_000),
+        now: poisonIntermediateAt,
+      }),
+    ).resolves.toBe('dead_letter');
+    const poisonLeafAt = new Date(poisonAt.getTime() + 2_000);
+    const poisonLeafId = await outbox.replayDeadLetter({
+      eventId: poisonIntermediateId,
+      actorPersonId: 'person-owner-alice',
+      reason: 'growth_projection_retry_again',
+      correlationId: 'growth-unprojected-leaf',
+      now: poisonLeafAt,
+    });
+    expect(await claimOne(poisonLeafAt)).toBe(poisonLeafId);
+    const concurrentProjection = await Promise.all([
+      growth.projectEventById({ eventId: poisonLeafId, now: poisonLeafAt }),
+      growth.projectEventById({ eventId: poisonLeafId, now: poisonLeafAt }),
+    ]);
+    expect([...concurrentProjection].sort()).toEqual(['already_projected', 'projected']);
+    await expect(
+      outbox.fail({
+        eventId: poisonLeafId,
+        workerId: 'growth-replay-worker',
+        errorCode: 'growth_projection_completion_lost',
+        nextAttemptAt: new Date(poisonLeafAt.getTime() + 60_000),
+        now: poisonLeafAt,
+      }),
+    ).resolves.toBe('dead_letter');
+    const poisonDedupeAt = new Date(poisonAt.getTime() + 3_000);
+    const poisonDedupeId = await outbox.replayDeadLetter({
+      eventId: poisonLeafId,
+      actorPersonId: 'person-owner-alice',
+      reason: 'growth_projection_dedupe',
+      correlationId: 'growth-unprojected-dedupe',
+      now: poisonDedupeAt,
+    });
+    expect(await claimOne(poisonDedupeAt)).toBe(poisonDedupeId);
+    await expect(
+      growth.projectEventById({ eventId: poisonDedupeId, now: poisonDedupeAt }),
+    ).resolves.toBe('already_projected');
+    await expect(
+      outbox.complete({
+        eventId: poisonDedupeId,
+        workerId: 'growth-replay-worker',
+        now: poisonDedupeAt,
+      }),
+    ).resolves.toBe(true);
+
+    const facts = await database.query<{
+      snapshots: number;
+      receipts: number;
+      projected_root_receipts: number;
+      poison_root_receipts: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM customer_health_snapshots
+          WHERE household_id = 'household-sunrise'
+            AND ruleset_version = 'run2-growth-v1'
+            AND calculated_at >= $2) AS snapshots,
+         (SELECT count(*)::int FROM growth_event_receipts
+          WHERE root_event_id IN (
+            'event-growth-projected-root','event-growth-unprojected-root'
+          )) AS receipts,
+         (SELECT count(*)::int FROM growth_event_receipts
+          WHERE event_id = 'event-growth-projected-root'
+            AND root_event_id = 'event-growth-projected-root') AS projected_root_receipts,
+         (SELECT count(*)::int FROM growth_event_receipts
+          WHERE event_id = $1
+            AND root_event_id = 'event-growth-unprojected-root') AS poison_root_receipts`,
+      [poisonLeafId, projectedAt.toISOString()],
+    );
+    expect(facts.rows[0]).toEqual({
+      snapshots: 2,
+      receipts: 2,
+      projected_root_receipts: 1,
+      poison_root_receipts: 1,
+    });
+    for (const protectedEventId of [
+      'event-growth-unprojected-root',
+      poisonIntermediateId,
+      poisonLeafId,
+    ]) {
+      await expect(
+        database.query('DELETE FROM outbox_events WHERE id = $1', [protectedEventId]),
+      ).rejects.toThrow(/foreign key/iu);
+    }
   });
 
   it('measures actual orientation timestamps, suppresses an abandoned-flow contact, and correlates a later Check', async () => {

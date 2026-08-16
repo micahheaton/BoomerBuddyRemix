@@ -73,6 +73,12 @@ interface GrowthEventRow extends Record<string, unknown> {
   readonly dead_lettered_at: unknown | null;
 }
 
+interface GrowthEventLineageRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly replay_of_event_id: string | null;
+  readonly matches_current: boolean;
+}
+
 interface AttributionRow extends Record<string, unknown> {
   readonly channel: AttributionChannel;
   readonly source_token: string | null;
@@ -190,6 +196,17 @@ function lifecycleWorkflowKind(trigger: LifecycleTrigger): string {
   return 'activation';
 }
 
+function growthRootEventIdSql(eventIdExpression: string): string {
+  return `(WITH RECURSIVE growth_lineage AS (
+            SELECT id, replay_of_event_id FROM outbox_events WHERE id = ${eventIdExpression}
+            UNION
+            SELECT parent.id, parent.replay_of_event_id
+            FROM outbox_events parent
+            JOIN growth_lineage child ON parent.id = child.replay_of_event_id
+          )
+          SELECT id FROM growth_lineage WHERE replay_of_event_id IS NULL)`;
+}
+
 function publicAttribution(source: string, campaign: string): RawAttribution {
   const channel: AttributionChannel =
     source === 'organic'
@@ -261,7 +278,8 @@ export class GrowthRuntimeRepository {
          WHERE event.event_type IN (${eventPlaceholders})
            AND event.dead_lettered_at IS NULL
            AND NOT EXISTS (
-             SELECT 1 FROM growth_event_receipts receipt WHERE receipt.event_id = event.id
+             SELECT 1 FROM growth_event_receipts receipt
+             WHERE receipt.root_event_id = ${growthRootEventIdSql('event.id')}
            )
            AND NOT EXISTS (
              SELECT 1
@@ -274,7 +292,7 @@ export class GrowthRuntimeRepository {
                AND prior.causal_order_position < event.causal_order_position
                AND NOT EXISTS (
                  SELECT 1 FROM growth_event_receipts prior_receipt
-                 WHERE prior_receipt.event_id = prior.id
+                 WHERE prior_receipt.root_event_id = ${growthRootEventIdSql('prior.id')}
                )
            )
          ORDER BY event.causal_order_position
@@ -289,9 +307,10 @@ export class GrowthRuntimeRepository {
           now: input.now,
         });
         if (disposition === 'projected') projected += 1;
+        const rootEventId = await this.growthLineageRoot(this.database, candidate.id);
         const receipt = await this.database.query(
-          'SELECT 1 FROM growth_event_receipts WHERE event_id = $1',
-          [candidate.id],
+          'SELECT 1 FROM growth_event_receipts WHERE root_event_id = $1',
+          [rootEventId],
         );
         if (receipt.rowCount > 0) {
           handled += 1;
@@ -325,9 +344,15 @@ export class GrowthRuntimeRepository {
       ) {
         return 'ignored';
       }
+      const rootEventId = await this.growthLineageRoot(transaction, event.id);
+      if (rootEventId !== event.id) {
+        await transaction.query('SELECT id FROM outbox_events WHERE id = $1 FOR UPDATE', [
+          rootEventId,
+        ]);
+      }
       const receipt = await transaction.query(
-        'SELECT 1 FROM growth_event_receipts WHERE event_id = $1',
-        [event.id],
+        'SELECT 1 FROM growth_event_receipts WHERE root_event_id = $1',
+        [rootEventId],
       );
       if (receipt.rowCount > 0) return 'already_projected';
       const predecessorEventPlaceholders = placeholders(2, growthProjectionEventTypes.length);
@@ -342,7 +367,7 @@ export class GrowthRuntimeRepository {
            AND prior.causal_order_position < current.causal_order_position
            AND NOT EXISTS (
              SELECT 1 FROM growth_event_receipts prior_receipt
-             WHERE prior_receipt.event_id = prior.id
+             WHERE prior_receipt.root_event_id = ${growthRootEventIdSql('prior.id')}
            )
          LIMIT 1`,
         [event.id, ...growthProjectionEventTypes],
@@ -356,12 +381,49 @@ export class GrowthRuntimeRepository {
       const disposition = await this.projectEvent(transaction, event, input.now);
       await transaction.query(
         `INSERT INTO growth_event_receipts(
-           event_id, event_type, projection_version, disposition, projected_at
-         ) VALUES ($1,$2,'run2-growth-v1',$3,$4)`,
-        [event.id, event.event_type, disposition, input.now.toISOString()],
+           event_id, root_event_id, event_type, projection_version, disposition, projected_at
+         ) VALUES ($1,$2,$3,'run2-growth-v1',$4,$5)`,
+        [event.id, rootEventId, event.event_type, disposition, input.now.toISOString()],
       );
       return disposition;
     });
+  }
+
+  private async growthLineageRoot(executor: SqlExecutor, eventId: string): Promise<string> {
+    const lineage = await executor.query<GrowthEventLineageRow>(
+      `WITH RECURSIVE growth_lineage AS (
+         SELECT id, replay_of_event_id FROM outbox_events WHERE id = $1
+         UNION
+         SELECT parent.id, parent.replay_of_event_id
+         FROM outbox_events parent
+         JOIN growth_lineage child ON parent.id = child.replay_of_event_id
+       )
+       SELECT lineage.id, lineage.replay_of_event_id,
+         source.event_type = current.event_type
+         AND source.event_version = current.event_version
+         AND source.aggregate_type = current.aggregate_type
+         AND source.aggregate_id = current.aggregate_id
+         AND source.household_id IS NOT DISTINCT FROM current.household_id
+         AND source.actor_person_id IS NOT DISTINCT FROM current.actor_person_id
+         AND source.classification = current.classification
+         AND source.payload = current.payload
+         AND source.occurred_at = current.occurred_at
+         AND source.causal_order_position = current.causal_order_position
+           AS matches_current
+       FROM growth_lineage lineage
+       JOIN outbox_events source ON source.id = lineage.id
+       JOIN outbox_events current ON current.id = $1`,
+      [eventId],
+    );
+    const roots = lineage.rows.filter((item) => item.replay_of_event_id === null);
+    if (
+      roots.length !== 1 ||
+      lineage.rows.length === 0 ||
+      lineage.rows.some((item) => !item.matches_current)
+    ) {
+      throw new TypeError('Growth replay lineage is invalid');
+    }
+    return roots[0]?.id ?? eventId;
   }
 
   private async projectEvent(

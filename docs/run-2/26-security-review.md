@@ -11,7 +11,7 @@ Status: **expanded local security controls passed the frozen Run 2 gate; product
 - The Check path never fetches a submitted URL. Seven provider roles receive exact allowlisted fields; freshness, local budgets, kill switches, and a required durable live-rate reservation fail closed.
 - Public Check applies per-context, atomic global/per-client HMAC quotas, and expiring global/per-client database concurrency leases without storing a raw address as quota identity.
 - Append-only consent, provider event, knowledge/evaluation, privacy request, conversion, commerce, and causal replay evidence resists silent rewriting.
-- Durable work uses leases, receipts, idempotency, retry/dead letter, audited replay, and poison-predecessor ordering.
+- Durable work uses leases, canonical replay-lineage receipts, restrictive lineage foreign keys, idempotency, retry/dead letter, audited replay, and poison-predecessor ordering.
 - The portability/V1 guard inspects runtime imports and statically decodable path construction rather than relying on a plain text search.
 
 Frozen evidence includes full workspace typecheck, ESLint, and Prettier PASS; security 6 files/19 tests PASS; the broader unit/integration/evaluation suites PASS; and Edge 15/15 PASS. Coverage was 90.20% statements, 88.35% branches, 98.19% functions, and 93.67% lines across the frozen aggregate. The evaluation recorded zero forbidden actions, one intentional provider-outage case, and `not_calibrated`. Windows browser teardown linger required terminating only verified API/web/HQ listeners, after which the ports were clear. These are automated local checks, not a penetration test or production evidence.

@@ -1,0 +1,33 @@
+# Build Run 1 Summary
+
+Status: **implemented and tested as a local, synthetic-data foundation; not production-ready and not authorized for sale or deployment**.
+
+## Outcome
+
+The bounded [Gauntlet Zero readiness gate](../gauntlet-zero/45-readiness-gate.md) passed, and Build Run 1 produced a new BoomerBuddy 2.0 TypeScript monorepo without importing or modifying `reference/boomerbuddy-v1/`. The result proves a consented household Check flow across a Fastify API, customer web, Expo mobile source, a separate HQ application, PostgreSQL-compatible persistence, and shared domain packages.
+
+At the documentation freeze on 2026-08-16, fresh local runs passed 99 unit tests, 18 integration tests, and 16 security tests. The Edge journey suite covers customer Check/history, independent protected enrollment, Family invitation/withdrawal, orientation, multi-household scoping, HQ roles, and accessibility. Final aggregate command evidence belongs in the consolidated test report.
+
+## What is actually built
+
+| Area                      | Status                                            | Evidence and boundary                                                                                                                                                                                                                                                  |
+| ------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Check with BoomerBuddy    | **Implemented with local provider**               | Authenticated text and URL-string input, pre-analysis minimization, deterministic evidence/risk/actions, 30-day Check retention, history, deletion, explicit sharing, and content-free audit/outbox. The provider returns `unknown`; submitted URLs are never fetched. |
+| Household and Family      | **Implemented for local proof**                   | Tenant-scoped memberships, protected enrollment, one-permission Trusted Circle invitations, credential-bound preview, explicit acceptance, cancellation, revocation, consent, seat allocation, and share removal. Delivery is a local code handoff, not email or SMS.  |
+| Orientation               | **Implemented for seeded protected people**       | Ordered, resumable steps and atomic safe-word disposition/verifier updates. A production enrollment and recovery journey is deferred.                                                                                                                                  |
+| Commerce and entitlements | **Implemented with local mock state**             | Immutable product/plan versions, normalized subscription lifecycle, grants, sponsorship, reconciliation records, and exact allowances. Prices and plans are hypotheses; no money moves.                                                                                |
+| Customer web              | **Implemented**                                   | Public positioning and pricing plus signed-in Home, Check, History, Family, and guided Orientation. Persisted Check is member-only.                                                                                                                                    |
+| Mobile                    | **Implemented source; native validation blocked** | Expo navigation and customer flows share contracts and design tokens. Web export/static checks are available; native sharing is absent, and iOS/Android device behavior is unverified on this host.                                                                    |
+| BoomerBuddy HQ            | **Implemented with seeded projections**           | Separate application, origin, cookie, audience, role policy, owner views, reviewer queue, revenue fixtures, provider health, and audit. It is not a production operations system.                                                                                      |
+| Events and jobs           | **Partially implemented**                         | Domain changes atomically write audit and outbox rows. Check retention runs in bounded in-process sweeps. Durable dispatch, dead-letter/replay tooling, and a production scheduler are deferred.                                                                       |
+| Identity and secrets      | **Development-only**                              | Allow-listed personas, database-backed revocable sessions, and audience-specific credentials prove authorization. Production startup is intentionally refused until managed identity and KMS exist.                                                                    |
+
+## Corrected consent and bootstrap semantics
+
+Protected status is independent of household role. An active membership, accepted self-consent record, exact active `protected_members` allowance, and effective backing grant are all required before `isProtectedMember` becomes true. Thus a household owner can also be a protected adult (seeded Alice), while ownership alone does not grant Check, self-orientation, or invitation authority (seeded Bob). The repository implements self-enrollment/revocation transactions, but a general enrollment API and user journey are **deferred**; Run 1 exercises seeded enrollments and repository-level tests.
+
+Demo seed is a **one-shot local bootstrap**. It runs in one transaction, records `local_demo_bootstraps.run1-v1`, returns without reseeding after that marker exists, and refuses an unmarked database when the checked root/domain tables are occupied. Restart tests prove that deleted Checks, revoked consent/relationships, disabled identity, and lapsed entitlement state are not resurrected. The schema-wide occupancy gap for exotic operational-only rows remains documented in [Known Limitations](./12-known-limitations.md).
+
+## Stop boundary
+
+Build Run 1 did not deploy, use production credentials, contact users, fetch a submitted URL, connect commerce or communications vendors, submit an app, or purchase infrastructure. Production identity/MFA, KMS and rotation, real PostgreSQL staging/restore evidence, durable jobs, full export/deletion, native device validation, external security/accessibility review, production provider evaluation, incident operations, and the unresolved dependency advisories remain first-dollar blockers. The [Build Run 1 plan](../BUILD-RUN-1-PLAN.md) and accepted [ADRs](../adr/README.md) remain the decision baseline.

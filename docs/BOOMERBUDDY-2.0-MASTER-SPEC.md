@@ -1,7 +1,11 @@
 # BoomerBuddy 2.0 Master Spec
 
-Status: **Gauntlet Zero synthesis; implementation status must be updated after Build Run 1**  
-Decision date: 2026-08-15  
+Status: **Gauntlet Zero product contract, reconciled to the completed local Build Run 1**
+
+Decision date: 2026-08-15
+
+Implementation reconciliation: 2026-08-16
+
 Working product name: **BoomerBuddy** (not audience-tested or legally cleared)
 
 This document is the authoritative product and system contract. Detailed evidence lives in [Gauntlet Zero](./gauntlet-zero/00-executive-verdict.md); architectural decisions live in [ADRs](./adr/). Where this document conflicts with a workstream note, this document governs until a dated amendment explains the change.
@@ -88,11 +92,11 @@ HQ is a separate employee application and session audience. Its first operating 
 
 Packaging is a hypothesis:
 
-| Offer | Working boundary | Hypothesis |
-|---|---|---:|
-| Free | Useful complete result, urgent actions, limited history/collaboration | $0 |
-| Plus | One protected adult, two Trusted Circle participants | $8.99/month or $89/year |
-| Family | Up to three protected adults, six Trusted Circle participants | $14.99/month or $149/year |
+| Offer  | Working boundary                                                      |                Hypothesis |
+| ------ | --------------------------------------------------------------------- | ------------------------: |
+| Free   | Useful complete result, urgent actions, limited history/collaboration |                        $0 |
+| Plus   | One protected adult, two Trusted Circle participants                  |   $8.99/month or $89/year |
+| Family | Up to three protected adults, six Trusted Circle participants         | $14.99/month or $149/year |
 
 `$119/year` may be tested only as a controlled founding offer. No plan promises unlimited costly use. Sponsored pricing and credit-union pilots are discovery hypotheses, not quotes or relationships. Provider-neutral entitlements—not payment-provider fields—govern access. Production Stripe, App Store, Play, taxes, refunds, cancellation, and reconciliation are excluded from Build Run 1.
 
@@ -154,6 +158,19 @@ Target WCAG 2.2 AA as a testable floor, with at least 48px primary touch targets
 ## Build/run boundaries
 
 Build Run 1 proves architecture and one end-to-end vertical slice with seeded local data. It does not accept money, contact users, fetch URLs, use live intelligence/AI, submit to app stores, deploy, or represent mock delivery as real. Detailed scope is in [Build Run 1 Plan](./BUILD-RUN-1-PLAN.md).
+
+### Build Run 1 implementation amendments
+
+These are implementation clarifications, not silent changes to the buyer, promise, pricing, or distribution hypotheses:
+
+- Protected status is independent of household role. Effective protected authority now requires active membership, accepted self-consent, an exact active `protected_members` allowance allocation, and a grant contributing to the household's current entitlement portfolio. An owner can separately enroll as protected; ownership alone grants no protected-person workflow.
+- The local demo bootstrap is opt-in and one-shot. It runs atomically only when its checked root and selected domain tables are empty, writes a durable marker last, becomes a no-op after that marker exists, and rejects an unmarked database occupied in those checked tables. Normal marked restarts therefore cannot resurrect deleted Checks, revoked consent or relationships, disabled identities, or lapsed grants. The operational-only unmarked edge case is recorded in [Known Limitations](./build-run-1/12-known-limitations.md).
+- Run 1 implements only the invitation permission `view_shared_checks`. The wider conceptual permission set remains designed, and the current code names its deferred entries `receive_escalations` and `help_with_orientation`. No screen or local invitation implies those deferred permissions work.
+- Check history is split into actor-owned records and individually shared records. There is no household-wide history, and loss of protected enrollment removes new owned-workflow authority without removing the owner's ability to delete existing content or either participant's ability to withdraw consent.
+- Audit/outbox writes and bounded local retention sweeps are implemented; external dispatch, multi-instance scheduling, replay/dead-letter operations, and production privacy orchestration remain deferred.
+- Demo seeding, development sessions, local provider observations, commerce states, revenue data, and HQ projections are synthetic. Production startup deliberately fails closed until managed identity and KMS adapters exist.
+
+The consolidated as-built evidence is in the [Build Run 1 Report](./BUILD-RUN-1-REPORT.md). No amendment authorizes deployment, production credentials, live providers, customer contact, payment, or Build Run 2.
 
 First-dollar launch remains blocked by customer/name/price validation; production identity and commerce; current legal review; production retention/export/deletion; external security and accessibility review; expanded independent fraud/action evaluation; production monitoring/backups/restore; support/incident ownership; and tested vendor terms.
 

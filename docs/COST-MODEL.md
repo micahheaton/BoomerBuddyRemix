@@ -2,6 +2,17 @@
 
 Status: directional planning model, USD, accessed/estimated 2026-08-15. Reprice vendors before commitment. Labor, tax, legal, insurance, and acquisition vary too widely to present as fixed quotes.
 
+## Build Run 1 reconciliation
+
+Build Run 1 incurred no authorized external vendor, infrastructure, messaging, intelligence, payment, deployment, or customer-acquisition spend. It used local PGlite, synthetic personas, local provider states, and development-only credentials, so it produced **no observed production unit cost**. The estimates below remain planning inputs rather than validation.
+
+The implementation reinforces four budgeting realities:
+
+- managed identity/KMS, hosted PostgreSQL with backup/restore, durable jobs, monitoring, commerce reconciliation, legal/privacy work, independent security and accessibility review, and staffed incident/support ownership are first-dollar requirements, not optional scale polish;
+- 11 high and 7 moderate production-dependency advisories remain in the production dependency audit, largely through the Expo/React Native toolchain, so compatible remediation and ongoing software-supply-chain work need time and budget before release;
+- the 12-case synthetic fraud suite does not justify buying multiple intelligence feeds; fund a rights-cleared adjudicated corpus first, then pay for one source only if it demonstrates marginal safety lift; and
+- human research, fraud review, support, channel fees, and acquisition are more likely to dominate economics than the current text-inference hypothesis.
+
 ## Unit assumptions
 
 - Family hypothesis: $14.99 monthly; annual mix and discounts not modeled.
@@ -14,24 +25,24 @@ Sources: [OpenAI](https://developers.openai.com/api/docs/models/compare), [Googl
 
 ## Stage model
 
-| Category | First dollar | 100 families | 10,000 families | Notes |
-|---|---:|---:|---:|---|
-| Hosting/API/web/HQ | $25–150/mo | $75–400 | $500–3,000 | Managed app runtime/CDN; load-test before scaling. |
-| PostgreSQL/backups | $15–100 | $50–300 | $500–2,500 | Neon Launch lists typical intermittent use near $15; scale/security tier can be much higher. |
-| Object storage/scanning | $0–50 | $10–150 | $200–2,000+ | Images/audio deferred; scanning may be enterprise-priced. |
-| Identity | $0–100 | $0–250 | $0–2,500+ | AuthKit user management currently has a large free tier; SSO connections cost extra. |
-| URL intelligence | $0 | $0 | $0–450 at 1M lookups | Premium feeds may add $10k+/year and require measured lift. |
-| Inference | $0–50 | roughly $2–50 | roughly $180–2,000+ | 100k–1M checks under the token assumption; provider mix/retries dominate. |
-| Transactional email | $0–20 | $0–20 | $35–160 | Resend publishes 3k free and $20/50k. |
-| SMS | usage + registration | $10–100 | $350+ before carrier fees | Twilio base is $0.0083/segment; consent, carrier and 10DLC costs apply. |
-| Push | $0–19 | $0–50 | $50–500 | Expo Starter is $19; app-store accounts: Apple $99/year, Google $25 once. |
-| Payments | variable | about $74/mo* | about $7,350/mo* | *At $14.99 monthly via Stripe cards; excludes Billing/tax and channel commissions. |
-| App-store commission | variable | up to ~$225/mo | up to ~$22,485/mo | If all modeled revenue is subject to a 15% commission. |
-| Observability/analytics | $0–100 | $25–300 | $250–2,000+ | Start with redaction and sampling; no artifact content. |
-| Support tooling | $0–100 | $0–200 | $500–3,000+ | Human support labor is separate and likely larger. |
-| Prospecting/enrichment | $0 | $0–79/seat/mo if validated | contract/credits vary | Optional B2B acceleration. Apollo currently lists Free, $49 Basic, and $79 Professional annual-billing rates; credits expire and usage varies. |
-| Accounting/tax/payroll software | $50–500 | $100–1,000 | $1,000–5,000+ | Integrate specialists; professional fees excluded. |
-| Security/compliance | $20k–75k project | maintenance | $50k–250k+/yr | Independent review, testing, policies, vendor/partner diligence. |
+| Category                        |         First dollar |               100 families |           10,000 families | Notes                                                                                                                                          |
+| ------------------------------- | -------------------: | -------------------------: | ------------------------: | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hosting/API/web/HQ              |           $25–150/mo |                    $75–400 |                $500–3,000 | Managed app runtime/CDN; load-test before scaling.                                                                                             |
+| PostgreSQL/backups              |              $15–100 |                    $50–300 |                $500–2,500 | Neon Launch lists typical intermittent use near $15; scale/security tier can be much higher.                                                   |
+| Object storage/scanning         |                $0–50 |                    $10–150 |               $200–2,000+ | Images/audio deferred; scanning may be enterprise-priced.                                                                                      |
+| Identity                        |               $0–100 |                     $0–250 |                 $0–2,500+ | AuthKit user management currently has a large free tier; SSO connections cost extra.                                                           |
+| URL intelligence                |                   $0 |                         $0 |      $0–450 at 1M lookups | Premium feeds may add $10k+/year and require measured lift.                                                                                    |
+| Inference                       |                $0–50 |              roughly $2–50 |       roughly $180–2,000+ | 100k–1M checks under the token assumption; provider mix/retries dominate.                                                                      |
+| Transactional email             |                $0–20 |                      $0–20 |                   $35–160 | Resend publishes 3k free and $20/50k.                                                                                                          |
+| SMS                             | usage + registration |                    $10–100 | $350+ before carrier fees | Twilio base is $0.0083/segment; consent, carrier and 10DLC costs apply.                                                                        |
+| Push                            |                $0–19 |                      $0–50 |                   $50–500 | Expo Starter is $19; app-store accounts: Apple $99/year, Google $25 once.                                                                      |
+| Payments                        |             variable |              about $74/mo* |          about $7,350/mo* | *At $14.99 monthly via Stripe cards; excludes Billing/tax and channel commissions.                                                             |
+| App-store commission            |             variable |             up to ~$225/mo |         up to ~$22,485/mo | If all modeled revenue is subject to a 15% commission.                                                                                         |
+| Observability/analytics         |               $0–100 |                    $25–300 |               $250–2,000+ | Start with redaction and sampling; no artifact content.                                                                                        |
+| Support tooling                 |               $0–100 |                     $0–200 |               $500–3,000+ | Human support labor is separate and likely larger.                                                                                             |
+| Prospecting/enrichment          |                   $0 | $0–79/seat/mo if validated |     contract/credits vary | Optional B2B acceleration. Apollo currently lists Free, $49 Basic, and $79 Professional annual-billing rates; credits expire and usage varies. |
+| Accounting/tax/payroll software |              $50–500 |                 $100–1,000 |             $1,000–5,000+ | Integrate specialists; professional fees excluded.                                                                                             |
+| Security/compliance             |     $20k–75k project |                maintenance |             $50k–250k+/yr | Independent review, testing, policies, vendor/partner diligence.                                                                               |
 
 ## Stage requirements
 

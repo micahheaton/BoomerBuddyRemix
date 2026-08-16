@@ -2,16 +2,22 @@
 
 Budget bands are planning estimates, not vendor quotes.
 
-| Rank | Investment | Expected leverage | Defensibility | Time to value | Indicative cost | Confidence |
-|---:|---|---|---|---|---:|---|
-| 1 | Paired older-adult/adult-child research and longitudinal pilot | Very high | Medium | 1–3 months | $15k–50k | High |
-| 2 | Human-reviewed fraud/action evaluation corpus and tooling | Very high | High and compounding | 1–4 months | $25k–150k | High |
-| 3 | Independent application security, privacy architecture, and threat modeling | Existential risk reduction | Medium | 1–2 months | $25k–100k | High |
-| 4 | Accessibility audit plus testing with disabled older adults | High trust/conversion | Medium | 1–2 months | $15k–60k | High |
-| 5 | One measurable commercial threat-intelligence pilot | High if it improves missed threats | Medium/high via accumulated evaluation | 1–3 months | $10k–100k+ | Medium |
-| 6 | Brand/name validation and senior-quality identity system | Medium/high | Medium | 1–3 months | $15k–75k | Medium |
-| 7 | Credit-union design-partner discovery and quantified pilot design | High distribution option | High if agreements/data compound | 3–9 months | $15k–100k | Medium |
-| 8 | Specialist native iOS/Android share-extension engineering | High activation | Low/medium | 1–2 months | $20k–80k | High |
+| Rank | Investment                                                                  | Expected leverage                  | Defensibility                          | Time to value | Indicative cost | Confidence |
+| ---: | --------------------------------------------------------------------------- | ---------------------------------- | -------------------------------------- | ------------- | --------------: | ---------- |
+|    1 | Paired older-adult/adult-child research and longitudinal pilot              | Very high                          | Medium                                 | 1–3 months    |        $15k–50k | High       |
+|    2 | Human-reviewed fraud/action evaluation corpus and tooling                   | Very high                          | High and compounding                   | 1–4 months    |       $25k–150k | High       |
+|    3 | Independent application security, privacy architecture, and threat modeling | Existential risk reduction         | Medium                                 | 1–2 months    |       $25k–100k | High       |
+|    4 | Accessibility audit plus testing with disabled older adults                 | High trust/conversion              | Medium                                 | 1–2 months    |        $15k–60k | High       |
+|    5 | One measurable commercial threat-intelligence pilot                         | High if it improves missed threats | Medium/high via accumulated evaluation | 1–3 months    |      $10k–100k+ | Medium     |
+|    6 | Brand/name validation and senior-quality identity system                    | Medium/high                        | Medium                                 | 1–3 months    |        $15k–75k | Medium     |
+|    7 | Credit-union design-partner discovery and quantified pilot design           | High distribution option           | High if agreements/data compound       | 3–9 months    |       $15k–100k | Medium     |
+|    8 | Specialist native iOS/Android share-extension engineering                   | High activation                    | Low/medium                             | 1–2 months    |        $20k–80k | High       |
+
+## Build Run 1 reconciliation
+
+The build changes no rank; it makes the first four needs more concrete. The product has a coherent local flow, but no moderated older-adult evidence. The fraud harness passes 12 synthetic cases with zero forbidden-action violations but is explicitly not calibrated or independently adjudicated. Automated Edge/axe checks passed, while native devices and disabled older-adult usability remain untested. A source review closed two High authorization/bootstrap defects, yet production identity/KMS, dependency remediation, real PostgreSQL operations, and independent security work remain open.
+
+The first funded tranche should therefore buy **evidence before reach**: paired task research, a rights-cleared double-reviewed corpus, independent security/privacy work, and accessibility testing. Release brand, native-capture, intelligence, or partner-design money only after its preceding question is answered. Do not purchase multiple feeds, production infrastructure, or acquisition simply because local Run 1 passed.
 
 ## Spend rules
 

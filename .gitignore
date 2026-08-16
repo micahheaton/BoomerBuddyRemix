@@ -1,0 +1,40 @@
+# Legacy product research is intentionally outside the 2.0 repository.
+reference/
+
+# Dependencies and generated output
+node_modules/
+.pnpm-store/
+.turbo/
+dist/
+build/
+.next/
+.expo/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+*.log
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local databases and temporary data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+.data/
+tmp/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Internal gauntlet runtime markers
+docs/.gauntlet/

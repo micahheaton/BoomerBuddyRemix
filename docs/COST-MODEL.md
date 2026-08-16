@@ -1,0 +1,44 @@
+# Cost Model
+
+Status: directional planning model, USD, accessed/estimated 2026-08-15. Reprice vendors before commitment. Labor, tax, legal, insurance, and acquisition vary too widely to present as fixed quotes.
+
+## Unit assumptions
+
+- Family hypothesis: $14.99 monthly; annual mix and discounts not modeled.
+- Typical AI-assisted text check: 4,000 input + 800 output tokens. At current GPT-5.6 Luna list rates ($0.20/$1.20 per 1M), this infers about **$0.0018/check** before retries, tools, caching, or other providers. Build Run 1 does not call it.
+- Web Risk Lookup is free through 100,000 calls/month, then $0.50/1,000. Do not use noncommercial Safe Browsing for a paid product.
+- Stripe domestic online card: 2.9% + $0.30; optional Stripe Billing pay-as-you-go currently adds 0.7% of billing volume.
+- Apple/Google subscription commissions can be about 15% for qualifying subscriptions/programs and may dominate inference costs; channel mix matters.
+
+Sources: [OpenAI](https://developers.openai.com/api/docs/models/compare), [Google Web Risk](https://cloud.google.com/web-risk/pricing), [Stripe](https://stripe.com/pricing), [Apple](https://developer.apple.com/programs/whats-included/), [Google Play](https://support.google.com/googleplay/android-developer/answer/112622?hl=en).
+
+## Stage model
+
+| Category | First dollar | 100 families | 10,000 families | Notes |
+|---|---:|---:|---:|---|
+| Hosting/API/web/HQ | $25–150/mo | $75–400 | $500–3,000 | Managed app runtime/CDN; load-test before scaling. |
+| PostgreSQL/backups | $15–100 | $50–300 | $500–2,500 | Neon Launch lists typical intermittent use near $15; scale/security tier can be much higher. |
+| Object storage/scanning | $0–50 | $10–150 | $200–2,000+ | Images/audio deferred; scanning may be enterprise-priced. |
+| Identity | $0–100 | $0–250 | $0–2,500+ | AuthKit user management currently has a large free tier; SSO connections cost extra. |
+| URL intelligence | $0 | $0 | $0–450 at 1M lookups | Premium feeds may add $10k+/year and require measured lift. |
+| Inference | $0–50 | roughly $2–50 | roughly $180–2,000+ | 100k–1M checks under the token assumption; provider mix/retries dominate. |
+| Transactional email | $0–20 | $0–20 | $35–160 | Resend publishes 3k free and $20/50k. |
+| SMS | usage + registration | $10–100 | $350+ before carrier fees | Twilio base is $0.0083/segment; consent, carrier and 10DLC costs apply. |
+| Push | $0–19 | $0–50 | $50–500 | Expo Starter is $19; app-store accounts: Apple $99/year, Google $25 once. |
+| Payments | variable | about $74/mo* | about $7,350/mo* | *At $14.99 monthly via Stripe cards; excludes Billing/tax and channel commissions. |
+| App-store commission | variable | up to ~$225/mo | up to ~$22,485/mo | If all modeled revenue is subject to a 15% commission. |
+| Observability/analytics | $0–100 | $25–300 | $250–2,000+ | Start with redaction and sampling; no artifact content. |
+| Support tooling | $0–100 | $0–200 | $500–3,000+ | Human support labor is separate and likely larger. |
+| Prospecting/enrichment | $0 | $0–79/seat/mo if validated | contract/credits vary | Optional B2B acceleration. Apollo currently lists Free, $49 Basic, and $79 Professional annual-billing rates; credits expire and usage varies. |
+| Accounting/tax/payroll software | $50–500 | $100–1,000 | $1,000–5,000+ | Integrate specialists; professional fees excluded. |
+| Security/compliance | $20k–75k project | maintenance | $50k–250k+/yr | Independent review, testing, policies, vendor/partner diligence. |
+
+## Stage requirements
+
+- **Required at first dollar:** production identity, payments/reconciliation, database/backups, app hosting, monitoring, email, legal/privacy/security/accessibility review, accounting and tax workflow, app-store accounts if mobile commerce.
+- **Required around 100 families:** support case workflow, reliable jobs, restore drills, fraud review cadence, product analytics, spend alerts, expanded evaluation set.
+- **Required around 10,000 families:** stronger database/observability, 24/7 incident path, dedicated fraud/customer operations, vendor SLAs, formal compliance program, partner reporting, data warehouse/read models.
+- **Optional acceleration:** premium intelligence, advanced experimentation, brand agency, paid acquisition, and prospect enrichment. Current example economics: [Apollo pricing](https://www.apollo.io/pricing) and [credit rules](https://knowledge.apollo.io/hc/en-us/articles/9527776320781-What-Are-Credits); recheck before purchase.
+- **Enterprise/B2B:** SSO/SCIM connections, security questionnaires/audits, contract/DPA work, partner implementation and support; price these into contracts.
+
+The largest likely variable costs are distribution commissions, payment fees, human support/fraud operations, and acquisition—not basic model tokens.

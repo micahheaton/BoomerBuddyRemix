@@ -27,10 +27,11 @@ ${footer}`;
 const production = `${header}import "./.next/types/routes.d.ts";
 import "./.next/types/root-params.d.ts";
 ${footer}`;
-const current = (await readFile(file, 'utf8')).replace(/\r\n?/gu, '\n');
+const original = await readFile(file, 'utf8');
+const current = original.replace(/\r\n?/gu, '\n');
 if (current !== development && current !== production) {
   throw new Error(`Refusing to overwrite unexpected generated declaration content: ${file}`);
 }
-if (current !== development) {
+if (original !== development) {
   await writeFile(file, development, 'utf8');
 }

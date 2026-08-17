@@ -49,6 +49,13 @@ describe('Next generated declaration normalization', () => {
   }
 
   it('resolves the repository from the script when launched in a workspace', async () => {
+    const attributes = await readFile(join(root, '.gitattributes'), 'utf8');
+    expect(attributes.split(/\r?\n/gu)).toEqual(
+      expect.arrayContaining([
+        'apps/hq/next-env.d.ts text eol=lf',
+        'apps/web/next-env.d.ts text eol=lf',
+      ]),
+    );
     const fixture = await createFixture(production);
 
     const result = spawnSync(process.execPath, [fixture.script, 'web'], {

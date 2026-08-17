@@ -88,15 +88,16 @@ export function registerPrivacyRoutes(app: FastifyInstance, context: ApiContext)
       ['customer', 'mobile'],
       now,
     );
+    const requests = await context.repositories.businessOs.listPrivacyRequests({
+      personId: auth.principal.personId,
+      limit: 101,
+    });
     return privacyRequestListResponseSchema.parse({
-      requests: (
-        await context.repositories.businessOs.listPrivacyRequests({
-          personId: auth.principal.personId,
-        })
-      ).map(privacyRequestDto),
+      requests: requests.slice(0, 100).map(privacyRequestDto),
+      truncated: requests.length > 100,
       fulfillmentMode: 'evidence_plan_only',
       limitation:
-        'Run 2 records identity review and a content-free fulfillment plan; it does not claim completed export or erasure.',
+        'Records identity review and a content-free Run 3 inventory plan; it does not claim completed export, correction, restriction, or erasure.',
     });
   });
 }

@@ -1,164 +1,198 @@
-# Founding Household Playbook
+# Founding Household closed-beta playbook
 
-Status: **operator playbook drafted; Founding Household runtime mode and real cohort evidence are pending**
+## Evidence statement
 
-Last reviewed: 2026-08-16
+This playbook describes an implemented local-simulation workflow. It is not evidence of a real household invitation, managed identity, deployed staging, provider success, payment, conversion, willingness to pay, retention, calibration, or production readiness.
 
-This playbook defines the smallest bounded closed beta. It does not authorize contacting anyone, enrolling a household, opening public traffic, charging a card, or treating participants as evidence of willingness to pay. A participant becomes a beta customer/test household only after the founder follows the approved recruitment, identity, consent, and provisioning steps.
+The current production critical-path blocker is managed customer identity and a separately reviewed production sponsor release. Production rendering hides the local forms, and the repository hard-refuses nonlocal operations. Canonical entitlement/session/Family/HQ projections additionally exclude local Founding rows when the runtime is production. The API also refuses production startup globally. Do not promote local persona evidence to a higher tier.
 
 ## Objective
 
-Learn whether one invited household can safely complete a coherent loop:
+Use the smallest safe cohort needed to learn whether a household can reach useful product behaviors. Founding Households are beta customers/test households, not paid customers and not proof that anyone will pay.
 
-1. create and recover an account;
-2. complete orientation;
-3. run a first Check;
-4. understand the result and evidence limits;
-5. choose a safe next action;
-6. establish a consented Trusted Circle relationship;
-7. receive a relevant service benefit;
-8. submit useful feedback; and
-9. return later.
+The implemented path is deliberately narrow:
 
-The objective is not signup volume, testimonials, referrals, revenue, conversion, or fraud-model calibration.
+1. the exact configured founder records a finite local cohort policy;
+2. the founder issues one HMAC-only credential with no recipient/contact record;
+3. an existing authenticated household administrator reviews the exact benefit;
+4. the administrator separately accepts service terms and protected-adult self-enrollment;
+5. one transaction creates finite canonical sponsor access with no payer and no card;
+6. the product derives only supported, privacy-bounded funnel facts;
+7. the administrator may withdraw, or the founder may end only that sponsorship.
 
-## Founder gates
+No adapter sends an email, text, notification, campaign, or referral. No account is created by the invitation.
 
-Before inviting the first real household, the founder must record:
+## Founder prerequisites and gates
 
-- cohort owner and support backup;
-- maximum active Founding Households;
-- invitation expiration;
-- benefit and benefit expiration—never “free forever”;
-- launch geography and age/eligibility rule;
-- stated support hours and emergency boundary;
-- identity/recovery process;
-- privacy notice, beta terms, research consent, and communications consent versions;
-- feedback/media retention choice;
-- incident, pause, and offboarding owners; and
-- the exact frozen candidate commit/tag.
+For local rehearsal only:
 
-Missing values keep enrollment disabled. Values belong in the provisioning system, not hard-coded application copy.
+- `BB_FOUNDER_PERSON_ID` must name the exact local founder persona (`person-hq-heidi` in the deterministic seed only).
+- That person must currently hold an active `hq_owner` assignment in an `internal` organization.
+- The normal local development identity, database migration, and seed controls must be enabled.
+- The repository must remain in the `local` environment and the evidence tier must remain `local_simulation`.
 
-## Recruitment boundary
+An upgraded local database that already has the historical `run1-v1` demo-bootstrap marker intentionally returns `already_seeded`; migration 0019 adds the dormant schema and immutable catalogue but does not retrofit Stage 7 demo sponsor/backing fixtures into that occupied database. Use a new disposable local database and run the normal migration/seed path for this rehearsal, or implement a separately reviewed versioned bootstrap. Do not delete or rewrite the old marker, rerun the empty-database seed against occupied data, or silently resurrect fixtures.
 
-### Allowed draft script
+Do not put invitation credentials, session secrets, HMAC keys, customer content, or other secret values in source, documentation, logs, prompts, tickets, screenshots, or evidence manifests.
 
-> BoomerBuddy is testing a private, early fraud-safety service with a small number of households. This is a beta: it can make mistakes, is not emergency or financial advice, and may change. Participation is optional. We want to observe onboarding, a synthetic or participant-chosen Check, safe-action guidance, Trusted Circle consent, and feedback. The beta benefit and end date will be shown before you accept. You can withdraw from research or service communications without losing safety/withdrawal controls. Replying to this invitation is not consent to marketing.
+Before any real household can be invited, the founder must separately complete and review:
 
-The founder sends or approves every first invitation. Initial outreach must use an existing legitimate relationship or a participant-requested channel; no purchased/enriched list, contact upload, transferred consent, automated cold outreach, or implied institutional endorsement.
+- managed customer identity and account-recovery custody;
+- a verified company-controlled production sponsor organization/backing;
+- a production-specific code release that removes the repository’s nonlocal hard refusal only after security review;
+- deployed staging evidence for the exact frozen release;
+- applicable beta terms, privacy, accessibility, support, incident, and professional-review gates;
+- explicit authorization for the real recipient contact/recruitment action.
 
-### Research versus marketing
+This document does not authorize any of those actions.
 
-- Product access terms authorize the bounded beta service only.
-- Research participation is separate, optional, purpose/version bound, and revocable.
-- Service notifications are separate from marketing and referral messages.
-- A beta invitation is not a testimonial request.
-- A free household is not willingness-to-pay evidence.
-- Quotes, recordings, images, case studies, and testimonials require later artifact-specific permission and review.
+## Local founder procedure
 
-## Enrollment checklist
+1. Sign in to the separate HQ app as the configured founder.
+2. Open **Founding Households**.
+3. Confirm the banner says `Local simulation; no card and no delivery adapter`.
+4. Choose the sponsor benefit:
+   - Plus beta: one protected member and two Trusted Circle participants; or
+   - Family beta: three protected members and six Trusted Circle participants.
+5. Record all finite bounds:
+   - cohort maximum: 1–25 households;
+   - invitation lifetime: 1–14 days;
+   - sponsored access: 1–180 days;
+   - hard programme end: no more than 180 days from the change.
+6. Save the policy. Saving any revision terminally supersedes every pending invitation and zeroizes its HMAC material.
+7. Issue one local credential. The raw credential appears once. The system stores only its HMAC fingerprint and key version.
+8. Hand the credential to the intended local tester only through the explicitly permitted local rehearsal channel. The product does not deliver it.
+9. If the credential is lost, exposed, or copied into a prohibited surface, revoke it and issue a new one. It cannot be recovered.
+10. Never interpret a reservation, acceptance, or active local grant as a payment or conversion.
 
-The founder or authorized operator must complete every item:
+Mutation buttons retain one action-and-payload idempotency UUID across an unknown network outcome. Retry the unchanged action first. For invitation creation, an exact retry can confirm that the invitation was created but can never recover its one-time bearer; the console must show `created_credential_unavailable`, then require revocation/zeroization of that exact invitation before a new operation key is issued. A changed payload or resolved operation receives a new UUID.
 
-- [ ] Candidate is inside the configured cohort and geography limits.
-- [ ] Invitation has a unique, short-lived, identity-bound token and has not been reassigned.
-- [ ] Benefit, expiration, included capabilities, support hours, beta limits, and no-card status are shown.
-- [ ] Customer identity and recovery route are verified through the approved identity provider.
-- [ ] Customer/HQ audiences remain separate; no development persona or bearer-token login is used.
-- [ ] Household administrator, protected person, payer, and billing authority are not conflated.
-- [ ] Protected enrollment is self-consented and consumes the correct independent allowance.
-- [ ] Trusted Circle authority is pairwise, purpose-limited, explicitly accepted, and revocable by either participant.
-- [ ] Research, follow-up, feedback/media retention, and each communications channel have separate choices.
-- [ ] The participant receives the safe-word/recovery limitation and emergency escalation language.
-- [ ] The founder records only content-free status evidence and the frozen release ID.
+The founder console can disable the policy, revoke a pending credential, and offboard an active sponsored household. These controls execute no provider, payment, messaging, deployment, DNS, or purchase action.
 
-No card is requested for Founding Household enrollment. Any future paid conversion is a separate, founder-gated Checkout decision.
+## Recruitment script template
 
-## Guided first session
+Use only after the founder has explicit authority to contact the person. Do not run this as an automated campaign.
 
-Use a synthetic practice scenario before inviting sensitive real content.
+> I’m inviting a small number of households to test BoomerBuddy’s scam-safety workflow. This is a finite sponsored beta and needs no card. It is not an emergency service, identity proof, or promise that a message is safe. Participation in the service does not consent you to research, marketing, follow-up, referral, or media use. You can review the exact benefit and end date before accepting, and you can withdraw the sponsored service later. Would you like to receive the one-time invitation through our approved handoff?
 
-1. Confirm the participant can sign in, sign out, recover access, and identify BoomerBuddy support.
-2. Complete orientation and ask the participant to explain the protected-person/Trusted Circle boundary in their own words.
-3. Run a synthetic Check and confirm the UI distinguishes evidence, uncertainty, and safe next actions.
-4. Ask the participant what they would do next; do not coach toward a desired answer before observing comprehension.
-5. If they choose, establish one Trusted Circle relationship with the other adult's direct acceptance. Do not enter or message the other person's phone/email as proof of consent.
-6. Exercise participant withdrawal and confirm relationship/content access ends while safety withdrawal controls remain available.
-7. Submit one contextual feedback item without sensitive real content.
-8. Schedule a participant-chosen follow-up inside the stated cadence.
+Record neither the answer nor recipient contact data in the Founding Household invitation table. If research, follow-up, or marketing is desired, use a separately reviewed consent purpose and system.
 
-Never ask the participant to paste passwords, OTPs, card numbers, seed phrases, private keys, or unnecessary real scam content into research notes.
+## Household acceptance checklist
 
-## Follow-up cadence
+The person must already have:
 
-The default draft cadence is manual and must be founder-approved:
+- an active, unexpired, unrevoked local development session;
+- an active local identity;
+- active membership in the selected household;
+- an active household-administrator assignment.
 
-- Day 0: guided onboarding and first Check.
-- Day 1: optional service follow-up on comprehension or a blocker.
-- Day 3: optional feedback prompt only when follow-up consent remains active.
-- Day 7: return/usefulness conversation and opt-in reminder of beta expiration.
-- Day 14 or configured end: continuation/offboarding decision and data-choice reminder.
+On **Member → Founding Household**:
 
-STOP/withdrawal/suppression overrides the cadence immediately. Quiet hours, frequency caps, test-recipient restrictions, and provider delivery reconciliation apply before BoomerBuddy sends any message. Until an approved provider path exists, outreach remains founder/manual and separately consented.
+1. Enter the complete one-time credential. It stays only in the page’s transient form state.
+2. Review the exact benefit, invitation expiry, and access end.
+3. Confirm that payment, research, marketing, and follow-up are all `no`.
+4. Separately accept:
+   - Founding Household service terms version `founding-household-service-beta-v1`; and
+   - protected-adult self-enrollment version `founding-household-protected-self-v1`.
+5. Submit once. A successful local response must say `not_paid_sponsored_beta`, `local_simulation`, and `paymentCollected: false`.
 
-## Privacy-bounded funnel evidence
+The exact service disclosure rendered by the API is:
 
-Record content-free events only, with explicit schema/version and participant choice:
+> This finite Founding Household beta is sponsored by BoomerBuddy and requires no card. It provides the selected code-owned benefit only until the displayed effective end. To operate this bounded cohort during effective access, BoomerBuddy records only whether an active local account existed before enrollment, orientation became ready, a Check completed without its submitted content or result, an active Trusted Circle relationship was established without message or contact contents, an authenticated minimized feedback intake completed without treating it as useful, and a later authenticated session occurred. The founder console sees the stable internal household identifier, effective sponsor-access state, and these yes-or-no milestones, but not precise event times, Check or feedback content, message or contact contents. These operational facts are retained with the append-only enrollment history under the service retention policy; they are not research, marketing, testimonial, referral, follow-up, or media consent, and they are not evidence of willingness to pay. The accepting administrator may withdraw service consent at any time, including after founder offboarding.
 
-- invitation issued, opened, expired, accepted, or declined;
-- identity binding completed;
-- orientation started/completed;
-- first Check completed;
-- result comprehension prompt completed;
-- safe-action selection category—not raw content;
-- Trusted Circle invitation accepted/declined/withdrawn;
-- service notification eligible/suppressed/delivered/unknown;
-- feedback submitted, minimized, quarantined, triaged, or closed;
-- return session; and
-- benefit expired, converted, extended by explicit founder decision, or offboarded.
+The exact service policy rendered with it is:
 
-Do not put raw Check text/URLs, message content, phone/email, safe words, attachment data, research notes, or free-text feedback in analytics. Household/person IDs must be minimized or pseudonymized for the approved purpose. Provider analytics is not enabled until its retention, residency, deletion, and consent path is approved and proved.
+> Founding Household service consent is purpose-limited to delivering and measuring the finite sponsored beta with the bounded operational facts named in the disclosure. Attribution stops at the earliest of withdrawal, founder offboarding, sponsor access end, or program end. Existing consent, enrollment, audit, and bounded operational event history remains append-only under the applicable service retention policy; submitted Check content is excluded, and feedback content has its own retention and withdrawal controls. Research participation, content reuse, marketing, follow-up, referral, testimonial, and media uses require separate explicit consent. Ending this cohort revokes only its sponsor chain and must preserve or rebind unrelated effective entitlements.
+
+The protected-adult consent is separate because it enables the accepting administrator’s protected workflow. Neither consent grants research, marketing, follow-up, referral, or media use.
+
+## Onboarding checklist
+
+Do not mark a step successful without its named evidence source.
+
+| Funnel step | Current evidence source | Truthful current state |
+| --- | --- | --- |
+| Account creation/readiness | active identity | observable locally; invitation does not create an account |
+| Founding Household acceptance | cohort enrollment | observable locally |
+| Orientation | ready orientation state after enrollment | observable when completed |
+| First Check | completed analysis requested by the accepting person after enrollment | observable without submitted content |
+| Understand result | none | `not_observed / not_implemented` |
+| Safe next action | none | `not_observed / not_implemented` |
+| Trusted Circle established | active relationship plus current consent after enrollment | observable |
+| Relevant service value | none | `not_observed / not_implemented` |
+| Feedback submitted | exact authenticated household/person, completed minimized safe Stage 8 intake inside effective access | observable without content; not a usefulness claim |
+| Return later | a different customer/mobile session at least 24 hours after enrollment | observable |
+
+The cohort DTO exposes stable household control identity plus yes/no milestones and bounded provenance codes. Accepting-person identity, precise event times, household names, recipient contact data, submitted Check content, feedback content, and message content are excluded. Feedback usefulness remains unimplemented and must not be inferred from submission or assignment.
+
+## Follow-up cadence and consent boundary
+
+The Stage 7 acceptance path records `researchConsent: false`, `marketingConsent: false`, and `followUpConsent: false`. Therefore BoomerBuddy must not initiate an automated or product-originated follow-up from this acceptance.
+
+If a separately consented research system is later approved, a candidate human cadence is:
+
+- after onboarding: confirm the participant can stop and knows support/emergency limits;
+- after first Check: ask a comprehension question without collecting the submitted message;
+- after a Trusted Circle action: test permission comprehension;
+- after seven days: ask whether the service was useful and whether they chose to return;
+- at exit: record withdrawal/expiry experience and ask no marketing question unless separately consented.
+
+Until that separate consent exists, every cadence item remains blocked and must not be sent.
+
+## Stop conditions
+
+Immediately disable policy issuance and revoke affected pending credentials if any of these occur:
+
+- credential or HMAC material appears in logs, source, prompts, tickets, screenshots, or documentation;
+- a non-administrator or inactive/revoked session can preview or accept;
+- cohort capacity, one-time use, expiry, or idempotency can be bypassed;
+- access is shown as paid, permanent, or “free forever”;
+- a shortened or invalid sponsor backing still appears as effective through the longer ledger end;
+- a linked subscription, sponsorship allocation, grant, or service-consent terminator leaves future access or post-terminator funnel milestones visible;
+- a missing, malformed, suspended, revoked, expired, deferred, proposed, relinquished, or withdrawn service-consent projection disappears from the ledger or is mislabeled as another consent action;
+- a Founding operation can share, replay, lease, process, dead-letter, or omit its operation-bound audit/outbox evidence before commit;
+- a Founding-bound protected-member or Trusted Circle allowance can be deleted instead of preserved and safely rebound;
+- a local Founding grant contributes to production entitlement, session, Family, HQ, Check, Orientation, or commerce-reconciliation behavior after a database restore;
+- research, marketing, follow-up, referral, or media consent is inferred from service acceptance;
+- an unrelated grant, payer record, subscription, or consent is changed during offboarding;
+- local evidence is labeled as staging, production, a real household, revenue, or conversion;
+- the funnel claims comprehension, safe action, value, or feedback without its reviewed evidence source;
+- a deployment attempts to make nonlocal access effective before managed identity and sponsor review.
+
+For an exposed credential, revoke it so the HMAC is zeroized, preserve its append-only history, investigate the exposure, and issue a new credential only after the stop condition is cleared.
 
 ## Success and failure definitions
 
-### Per-household success candidate
+Local implementation success means all of the following are proven by local tests only:
 
-A household is a usability success candidate only if it independently completes orientation, one Check, result comprehension, a safe next action, and a later return without a severe privacy/authorization/support incident. Trusted Circle and feedback steps are reported separately rather than silently excluded.
+- exact founder/internal-owner authorization;
+- bounded, expiring, versioned policy;
+- high-entropy HMAC-only one-time invitation;
+- authenticated administrator preview and explicit two-purpose acceptance;
+- atomic no-payer canonical sponsor entitlement;
+- concurrency-safe cap and idempotency;
+- finite expiry and unrelated-grant-safe offboarding;
+- one common canonical effective end, immediate terminator attention, and environment-matched resolution across entitlement, Check, Orientation, and reconciliation paths;
+- privacy-bounded funnel projection that leaves unavailable outcomes unobserved.
 
-### Program learning threshold
+A future real-beta learning success requires genuine human evidence, kept distinct from this local proof, that a household safely completes the relevant funnel steps and chooses to return. One household’s use does not prove product-market fit, willingness to pay, conversion, or calibration.
 
-The founder sets the cohort target before seeing outcomes. Results must include denominators, drop-off, support intervention, missing evidence, and participant withdrawals. A tiny self-selected cohort cannot establish fraud accuracy, market demand, willingness to pay, or population accessibility.
+Failure includes authorization leakage, secret retention, oversubscription, perpetual access, consent transfer, unrelated-grant mutation, fabricated funnel evidence, inaccessible onboarding, or inability to withdraw safely.
 
-### Stop conditions
+## Offboarding and retention
 
-Pause new invitations immediately for:
+- Natural expiry ends entitlement effectiveness through canonical resolution.
+- Founder offboarding ends only the linked Founding Household grant, allocation, sponsor subscription, and enrollment. It does not claim the customer withdrew consent.
+- Household withdrawal is available only to the accepting active administrator and appends service-consent withdrawal evidence before ending only that sponsor chain. If the founder already ended sponsorship, the same administrator retains a consent-only withdrawal path that does not mutate the chain again.
+- Invitations and enrollments are never deleted. Pending HMAC material is terminally zeroized on acceptance, expiry, revocation, or supersession.
+- Operations, audits, outbox records, and consent evidence remain append-only under their existing retention/governance rules.
 
-- unauthorized customer/HQ or cross-household access;
-- plaintext secret, raw content, or media exposure;
-- loss of consent withdrawal, suppression, or deletion controls;
-- incorrect payment or entitlement activation;
-- unbounded external message/action retry;
-- serious/critical accessibility blocker on the required web path;
-- inability to identify/restore the canonical database or frozen release;
-- applicable unresolved Critical/High security defect;
-- participant harm, credible unsafe guidance, or support coverage failure; or
-- the founder engaging the global stop.
+## Current verification inventory
 
-Preserve evidence, stop external initiation, revoke affected credentials when necessary, communicate only through the incident-approved path, and do not resume until remediation and independent review are recorded.
-
-## Offboarding
-
-At benefit expiration or withdrawal:
-
-1. explain the service state and any continuation choices without pressure;
-2. stop non-required communications and preserve STOP/suppression;
-3. keep relationship withdrawal and participant safety controls available;
-4. revoke beta-specific entitlement without revoking an unrelated valid grant;
-5. honor feedback/media research retention choices and privacy requests;
-6. preserve required consent, audit, commerce, and incident evidence under policy; and
-7. record the reason category without raw participant narrative in analytics.
-
-## Evidence classification
-
-This document is `operational_design`. Current repository-local synthetic journeys are `local_simulation`. A founder-invited participant would be `real_human_closed_beta` only after identity, consent, deployment, support, and provisioning evidence exists. No real household was recruited, contacted, enrolled, observed, charged, or measured by creating this playbook.
+- Domain and contract tests: local simulation only.
+- PGlite fresh 0001–0019 and 0018→0019 upgrade tests: local simulation only.
+- Repository hostile, authority, secret, expiry, concurrency, consent, canonical-entitlement, and offboarding tests: local simulation only.
+- Direct-SQL PGlite tests cover initial pending/active states, exact captured database time, finite TTL/access bounds, configured-founder binding, immutable-catalogue upgrade conflicts, credential supersession/zeroization, commit-time consent projection integrity, exact sponsor-chain times, fresh operation-bound audit/outbox pairs, exact result counts, append-only allowance transition history, and refusal of partial sponsor-chain or allowance deletion/transitions. These are local trigger tests, not evidence of managed PostgreSQL role custody.
+- API founder-to-household integration journey: local simulation only.
+- Browser journey is implemented; a focused local Edge run must be reported separately from provider, staging, human, or production evidence.
+- Real PostgreSQL concurrency/restore evidence, managed identity, deployed staging, real humans, and production remain separate required gates.

@@ -74,6 +74,7 @@ The authoritative current inventory is [`.env.example`](../../.env.example). Rep
 - `BB_RUN_MIGRATIONS`
 - `BB_SEED_DEMO`
 - `BB_ALLOW_DEV_IDENTITY`
+- `BB_FOUNDER_PERSON_ID`
 - `BB_CUSTOMER_ORIGINS`
 - `BB_HQ_ORIGINS`
 - `BB_TRUSTED_PROXY_HOPS`
@@ -83,23 +84,42 @@ The authoritative current inventory is [`.env.example`](../../.env.example). Rep
 - `BB_SAFE_WORD_PEPPER`
 - `BB_LOG_LEVEL`
 
-The raw secret names above are development/test inputs today, not an approved production KMS design. Production must use the final managed references and key-version contract once implemented. Never paste values into this file.
+The raw secret names above are development/test inputs today, not an approved production KMS design. `BB_FOUNDER_PERSON_ID` must come from the provisioned identity and match the exact founder; leaving it unset keeps founder-only controls closed. Production must use the final managed references and key-version contract once implemented. Never invent an identity or paste values into this file.
 
 ### API-only names
 
 - `BB_API_HOST`
 - `BB_API_PORT`
-- `BB_STRIPE_MODE`
-- `BB_STRIPE_SECRET_KEY`
-- `BB_STRIPE_WEBHOOK_SECRET`
-- `BB_STRIPE_API_VERSION`
-- `BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID`
-- `BB_STRIPE_PLUS_MONTHLY_PRICE_ID`
-- `BB_STRIPE_PLUS_ANNUAL_PRICE_ID`
-- `BB_STRIPE_FAMILY_MONTHLY_PRICE_ID`
-- `BB_STRIPE_FAMILY_ANNUAL_PRICE_ID`
 
-Run 3 allows Stripe **test** values only until the founder-only live gate. `BB_STRIPE_MODE=test` is not evidence that Stripe was actually exercised.
+### Stripe names consumed by the API and worker
+
+- `BB_STRIPE_MODE`
+
+| Resource | Test name | Live manifest name |
+| --- | --- | --- |
+| Account | `BB_STRIPE_TEST_ACCOUNT_ID` | `BB_STRIPE_LIVE_ACCOUNT_ID` |
+| API credential | `BB_STRIPE_TEST_API_KEY` | `BB_STRIPE_LIVE_API_KEY` |
+| Webhook endpoint secret | `BB_STRIPE_TEST_WEBHOOK_SECRET` | `BB_STRIPE_LIVE_WEBHOOK_SECRET` |
+| Founding product | `BB_STRIPE_TEST_FOUNDING_PRODUCT_ID` | `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` |
+| Founding monthly price | `BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID` | `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` |
+| Cancel-only portal configuration | `BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` |
+
+The API and worker must receive the same complete manifest for the selected environment; do not mix test and live resources. The Stripe API version is code-owned and is not an environment variable. Run 3 permits test configuration only after the applicable founder gate, and `BB_STRIPE_MODE=test` is not evidence that Stripe was actually exercised. Live resource names remain an offline custody manifest: raw `BB_STRIPE_LIVE_API_KEY` and `BB_STRIPE_LIVE_WEBHOOK_SECRET` values are refused, and API and worker startup in live mode remains refused until managed identity/KMS custody and its adapter exist. Do not set or invent live values to bypass those controls.
+
+### Messaging disabled sentinel and reserved names
+
+- `BB_TWILIO_MODE=disabled`
+- `BB_TWILIO_ACCOUNT_SID`
+- `BB_TWILIO_AUTH_TOKEN`
+- `BB_TWILIO_MESSAGING_SERVICE_SID`
+- `BB_TWILIO_TOLL_FREE_NUMBER_SID`
+- `BB_TWILIO_INBOUND_WEBHOOK_BASE_URL`
+- `BB_TWILIO_STATUS_CALLBACK_BASE_URL`
+
+Only the literal disabled mode is accepted. The current configuration rejects every reserved
+credential, identifier, and callback value, and no Twilio adapter or provider network path exists.
+Do not provision these names into Replit until a future reviewed provider-test adapter defines and
+accepts its exact managed-secret contract.
 
 ### Worker-only names
 
@@ -143,7 +163,15 @@ npm run build
 node scripts/verify-portability.mjs
 ```
 
-Then run the candidate's clean-clone, dependency/SBOM, real-PostgreSQL, restore, and browser evidence gates. A local PGlite pass is insufficient for PostgreSQL or deployed-edge claims.
+Then bind the local clean-clone proof to the immutable candidate tag and commit:
+
+```sh
+BB_CANDIDATE_REF=run3-local-candidate-<12-hex> \
+BB_CANDIDATE_COMMIT=<40-hex-commit> \
+node scripts/clean-clone-check.mjs
+```
+
+Run the dependency/SBOM, real-PostgreSQL, restore, and browser evidence gates separately. A local PGlite pass is insufficient for PostgreSQL or deployed-edge claims.
 
 ## Health and smoke checks
 

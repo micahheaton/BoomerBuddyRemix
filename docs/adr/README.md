@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-These decisions govern BoomerBuddy 2.0 together with the [master spec](../BOOMERBUDDY-2.0-MASTER-SPEC.md). `Accepted` means the direction is selected, not that it is implemented or production-verified. Each Run 2 ADR distinguishes local design evidence from proof blocked by accounts, infrastructure, datasets, or professional review.
+These decisions govern BoomerBuddy 2.0 together with the [master spec](../BOOMERBUDDY-2.0-MASTER-SPEC.md). `Accepted` means the direction is selected, not that it is implemented or production-verified. Each ADR distinguishes local design evidence from proof blocked by accounts, infrastructure, datasets, or professional review.
 
 1. [Modular monolith and TypeScript monorepo](./0001-modular-monolith-and-monorepo.md)
 2. [PostgreSQL canonical schema with PGlite locally](./0002-postgresql-canonical-pglite-local.md)
@@ -21,5 +21,14 @@ These decisions govern BoomerBuddy 2.0 together with the [master spec](../BOOMER
 17. [Provider-neutral commerce and storefront policy](./0017-provider-neutral-commerce-and-storefront-policy.md)
 18. [Business OS, owner attention, and bounded autonomy](./0018-business-os-owner-attention-and-bounded-autonomy.md)
 19. [Governed V1 curation and evaluation evidence](./0019-governed-v1-curation-and-evaluation-evidence.md)
+20. [Least-privilege HQ metadata projections](./0020-least-privilege-hq-projections.md)
+21. [Cumulative transactional automation budgets](./0021-cumulative-transactional-automation-budgets.md)
+22. [Stripe first-dollar evidence chain](./0022-stripe-first-dollar-evidence-chain.md)
+23. [Founder provisioning uses a secret-free append-only evidence ledger](./0023-founder-provisioning-evidence-ledger.md)
+24. [Environment-bound Founding Household sponsorship](./0024-environment-bound-founding-household-sponsorship.md)
+25. [Local feedback learning evidence boundary](./0025-local-feedback-learning-evidence-boundary.md)
+26. [Provider-free consent-aware messaging core](./0026-provider-free-consent-aware-messaging-core.md)
+27. [Local editorial intelligence evidence boundary](./0027-local-editorial-intelligence-evidence-boundary.md)
+28. [Disabled referral-credit core](./0028-disabled-referral-credit-core.md)
 
 Superseding a decision requires a new dated ADR, affected contract/test changes, migration and rollback plans, and updates to source evidence.

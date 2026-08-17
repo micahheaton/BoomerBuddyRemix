@@ -4,6 +4,8 @@ Status: **local inventory complete; fresh advisory identity and reachability adj
 
 Recorded: 2026-08-16
 
+Rechecked locally: 2026-08-17
+
 ## Frozen inputs
 
 - Node: `v22.18.0`
@@ -73,6 +75,25 @@ No secret is required in source or documentation. In a company-controlled CI/sec
 8. obtain qualified license/provenance review before distribution where required.
 
 Do not paste registry credentials, private advisory artifacts, recovery codes, signing material, or internal repository tokens into prompts, source, screenshots, or logs.
+
+## Candidate enforcement prepared in Run 3
+
+- CI now runs for immutable `run3-local-candidate-*` tags as well as pull requests and `main`.
+- CI uses the repository's High advisory threshold without omitting development packages, runs the
+  focused coverage gate, retains a CycloneDX artifact, and has a separate Windows Edge job.
+- The OCI runtime dependency stage performs a lockfile-backed production-only install scoped to the
+  API and worker workspaces, removes bundled internal-workspace links, and does not copy the build
+  dependency tree. A local graph verifier requires the external runtime packages and rejects known
+  web, native, browser-test, TypeScript, and test-runner packages from that selected graph. A built
+  OCI SBOM is still required to prove the resulting image bytes.
+- The local and external-source reconstruction scripts require an exact candidate tag and
+  40-character commit, check out detached, assert `HEAD`, and refuse a dirty reconstructed tree.
+
+These controls are source preparation, not executed company-CI evidence. GitHub actions are pinned
+to the full commit IDs independently resolved from their official Git repositories on 2026-08-17.
+The Node and PostgreSQL image tags are paired with the multi-architecture manifest digests returned
+by the official Docker registry on 2026-08-17. No candidate SBOM, advisory result, provenance
+attestation, OCI scan, or Edge artifact has yet been retained by company CI.
 
 ## Gate decision
 

@@ -30,6 +30,7 @@ import type {
   PrincipalDto,
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
+import { buildUserInitiatedInvitationShareDraft } from '@boomerbuddy/contracts';
 import { mobileRequest, readableError } from './api';
 import {
   mobileHouseholdScopeSummary,
@@ -289,19 +290,21 @@ export function HomeScreen({
           ))}
         </View>
       ) : null}
-      <View style={s.banner}>
-        <Text style={s.label}>Native intake is blocked pending device verification</Text>
-        <Text style={s.muted}>
-          Route-only deep-link observation is scaffolded. Inbound share targets are not configured,
-          and this build does not read messages, notifications, contacts, or the clipboard. Paste an
-          item manually in Check.
-        </Text>
-        <ActionButton
-          kind="secondary"
-          title="Review native proof status"
-          onPress={() => navigation.navigate('NativeProof')}
-        />
-      </View>
+      {__DEV__ ? (
+        <View style={s.banner}>
+          <Text style={s.label}>Native intake is blocked pending device verification</Text>
+          <Text style={s.muted}>
+            Route-only deep-link observation is scaffolded. Inbound share targets are not
+            configured, and this build does not read messages, notifications, contacts, or the
+            clipboard. Paste an item manually in Check.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Review native proof status"
+            onPress={() => navigation.navigate('NativeProof')}
+          />
+        </View>
+      ) : null}
       {nativeEntrySignal === 'route_only_check' ? (
         <View style={s.card}>
           <Text style={s.pill}>Route-only deep link observed</Text>
@@ -1114,6 +1117,25 @@ export function FamilyScreen({
       setBusy(false);
     }
   }
+  async function shareCreatedInvitation() {
+    if (!__DEV__ || created === undefined) return;
+    try {
+      const draft = buildUserInitiatedInvitationShareDraft({
+        invitationId: created.invitation.id,
+        localInviteCode: created.localInviteCode,
+        expiresAt: created.invitation.expiresAt,
+        surface: 'native_share_sheet',
+      });
+      const outcome = await Share.share({ message: draft.draftText });
+      setStatus(
+        outcome.action === Share.sharedAction
+          ? 'Your device share sheet completed. BoomerBuddy did not select a contact or send a message.'
+          : 'Share sheet closed. BoomerBuddy did not send anything.',
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    }
+  }
   async function acceptInvite() {
     if (!preview || !consentConfirmed) return;
     const acceptedHouseholdId = preview.invitation.household.id;
@@ -1393,7 +1415,7 @@ export function FamilyScreen({
             )}
             <Text style={s.muted}>Invitation history never displays one-time codes.</Text>
           </View>
-          {isProtectedMember ? (
+          {__DEV__ && isProtectedMember ? (
             <View style={s.card}>
               <Text style={s.heading}>Create local invitation</Text>
               <Text style={s.body}>
@@ -1419,7 +1441,7 @@ export function FamilyScreen({
               />
             </View>
           ) : null}
-          {created ? (
+          {__DEV__ && created ? (
             <View accessibilityLiveRegion="polite" style={s.banner}>
               <Text style={s.heading}>Local invitation created</Text>
               <Text style={s.body}>
@@ -1431,6 +1453,14 @@ export function FamilyScreen({
               </Text>
               <Text selectable style={s.label}>
                 One-time code: {created.localInviteCode}
+              </Text>
+              <ActionButton
+                title="Open device share sheet"
+                onPress={() => void shareCreatedInvitation()}
+              />
+              <Text style={s.muted}>
+                Your device owns the destination and final send. BoomerBuddy does not request
+                contacts permission, upload an address book, or send automatically.
               </Text>
             </View>
           ) : null}

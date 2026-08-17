@@ -1,12 +1,31 @@
 # Editorial Intelligence Board
 
-Status: **metadata foundations exist; external ingestion, generation, publication, sending, and authentic source-health evidence are not implemented**
+Status: **provider-free local governance and HQ-queue foundations implemented; external ingestion, generation, publication, sending, and authentic source-health evidence are not implemented**
 
-Last reviewed: 2026-08-16
+Last reviewed: 2026-08-17
 
 BoomerBuddy may eventually provide ongoing fraud-safety value between Checks, but an LLM summary, viral post, search result, or provider response is never source truth. This design extends the repository's governed source/content and knowledge-asset metadata into a provenance-first review system. It does not authorize fetching, publishing, emailing, texting, pushing, or claiming that any alert is current.
 
 Current local truth is documented in the Run 2 [content-engine report](../run-2/14-content-engine.md): source and claim-control metadata plus draft knowledge assets exist; generation, media processing, CMS publishing, and distribution do not. The source-verified seed drafts remain ineligible for runtime use until their independent domain and rights reviews activate a new version.
+
+Run 3 now also has a bounded local implementation in migration
+`0022_run3_editorial_intelligence.sql` and isolated editorial domain, contract, persistence, API,
+and HQ modules. It records append-only source reviews, digest-only local artifact receipts and
+artifact/source-authority-bounded claims, duplicate/syndication/corroboration decisions, encrypted
+immutable draft versions, exact product/locale/jurisdiction provenance, review assignments and
+approvals, internal calendar entries, local preference withdrawal, and correction lineage. All
+artifact, claim, draft, and append-only event times are bound to the current database transaction
+while freshness is evaluated against the database clock. Claims retain the exact author assignment;
+reviews retain the exact assignment
+event so withdrawal/reassignment cannot revive an approval; duplicate conflicts are order
+independent; and correction replacements must preserve scope and current approval evidence. All
+records are `local_simulation`; database constraints keep fetch, model, provider, publication,
+outbound delivery, and external-action flags false. The contract-strict HQ board is content-free
+and owner-global or exact-assignee scoped. Shared API composition registers the metadata route, and
+shared HQ navigation links the page for owner/reviewer identities only outside production. The
+route refuses production before repository access. There is deliberately no draft-content API until
+a current step-up grant can be enforced. No worker handler, durable job, outbox event, destination,
+public route, fetch client, provider adapter, publisher, or sender was added.
 
 ## Products in scope
 
@@ -265,6 +284,29 @@ Record in the Founder Provisioning system:
 
 Do not paste source-provider, CMS, messaging, analytics, or publication credentials into source, documentation, logs, screenshots, or prompts.
 
+## Run 3 local validation snapshot — 2026-08-17
+
+The bounded provider-free tranche has the following local evidence:
+
+- domain and strict-contract checks: 2 files, 7 tests passed;
+- PGlite migration, repository authorization/privacy, provenance, deduplication, freshness,
+  product/locale/jurisdiction binding, artifact/source authority, skeptical/final independence,
+  exact assignment-event and claim-author authority, order-independent duplicate handling,
+  correction/preference, and isolated API-route checks: 3 files, 20 tests passed;
+- TypeScript checks passed for domain, contracts, persistence, API, and HQ workspaces; and
+- exact-file ESLint and Prettier checks passed for the new TypeScript/TSX modules.
+
+These are simulated/local evidence only. They include no URL fetch, provider request, public route,
+worker execution, publication, message, real recipient, deployed environment, managed-PostgreSQL
+recovery, human review, or production evidence. The external-provider, deployed, human, and
+production evidence columns therefore remain `not_evidenced`, not implicitly passed.
+
 ## Current disposition
 
-`REMEDIATE`. Repository-local governance metadata and two inactive source-verified knowledge drafts are useful foundations, but no approved external fetcher, live source registry, authentic source-health observation, content body/media store, generator, editorial HQ board, CMS/publisher, newsletter/SMS/push sender, analytics outcome, correction drill, or real human approval exists. No customer-facing content was published or sent by creating this document.
+`REMEDIATE`. The provider-free local source/provenance/review/correction foundation and isolated
+content-free HQ board now have focused local tests and nonproduction shared composition/navigation.
+There is no approved external fetcher, live source registry, authentic source-health observation,
+restricted raw-artifact/media store, generator, step-up draft-content route, CMS/publisher,
+newsletter/SMS/push sender, analytics outcome, deployed correction drill, or real human approval.
+Local fixture approvals are not authentic human evidence. No customer-facing content was published
+or sent by this implementation.

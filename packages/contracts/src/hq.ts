@@ -34,6 +34,7 @@ export const hqHouseholdsResponseSchema = z.object({
       dataState: z.literal('local_development'),
     }),
   ),
+  truncated: z.boolean(),
 });
 
 export const hqChecksResponseSchema = z.object({
@@ -49,6 +50,54 @@ export const hqChecksResponseSchema = z.object({
     }),
   ),
 });
+
+export const hqSupportQueueResponseSchema = z
+  .object({
+    projection: z.literal('assigned_support_queue'),
+    cases: z.array(
+      z
+        .object({
+          id: opaqueIdSchema,
+          householdId: opaqueIdSchema,
+          householdName: z.string().min(1).max(160),
+          purposeCode: z.enum(['customer_support']),
+          status: z.literal('open'),
+          assignedAt: isoDateTimeSchema,
+          dataState: z.literal('local_development'),
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+  })
+  .strict();
+
+export const hqReviewQueueResponseSchema = z
+  .object({
+    projection: z.literal('assigned_review_queue'),
+    cases: z.array(
+      z
+        .object({
+          id: opaqueIdSchema,
+          severity: z.enum(['low', 'medium', 'high', 'critical']),
+          state: z.enum(['open', 'triaged', 'in_progress']),
+          routingClass: z.enum([
+            'self_service',
+            'ai_assisted',
+            'l1_human',
+            'trust_safety',
+            'billing',
+            'security_privacy',
+            'founder',
+          ]),
+          dueAt: isoDateTimeSchema.optional(),
+          updatedAt: isoDateTimeSchema,
+          dataState: z.literal('local_development'),
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+  })
+  .strict();
 
 export const hqProviderHealthResponseSchema = z.object({
   providers: z.array(
@@ -105,6 +154,7 @@ export const hqRevenueResponseSchema = z.object({
       dataState: z.literal('seeded'),
     }),
   ),
+  truncated: z.boolean(),
 });
 
 export const publicConfigResponseSchema = z.object({
@@ -126,5 +176,7 @@ export const publicConfigResponseSchema = z.object({
 });
 
 export type HqOverviewResponse = z.infer<typeof hqOverviewResponseSchema>;
+export type HqSupportQueueResponse = z.infer<typeof hqSupportQueueResponseSchema>;
+export type HqReviewQueueResponse = z.infer<typeof hqReviewQueueResponseSchema>;
 export type HqRevenueResponse = z.infer<typeof hqRevenueResponseSchema>;
 export type PublicConfigResponse = z.infer<typeof publicConfigResponseSchema>;

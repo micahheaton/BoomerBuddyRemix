@@ -1,7 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import type { AppConfig } from '@boomerbuddy/config';
+import { assertStripeOnlineRuntimePermitted, type AppConfig } from '@boomerbuddy/config';
 import { publicConfigResponseSchema } from '@boomerbuddy/contracts';
 import { DomainError, seededCommercePlanVersions } from '@boomerbuddy/domain';
 import { StripeHttpTransport, type StripeTransport } from '@boomerbuddy/integrations';
@@ -19,11 +19,17 @@ import { createRepositories, type ApiContext } from './context';
 import { registerCheckRoutes } from './routes/checks';
 import { registerBusinessOsRoutes } from './routes/business-os';
 import { registerCommerceRoutes } from './routes/commerce';
+import { registerEditorialIntelligenceRoutes } from './routes/editorial-intelligence';
 import { registerFamilyRoutes } from './routes/family';
+import { registerFeedbackRoutes } from './routes/feedback';
+import { registerFounderProvisioningRoutes } from './routes/founder-provisioning';
+import { registerFoundingHouseholdRoutes } from './routes/founding-households';
 import { registerHqRoutes } from './routes/hq';
+import { registerMessagingRoutes } from './routes/messaging';
 import { registerOrientationRoutes } from './routes/orientation';
 import { registerPublicCheckRoutes } from './routes/public-checks';
 import { registerPrivacyRoutes } from './routes/privacy';
+import { registerReferralRoutes } from './routes/referrals';
 import { registerSessionRoutes } from './routes/sessions';
 
 export interface BuildAppOptions {
@@ -37,6 +43,8 @@ export interface BuildAppOptions {
   readonly retentionSweepIntervalMs?: number;
   /** Deterministic fixture transport for tests; runtime otherwise uses Stripe HTTPS in test mode. */
   readonly stripeTransport?: StripeTransport;
+  readonly stripeEvidenceLevel?:
+    'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production';
 }
 
 const retentionBatchSize = 100;
@@ -169,6 +177,23 @@ function registerBaseRoutes(app: FastifyInstance, context: ApiContext): void {
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
+  assertStripeOnlineRuntimePermitted(options.config, 'api');
+  const stripeEvidenceLevel =
+    options.stripeEvidenceLevel ??
+    (options.stripeTransport !== undefined
+      ? 'local_fixture'
+      : options.config.commerce.stripe.mode === 'test'
+        ? 'stripe_test'
+        : 'local_fixture');
+  if (
+    (options.stripeTransport !== undefined && stripeEvidenceLevel !== 'local_fixture') ||
+    (options.stripeTransport === undefined &&
+      options.config.commerce.stripe.mode === 'test' &&
+      stripeEvidenceLevel === 'local_fixture') ||
+    stripeEvidenceLevel === 'live_production'
+  ) {
+    throw new TypeError('Stripe evidence tier does not match the runtime transport boundary');
+  }
   const database = options.database ?? (await connectDatabase(options.config));
   const closeDatabase = options.closeDatabase ?? options.database === undefined;
   const logger = options.logger ?? createLogger({ level: options.config.logLevel });
@@ -295,6 +320,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerSessionRoutes(app, context);
   registerCheckRoutes(app, context);
   registerFamilyRoutes(app, context);
+  registerEditorialIntelligenceRoutes(app, {
+    config: context.config,
+    sessions: context.repositories.sessions,
+    editorial: context.repositories.editorial,
+    now: context.now,
+  });
+  registerFeedbackRoutes(app, {
+    config: context.config,
+    sessions: context.repositories.sessions,
+    feedback: context.repositories.feedback,
+    now: context.now,
+  });
   registerOrientationRoutes(app, context);
   registerCommerceRoutes(
     app,
@@ -302,12 +339,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     options.stripeTransport ??
       (context.config.commerce.stripe.mode === 'test'
         ? new StripeHttpTransport(
-            context.config.commerce.stripe.secretKey,
+            context.config.commerce.stripe.apiKey,
             context.config.commerce.stripe.apiVersion,
           )
         : undefined),
+    stripeEvidenceLevel,
   );
   registerHqRoutes(app, context);
+  registerMessagingRoutes(app, context);
+  registerReferralRoutes(app, context);
+  registerFounderProvisioningRoutes(app, context);
+  registerFoundingHouseholdRoutes(app, context);
   registerBusinessOsRoutes(app, context);
   return app;
 }

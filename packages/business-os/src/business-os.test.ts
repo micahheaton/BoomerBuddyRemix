@@ -126,8 +126,8 @@ describe('Business OS policy', () => {
       allowedDataClasses: ['public'],
       allowedTools: ['hq'],
       autonomy: 'auto' as const,
-      budgetCents: 10,
       enabled: true,
+      maxCostPerOperationCents: 10,
       requiresAudit: true,
     };
     expect(

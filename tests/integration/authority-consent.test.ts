@@ -90,9 +90,13 @@ describe('authority and consent persistence', () => {
          household_id, id, case_id, employee_assignment_id, resource_type,
          resource_id, purpose, assurance, status, granted_by_person_id,
          granted_at, expires_at
-       ) VALUES ('household-sunrise','restricted-grant-exact','support-case-exact',
-         'employee-hq-support','artifact','artifact-exact','Inspect customer-selected artifact',
-         'step_up_verified','active','person-owner-alice',$1,$2)`,
+       ) VALUES
+         ('household-sunrise','restricted-grant-exact','support-case-exact',
+          'employee-hq-support','artifact','artifact-exact','Inspect customer-selected artifact',
+          'step_up_verified','active','person-owner-alice',$1,$2),
+         ('household-sunrise','restricted-grant-message','support-case-exact',
+          'employee-hq-support','messaging_inbound','message-event-exact','customer_support',
+          'step_up_verified','active','person-owner-alice',$1,$2)`,
       [now.toISOString(), grantExpiry.toISOString()],
     );
 
@@ -112,14 +116,24 @@ describe('authority and consent persistence', () => {
         employeeAssignmentId: 'employee-hq-support',
       }),
     ]);
-    expect(active?.principal.restrictedAccessScopes).toEqual([
-      expect.objectContaining({
-        grantId: 'restricted-grant-exact',
-        caseId: 'support-case-exact',
-        resourceType: 'artifact',
-        resourceId: 'artifact-exact',
-      }),
-    ]);
+    expect(active?.principal.restrictedAccessScopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          grantId: 'restricted-grant-exact',
+          caseId: 'support-case-exact',
+          resourceType: 'artifact',
+          resourceId: 'artifact-exact',
+        }),
+        expect.objectContaining({
+          grantId: 'restricted-grant-message',
+          caseId: 'support-case-exact',
+          purpose: 'customer_support',
+          resourceType: 'messaging_inbound',
+          resourceId: 'message-event-exact',
+        }),
+      ]),
+    );
+    expect(active?.principal.restrictedAccessScopes).toHaveLength(2);
 
     const afterGrantExpiry = await sessions.resolve(
       'session-hq-support',

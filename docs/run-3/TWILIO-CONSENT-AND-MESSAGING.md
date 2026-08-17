@@ -1,8 +1,8 @@
 # Twilio Consent and Messaging
 
-Status: **consent/operations design only; no Twilio adapter, provider test, recipient message, or live send exists**
+Status: **provider-free local core candidate implemented; no Twilio adapter, provider test, provider network action, recipient message, or live send exists**
 
-Last reviewed: 2026-08-16
+Last reviewed: 2026-08-17
 
 This document defines the boundary for a future Twilio test integration. It does not authorize purchasing a number, enabling a Messaging Service, sending to a real recipient, contacting an invitee, or treating one adult's phone-number entry as another adult's consent.
 
@@ -10,7 +10,7 @@ This document defines the boundary for a future Twilio test integration. It does
 
 | Level | Current state |
 | --- | --- |
-| Local simulation | Run 2 has a `local_test` notification sink, durable jobs, suppression checks, and content-free operational evidence. Stage 0 is adding a state-only external-action ledger. These are not Twilio delivery proof. |
+| Local simulation | Migration `0021_run3_consent_messaging.sql` plus isolated domain, contracts, persistence, and worker-composition modules now model encrypted local fixture destinations, recipient-purpose consent/withdrawal, STOP/START/HELP effects, exact-case support intake, quiet hours, serialized cumulative caps, and terminal local outcomes. Transport is constrained to `none`, network permission to `false`, and production composition installs no handler. This is not Twilio delivery proof. |
 | Twilio test | **Blocked** pending founder-owned account/subaccount, verified toll-free sender, approved test recipients, credentials, reachable staging, and the reviewed adapter. |
 | Deployed staging | **Blocked** pending managed identity/KMS, PostgreSQL, trusted proxy, monitoring, recovery, and exact consent/suppression evidence. |
 | Live customer messaging | **Blocked and founder-gated** pending communications/legal review, toll-free/campaign approval, templates, support coverage, and a bounded activation decision. |
@@ -30,7 +30,10 @@ Twilio's current Messaging Policy requires the sender to obtain the applicable c
 
 ## Reserved configuration names
 
-These names are reserved for the future reviewed adapter. The current application does **not** parse or use them, so setting them has no effect. Values must stay in the founder-controlled secret/config system.
+These names are reserved for the future reviewed adapter. The current application parses only the
+`disabled` sentinel and rejects every reserved credential, identifier, or callback value; no
+messaging adapter consumes them. Future values must stay in the founder-controlled secret/config
+system.
 
 | Name | Type | Intended use |
 | --- | --- | --- |
@@ -42,7 +45,7 @@ These names are reserved for the future reviewed adapter. The current applicatio
 | `BB_TWILIO_INBOUND_WEBHOOK_BASE_URL` | Non-secret configuration | Canonical externally visible HTTPS base URL used for exact signature reconstruction. |
 | `BB_TWILIO_STATUS_CALLBACK_BASE_URL` | Non-secret configuration | Canonical externally visible HTTPS status-callback base URL. |
 
-Before implementation, add the reviewed names to `.env.example`, validate environment separation in `@boomerbuddy/config`, and keep production disabled until managed secret custody exists.
+The names are now reserved in `.env.example`. `@boomerbuddy/config` accepts only `BB_TWILIO_MODE=disabled` and rejects every credential or callback value; a future provider implementation must introduce a separately reviewed environment-specific contract and managed secret custody rather than relaxing this sentinel in place.
 
 ## Consent model
 
@@ -137,6 +140,28 @@ Frequency reservations must be concurrency-safe so several individually valid jo
 
 ## Test matrix before `test_proven`
 
+### Provider-free local candidate evidence
+
+The local candidate has focused deterministic evidence for:
+
+- production runtime rejection and production worker composition with zero messaging handlers;
+- encrypted synthetic destination storage with no raw destination in intents, jobs, or delivery evidence;
+- purpose-matched fixed templates, unknown-timezone and quiet-hours fail closure, STOP suppression, START restart-request semantics, self-withdrawal after membership loss, membership/destination/scope rechecks, global stop, purpose/global caps, and idempotent terminal local outcomes;
+- two local dispatch transactions racing the final purpose slot, producing one allowed local outcome and one cap denial under the PGlite fixture;
+- content-free deduplicated STOP/START/HELP fixtures, with HELP intentionally producing no reply;
+- bounded support content minimized and encrypted into the exact open assigned case, unrelated employee denial, exact-purpose step-up restricted-access grant, same-transaction access evidence, and one-hour active-store erasure evidence atomically paired with ciphertext removal;
+- exact-recipient local intent status and exact-current-support-assignee content-free intake metadata, without destination or message-body projection;
+- database rejection of provider-network enablement, append-only evidence mutation, chain revision skipping, and destination mutation; and
+- an initial-invitation helper that accepts no destination/recipient/contact list and returns only a user-device share/composer draft with automatic send and contact upload explicitly forbidden.
+
+These are code and local-simulation results only. Shared composition now exposes a non-production member consent laboratory, authenticated self-only destination/status/consent routes, exact-assignee content-free HQ metadata and JIT-read routes, a device-owned invitation share sheet, and the provider-free worker handler plus local retention. Production navigation omits these surfaces and production composition installs zero messaging handlers. No public inbound-fixture route, customer intent-creation route, provider callback, renderer, sender, credential, provider URL, or network operation exists. See ADR 0026.
+
+Shared authorization now explicitly carries `messaging_inbound` through the domain, authorization, and persistence session unions. Session and policy regressions prove exact-event projection, cross-resource denial, expiry/assignment removal, and purpose-specific repository enforcement. This closes the local type handoff; it does not prove a provider identity, production employee session, managed database role, or deployed edge.
+
+### Still-blocked provider and deployed matrix
+
+The following cases are required future evidence; none is claimed by the local candidate:
+
 - Valid signed inbound support message into the exact assigned case; unrelated employee denied.
 - STOP/START/UNSTOP/HELP with append-only consent/suppression evidence and no duplicate response.
 - Outbound service notification to one approved test destination with current consent.
@@ -165,4 +190,4 @@ Run 3 has not satisfied or exercised the live activation item.
 
 ## Current disposition
 
-The only executable notification sink remains `local_test`; external channels remain blocked. Founder account/toll-free work is status input, not retained evidence. No Twilio credential was requested or stored, no provider API was called, and no real person was messaged.
+The legacy executable notification sink remains `local_test`. The new Stage 6 core can execute only a content-free, non-production local governance simulation; it renders and sends nothing. Its shared local routes, customer laboratory, exact-assignee HQ boundary, and worker composition remain unavailable in production, and external channels remain blocked. Founder account/toll-free work is status input, not retained evidence. No Twilio credential was requested or stored, no provider URL or API was used, and no real person was messaged.

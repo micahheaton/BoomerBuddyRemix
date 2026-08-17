@@ -13,7 +13,7 @@ import {
   type TrustedCirclePermission,
 } from '@boomerbuddy/domain';
 import type { Database } from './database';
-import { EntitlementRepository } from './entitlements';
+import { EntitlementRepository, type EntitlementRuntimeEnvironment } from './entitlements';
 import { asDate, jsonValue, randomIdFactory, stringArray, type IdFactory } from './values';
 
 interface PersonaRow extends Record<string, unknown> {
@@ -53,9 +53,9 @@ interface TrustedGrantRow extends Record<string, unknown> {
 
 interface EmployeeRow extends Record<string, unknown> {
   readonly assignment_id: string;
-  readonly organization_id: string | null;
+  readonly organization_id: string;
+  readonly organization_kind: 'internal';
   readonly role: string;
-  readonly status: string;
 }
 
 interface SupportCaseRow extends Record<string, unknown> {
@@ -67,7 +67,7 @@ interface SupportCaseRow extends Record<string, unknown> {
 
 interface RestrictedAccessRow extends SupportCaseRow {
   readonly grant_id: string;
-  readonly resource_type: 'artifact' | 'analysis' | 'family';
+  readonly resource_type: 'artifact' | 'analysis' | 'family' | 'messaging_inbound';
   readonly resource_id: string;
   readonly expires_at: unknown;
 }
@@ -94,6 +94,7 @@ export class SessionRepository {
   constructor(
     private readonly database: Database,
     private readonly idFactory: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
   ) {}
 
   async findDevPersona(subject: string): Promise<{ personId: string; displayName: string } | null> {
@@ -252,22 +253,25 @@ export class SessionRepository {
     });
 
     const employeeResult = await this.database.query<EmployeeRow>(
-      `SELECT id AS assignment_id, organization_id, role, status
-       FROM employee_assignments WHERE person_id = $1`,
+      `SELECT employee.id AS assignment_id, employee.organization_id,
+              organization.kind AS organization_kind, employee.role
+       FROM employee_assignments employee
+       JOIN organizations organization ON organization.id = employee.organization_id
+       WHERE employee.person_id = $1 AND employee.status = 'active'
+         AND organization.kind = 'internal'`,
       [session.person_id],
     );
     const employeeScopes: EmployeeScope[] = employeeResult.rows.map((row) => {
       if (!isRole(row.role) || !['hq_owner', 'hq_reviewer', 'hq_support'].includes(row.role)) {
         throw new TypeError('Invalid employee role in database');
       }
-      const base = {
+      return {
         employeeAssignmentId: row.assignment_id,
+        organizationId: ids.organization(row.organization_id),
+        organizationKind: row.organization_kind,
         role: row.role as EmployeeScope['role'],
-        status: row.status === 'active' ? ('active' as const) : ('suspended' as const),
+        status: 'active' as const,
       };
-      return row.organization_id === null
-        ? base
-        : { ...base, organizationId: ids.organization(row.organization_id) };
     });
     const supportCasesResult = await this.database.query<SupportCaseRow>(
       `SELECT c.household_id, c.id AS case_id,
@@ -276,8 +280,9 @@ export class SessionRepository {
        JOIN support_cases c
          ON c.household_id = assignment.household_id AND c.id = assignment.case_id
        JOIN employee_assignments employee ON employee.id = assignment.employee_assignment_id
+       JOIN organizations organization ON organization.id = employee.organization_id
        WHERE employee.person_id = $1 AND employee.status = 'active'
-         AND employee.role = 'hq_support'
+         AND employee.role = 'hq_support' AND organization.kind = 'internal'
          AND assignment.status = 'active' AND c.status = 'open'
        ORDER BY c.household_id, c.id`,
       [session.person_id],
@@ -301,8 +306,9 @@ export class SessionRepository {
          ON c.household_id = access_grant.household_id AND c.id = access_grant.case_id
        JOIN employee_assignments employee
          ON employee.id = access_grant.employee_assignment_id
+       JOIN organizations organization ON organization.id = employee.organization_id
        WHERE employee.person_id = $1 AND employee.status = 'active'
-         AND employee.role = 'hq_support'
+         AND employee.role = 'hq_support' AND organization.kind = 'internal'
          AND assignment.status = 'active' AND c.status = 'open'
          AND access_grant.status = 'active'
          AND access_grant.assurance = 'step_up_verified'
@@ -324,7 +330,11 @@ export class SessionRepository {
     const householdIds = membershipScopesWithoutCapabilities
       .filter((membership) => membership.status === 'active')
       .map((membership) => membership.householdId);
-    const entitlementRepository = new EntitlementRepository(this.database);
+    const entitlementRepository = new EntitlementRepository(
+      this.database,
+      undefined,
+      this.runtimeEnvironment,
+    );
     const effectiveEntitlements = await Promise.all(
       householdIds.map((householdId) => entitlementRepository.forHousehold(householdId, now)),
     );

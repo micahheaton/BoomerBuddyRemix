@@ -159,11 +159,13 @@ export default function App() {
                 component={OrientationScreen}
                 options={{ title: 'Orientation' }}
               />
-              <Stack.Screen
-                name="NativeProof"
-                component={NativeProofScreen}
-                options={{ title: 'Native proof' }}
-              />
+              {__DEV__ ? (
+                <Stack.Screen
+                  name="NativeProof"
+                  component={NativeProofScreen}
+                  options={{ title: 'Native proof' }}
+                />
+              ) : null}
             </>
           </Stack.Navigator>
         </MobileHouseholdProvider>

@@ -1,4 +1,4 @@
-FROM node:22.13.1-bookworm-slim AS dependencies
+FROM node:22.13.1-bookworm-slim@sha256:83fdfa2a4de32d7f8d79829ea259bd6a4821f8b2d123204ac467fbe3966450fc AS workspace-manifests
 WORKDIR /workspace
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/package.json
@@ -20,16 +20,22 @@ COPY packages/persistence/package.json packages/persistence/package.json
 COPY packages/platform/package.json packages/platform/package.json
 COPY packages/security/package.json packages/security/package.json
 COPY packages/testkit/package.json packages/testkit/package.json
+
+FROM workspace-manifests AS dependencies
 RUN npm ci
 
 FROM dependencies AS build
 COPY . .
 RUN npm run build -w @boomerbuddy/api && npm run build -w @boomerbuddy/worker
 
-FROM node:22.13.1-bookworm-slim AS runtime
+FROM workspace-manifests AS production-dependencies
+RUN npm ci --omit=dev --ignore-scripts --include-workspace-root=false --workspace @boomerbuddy/api --workspace @boomerbuddy/worker
+RUN rm -rf node_modules/@boomerbuddy
+
+FROM node:22.13.1-bookworm-slim@sha256:83fdfa2a4de32d7f8d79829ea259bd6a4821f8b2d123204ac467fbe3966450fc AS runtime
 ENV NODE_ENV=production
 WORKDIR /workspace
-COPY --from=dependencies /workspace/node_modules ./node_modules
+COPY --from=production-dependencies /workspace/node_modules ./node_modules
 COPY --from=build /workspace/package.json /workspace/package-lock.json ./
 COPY --from=build /workspace/apps/api/package.json ./apps/api/package.json
 COPY --from=build /workspace/apps/api/dist ./apps/api/dist

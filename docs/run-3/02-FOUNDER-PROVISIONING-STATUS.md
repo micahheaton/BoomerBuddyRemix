@@ -1,9 +1,14 @@
 # BoomerBuddy — Founder Provisioning Status
 
-**Purpose:** Human-maintained, secret-free status handoff for Run 3.  
+> Historical founder handoff captured before the Run 3 code-owned provisioning ledger. Do not use
+> this table as current evidence or update authority. The current secret-free register, status
+> vocabulary, evidence requirements, and ordered steps are in
+> [`FOUNDER-PROVISIONING.md`](./FOUNDER-PROVISIONING.md) and the HQ provisioning console.
+
+**Purpose:** Historical secret-free status handoff retained for provenance.
 **Rule:** Never paste passwords, recovery codes, API secrets, signing keys, full card/bank details, or private credentials into this file.
 
-Update `Status`, IDs that are safe to record, and notes as the founder completes accounts.
+Do not update these historical rows; append current evidence only through the code-owned ledger.
 
 | Provider / asset | Purpose | Status | Safe identifiers / notes | Next founder action |
 |---|---|---|---|---|
@@ -31,9 +36,10 @@ Update `Status`, IDs that are safe to record, and notes as the founder completes
 | Accounting/bookkeeping | Financial system of record | `outside_repo` |  | Keep external; do not rebuild in HQ |
 | Legal/privacy review | Terms/privacy/marketing/SMS | `pending_professional` |  | Run 3 should prepare review packet; founder retains qualified reviewer |
 
-## Founder decisions Run 3 may ask for
+## Historical blank decision worksheet
 
-Record decisions here only when made:
+Do not record current decisions here. Preserve these blank fields as historical context and record
+current decisions through the code-owned ledger plus the final Run 3 dossier:
 
 - Initial launch geography:
 - Founding Household cohort size:

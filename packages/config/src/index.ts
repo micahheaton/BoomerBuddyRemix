@@ -15,21 +15,33 @@ const environmentSchema = z.object({
   BB_RUN_MIGRATIONS: booleanText.default(true),
   BB_SEED_DEMO: booleanText.default(false),
   BB_ALLOW_DEV_IDENTITY: booleanText.default(true),
+  BB_FOUNDER_PERSON_ID: nonEmpty.optional(),
   BB_CUSTOMER_ORIGINS: nonEmpty,
   BB_HQ_ORIGINS: nonEmpty,
   BB_SESSION_SECRET: z.string().min(32),
   BB_ARTIFACT_KEY_BASE64: nonEmpty,
   BB_FINGERPRINT_KEY_BASE64: nonEmpty,
   BB_SAFE_WORD_PEPPER: z.string().min(16),
-  BB_STRIPE_MODE: z.enum(['disabled', 'test']).default('disabled'),
-  BB_STRIPE_SECRET_KEY: z.string().optional(),
-  BB_STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  BB_STRIPE_API_VERSION: z.string().optional(),
-  BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
-  BB_STRIPE_PLUS_MONTHLY_PRICE_ID: z.string().optional(),
-  BB_STRIPE_PLUS_ANNUAL_PRICE_ID: z.string().optional(),
-  BB_STRIPE_FAMILY_MONTHLY_PRICE_ID: z.string().optional(),
-  BB_STRIPE_FAMILY_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_MODE: z.enum(['disabled', 'test', 'live']).default('disabled'),
+  BB_STRIPE_TEST_ACCOUNT_ID: z.string().optional(),
+  BB_STRIPE_TEST_API_KEY: z.string().optional(),
+  BB_STRIPE_TEST_WEBHOOK_SECRET: z.string().optional(),
+  BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: z.string().optional(),
+  BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  BB_STRIPE_LIVE_ACCOUNT_ID: z.string().optional(),
+  BB_STRIPE_LIVE_API_KEY: z.string().optional(),
+  BB_STRIPE_LIVE_WEBHOOK_SECRET: z.string().optional(),
+  BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: z.string().optional(),
+  BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  BB_TWILIO_MODE: z.literal('disabled').default('disabled'),
+  BB_TWILIO_ACCOUNT_SID: z.string().optional(),
+  BB_TWILIO_AUTH_TOKEN: z.string().optional(),
+  BB_TWILIO_MESSAGING_SERVICE_SID: z.string().optional(),
+  BB_TWILIO_TOLL_FREE_NUMBER_SID: z.string().optional(),
+  BB_TWILIO_INBOUND_WEBHOOK_BASE_URL: z.string().optional(),
+  BB_TWILIO_STATUS_CALLBACK_BASE_URL: z.string().optional(),
   BB_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
 
@@ -57,6 +69,8 @@ export interface AppConfig {
   readonly identity: {
     readonly allowDevelopmentIssuer: boolean;
     readonly customerOrigins: readonly string[];
+    /** Exact founder identity for consequential automation-control mutations. Omitted means fail closed. */
+    readonly founderPersonId?: string;
     readonly hqOrigins: readonly string[];
   };
   readonly secrets: {
@@ -70,16 +84,76 @@ export interface AppConfig {
     | {
         readonly stripe: {
           readonly mode: 'test';
-          readonly secretKey: string;
+          readonly environment: 'test';
+          readonly accountId: string;
+          readonly apiKey: string;
           readonly webhookSecret: string;
-          readonly apiVersion: string;
+          readonly apiVersion: typeof stripeApiVersion;
+          readonly runtimeInitiationPermitted: true;
+          readonly runtimeNetworkPermitted: true;
           readonly cancelOnlyPortalConfigurationId: string;
-          readonly prices: Readonly<
-            Record<'plus_v1:month' | 'plus_v1:year' | 'family_v1:month' | 'family_v1:year', string>
-          >;
+          readonly offer: {
+            readonly offerId: 'founding_family_monthly_v1';
+            readonly planVersionId: 'family_v1';
+            readonly billingInterval: 'month';
+            readonly providerProductId: string;
+            readonly providerPriceId: string;
+            readonly currency: 'usd';
+            readonly unitAmountMinor: 1499;
+            readonly quantity: 1;
+          };
+        };
+      }
+    | {
+        readonly stripe: {
+          readonly mode: 'live';
+          readonly environment: 'production';
+          readonly accountId: string;
+          readonly apiVersion: typeof stripeApiVersion;
+          readonly runtimeInitiationPermitted: false;
+          readonly runtimeNetworkPermitted: false;
+          readonly credentialCustody: 'managed_identity_kms_unavailable';
+          readonly requiredSecretNames: readonly [
+            'BB_STRIPE_LIVE_API_KEY',
+            'BB_STRIPE_LIVE_WEBHOOK_SECRET',
+          ];
+          readonly cancelOnlyPortalConfigurationId: string;
+          readonly offer: {
+            readonly offerId: 'founding_family_monthly_v1';
+            readonly planVersionId: 'family_v1';
+            readonly billingInterval: 'month';
+            readonly providerProductId: string;
+            readonly providerPriceId: string;
+            readonly currency: 'usd';
+            readonly unitAmountMinor: 1499;
+            readonly quantity: 1;
+          };
         };
       };
+  readonly messaging?: {
+    readonly twilio: {
+      readonly mode: 'disabled';
+      readonly runtimeNetworkPermitted: false;
+      readonly credentialLoadingPermitted: false;
+    };
+  };
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
+}
+
+/**
+ * Live Stripe values are currently an offline custody manifest, not an online runtime mode.
+ * Keep this guard at every process boundary so an injected transport or development startup
+ * cannot accidentally turn resource names into provider access.
+ */
+export function assertStripeOnlineRuntimePermitted(
+  config: AppConfig,
+  surface: 'api' | 'worker',
+): void {
+  if (config.commerce.stripe.mode === 'live') {
+    throw new TypeError(
+      `Live Stripe configuration is offline-only; ${surface} startup is refused until managed identity and KMS custody exist`,
+    );
+  }
 }
 
 function decodeBase64Key(value: string): Buffer {
@@ -125,50 +199,144 @@ function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void
   );
 }
 
+export const stripeApiVersion = '2026-02-25.clover' as const;
+
 function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConfig['commerce'] {
+  const testFields = [
+    parsed.BB_STRIPE_TEST_ACCOUNT_ID,
+    parsed.BB_STRIPE_TEST_API_KEY,
+    parsed.BB_STRIPE_TEST_WEBHOOK_SECRET,
+    parsed.BB_STRIPE_TEST_FOUNDING_PRODUCT_ID,
+    parsed.BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
+  ];
+  const liveFields = [
+    parsed.BB_STRIPE_LIVE_ACCOUNT_ID,
+    parsed.BB_STRIPE_LIVE_API_KEY,
+    parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET,
+    parsed.BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID,
+    parsed.BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
+  ];
+  const hasConfiguredField = (fields: readonly (string | undefined)[]) =>
+    fields.some((value) => value !== undefined);
+  if (
+    parsed.BB_STRIPE_LIVE_API_KEY !== undefined ||
+    parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET !== undefined
+  ) {
+    throw new TypeError(
+      'Live Stripe secrets cannot be loaded from raw environment keys until managed identity and KMS custody exist',
+    );
+  }
+  if (parsed.BB_STRIPE_MODE === 'disabled' && hasConfiguredField([...testFields, ...liveFields])) {
+    throw new TypeError('Stripe disabled mode refuses all Stripe configuration values');
+  }
   if (parsed.BB_STRIPE_MODE === 'disabled') return { stripe: { mode: 'disabled' } };
+  const test = parsed.BB_STRIPE_MODE === 'test';
+  if (test && hasConfiguredField(liveFields)) {
+    throw new TypeError('Stripe test mode refuses live Stripe configuration values');
+  }
+  if (!test && hasConfiguredField(testFields)) {
+    throw new TypeError('Stripe live mode refuses test Stripe configuration values');
+  }
   const required = {
-    secretKey: parsed.BB_STRIPE_SECRET_KEY,
-    webhookSecret: parsed.BB_STRIPE_WEBHOOK_SECRET,
-    apiVersion: parsed.BB_STRIPE_API_VERSION,
-    cancelOnlyPortalConfigurationId: parsed.BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
-    plusMonth: parsed.BB_STRIPE_PLUS_MONTHLY_PRICE_ID,
-    plusYear: parsed.BB_STRIPE_PLUS_ANNUAL_PRICE_ID,
-    familyMonth: parsed.BB_STRIPE_FAMILY_MONTHLY_PRICE_ID,
-    familyYear: parsed.BB_STRIPE_FAMILY_ANNUAL_PRICE_ID,
+    accountId: test ? parsed.BB_STRIPE_TEST_ACCOUNT_ID : parsed.BB_STRIPE_LIVE_ACCOUNT_ID,
+    apiKey: test ? parsed.BB_STRIPE_TEST_API_KEY : parsed.BB_STRIPE_LIVE_API_KEY,
+    webhookSecret: test
+      ? parsed.BB_STRIPE_TEST_WEBHOOK_SECRET
+      : parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET,
+    productId: test
+      ? parsed.BB_STRIPE_TEST_FOUNDING_PRODUCT_ID
+      : parsed.BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID,
+    priceId: test
+      ? parsed.BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID
+      : parsed.BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID,
+    cancelOnlyPortalConfigurationId: test
+      ? parsed.BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID
+      : parsed.BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
   };
   if (
-    required.secretKey === undefined ||
-    !/^sk_test_[A-Za-z0-9_]{8,}$/u.test(required.secretKey) ||
-    required.webhookSecret === undefined ||
-    !/^whsec_[A-Za-z0-9_]{8,}$/u.test(required.webhookSecret) ||
-    required.apiVersion === undefined ||
-    !/^\d{4}-\d{2}-\d{2}(?:\.[A-Za-z0-9_-]+)?$/u.test(required.apiVersion) ||
+    required.accountId === undefined ||
+    !/^acct_[A-Za-z0-9]{8,}$/u.test(required.accountId) ||
+    (test &&
+      (required.apiKey === undefined ||
+        !/^rk_test_[A-Za-z0-9_]{8,}$/u.test(required.apiKey) ||
+        required.webhookSecret === undefined ||
+        !/^whsec_[A-Za-z0-9_]{8,}$/u.test(required.webhookSecret))) ||
     required.cancelOnlyPortalConfigurationId === undefined ||
     !/^bpc_[A-Za-z0-9_]{6,}$/u.test(required.cancelOnlyPortalConfigurationId) ||
-    required.plusMonth === undefined ||
-    required.plusYear === undefined ||
-    required.familyMonth === undefined ||
-    required.familyYear === undefined ||
-    ![required.plusMonth, required.plusYear, required.familyMonth, required.familyYear].every(
-      (value) => /^price_[A-Za-z0-9_]{6,}$/u.test(value),
-    )
+    required.productId === undefined ||
+    !/^prod_[A-Za-z0-9_]{6,}$/u.test(required.productId) ||
+    required.priceId === undefined ||
+    !/^price_[A-Za-z0-9_]{6,}$/u.test(required.priceId)
   ) {
-    throw new TypeError('Stripe test mode requires complete test credentials and price mapping');
+    throw new TypeError(
+      `Stripe ${parsed.BB_STRIPE_MODE} mode requires complete environment-specific credentials and the founding offer mapping`,
+    );
+  }
+  const offer = {
+    offerId: 'founding_family_monthly_v1' as const,
+    planVersionId: 'family_v1' as const,
+    billingInterval: 'month' as const,
+    providerProductId: required.productId,
+    providerPriceId: required.priceId,
+    currency: 'usd' as const,
+    unitAmountMinor: 1499 as const,
+    quantity: 1 as const,
+  };
+  if (!test) {
+    return {
+      stripe: {
+        mode: 'live',
+        environment: 'production',
+        accountId: required.accountId,
+        apiVersion: stripeApiVersion,
+        runtimeInitiationPermitted: false,
+        runtimeNetworkPermitted: false,
+        credentialCustody: 'managed_identity_kms_unavailable',
+        requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
+        cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+        offer,
+      },
+    };
   }
   return {
     stripe: {
       mode: 'test',
-      secretKey: required.secretKey,
-      webhookSecret: required.webhookSecret,
-      apiVersion: required.apiVersion,
+      environment: 'test',
+      accountId: required.accountId,
+      apiKey: required.apiKey as string,
+      webhookSecret: required.webhookSecret as string,
+      apiVersion: stripeApiVersion,
+      runtimeInitiationPermitted: true,
+      runtimeNetworkPermitted: true,
       cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
-      prices: {
-        'plus_v1:month': required.plusMonth,
-        'plus_v1:year': required.plusYear,
-        'family_v1:month': required.familyMonth,
-        'family_v1:year': required.familyYear,
-      },
+      offer,
+    },
+  };
+}
+
+function twilioConfiguration(
+  parsed: z.infer<typeof environmentSchema>,
+): NonNullable<AppConfig['messaging']> {
+  const reservedValues = [
+    parsed.BB_TWILIO_ACCOUNT_SID,
+    parsed.BB_TWILIO_AUTH_TOKEN,
+    parsed.BB_TWILIO_MESSAGING_SERVICE_SID,
+    parsed.BB_TWILIO_TOLL_FREE_NUMBER_SID,
+    parsed.BB_TWILIO_INBOUND_WEBHOOK_BASE_URL,
+    parsed.BB_TWILIO_STATUS_CALLBACK_BASE_URL,
+  ];
+  if (reservedValues.some((value) => value !== undefined)) {
+    throw new TypeError(
+      'Twilio configuration and credentials are refused until the reviewed provider adapter exists',
+    );
+  }
+  return {
+    twilio: {
+      mode: parsed.BB_TWILIO_MODE,
+      runtimeNetworkPermitted: false,
+      credentialLoadingPermitted: false,
     },
   };
 }
@@ -230,6 +398,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     identity: {
       allowDevelopmentIssuer: parsed.BB_ALLOW_DEV_IDENTITY,
       customerOrigins,
+      ...(parsed.BB_FOUNDER_PERSON_ID === undefined
+        ? {}
+        : { founderPersonId: parsed.BB_FOUNDER_PERSON_ID }),
       hqOrigins,
     },
     secrets: {
@@ -239,6 +410,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       safeWordPepper,
     },
     commerce: stripeConfiguration(parsed),
+    messaging: twilioConfiguration(parsed),
     logLevel: parsed.BB_LOG_LEVEL,
   };
 }

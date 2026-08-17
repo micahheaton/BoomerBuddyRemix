@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev -p 3001",
     "dev:e2e": "cross-env NEXT_PUBLIC_API_URL=http://127.0.0.1:4100 next dev -p 3101",
-    "build": "next build",
+    "build": "next build && node ../../scripts/normalize-next-env.mjs hq",
     "start": "next start -p 3001",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

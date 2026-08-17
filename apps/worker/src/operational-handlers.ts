@@ -71,9 +71,11 @@ async function enqueueNext(input: {
 }
 
 export async function seedOperationalSchedules(input: {
+  readonly environment: 'development' | 'test' | 'production';
   readonly jobs: DurableJobRepository;
   readonly now: Date;
 }): Promise<void> {
+  if (input.environment === 'production') return;
   const schedules = [
     {
       type: 'intelligence.refresh',
@@ -98,6 +100,7 @@ export async function seedOperationalSchedules(input: {
 }
 
 export function createOperationalHandlers(input: {
+  readonly environment: 'development' | 'test' | 'production';
   readonly jobs: DurableJobRepository;
   readonly operations: OperationalWorkRepository;
   readonly fingerprintKey: Uint8Array;
@@ -162,9 +165,10 @@ export function createOperationalHandlers(input: {
       now,
     });
   };
-  return {
+  const handlers: Readonly<Record<string, JobHandler>> = {
     'notification.dispatch': notification,
     'intelligence.refresh': intelligence,
     'evaluation.run': evaluation,
   };
+  return input.environment === 'production' ? { 'notification.dispatch': notification } : handlers;
 }

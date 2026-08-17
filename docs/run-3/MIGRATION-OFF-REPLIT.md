@@ -154,4 +154,14 @@ The migration-off-Replit gate passes only when an independent operator records:
 
 ## Strongest evidence currently available
 
-Run 2 produced a clean-clone source/build check and local portability evidence. Run 3 has not yet performed a founder-controlled external clone, OCI start, real PostgreSQL restore, object restore, Replit-loss simulation, replacement deployment, or DNS cutover. The procedure is therefore `prepared`, not a completed recovery proof.
+The local reconstruction script now refuses to run without both an immutable tag named `run3-local-candidate-<12-hex>` and its exact 40-character commit:
+
+```sh
+BB_CANDIDATE_REF=run3-local-candidate-<12-hex> \
+BB_CANDIDATE_COMMIT=<40-hex-commit> \
+node scripts/clean-clone-check.mjs
+```
+
+The external-source loss drill requires the same binding through `BB_CONTINUITY_GIT_REF` and `BB_CONTINUITY_GIT_COMMIT`, in addition to a non-Replit, non-loopback `BB_CONTINUITY_GIT_URL` with no credentials embedded in the URL. Both scripts check out detached, assert exact `HEAD`, and require a clean tree before installing, after all validation, and before emitting success. Authentication may still come from the operator's Git or SSH configuration, so the script proves only its exact URL checks—not credential-free transport or an independent external host.
+
+Run 2 produced a clean-clone source/build check and local portability evidence. Run 3 has not yet performed the candidate-bound reconstruction, a founder-controlled external clone, OCI start, real PostgreSQL restore, object restore, Replit-loss simulation, replacement deployment, or DNS cutover. The procedure is therefore `prepared`, not completed recovery proof.

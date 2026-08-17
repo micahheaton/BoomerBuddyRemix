@@ -30,6 +30,7 @@ test('public, member, and HQ landmark pages have zero serious or critical axe vi
     '/member/history',
     '/member/family',
     '/member/orientation',
+    '/member/founding-household',
   ]) {
     await page.goto(`${customerUrl}${path}`);
     await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
@@ -39,6 +40,10 @@ test('public, member, and HQ landmark pages have zero serious or critical axe vi
   await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /');
   await page.goto(`${hqUrl}/fraud`);
   await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /fraud');
+  await page.goto(`${hqUrl}/provisioning`);
+  await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /provisioning');
+  await page.goto(`${hqUrl}/founding-households`);
+  await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /founding-households');
 });
 
 test('keyboard focus, live result announcement, 200% zoom, and 320px reflow remain usable', async ({

@@ -83,6 +83,7 @@ export function hasActiveProtectedEnrollment(
 export interface EmployeeScope {
   readonly employeeAssignmentId: string;
   readonly organizationId?: OrganizationId;
+  readonly organizationKind: 'internal' | 'sponsor';
   readonly role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_support'>;
   readonly status: 'active' | 'suspended';
 }
@@ -96,7 +97,7 @@ export interface SupportCaseScope {
 
 export interface RestrictedAccessScope extends SupportCaseScope {
   readonly grantId: RestrictedAccessGrantId;
-  readonly resourceType: 'artifact' | 'analysis' | 'family';
+  readonly resourceType: 'artifact' | 'analysis' | 'family' | 'messaging_inbound';
   readonly resourceId: string;
   readonly expiresAt: Date;
 }

@@ -29,12 +29,21 @@ export const actions = [
   'orientation:view',
   'orientation:update',
   'entitlement:view',
+  'founding_household:view',
+  'founding_household:accept',
+  'founding_household:offboard',
   'hq:overview',
   'hq:households:list',
   'hq:reviews:list',
+  'hq:support_queue:list',
+  'hq:review_queue:list',
   'hq:audit:list',
   'hq:business_os:read',
   'hq:business_os:manage',
+  'hq:founder_provisioning:read',
+  'hq:founder_provisioning:manage',
+  'hq:founding_households:read',
+  'hq:founding_households:manage',
   'hq:support_case:view',
   'hq:restricted_resource:read',
 ] as const;
@@ -95,8 +104,23 @@ export type Resource =
       readonly kind: 'restricted_customer_resource';
       readonly householdId: HouseholdId;
       readonly caseId: SupportCaseId;
-      readonly resourceType: 'artifact' | 'analysis' | 'family';
+      readonly resourceType: 'artifact' | 'analysis' | 'family' | 'messaging_inbound';
       readonly resourceId: string;
+    }
+  | {
+      readonly kind: 'founder_provisioning';
+      readonly configuredFounderPersonId?: string;
+    }
+  | {
+      readonly kind: 'founding_household_program';
+      readonly configuredFounderPersonId?: string;
+    }
+  | {
+      readonly kind: 'founding_household';
+      readonly householdId: HouseholdId;
+      readonly scope:
+        | { readonly kind: 'status' }
+        | { readonly kind: 'invitation'; readonly credentialPresented: boolean };
     }
   | { readonly kind: 'hq'; readonly organizationId?: OrganizationId };
 
@@ -123,6 +147,7 @@ export interface Principal {
   readonly organizations: readonly {
     readonly employeeAssignmentId: string;
     readonly organizationId?: OrganizationId;
+    readonly organizationKind: 'internal' | 'sponsor';
     readonly role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_support'>;
     readonly status: 'active' | 'suspended';
   }[];
@@ -138,7 +163,7 @@ export interface Principal {
     readonly householdId: HouseholdId;
     readonly employeeAssignmentId: string;
     readonly purpose: string;
-    readonly resourceType: 'artifact' | 'analysis' | 'family';
+    readonly resourceType: 'artifact' | 'analysis' | 'family' | 'messaging_inbound';
     readonly resourceId: string;
     readonly expiresAt: Date;
   }[];
@@ -208,6 +233,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
         principal.organizations.some(
           (assignment) =>
             assignment.employeeAssignmentId === supportScope.employeeAssignmentId &&
+            assignment.organizationKind === 'internal' &&
             assignment.role === 'hq_support' &&
             assignment.status === 'active',
         );
@@ -231,10 +257,39 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
         principal.organizations.some(
           (assignment) =>
             assignment.employeeAssignmentId === accessScope.employeeAssignmentId &&
+            assignment.organizationKind === 'internal' &&
             assignment.role === 'hq_support' &&
             assignment.status === 'active',
         );
       return eligible
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('inactive_relationship');
+    }
+    if (
+      action === 'hq:founder_provisioning:read' ||
+      action === 'hq:founder_provisioning:manage' ||
+      action === 'hq:founding_households:read' ||
+      action === 'hq:founding_households:manage'
+    ) {
+      const expectedResource = action.startsWith('hq:founder_provisioning:')
+        ? 'founder_provisioning'
+        : 'founding_household_program';
+      if (resource.kind !== expectedResource) {
+        return deny('unsupported_action_resource');
+      }
+      const founderOwner = principal.organizations.some(
+        (assignment) =>
+          assignment.organizationKind === 'internal' &&
+          assignment.role === 'hq_owner' &&
+          assignment.status === 'active',
+      );
+      if (
+        resource.configuredFounderPersonId === undefined ||
+        principal.personId !== resource.configuredFounderPersonId
+      ) {
+        return deny('insufficient_role');
+      }
+      return founderOwner
         ? { allowed: true, reason: 'allowed_by_policy' }
         : deny('inactive_relationship');
     }
@@ -243,20 +298,22 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       .filter(
         (scope) =>
           scope.status === 'active' &&
+          scope.organizationKind === 'internal' &&
           (resource.organizationId === undefined ||
             scope.organizationId === resource.organizationId),
       )
       .map((scope) => scope.role);
+    if (action === 'hq:support_queue:list') {
+      return activeRoles.includes('hq_support')
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny(activeRoles.length === 0 ? 'inactive_relationship' : 'insufficient_role');
+    }
+    if (action === 'hq:review_queue:list') {
+      return activeRoles.includes('hq_reviewer')
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny(activeRoles.length === 0 ? 'inactive_relationship' : 'insufficient_role');
+    }
     if (activeRoles.includes('hq_owner')) return { allowed: true, reason: 'allowed_by_policy' };
-    if (
-      action === 'hq:reviews:list' &&
-      (activeRoles.includes('hq_reviewer') || activeRoles.includes('hq_support'))
-    ) {
-      return { allowed: true, reason: 'allowed_by_policy' };
-    }
-    if (action === 'hq:households:list' && activeRoles.includes('hq_support')) {
-      return { allowed: true, reason: 'allowed_by_policy' };
-    }
     return deny(activeRoles.length === 0 ? 'inactive_relationship' : 'insufficient_role');
   }
 
@@ -266,6 +323,8 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
   }
   if (
     resource.kind === 'hq' ||
+    resource.kind === 'founder_provisioning' ||
+    resource.kind === 'founding_household_program' ||
     resource.kind === 'support_case' ||
     resource.kind === 'restricted_customer_resource'
   ) {
@@ -283,6 +342,28 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
   }
   const relationship = householdRelationship(principal, resource.householdId);
   if (relationship === undefined) return deny('outside_tenant');
+
+  if (resource.kind === 'founding_household') {
+    if (!relationship.isAdministrator) return deny('insufficient_role');
+    if (
+      action === 'founding_household:view' &&
+      (resource.scope.kind === 'status' ||
+        (resource.scope.kind === 'invitation' && resource.scope.credentialPresented))
+    ) {
+      return { allowed: true, reason: 'allowed_by_policy' };
+    }
+    if (
+      action === 'founding_household:accept' &&
+      resource.scope.kind === 'invitation' &&
+      resource.scope.credentialPresented
+    ) {
+      return { allowed: true, reason: 'allowed_by_policy' };
+    }
+    if (action === 'founding_household:offboard' && resource.scope.kind === 'status') {
+      return { allowed: true, reason: 'allowed_by_policy' };
+    }
+    return deny('unsupported_action_resource');
+  }
 
   const capability = requiredCapability(action, resource);
   if (capability !== undefined && !relationship.capabilities.includes(capability)) {

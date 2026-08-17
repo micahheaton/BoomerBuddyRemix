@@ -1,10 +1,10 @@
 # Referral Credit and Viral Loop
 
-Status: **economic and safety design only; referral attribution, qualification, credits, and outbound invitations are not implemented**
+Status: **disabled local core implemented with a content-free non-production HQ projection; no program, customer mutation route, worker execution, outbound invitation, or provider credit application is registered**
 
-Last reviewed: 2026-08-16
+Last reviewed: 2026-08-17
 
-This document models a configurable, consent-aware referral-credit engine. It does not approve a permanent offer, create a customer entitlement, authorize outreach, promise a credit, or claim referral demand. No person, household, phone number, email address, payment identity, or provider transaction was used to create it.
+This document models a configurable, consent-aware referral-credit engine. It does not approve a permanent offer, create a customer entitlement, authorize outreach, promise a credit, or claim referral demand. No real person, household, contact destination, payment identity, or provider transaction was used; repository tests use only synthetic local fixtures and purpose-specific HMAC values.
 
 The immediate objective is stakeholder discovery after a useful household experience—not viral volume before Customer #1.
 
@@ -20,6 +20,12 @@ The immediate objective is stakeholder discovery after a useful household experi
 - No purchased lists, cold outreach, transferred consent, cash payout, transferable balance, public leaderboard, or “free forever” promise.
 
 Until the runtime and external gates pass, the product may expose only fixed safe copy through a user-controlled share surface; it must not claim that sharing or opening will earn credit.
+
+## Run 3 disabled local-core evidence
+
+Migration `0023_run3_referral_credit_engine.sql` and isolated domain, contract, and persistence modules now model immutable disabled program versions, one-time HMAC-only attribution, recipient binding, deterministic server-event qualification, exact local settlement/refund lineage, cumulative identity/cap controls, and an append-only reserved/earned/expired/reversed/correction ledger. No program row is seeded; the schema has no `active` lifecycle value or `applied` ledger kind. Every program/provider/external-action flag is constrained false.
+
+The modules are exported through shared package indexes and the API dependency context constructs the disabled repository. A non-production `GET /v1/hq/referrals` route and HQ page expose only the bounded content-free evidence projection to a current internal owner or reviewer; production returns not found. There is still no customer referral route, mutation handler, worker registration or consumer, program seed, provider adapter, or executable lifecycle. Durable receipts are content-free and remain `queued_not_run`. The only modeled share capabilities are unregistered native-share-sheet and copy-link integrations that require a user gesture, request no contact permission, accept no contact data, automatically send nothing, and award nothing for sharing. Focused local PGlite tests exercise forged activation, append-only mutation, stolen/reused attribution, future and reordered evidence, symmetric cross-version payment-identity reuse/races, parallel first-touch binding, wrong milestone/offer/time, over-refund, zero-rounding cumulative refund/dispute principal under retries and concurrency, unique exact ledger source/digest/time/target/amount enforcement, correction authority/source depletion, raw-token absence, and job redaction. This is local simulation evidence—not provider test, deployed, human, or production evidence. ADR 0028 records the boundary.
 
 ## Hypotheses to model
 
@@ -138,6 +144,8 @@ Program terms must state when a credit is reserved, usable, expired, or reversib
 - full refund or unresolved dispute before the hold clears prevents earning;
 - refund/dispute after earning creates a reviewed reversal under the exact disclosed rule;
 - partial refund uses the authenticated principal amount and policy, never a binary guess;
+- cumulative proportional reversal uses every authenticated refund/dispute principal even when an
+  earlier increment rounded to zero, while subtracting only reversal debits actually recorded;
 - later provider success/failure remains recordable after a prior timeout/unknown;
 - an ordinary `subscription.active` event cannot override a financial restriction;
 - clawback never edits the original credit or payment event;
@@ -239,4 +247,11 @@ No agent may make a purchase, configure a live coupon/credit, message a recipien
 
 ## Current disposition
 
-`REMEDIATE`. The design and sensitivity arithmetic are repository-local. There is no referral program definition, attribution runtime, qualification decision, abuse review, credit ledger, canonical billing application, customer terms, provider-test evidence, professional review, real-human evidence, or live credit. The permanent mechanic and economics remain undecided.
+`REMEDIATE`. The design, sensitivity arithmetic, disabled core, and content-free local HQ projection
+are local-simulation evidence. Shared package exports, API-context construction, and the read-only HQ
+surface do not create a customer or worker execution path. There is no seeded or active referral
+program, customer mutation/share route, worker execution, canonical provider credit application,
+provider-test evidence, approved customer terms, professional review, real-human evidence, or live
+credit. Managed identity/KMS, real PostgreSQL concurrency/restore, production observability,
+abuse-review operations, privacy retention, and settlement economics remain unproven. The permanent
+mechanic and economics remain undecided.

@@ -18,6 +18,7 @@ export const seedPersonas = [
   },
   { personaId: 'hq-heidi', personId: 'person-hq-heidi', displayName: 'Heidi HQ Owner' },
   { personaId: 'hq-riley', personId: 'person-hq-riley', displayName: 'Riley Reviewer' },
+  { personaId: 'hq-sam', personId: 'person-hq-sam', displayName: 'Sam Support' },
 ] as const;
 
 export const seedHouseholds = {
@@ -58,7 +59,9 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
   await transaction.query(
     `INSERT INTO organizations(id, name, kind, verification_state, created_at) VALUES
        ('organization-boomerbuddy','BoomerBuddy local HQ','internal','local_fixture',$1),
-       ('organization-synthetic-sponsor','Synthetic sponsor fixture','sponsor','local_fixture',$1)
+       ('organization-synthetic-sponsor','Synthetic sponsor fixture','sponsor','local_fixture',$1),
+       ('organization-founding-households-local',
+        'Founding Household local simulation sponsor','sponsor','local_fixture',$1)
      ON CONFLICT (id) DO NOTHING`,
     [now.toISOString()],
   );
@@ -99,8 +102,26 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
   await transaction.query(
     `INSERT INTO employee_assignments(id, person_id, organization_id, role, status, created_at) VALUES
        ('employee-hq-heidi','person-hq-heidi','organization-boomerbuddy','hq_owner','active',$1),
-       ('employee-hq-riley','person-hq-riley','organization-boomerbuddy','hq_reviewer','active',$1)
+       ('employee-hq-riley','person-hq-riley','organization-boomerbuddy','hq_reviewer','active',$1),
+       ('employee-hq-sam','person-hq-sam','organization-boomerbuddy','hq_support','active',$1)
      ON CONFLICT (id) DO NOTHING`,
+    [now.toISOString()],
+  );
+  await transaction.query(
+    `INSERT INTO support_cases(
+       household_id, id, purpose, status, opened_by_person_id, opened_at
+     ) VALUES (
+       'household-sunrise','support-case-seeded-sam','Resolve a synthetic navigation request',
+       'open','person-owner-alice',$1
+     ) ON CONFLICT (household_id, id) DO NOTHING`,
+    [now.toISOString()],
+  );
+  await transaction.query(
+    `INSERT INTO support_case_assignments(
+       household_id, case_id, employee_assignment_id, status, assigned_at
+     ) VALUES (
+       'household-sunrise','support-case-seeded-sam','employee-hq-sam','active',$1
+     ) ON CONFLICT (household_id, case_id, employee_assignment_id) DO NOTHING`,
     [now.toISOString()],
   );
   await transaction.query(
@@ -263,6 +284,32 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
       planEffectiveAt,
       now.toISOString(),
     ],
+  );
+  await transaction.query(
+    `INSERT INTO commerce_sponsorships(
+       id, organization_id, plan_version_id, state, privacy_policy_version,
+       starts_at, ends_at, created_at
+     ) VALUES
+       ('founding-sponsorship-plus-local-v1','organization-founding-households-local',
+        'founding_plus_beta_v2','active','founding-household-local-simulation-v1',$1,NULL,$2),
+       ('founding-sponsorship-family-local-v1','organization-founding-households-local',
+        'founding_family_beta_v2','active','founding-household-local-simulation-v1',$1,NULL,$2)
+     ON CONFLICT (id) DO NOTHING`,
+    [planEffectiveAt, now.toISOString()],
+  );
+  await transaction.query(
+    `INSERT INTO founding_household_sponsor_backings(
+       cohort_key, environment, benefit_key, organization_id, sponsorship_id,
+       plan_version_id, evidence_tier, approved_by_person_id, approved_at
+     ) VALUES
+       ('run3_sponsored_founding_household_v1','local','plus_beta_v1',
+        'organization-founding-households-local','founding-sponsorship-plus-local-v1',
+        'founding_plus_beta_v2','local_simulation',NULL,$1),
+       ('run3_sponsored_founding_household_v1','local','family_beta_v1',
+        'organization-founding-households-local','founding-sponsorship-family-local-v1',
+        'founding_family_beta_v2','local_simulation',NULL,$1)
+     ON CONFLICT (cohort_key, environment, benefit_key) DO NOTHING`,
+    [now.toISOString()],
   );
   const periodEnd = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1_000).toISOString();
   await transaction.query(
@@ -443,6 +490,16 @@ async function seedHqData(transaction: SqlExecutor, now: Date): Promise<void> {
      ON CONFLICT (id) DO NOTHING`,
     [staleAt, futureAt, now.toISOString()],
   );
+  await transaction.query(
+    `INSERT INTO hq_work_cases(
+       id, case_kind, household_id, severity, state, routing_class, summary,
+       assigned_person_id, due_at, created_at, updated_at
+     ) VALUES (
+       'case-seeded-riley-review','fraud','household-sunrise','medium','open',
+       'trust_safety','Synthetic metadata-only review fixture','person-hq-riley',$1,$2,$2
+     ) ON CONFLICT (id) DO NOTHING`,
+    [futureAt, now.toISOString()],
+  );
 }
 
 const safeDecision: DecisionRecord = {
@@ -533,7 +590,16 @@ export async function seedDemoData(
       `SELECT (
          EXISTS (SELECT 1 FROM persons) OR EXISTS (SELECT 1 FROM households)
          OR EXISTS (SELECT 1 FROM organizations)
-         OR EXISTS (SELECT 1 FROM commerce_product_versions)
+         OR EXISTS (
+           SELECT 1 FROM commerce_product_versions
+           WHERE id <> 'consumer_household_v1'
+         )
+         OR (SELECT count(*) FROM commerce_product_versions) <> 1
+         OR EXISTS (
+           SELECT 1 FROM commerce_plan_versions
+           WHERE id NOT IN ('founding_plus_beta_v2','founding_family_beta_v2')
+         )
+         OR (SELECT count(*) FROM commerce_plan_versions) <> 2
          OR EXISTS (SELECT 1 FROM analyses)
          OR EXISTS (SELECT 1 FROM provider_health)
          OR EXISTS (SELECT 1 FROM saved_searches)

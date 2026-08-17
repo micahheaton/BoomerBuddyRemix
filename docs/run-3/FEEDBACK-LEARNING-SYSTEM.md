@@ -1,8 +1,8 @@
 # Feedback Learning System
 
-Status: **governed design only; unified intake, media storage, transcription, email ingestion, and HQ feedback queues are not implemented**
+Status: **local text-only persistence/repository foundation, shared API registration, local-only web/HQ navigation, an isolated unwired native component, and bounded non-production retention-worker composition implemented; production intake/maintenance, media storage, transcription, email ingestion, deployed proof, and human evidence are not implemented**
 
-Last reviewed: 2026-08-16
+Last reviewed: 2026-08-17
 
 Feedback is a customer-safety and product-learning workflow, not an unrestricted inbox. This design defines the minimum object, privacy boundary, review roles, and evidence required before any feedback adapter is enabled. It does not claim that a real customer submitted feedback, that a provider processed media, or that an issue was fixed.
 
@@ -18,7 +18,14 @@ The eventual system may accept:
 - optional audio, screenshot/image, and—only after separate proof—screen recording; and
 - `feedback@boomerbuddy.net` inbound mail after the founder provisions and approves the adapter.
 
-No adapter is enabled merely because this list exists. The current repository has no governed feedback object, media store, malware scanner, transcription provider, feedback-mailbox adapter, or feedback-specific HQ queue.
+No external adapter is enabled merely because this list exists. The repository now has a governed local text object, an owner-global-or-exact-assignee metadata projection, an assigned-only minimized-text reader, and content-free durable job receipts. An owner must explicitly self-claim a non-support record before reading; support conversion remains bound to its current exact case assignment. The reader reruns deterministic minimization, audits the code-owned `feedback_triage` purpose in the same transaction, and refuses unsafe, quarantined, restricted, withdrawn, expired, or erased payloads. The shared API constructs the repository with artifact-encryption and fingerprint key version 1 and registers the feedback routes in every environment so their production guards are exercised. Local development/test navigation exposes selected-household web feedback and role-bounded HQ review; public feedback remains unlinked. The native feedback component is deliberately unwired from the shared app entry until a release-specific module boundary can exclude it from production artifacts. Production public/member/HQ routes render explicit blockers, and production native navigation contains no feedback path or action. A route-mocked local Edge test covers HQ `no-store` requests and clearing opened text on authorization loss; a separate real-`buildApp` integration test covers route registration and durable authenticated intake. Neither is deployed or native-device evidence. File-system web pages render no form in production and explicitly warn against sending data; the API independently refuses production intake. The durable worker composes only `feedback.retention.maintain` outside production and idempotently bootstraps its content-free local job; production composes no feedback handler or job. The API startup/close lifecycle never runs feedback maintenance. The system still has no automated classification/deduplication/drafting handler, media store, malware scanner, transcription provider, or feedback-mailbox adapter.
+
+Code-owned adapter state is explicit:
+
+- authenticated text, anonymous text, and exact-assignee support conversion are `local_only_enabled` at the repository boundary; and
+- attachment, audio, image, video, screen recording, inbound email, transcription, and external-model processing are `structurally_disabled`.
+
+The implemented repository has not received real customer content. Focused tests use synthetic local fixtures only.
 
 ## Safety boundary
 
@@ -45,7 +52,7 @@ Use a strict, versioned contract. Fields are absent unless required for the sele
 | Follow-up | Separate consent/purpose/version, allowed channel class, withdrawal state; no raw destination in the feedback object |
 | Research | Separate retention purpose/version, expiration, withdrawal/restriction state; never inferred from product terms |
 | Media | Attachment IDs, declared kind, byte size, hash, quarantine/redaction/transcription state, retention deadline; no public URL |
-| Ownership | Current assigned queue/role, service level, escalation state, optimistic version |
+| Ownership | Code-owned queue, unassigned/assigned routing state, current exact assignee when present, escalation state, optimistic version |
 | Outcome | Linked issue/experiment/content/support action IDs, structured disposition, close-loop state, reviewer evidence |
 | Evidence | Origin interaction ID, correlation ID, immutable state-event lineage, evidence tier, recorded time |
 
@@ -61,7 +68,7 @@ Additional terminal or holding states:
 
 - `withdrawn` — participant withdrew the optional research/follow-up purpose;
 - `restricted` — privacy restriction blocks ordinary processing;
-- `retention_expired` — optional payload/media was physically removed or crypto-erased while required evidence remains truthfully retained;
+- `retention_expired` — optional active-store payload/media was removed while required evidence remains truthfully retained; backup/provider disposition is separate;
 - `unsafe_unprocessable` — attachment or payload cannot be safely inspected;
 - `support_escalated` — assigned support path exists; this does not expose content to unrelated product reviewers; and
 - `incident_escalated` — security/safety incident process owns the next action.
@@ -72,7 +79,9 @@ State events require actor/service provenance, prior version, structured reason,
 
 ### Text
 
-Before general review, a bounded minimization step detects and redacts unnecessary OTPs, payment-card patterns, credentials, private-key/seed material, direct destinations, and other purpose-irrelevant identifiers. Redaction is not a claim that all secrets were found. High-risk or parser-failed payloads remain quarantined for the narrow security/privacy role.
+Before persistence or general review, the local repository applies the existing bounded restricted-input minimizer. Raw submitted text is normalized first and any occurrence of a code-owned reserved redaction placeholder (`[PAYMENT_CARD]`, `[AUTH_CREDENTIAL]`, or `[ONE_TIME_CODE]`) causes metadata-only quarantine before minimization; a participant cannot smuggle a pre-redacted-looking value into retained text. Verification of decrypted, already-minimized content is a separate code path that permits those code-owned placeholders but still requires deterministic equality and no new detection/redaction. OTP and payment-card spans are irreversibly replaced before AES-256-GCM encryption. Code-owned explicit credential labels and bare authorization schemes use an all-or-nothing pre-minimizer: the full bounded token is replaced only when its boundary is unambiguous, including supported punctuation, quoted/space-containing values, `password is`, URL-shaped values, and Unicode values. Ambiguous boundaries, private keys, overlapping spans, unsafe structures, and text made unusable by redaction are not retained as ciphertext; only typed detection metadata, a `quarantined_discarded` receipt, and an unassigned narrow privacy/security queue event remain. Database checks allow only code-owned detection classes and integer class counts, preventing those metadata fields from becoming a covert text channel. This metadata-only quarantine is not recoverable content and is not a claim that all secrets were detected.
+
+The local fixture keeps minimized text for exactly one hour when research retention is declined; support conversion is always in that one-hour class. Explicit research retention must match the participant's deadline and is capped by schema at 24 hours from the database-recorded intake time. Deferred database constraints require matching initial consent/record/payload chronology and matching same-transaction erasure evidence before `payload_erased` can commit. Repository deadlines, quota windows, concurrency leases, reads, and purge eligibility use `clock_timestamp()` obtained after the relevant authorization/record locks rather than a caller clock. These are conservative local candidate bounds, not approved production policy. Authenticated consent withdrawal and expiry remove ciphertext and its key-version reference from the active database, set `payload_erased`, and append a truthful erasure event. This is `active_store_ciphertext_erased`, not cryptographic erasure: the shared master key is not a per-record envelope key, and backup/provider/snapshot/cache deletion remains unproved because no deployed storage or backup system was used.
 
 ### Attachments
 
@@ -112,7 +121,7 @@ Distinct roles operate on minimized projections; one role cannot silently confer
 8. **Customer-success review** — manages consented follow-up and close-loop state.
 9. **Skeptical review** — attacks overgeneralization, duplication, survivorship bias, unsafe disclosure, and false closure.
 
-The pipeline may transcribe, redact, classify, deduplicate, cluster, summarize, draft internal issues/experiments, and produce content-free Founder Attention candidates after its exact action/data/tool tuple and cumulative budget are approved.
+The pipeline may eventually transcribe, redact, classify, deduplicate, cluster, summarize, draft internal issues/experiments, and produce content-free Founder Attention candidates after its exact action/data/tool tuple and cumulative budget are approved. The local foundation performs synchronous deterministic text minimization at intake and reruns that minimizer before assigned content disclosure. A governed assignment carries `human_review_required`; this is not an automated classification or deduplication result. The system queues confidential, content-free durable work for redaction verification, classification, deduplication, and internal drafting with receipts that explicitly say `local_processing_not_run`, `provider_processed=false`, and `external_action_executed=false`. No feedback processing worker or provider executes those jobs.
 
 It may not autonomously deploy, alter fraud policy, promise a feature, publish a quote/testimonial, send mass communication, change legal terms, or reveal customer content to unrelated employees or agents.
 
@@ -136,7 +145,7 @@ A count is never a severity score. Duplicate clustering retains every source rec
 
 ## HQ projections
 
-The future HQ feedback module needs least-privilege queues for:
+The local repository models least-privilege queues for:
 
 - new minimized feedback;
 - quarantined/unsafe intake for the narrow privacy/security role;
@@ -147,7 +156,11 @@ The future HQ feedback module needs least-privilege queues for:
 - product/engineering hypotheses and proposed experiments; and
 - “you told us / we changed” candidates awaiting evidence and customer-specific permission.
 
-Queue rows expose IDs, states, coarse classification, assignment, age/SLA, and evidence availability—not raw content. Opening restricted content requires exact assignment, purpose, current step-up grant, read audit, and content-safe rendering. Reviewer/support global metadata access does not confer feedback access.
+Customer and anonymous intake never resolves or requires an internal owner. It atomically records a code-owned unassigned route and content-free jobs, so a missing or suspended owner cannot drop feedback. A safe support conversion alone starts assigned to its exact current support-case assignee; an unsafe support conversion is narrowed into the unassigned privacy/security queue.
+
+Repository queue rows expose IDs, states, coarse classification, routing state, latest-effective consent booleans, content-access flags, and evidence tier—not submitted text. A current active internal owner receives a newest-first content-free global metadata projection capped at 100 rows; delegated reviewer/support access is limited to its latest exact active assignment under the same cap. Metadata flags and assigned-text reads use one code-owned readable-status allowlist. The repository locks the selected records, exact employee assignment and organization, and any exact support assignment, then re-reads latest state and obtains database authority time before projection or disclosure. A code-owned review mutex plus the common lock order keeps revocation and restriction from racing a same-transaction audit/release. Local deterministic race and direct-SQL regressions exist; managed-PostgreSQL contention evidence does not.
+
+Owner-global metadata is not content authority. A current owner may explicitly self-claim a non-support record, which appends an exact assignment and `human_review_required` state. Safe support conversion remains readable only by the same current exact support-case assignment; ending the case assignment removes both metadata and content access. Exact assignees may open only unexpired `encrypted_minimized` payloads whose fresh latest state is `minimized`, `classified`, or `assigned`. `restricted`, `withdrawn`, `retention_expired`, unsafe/quarantined, and erased records remain unreadable even if a stale claim or direct SQL state insertion exists. Before return, the repository decrypts with tenant/resource/field-bound additional data, reruns deterministic restricted-input minimization, refuses any residual detection or transformation, and writes a content-free `feedback.content.read` audit with purpose `feedback_triage` in the same transaction. HQ metadata and content responses set `Cache-Control: private, no-store, max-age=0`, `Pragma: no-cache`, and `Expires: 0`; the client also requests `cache: 'no-store'` and clears opened content on a 401/403. The shared local-only HQ path renders the returned minimized string as escaped React text and is advertised only to owner/reviewer/support roles outside production. Global-owner plaintext browse, reviewer/support global browse, provider output, destinations, and media remain unavailable. Shared routes are composed, but shared-runtime browser evidence is still absent; the browser evidence remains a local route-mocked Edge regression.
 
 ## Close the loop
 
@@ -165,11 +178,13 @@ Publishing a generalized “you told us / we changed” item additionally requir
 
 ## Retention, privacy requests, and deletion truth
 
-The founder and qualified privacy reviewer must approve exact periods before real intake. Defaults remain fail-closed: no optional media; no external transcription; the shortest useful text retention; and no indefinite raw-payload retention.
+The founder and qualified privacy reviewer must approve exact periods before real intake. Local fixture rules of exactly one hour without research consent or for support conversion, and at most 24 hours with explicit research retention, are not production policy. Deferred constraints reject a retained payload whose initial consent, deadline, record chronology, or same-transaction erase evidence does not match. Defaults remain fail-closed: no optional media; no external transcription; no indefinite raw-payload retention; and automatic active-store ciphertext deletion at the database-authoritative local deadline. Backup, snapshot, cache, object-store, and processor copies require separate reconciliation; none exists in this local candidate.
+
+Anonymous local intake deliberately stores no actor, household, campaign, linked object, raw network address, or network HMAC on the feedback object. The API accepts only the framework-resolved client IP after its configured trusted-proxy boundary; a shared strict parser canonicalizes valid IPv4/IPv6, collapses IPv4-mapped IPv6 into canonical dotted IPv4, and persistence repeats that check before HMAC derivation. Dotted IPv4 and all equivalent mapped forms therefore share one current-network quota and concurrency identity. Global and current-network HMAC quota/concurrency tables are separate and short-lived, with database-authoritative quota-hour and 30-second stale-lease boundaries. After acquisition, the anonymous create transaction locks its exact lease row, verifies and renews it using database time, holds the row lock throughout durable intake, and atomically renews/rechecks ownership immediately before commit. A concurrent acquisition cannot treat the lease as free merely because the original timestamp passes while the owning transaction is still running; failed final renewal rolls the intake back, and exact ID/HMAC cleanup runs in `finally`. The local contract mints no anonymous management credential, so post-submission anonymous correction or withdrawal is unavailable; the bounded automatic expiry and this limitation require explicit disclosure and review before any external anonymous test.
 
 Privacy operations must separately handle:
 
-- account-linked feedback export, correction annotations, restriction, and deletion/crypto-erasure;
+- account-linked feedback export, correction annotations, restriction, active-store deletion, and separately proved backup/key reconciliation;
 - anonymous credential/proof limitations stated at collection time;
 - media originals, derivatives, transcripts, thumbnails, caches, provider copies, and backups;
 - support/incident/legal evidence whose retention basis differs from optional research content;
@@ -218,6 +233,34 @@ Record, without placing secrets in source or prompts:
 
 Required environment-variable names are added only with an implemented adapter; no secret name or provider success is invented by this design.
 
+## Local implementation evidence
+
+Focused deterministic evidence currently includes:
+
+- domain and strict-contract tests for source/linkage compatibility, structural adapter disablement, consent shape, and no-effect response truth;
+- forward-only migration application through `0020` and direct-SQL immutability, state-ordering, and anonymous-association negatives;
+- exact authenticated membership and linked-Check ownership negatives across actor and household boundaries;
+- intake continuity with the owner assignment suspended, code-owned unassigned routing, exact support-case assignee conversion, and unrelated-reviewer visibility denial;
+- raw reserved-placeholder rejection before minimization plus a separate already-minimized redisclosure verifier; hostile assertions find no submitted placeholder span in ciphertext/plaintext, intake operations, durable jobs, audit, or metadata;
+- payment-card and all-or-nothing explicit-credential pre-encryption redaction, including punctuation, quoted/space, `password is`, URL, and Unicode cases, plus ambiguous-credential/private-key metadata-only quarantine; hostile assertions find no submitted credential span in retained payload fields, durable job payloads, or request digests;
+- idempotent retry and conflicting-operation rejection;
+- strict IPv4/IPv6 canonicalization after trusted-proxy resolution, IPv4-mapped collapse to dotted IPv4, global/current-network anonymous HMAC quotas, and one five-request bucket plus one concurrency identity across dotted/mapped equivalents;
+- an immutable singleton acquisition mutex plus database-authoritative lease acquisition and exact row-locked renewal through create completion, including exact TTL, wait, quota-hour rollover, caller-clock skew, a gated create crossing the original TTL, failed-final-renewal rollback, and cleanup regressions, without linking a network HMAC to a feedback identity;
+- OTP minimization before encryption and private-key metadata-only quarantine;
+- absence of submitted text from durable job payloads and HQ metadata projections;
+- authenticated consent-withdrawal, optional linked-object erasure, research-consent expiry, and retention-expiry active-store ciphertext deletion with deferred same-transaction evidence, database-authoritative timing, a hard 24-hour schema ceiling, exact one-hour declined/support retention, immutable evidence, and no backup-erasure claim;
+- one shared readable-state allowlist for metadata and content, owner self-claim, exact-assignee minimized-text read, fresh latest-state-after-lock checks, deterministic redisclosure redaction verification, latest-effective consent projection, support-assignment lapse/restriction-race denial, and content-free same-transaction read audit;
+- code-owned review mutex plus record-before-employee/support lock ordering, with managed-PostgreSQL contention still unproved; and
+- record-before-payload retention locking, removing the withdrawal/expiry lock inversion at the SQL design boundary.
+
+Latest integrated validation on 2026-08-17: 8 focused Vitest files / 55 tests passed, including real-`buildApp` route/adapter/intake/startup-non-purge coverage and exact dev/production worker-composition coverage; domain, contracts, persistence, API, web, HQ, worker, and mobile workspace typechecks plus root TypeScript passed. Final scoped lint/format, build, production-HTML, browser, and secret-scan results are recorded in the Stage 8 author evidence manifest rather than inferred here. One isolated route-mocked local Edge test covers `no-store` requests and clearing opened minimized text after authorization loss. These are local static/deterministic and local-browser-simulation results only. No deployed browser, native-device, managed-PostgreSQL contention, restore, backup deletion, provider, staging, or human evidence is claimed.
+
+The later integrated pre-commit repository suite also passed 50 files / 367 tests, and the
+current-tree shared Stage 5–10 independent review returned 0 Critical / 0 High. These remain local
+fixture receipts, not external evidence.
+
+All of this evidence is `local_simulation`. No real customer, deployed staging system, provider sandbox, managed PostgreSQL contention run, object store, backup restore, or production environment participated.
+
 ## Current disposition
 
-`REMEDIATE` for implementation and external proof. The repository currently has no unified feedback runtime, attachment/media boundary, feedback mailbox, transcription provider, or feedback HQ queue. No real customer feedback, audio, image, screen recording, inbound email, support conversion, cluster, experiment, close-loop message, or provider result was created by this document.
+`REMEDIATE` pending managed-PostgreSQL contention, deployed proof, founder decisions, professional review, and external evidence. Independent adversarial review of the integrated local slice and the later shared Stage 5–10 composition both returned 0 Critical / 0 High. The repository now has a shared but local-only text API/UI/retention-worker composition around the unified schema/repository, owner-global-or-exact-assignee metadata query, explicit owner self-claim, and exact-assignee minimized-text renderer. Production intake and feedback maintenance remain fail closed; media, feedback mailbox, transcription, external-model, and completed classification/dedup/draft processing remain unavailable. Active-store ciphertext deletion is not backup or cryptographic erasure. No real customer feedback, audio, image, screen recording, inbound email, real support conversion, cluster, experiment, close-loop message, provider result, or training use was created or claimed.

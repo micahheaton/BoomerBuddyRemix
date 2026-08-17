@@ -11,7 +11,7 @@ Recorded: 2026-08-16
 - Run 3 branch: `codex/run-3-first-dollar`
 - Annotated baseline tag: `run3-baseline-a66a24d`
 - Initial working tree: only the three expected untracked Run 3 handoff documents; no tracked change or other untracked file
-- `reference/boomerbuddy-v1/`: tracked status and diff clean; runtime-isolation guard passed
+- `reference/boomerbuddy-v1/`: ignored, untracked research input, so Git cannot attest its contents; the BoomerBuddy 2.0 runtime-isolation guard passed and no runtime import is permitted
 
 The three handoff files were preserved without reset, clean, overwrite, or discard.
 

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type {
+  AutomationBudgetStatusResponse,
   CreditUnionTargetsResponse,
   OpportunityQueueResponse,
   OwnerBriefResponse,
@@ -25,7 +26,7 @@ type AttentionItem = {
   updatedAt: string;
 };
 
-type AttentionResponse = { items: AttentionItem[] };
+type AttentionResponse = { items: AttentionItem[]; truncated: boolean };
 type Opportunity = OpportunityQueueResponse['opportunities'][number];
 type OpportunityStage = Opportunity['stage'];
 type AutonomyClass = 'auto' | 'approval' | 'human' | 'professional';
@@ -39,6 +40,8 @@ type GlobalAutomationControl = {
   killSwitch: boolean;
   updatedAt?: string;
 };
+type BudgetScopeKind = AutomationBudgetStatusResponse['caps'][number]['scopeKind'];
+type BudgetPeriodKind = AutomationBudgetStatusResponse['caps'][number]['periodKind'];
 
 const businessOsPaths = {
   ownerBrief: '/v1/hq/business-os/owner-brief',
@@ -46,6 +49,9 @@ const businessOsPaths = {
   opportunities: '/v1/hq/business-os/opportunities',
   attention: '/v1/hq/business-os/attention',
   autonomyPolicies: '/v1/hq/business-os/autonomy/policies',
+  autonomyBudgetCaps: '/v1/hq/business-os/autonomy/budgets/caps',
+  autonomyBudgetOverrides: '/v1/hq/business-os/autonomy/budgets/overrides',
+  autonomyBudgets: '/v1/hq/business-os/autonomy/budgets',
   autonomyEvaluate: '/v1/hq/business-os/autonomy/evaluate',
   autonomyGlobalControl: '/v1/hq/business-os/autonomy/global-control',
 } as const;
@@ -633,6 +639,9 @@ function OpportunityPipeline() {
         <strong>Automatic consequential outreach: Off</strong>
         <span>Records can schedule human work; they cannot send messages or make commitments.</span>
       </div>
+      {data?.truncated ? (
+        <p className="notice section">Showing the first 100 opportunities.</p>
+      ) : null}
       <div className="section">
         <CreateOpportunity onCreated={() => void loadOpportunities()} />
       </div>
@@ -723,6 +732,9 @@ function OwnerAttention() {
           {openItems.length} open of {data.items.length} local items
         </span>
       </div>
+      {data.truncated ? (
+        <p className="notice section">Showing the first 100 owner-attention items.</p>
+      ) : null}
       {data.items.length === 0 ? (
         <p className="empty section">No owner-attention items are recorded locally.</p>
       ) : (
@@ -808,11 +820,27 @@ function AutonomyControls() {
   const [globalControlError, setGlobalControlError] = useState('');
   const [globalControlMessage, setGlobalControlMessage] = useState('');
   const [clearGlobalConfirmed, setClearGlobalConfirmed] = useState(false);
+  const [budgetStatus, setBudgetStatus] = useState<AutomationBudgetStatusResponse>();
+  const [budgetStatusLoading, setBudgetStatusLoading] = useState(true);
+  const [budgetError, setBudgetError] = useState('');
+  const [budgetMessage, setBudgetMessage] = useState('');
+  const [budgetBusy, setBudgetBusy] = useState(false);
+  const [capScopeKind, setCapScopeKind] = useState<BudgetScopeKind>('company');
+  const [capScopeKey, setCapScopeKey] = useState('global');
+  const [capPeriodKind, setCapPeriodKind] = useState<BudgetPeriodKind>('day');
+  const [capLimitCents, setCapLimitCents] = useState('0');
+  const [capEnabled, setCapEnabled] = useState(true);
+  const [capConfirmed, setCapConfirmed] = useState(false);
+  const [overrideCapId, setOverrideCapId] = useState('');
+  const [overrideAdditionalCents, setOverrideAdditionalCents] = useState('0');
+  const [overrideKey, setOverrideKey] = useState('');
+  const [overrideReasonCode, setOverrideReasonCode] = useState('');
+  const [overrideConfirmed, setOverrideConfirmed] = useState(false);
   const [action, setAction] = useState('');
   const [allowedDataClasses, setAllowedDataClasses] = useState('');
   const [allowedTools, setAllowedTools] = useState('');
   const [autonomy, setAutonomy] = useState<AutonomyClass>('approval');
-  const [budgetCents, setBudgetCents] = useState('0');
+  const [maxCostPerOperationCents, setMaxCostPerOperationCents] = useState('0');
   const [enabled, setEnabled] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [policyError, setPolicyError] = useState('');
@@ -828,12 +856,32 @@ function AutonomyControls() {
 
   const globalKillSwitchEngaged = globalControl?.killSwitch ?? true;
   const globalControlKnown = globalControl !== undefined && !globalControlLoading;
+  const budgetConfigurationAllowed = globalControlKnown && globalKillSwitchEngaged;
+
+  const refreshBudgetStatus = useCallback(async () => {
+    setBudgetStatusLoading(true);
+    setBudgetError('');
+    try {
+      setBudgetStatus(
+        await hqRequest<AutomationBudgetStatusResponse>(businessOsPaths.autonomyBudgets),
+      );
+    } catch (caught) {
+      setBudgetStatus(undefined);
+      setBudgetError(readableError(caught));
+    } finally {
+      setBudgetStatusLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     hqRequest<unknown>(businessOsPaths.autonomyGlobalControl)
       .then((value) => setGlobalControl(parseGlobalAutomationControl(value)))
       .catch((caught) => setGlobalControlError(readableError(caught)))
       .finally(() => setGlobalControlLoading(false));
+    hqRequest<AutomationBudgetStatusResponse>(businessOsPaths.autonomyBudgets)
+      .then(setBudgetStatus)
+      .catch((caught) => setBudgetError(readableError(caught)))
+      .finally(() => setBudgetStatusLoading(false));
   }, []);
 
   async function updateGlobalControl(killSwitch: boolean) {
@@ -851,6 +899,7 @@ function AutonomyControls() {
       });
       const control = parseGlobalAutomationControl(response);
       setGlobalControl(control);
+      void refreshBudgetStatus();
       setClearGlobalConfirmed(false);
       setGlobalControlMessage(
         control.killSwitch
@@ -863,6 +912,63 @@ function AutonomyControls() {
       setGlobalControlError(readableError(caught));
     } finally {
       setGlobalControlBusy(false);
+    }
+  }
+
+  async function saveBudgetCap(event: FormEvent) {
+    event.preventDefault();
+    if (!budgetConfigurationAllowed || !capConfirmed) return;
+    setBudgetBusy(true);
+    setBudgetError('');
+    setBudgetMessage('');
+    try {
+      await hqRequest(businessOsPaths.autonomyBudgetCaps, {
+        method: 'PUT',
+        body: JSON.stringify({
+          confirmation: 'CONFIGURE_BUDGET_CAP',
+          enabled: capEnabled,
+          limitCents: Number(capLimitCents),
+          periodKind: capPeriodKind,
+          scopeKey: capScopeKey,
+          scopeKind: capScopeKind,
+        }),
+      });
+      setCapConfirmed(false);
+      setBudgetMessage('Cumulative cap recorded. No budget was reserved and no action ran.');
+      await refreshBudgetStatus();
+    } catch (caught) {
+      setBudgetError(readableError(caught));
+    } finally {
+      setBudgetBusy(false);
+    }
+  }
+
+  async function applyBudgetOverride(event: FormEvent) {
+    event.preventDefault();
+    if (!budgetConfigurationAllowed || !overrideConfirmed) return;
+    setBudgetBusy(true);
+    setBudgetError('');
+    setBudgetMessage('');
+    try {
+      await hqRequest(businessOsPaths.autonomyBudgetOverrides, {
+        method: 'POST',
+        body: JSON.stringify({
+          additionalCents: Number(overrideAdditionalCents),
+          capId: overrideCapId,
+          confirmation: 'EXPAND_BUDGET_CAP',
+          overrideKey,
+          reasonCode: overrideReasonCode,
+        }),
+      });
+      setOverrideConfirmed(false);
+      setBudgetMessage(
+        'Founder override appended to this period. No budget was reserved and no action ran.',
+      );
+      await refreshBudgetStatus();
+    } catch (caught) {
+      setBudgetError(readableError(caught));
+    } finally {
+      setBudgetBusy(false);
     }
   }
 
@@ -879,8 +985,8 @@ function AutonomyControls() {
           allowedDataClasses: parseTokens(allowedDataClasses, 'Allowed data classes'),
           allowedTools: parseTokens(allowedTools, 'Allowed tools'),
           autonomy,
-          budgetCents: Number(budgetCents),
           enabled,
+          maxCostPerOperationCents: Number(maxCostPerOperationCents),
           requiresAudit: true,
         }),
       });
@@ -1015,6 +1121,234 @@ function AutonomyControls() {
           </button>
         )}
       </section>
+      <section className="hq-card section" aria-labelledby="budget-authority-heading">
+        <div className="card-heading-row">
+          <div>
+            <EvidenceLabel>Persistent local ledger · USD cents</EvidenceLabel>
+            <h2 id="budget-authority-heading">Cumulative budget authority</h2>
+          </div>
+          <span className="global-control-status">
+            {budgetConfigurationAllowed ? 'CONFIGURATION OPEN' : 'LOCKED'}
+          </span>
+        </div>
+        <p>
+          A paid operation must atomically reserve company daily and monthly caps plus matching
+          agent, action, tool, and policy caps. Reservation, commit, release, and override evidence
+          is append-only. This screen cannot reserve budget, call a tool, or execute an action.
+        </p>
+        {!budgetConfigurationAllowed && (
+          <p className="source">
+            Confirm authoritative state and engage the global stop before changing or overriding a
+            cap.
+          </p>
+        )}
+        {budgetStatusLoading && <LoadingState>Loading cumulative budget windows…</LoadingState>}
+        {budgetError && (
+          <p className="error" role="alert">
+            {budgetError}
+          </p>
+        )}
+        {budgetMessage && (
+          <p className="success-message" role="status">
+            {budgetMessage}
+          </p>
+        )}
+        {budgetStatus && (
+          <>
+            <p className="source">
+              Generated {readableTimestamp(budgetStatus.generatedAt)} · External execution{' '}
+              {budgetStatus.externalExecutionEnabled ? 'enabled' : 'disabled'}
+            </p>
+            {budgetStatus.caps.length === 0 ? (
+              <p className="empty-state">
+                No cumulative caps are configured. Every budget reservation fails closed.
+              </p>
+            ) : (
+              <div className="card-grid section">
+                {budgetStatus.caps.map((cap) => (
+                  <article className="mini-card" key={cap.id}>
+                    <strong>
+                      {cap.scopeKind}:{cap.scopeKey} · {cap.periodKind}
+                    </strong>
+                    <dl className="data-list">
+                      <div>
+                        <dt>Available</dt>
+                        <dd>{integerFormatter.format(cap.availableCents)}¢</dd>
+                      </div>
+                      <div>
+                        <dt>Reserved</dt>
+                        <dd>{integerFormatter.format(cap.reservedCents)}¢</dd>
+                      </div>
+                      <div>
+                        <dt>Committed</dt>
+                        <dd>{integerFormatter.format(cap.committedCents)}¢</dd>
+                      </div>
+                      <div>
+                        <dt>Base + override</dt>
+                        <dd>
+                          {integerFormatter.format(cap.limitCents)}¢ +{' '}
+                          {integerFormatter.format(cap.overrideCents)}¢
+                        </dd>
+                      </div>
+                    </dl>
+                    <span className="source">
+                      {cap.enabled ? 'Enabled' : 'Disabled'} · v{cap.version} · {cap.id}
+                    </span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+        <div className="split-actions section">
+          <form className="form-stack" onSubmit={saveBudgetCap}>
+            <h3>Set a cumulative cap</h3>
+            <label htmlFor="budget-cap-scope-kind">Scope</label>
+            <select
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-cap-scope-kind"
+              value={capScopeKind}
+              onChange={(event) => {
+                const scopeKind = event.target.value as BudgetScopeKind;
+                setCapScopeKind(scopeKind);
+                if (scopeKind === 'company') setCapScopeKey('global');
+              }}
+            >
+              {['company', 'agent', 'action', 'tool', 'policy'].map((scopeKind) => (
+                <option key={scopeKind} value={scopeKind}>
+                  {scopeKind}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="budget-cap-scope-key">Exact scope key</label>
+            <input
+              disabled={!budgetConfigurationAllowed || budgetBusy || capScopeKind === 'company'}
+              id="budget-cap-scope-key"
+              pattern="[A-Za-z0-9][A-Za-z0-9._-]*"
+              required
+              value={capScopeKey}
+              onChange={(event) => setCapScopeKey(event.target.value)}
+            />
+            <label htmlFor="budget-cap-period">Period</label>
+            <select
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-cap-period"
+              value={capPeriodKind}
+              onChange={(event) => setCapPeriodKind(event.target.value as BudgetPeriodKind)}
+            >
+              <option value="day">UTC day</option>
+              <option value="month">UTC month</option>
+            </select>
+            <label htmlFor="budget-cap-limit">Limit (USD cents)</label>
+            <input
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-cap-limit"
+              inputMode="numeric"
+              max="100000000"
+              min="0"
+              required
+              type="number"
+              value={capLimitCents}
+              onChange={(event) => setCapLimitCents(event.target.value)}
+            />
+            <label className="checkbox-row" htmlFor="budget-cap-enabled">
+              <input
+                checked={capEnabled}
+                disabled={!budgetConfigurationAllowed || budgetBusy}
+                id="budget-cap-enabled"
+                type="checkbox"
+                onChange={(event) => setCapEnabled(event.target.checked)}
+              />
+              Enable this cap
+            </label>
+            <label className="checkbox-row" htmlFor="budget-cap-confirmed">
+              <input
+                checked={capConfirmed}
+                disabled={!budgetConfigurationAllowed || budgetBusy}
+                id="budget-cap-confirmed"
+                type="checkbox"
+                onChange={(event) => setCapConfirmed(event.target.checked)}
+              />
+              I am changing cumulative authority while the global stop is engaged.
+            </label>
+            <button
+              className="primary"
+              disabled={!budgetConfigurationAllowed || !capConfirmed || budgetBusy}
+              type="submit"
+            >
+              {budgetBusy ? 'Recording…' : 'Record cap only'}
+            </button>
+          </form>
+          <form className="form-stack" onSubmit={applyBudgetOverride}>
+            <h3>Founder period override</h3>
+            <label htmlFor="budget-override-cap">Exact cap</label>
+            <select
+              disabled={!budgetConfigurationAllowed || budgetBusy || !budgetStatus?.caps.length}
+              id="budget-override-cap"
+              required
+              value={overrideCapId}
+              onChange={(event) => setOverrideCapId(event.target.value)}
+            >
+              <option value="">Select a cap</option>
+              {budgetStatus?.caps.map((cap) => (
+                <option key={cap.id} value={cap.id}>
+                  {cap.scopeKind}:{cap.scopeKey}:{cap.periodKind}
+                </option>
+              ))}
+            </select>
+            <label htmlFor="budget-override-amount">Additional authority (USD cents)</label>
+            <input
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-override-amount"
+              inputMode="numeric"
+              max="100000000"
+              min="1"
+              required
+              type="number"
+              value={overrideAdditionalCents}
+              onChange={(event) => setOverrideAdditionalCents(event.target.value)}
+            />
+            <label htmlFor="budget-override-key">Stable override key</label>
+            <input
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-override-key"
+              pattern="[A-Za-z][A-Za-z0-9._-]+"
+              placeholder="founder_cap_override_2026_08_17"
+              required
+              value={overrideKey}
+              onChange={(event) => setOverrideKey(event.target.value)}
+            />
+            <label htmlFor="budget-override-reason">Reason code</label>
+            <input
+              disabled={!budgetConfigurationAllowed || budgetBusy}
+              id="budget-override-reason"
+              pattern="[A-Za-z][A-Za-z0-9._-]+"
+              required
+              value={overrideReasonCode}
+              onChange={(event) => setOverrideReasonCode(event.target.value)}
+            />
+            <label className="checkbox-row" htmlFor="budget-override-confirmed">
+              <input
+                checked={overrideConfirmed}
+                disabled={!budgetConfigurationAllowed || budgetBusy}
+                id="budget-override-confirmed"
+                type="checkbox"
+                onChange={(event) => setOverrideConfirmed(event.target.checked)}
+              />
+              I am explicitly expanding this named cap for its current UTC period.
+            </label>
+            <button
+              className="danger-action"
+              disabled={
+                !budgetConfigurationAllowed || !overrideConfirmed || !overrideCapId || budgetBusy
+              }
+              type="submit"
+            >
+              {budgetBusy ? 'Recording…' : 'Append founder override'}
+            </button>
+          </form>
+        </div>
+      </section>
       <section className="autonomy-legend section" aria-labelledby="autonomy-classes-heading">
         <h2 id="autonomy-classes-heading">Autonomy classes</h2>
         <dl className="data-list class-list">
@@ -1097,15 +1431,15 @@ function AutonomyControls() {
                 </option>
               ))}
             </select>
-            <label htmlFor="policy-budget">Maximum budget (cents)</label>
+            <label htmlFor="policy-budget">Maximum cost per operation (cents)</label>
             <input
               id="policy-budget"
               inputMode="numeric"
               max="1000000"
               min="0"
               type="number"
-              value={budgetCents}
-              onChange={(event) => setBudgetCents(event.target.value)}
+              value={maxCostPerOperationCents}
+              onChange={(event) => setMaxCostPerOperationCents(event.target.value)}
             />
             <label className="checkbox-row" htmlFor="policy-enabled">
               <input
@@ -1136,7 +1470,7 @@ function AutonomyControls() {
           <h2 id="evaluation-heading">Evaluate without executing</h2>
           <p>
             This asks the policy engine for a disposition. It never runs the action or calls the
-            selected tool.
+            selected tool, and it does not reserve cumulative budget authority.
           </p>
           <form className="form-stack" onSubmit={evaluate}>
             <label htmlFor="evaluation-action">Action token</label>
@@ -1196,7 +1530,9 @@ function AutonomyControls() {
                   <li key={reason}>{reason}</li>
                 ))}
               </ul>
-              <span className="source">Evaluation run {evaluation.runId}; no action executed.</span>
+              <span className="source">
+                Evaluation run {evaluation.runId}; no action executed and no budget reserved.
+              </span>
             </div>
           )}
         </section>

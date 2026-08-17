@@ -17,7 +17,7 @@ x-runtime-environment: &runtime-environment
 
 services:
   postgres:
-    image: postgres:17.6-bookworm
+    image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
     environment:
       POSTGRES_USER: boomerbuddy
       POSTGRES_PASSWORD: local-compose-password
@@ -55,7 +55,7 @@ services:
       migrate:
         condition: service_completed_successfully
     ports:
-      - '4000:4000'
+      - '127.0.0.1:4000:4000'
 
   worker:
     build: .

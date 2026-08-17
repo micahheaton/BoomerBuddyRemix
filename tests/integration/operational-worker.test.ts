@@ -10,7 +10,10 @@ import {
 } from '@boomerbuddy/persistence';
 import { PortableWorker, type WorkerRuntimeConfig } from '@boomerbuddy/platform';
 import { createGrowthRuntimeHandlers } from '../../apps/worker/src/growth-runtime';
-import { createOperationalHandlers } from '../../apps/worker/src/operational-handlers';
+import {
+  createOperationalHandlers,
+  seedOperationalSchedules,
+} from '../../apps/worker/src/operational-handlers';
 import { createSeededTestDatabase, fixedTestNow } from '@boomerbuddy/testkit';
 
 const workerConfig: WorkerRuntimeConfig = {
@@ -25,6 +28,32 @@ const workerConfig: WorkerRuntimeConfig = {
 };
 
 describe('operational durable worker handlers', () => {
+  it('installs no discretionary intelligence or evaluation work in production', async () => {
+    const database = await createSeededTestDatabase();
+    try {
+      const jobs = new DurableJobRepository(database);
+      const operations = new OperationalWorkRepository(database);
+      await seedOperationalSchedules({ environment: 'production', jobs, now: fixedTestNow });
+      expect(
+        Object.keys(
+          createOperationalHandlers({
+            environment: 'production',
+            jobs,
+            operations,
+            fingerprintKey: new Uint8Array(32).fill(7),
+          }),
+        ),
+      ).toEqual(['notification.dispatch']);
+      const discretionary = await database.query<{ count: number }>(
+        `SELECT count(*)::int AS count FROM durable_jobs
+         WHERE job_type IN ('intelligence.refresh', 'evaluation.run')`,
+      );
+      expect(discretionary.rows[0]?.count).toBe(0);
+    } finally {
+      await database.close();
+    }
+  });
+
   it('executes notification, intelligence, and evaluation work with durable receipts', async () => {
     const database = await createSeededTestDatabase();
     try {
@@ -66,6 +95,7 @@ describe('operational durable worker handlers', () => {
         jobs,
         new OutboxDeliveryRepository(database),
         createOperationalHandlers({
+          environment: 'test',
           jobs,
           operations,
           fingerprintKey: new Uint8Array(32).fill(7),
@@ -184,6 +214,7 @@ describe('operational durable worker handlers', () => {
         {
           ...createGrowthRuntimeHandlers({ growth, jobs, clock }),
           ...createOperationalHandlers({
+            environment: 'test',
             jobs,
             operations,
             fingerprintKey: new Uint8Array(32).fill(9),

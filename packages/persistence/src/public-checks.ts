@@ -30,6 +30,7 @@ export interface PublicCheckProtection {
 
 export interface PublicCheckContextGrant {
   readonly token: string;
+  readonly continuityProof: string;
   readonly expiresAt: Date;
   readonly remainingChecks: number;
 }
@@ -63,6 +64,8 @@ interface ContextRow extends Record<string, unknown> {
   readonly id: string;
   readonly token_hmac: string;
   readonly client_key_hmac: string;
+  readonly continuity_hmac: string | null;
+  readonly continuity_hmac_key_version: number | null;
   readonly remaining_checks: number;
   readonly state: 'active' | 'exhausted' | 'expired';
   readonly attribution_source: PublicAttributionSource;
@@ -90,6 +93,7 @@ interface ConversionRow extends Record<string, unknown> {
   readonly consent_version: string;
   readonly session_audience: 'customer' | 'mobile';
   readonly credential_hmac: string;
+  readonly semantics_version: 'single-success-retry-v1';
 }
 
 function assertProtection(protection: PublicCheckProtection): void {
@@ -129,7 +133,7 @@ function parseToken(
 }
 
 function tokenHmac(
-  purpose: 'context' | 'conversion',
+  purpose: 'context' | 'continuity' | 'conversion',
   id: string,
   secret: string,
   key: Uint8Array,
@@ -137,6 +141,21 @@ function tokenHmac(
   return createHmac('sha256', key)
     .update(lengthPrefixed(['boomerbuddy:public-check', purpose, id, secret]))
     .digest('base64url');
+}
+
+function continuityProofId(contextId: string): string {
+  return `public_continuity_${contextId.slice('public_context_'.length)}`;
+}
+
+function parseContinuityProof(
+  proof: string,
+  contextId: string,
+): { readonly id: string; readonly secret: string } {
+  const parsed = parseToken(proof, 'public_continuity');
+  if (parsed.id !== continuityProofId(contextId)) {
+    throw new DomainError('not_found', 'Public Check grant is invalid or unavailable');
+  }
+  return parsed;
 }
 
 function minuteBucket(now: Date): string {
@@ -257,6 +276,7 @@ export class PublicCheckRepository {
     this.assertClientKey(input.clientKey);
     const id = this.idFactory.next('public_context');
     const minted = mintToken(id);
+    const continuity = mintToken(continuityProofId(id));
     const expiresAt = new Date(input.now.getTime() + 10 * 60_000);
     await this.database.transaction(async (transaction) => {
       await consumeQuota(
@@ -276,8 +296,9 @@ export class PublicCheckRepository {
       await transaction.query(
         `INSERT INTO public_check_contexts(
            id, token_hmac, hmac_key_version, attribution_source, attribution_campaign,
-           remaining_checks, state, expires_at, created_at, client_key_hmac
-         ) VALUES ($1,$2,$3,$4,$5,3,'active',$6,$7,$8)`,
+           remaining_checks, state, expires_at, created_at, client_key_hmac,
+           continuity_hmac, continuity_hmac_key_version
+         ) VALUES ($1,$2,$3,$4,$5,3,'active',$6,$7,$8,$9,$10)`,
         [
           id,
           tokenHmac('context', id, minted.secret, this.protection.hmacKey),
@@ -287,15 +308,23 @@ export class PublicCheckRepository {
           expiresAt.toISOString(),
           input.now.toISOString(),
           input.clientKey,
+          tokenHmac('continuity', id, continuity.secret, this.protection.hmacKey),
+          this.protection.hmacKeyVersion,
         ],
       );
       await incrementAttribution(transaction, input.attribution, 'context_issued', input.now);
     });
-    return { token: minted.token, expiresAt, remainingChecks: 3 };
+    return {
+      token: minted.token,
+      continuityProof: continuity.token,
+      expiresAt,
+      remainingChecks: 3,
+    };
   }
 
   async consumeContext(input: {
     readonly token: string;
+    readonly continuityProof?: string;
     readonly clientKey: string;
     readonly now: Date;
   }): Promise<PublicCheckInteraction> {
@@ -303,7 +332,8 @@ export class PublicCheckRepository {
     const parsed = parseToken(input.token, 'public_context');
     return this.database.transaction(async (transaction) => {
       const selected = await transaction.query<ContextRow>(
-        `SELECT id, token_hmac, client_key_hmac, remaining_checks, state, attribution_source,
+        `SELECT id, token_hmac, client_key_hmac, continuity_hmac,
+                continuity_hmac_key_version, remaining_checks, state, attribution_source,
                 attribution_campaign, expires_at
          FROM public_check_contexts WHERE id = $1 FOR UPDATE`,
         [parsed.id],
@@ -314,9 +344,28 @@ export class PublicCheckRepository {
         !constantTimeEqual(
           row.token_hmac,
           tokenHmac('context', parsed.id, parsed.secret, this.protection.hmacKey),
-        ) ||
-        !constantTimeEqual(row.client_key_hmac, input.clientKey)
+        )
       ) {
+        throw new DomainError('not_found', 'Public Check grant is invalid or unavailable');
+      }
+      const networkMatches = constantTimeEqual(row.client_key_hmac, input.clientKey);
+      let continuityMatches = false;
+      if (row.continuity_hmac !== null && input.continuityProof !== undefined) {
+        const parsedContinuity = parseContinuityProof(input.continuityProof, row.id);
+        continuityMatches = constantTimeEqual(
+          row.continuity_hmac,
+          tokenHmac('continuity', row.id, parsedContinuity.secret, this.protection.hmacKey),
+        );
+      }
+      // Pre-0014 rows have no continuity HMAC and remain strictly network-bound. For new rows,
+      // omitting the proof retains same-network compatibility; supplying a proof never falls back.
+      const continuityAuthorized =
+        row.continuity_hmac === null
+          ? networkMatches
+          : input.continuityProof === undefined
+            ? networkMatches
+            : continuityMatches;
+      if (!continuityAuthorized) {
         throw new DomainError('not_found', 'Public Check grant is invalid or unavailable');
       }
       if (row.state !== 'active' || asDate(row.expires_at, 'public context expiry') <= input.now) {
@@ -506,7 +555,7 @@ export class PublicCheckRepository {
       const row = selected.rows[0];
       const conversionResult = await transaction.query<ConversionRow>(
         `SELECT result_id, actor_person_id, household_id, analysis_id, save_consent,
-                consent_version, session_audience, credential_hmac
+                consent_version, session_audience, credential_hmac, semantics_version
          FROM public_check_conversions WHERE result_id = $1`,
         [input.resultId],
       );
@@ -518,6 +567,7 @@ export class PublicCheckRepository {
           conversion.household_id !== input.householdId ||
           conversion.save_consent !== input.saveConsent ||
           conversion.consent_version !== input.consentVersion ||
+          conversion.semantics_version !== 'single-success-retry-v1' ||
           !constantTimeEqual(conversion.credential_hmac, expected)
         ) {
           throw new DomainError('not_found', 'Public Check grant is invalid or unavailable');
@@ -591,8 +641,8 @@ export class PublicCheckRepository {
            result_id, actor_person_id, household_id, context_id,
            attribution_source, attribution_campaign, artifact_id, analysis_id,
            save_consent, consent_version, session_audience, correlation_id,
-           credential_hmac, hmac_key_version, converted_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11,$12,$13,$14)`,
+           credential_hmac, hmac_key_version, converted_at, semantics_version
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11,$12,$13,$14,$15)`,
         [
           row.id,
           input.actorPersonId,
@@ -608,6 +658,7 @@ export class PublicCheckRepository {
           expected,
           this.protection.hmacKeyVersion,
           input.now.toISOString(),
+          'single-success-retry-v1',
         ],
       );
       await writeAuditAndOutbox(

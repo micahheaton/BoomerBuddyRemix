@@ -33,6 +33,7 @@ export function registerPublicCheckRoutes(
       createPublicCheckContextResponseSchema.parse({
         context: {
           token: grant.token,
+          continuityProof: grant.continuityProof,
           expiresAt: grant.expiresAt.toISOString(),
           remainingChecks: grant.remainingChecks,
         },
@@ -48,6 +49,7 @@ export function registerPublicCheckRoutes(
     try {
       const interaction = await publicChecks.consumeContext({
         token: body.contextToken,
+        ...(body.continuityProof === undefined ? {} : { continuityProof: body.continuityProof }),
         clientKey,
         now,
       });
@@ -84,6 +86,9 @@ export function registerPublicCheckRoutes(
             conversionGrant: {
               token: grant.conversionToken,
               expiresAt: grant.expiresAt.toISOString(),
+              semanticsVersion: 'single-success-retry-v1',
+              singleSuccessfulConversion: true,
+              retryableWithSameCredentialOwnerAndConsent: true,
               oneTime: true,
             },
           },

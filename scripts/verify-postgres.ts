@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import {
+  AutomationBudgetRepository,
+  BusinessOsRepository,
+  CommerceRuntimeRepository,
   createPostgresDatabase,
   DurableJobRepository,
+  FounderProvisioningRepository,
   OutboxDeliveryRepository,
   runMigrations,
 } from '@boomerbuddy/persistence';
@@ -58,6 +62,245 @@ try {
      ON CONFLICT (id) DO NOTHING`,
     [actorPersonId, 'PostgreSQL CI operator', base.toISOString()],
   );
+  const stripeHouseholdId = `household-postgres-stripe-${suffix}`;
+  await database.query(`INSERT INTO households(id, name, created_at) VALUES ($1,$2,$3)`, [
+    stripeHouseholdId,
+    'PostgreSQL Stripe concurrency fixture',
+    base.toISOString(),
+  ]);
+  await database.query(
+    `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+     VALUES ($1,$2,'internal','local_fixture',$3)
+     ON CONFLICT (id) DO NOTHING`,
+    [`organization-postgres-ci-${suffix}`, 'PostgreSQL CI internal', base.toISOString()],
+  );
+  await database.query(
+    `INSERT INTO employee_assignments(id, person_id, organization_id, role, status, created_at)
+     VALUES ($1,$2,$3,'hq_owner','active',$4)
+     ON CONFLICT (id) DO NOTHING`,
+    [
+      `assignment-postgres-ci-${suffix}`,
+      actorPersonId,
+      `organization-postgres-ci-${suffix}`,
+      base.toISOString(),
+    ],
+  );
+
+  const businessOs = new BusinessOsRepository(database, undefined, actorPersonId);
+  const automationBudgets = new AutomationBudgetRepository(database, undefined, actorPersonId);
+  const founderProvisioning = new FounderProvisioningRepository(database, actorPersonId);
+  const commerceRuntime = new CommerceRuntimeRepository(database);
+  const stripeDispatchInput = {
+    householdId: stripeHouseholdId,
+    action: 'portal' as const,
+    environment: 'test' as const,
+    serverOperationId: `portal-postgres-${suffix}`,
+    providerIdempotencyKey: `bb:test:portal:postgres-${suffix}`,
+    actorPersonId,
+    providerCustomerId: `cus_postgres_${suffix.replaceAll('-', '')}`,
+    providerConfigurationId: `bpc_postgres_${suffix.replaceAll('-', '')}`,
+    returnUrl: 'https://customer.boomerbuddy.test/member/billing',
+    now: base,
+  };
+  const initialStripeClaims = await Promise.all([
+    commerceRuntime.beginStripeSessionOperation(stripeDispatchInput),
+    commerceRuntime.beginStripeSessionOperation(stripeDispatchInput),
+  ]);
+  invariant(
+    initialStripeClaims.filter((claim) => claim.shouldDispatch).length === 1 &&
+      initialStripeClaims.every((claim) => claim.attempt === 1),
+    'Concurrent Stripe dispatch creation did not serialize to one provider attempt',
+  );
+  const stripeRetryAt = at(2 * 60_000 + 1);
+  const retryStripeClaims = await Promise.all([
+    commerceRuntime.beginStripeSessionOperation({
+      ...stripeDispatchInput,
+      allowDueRetry: true,
+      now: stripeRetryAt,
+    }),
+    commerceRuntime.beginStripeSessionOperation({
+      ...stripeDispatchInput,
+      allowDueRetry: true,
+      now: stripeRetryAt,
+    }),
+  ]);
+  invariant(
+    retryStripeClaims.filter((claim) => claim.shouldDispatch).length === 1 &&
+      retryStripeClaims.every((claim) => claim.attempt === 2),
+    'Concurrent stale Stripe lease recovery did not serialize to one same-key retry',
+  );
+  const stripeAttemptLedger = await database.query<
+    {
+      readonly attempt_count: number;
+      readonly dispatch_started_count: number;
+      readonly distinct_provider_keys: number;
+      readonly lease_expired_count: number;
+    } & Record<string, unknown>
+  >(
+    `SELECT operation.attempt_count,
+            count(*) FILTER (WHERE attempt.event_kind = 'dispatch_started')::int
+              AS dispatch_started_count,
+            count(*) FILTER (WHERE attempt.event_kind = 'lease_expired')::int
+              AS lease_expired_count,
+            count(DISTINCT attempt.provider_idempotency_key)::int AS distinct_provider_keys
+     FROM commerce_stripe_session_operations operation
+     JOIN commerce_stripe_session_operation_attempts attempt ON attempt.operation_id = operation.id
+     WHERE operation.household_id = $1 AND operation.server_operation_id = $2
+     GROUP BY operation.attempt_count`,
+    [stripeHouseholdId, stripeDispatchInput.serverOperationId],
+  );
+  invariant(
+    stripeAttemptLedger.rows[0]?.attempt_count === 2 &&
+      stripeAttemptLedger.rows[0]?.dispatch_started_count === 2 &&
+      stripeAttemptLedger.rows[0]?.lease_expired_count === 1 &&
+      stripeAttemptLedger.rows[0]?.distinct_provider_keys === 1,
+    'Stripe dispatch attempt ledger lost same-key concurrency evidence',
+  );
+  const provisioningInputs = [0, 1].map((index) => ({
+    access: {
+      actorPersonId,
+      correlationId: `postgres-provisioning-${index}-${suffix}`,
+    },
+    workstreamKey: 'company_git' as const,
+    operationKey: `provisioning:company_git:${index === 0 ? suffix : randomUUID()}`,
+    toStatus: 'founder_in_progress' as const,
+    evidence: {
+      tier: 'founder_report' as const,
+      kind: 'setup_started' as const,
+      result: 'reported' as const,
+      observedAt: base,
+    },
+  }));
+  const competingProvisioningTransitions = await Promise.allSettled(
+    provisioningInputs.map((input) => founderProvisioning.transition(input)),
+  );
+  const successfulProvisioningIndex = competingProvisioningTransitions.findIndex(
+    ({ status }) => status === 'fulfilled',
+  );
+  invariant(
+    successfulProvisioningIndex >= 0 &&
+      competingProvisioningTransitions.filter(({ status }) => status === 'fulfilled').length === 1,
+    'Concurrent founder provisioning transitions did not serialize to exactly one commit',
+  );
+  const successfulProvisioningInput = provisioningInputs[successfulProvisioningIndex];
+  invariant(successfulProvisioningInput !== undefined, 'Successful provisioning input is missing');
+  const provisioningRetry = await founderProvisioning.transition(successfulProvisioningInput);
+  invariant(
+    provisioningRetry.reused && provisioningRetry.externalActionExecuted === false,
+    'Founder provisioning exact retry was not idempotent and side-effect-free',
+  );
+  const provisioningState = await database.query<
+    {
+      readonly evidence_count: number;
+      readonly operation_count: number;
+      readonly status_count: number;
+    } & Record<string, unknown>
+  >(`
+    SELECT
+      (SELECT count(*)::int FROM founder_provisioning_evidence
+        WHERE workstream_key = 'company_git') AS evidence_count,
+      (SELECT count(*)::int FROM founder_provisioning_operations
+        WHERE workstream_key = 'company_git') AS operation_count,
+      (SELECT count(*)::int FROM founder_provisioning_status_events
+        WHERE workstream_key = 'company_git') AS status_count
+  `);
+  invariant(
+    provisioningState.rows[0]?.evidence_count === 2 &&
+      provisioningState.rows[0]?.operation_count === 1 &&
+      provisioningState.rows[0]?.status_count === 2,
+    'Founder provisioning concurrency left duplicate or orphan ledger rows',
+  );
+  const budgetPolicyId = await businessOs.putAutomationPolicy({
+    approvedByPersonId: actorPersonId,
+    correlationId: `postgres-budget-policy-${suffix}`,
+    now: base,
+    policy: {
+      action: 'create_internal_task',
+      allowedDataClasses: ['public'],
+      allowedTools: ['hq'],
+      autonomy: 'auto',
+      enabled: true,
+      maxCostPerOperationCents: 10,
+      requiresAudit: true,
+    },
+  });
+  const budgetScopes = [
+    { periodKind: 'day' as const, scopeKind: 'company' as const, scopeKey: 'global' },
+    { periodKind: 'month' as const, scopeKind: 'company' as const, scopeKey: 'global' },
+    {
+      periodKind: 'day' as const,
+      scopeKind: 'agent' as const,
+      scopeKey: 'postgres_budget_agent',
+    },
+    {
+      periodKind: 'day' as const,
+      scopeKind: 'action' as const,
+      scopeKey: 'create_internal_task',
+    },
+    { periodKind: 'day' as const, scopeKind: 'tool' as const, scopeKey: 'hq' },
+    {
+      periodKind: 'month' as const,
+      scopeKind: 'policy' as const,
+      scopeKey: budgetPolicyId,
+    },
+  ];
+  for (const [index, cap] of budgetScopes.entries()) {
+    await automationBudgets.putCap({
+      approvedByPersonId: actorPersonId,
+      context: {
+        actorPersonId,
+        audience: 'hq',
+        correlationId: `postgres-budget-cap-${index}-${suffix}`,
+        now: base,
+      },
+      enabled: true,
+      limitCents: 10,
+      ...cap,
+    });
+  }
+  await businessOs.setGlobalAutomationKillSwitch({
+    correlationId: `postgres-budget-clear-${suffix}`,
+    killSwitch: false,
+    now: base,
+    updatedByPersonId: actorPersonId,
+  });
+  const competingBudgetReservations = await Promise.all(
+    Array.from({ length: 25 }, (_, index) =>
+      automationBudgets.reserve({
+        agentKey: 'postgres_budget_agent',
+        context: {
+          actorPersonId,
+          audience: 'hq',
+          correlationId: `postgres-budget-reserve-${index}-${suffix}`,
+          now: base,
+        },
+        operationKey: `postgres-budget-operation-${index}-${suffix}`,
+        request: {
+          action: 'create_internal_task',
+          dataClasses: ['public'],
+          estimatedCostCents: 1,
+          tool: 'hq',
+        },
+        ttlMs: 60_000,
+      }),
+    ),
+  );
+  invariant(
+    competingBudgetReservations.filter((reservation) => reservation.allowed).length === 10,
+    'Concurrent automation budget reservations exceeded or underused the cumulative cap',
+  );
+  invariant(
+    (await automationBudgets.status(base)).every(
+      (cap) => cap.reservedCents === 10 && cap.availableCents === 0,
+    ),
+    'Overlapping automation budget windows did not converge on the same atomic reservation total',
+  );
+  await businessOs.setGlobalAutomationKillSwitch({
+    correlationId: `postgres-budget-engage-${suffix}`,
+    killSwitch: true,
+    now: at(1),
+    updatedByPersonId: actorPersonId,
+  });
 
   const competingType = type('competing');
   const competing = await jobs.enqueue({
@@ -715,7 +958,7 @@ try {
   );
 
   process.stdout.write(
-    'Real PostgreSQL migrations, locking, lease/reclaim/heartbeat ownership, duplicate receipts, ordering, retry/dead-letter/audited replay, shutdown, outbox, and reconciliation-intent persistence passed.\n',
+    'Real PostgreSQL migrations, founder provisioning, budget and Stripe dispatch concurrency, locking, lease/reclaim/heartbeat ownership, duplicate receipts, ordering, retry/dead-letter/audited replay, shutdown, outbox, and reconciliation-intent persistence passed.\n',
   );
 } finally {
   await database.close();

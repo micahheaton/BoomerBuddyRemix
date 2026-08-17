@@ -187,6 +187,28 @@ export default function MemberHomePage() {
               <p className="meta">History is unavailable in this household scope.</p>
             )}
           </section>
+          {process.env.NODE_ENV !== 'production' && selectedHouseholdId ? (
+            <section className="card">
+              <span className="dev-pill">Local text-only path</span>
+              <h2>Share feedback</h2>
+              <p>
+                Record a product observation for this selected household. Media, providers, and
+                outbound follow-up are disabled.
+              </p>
+              <Link href="/member/feedback">Open selected-household feedback</Link>
+            </section>
+          ) : null}
+          {process.env.NODE_ENV !== 'production' ? (
+            <section className="card">
+              <span className="dev-pill">Provider-free local simulation</span>
+              <h2>Messaging consent laboratory</h2>
+              <p>
+                Record a fictional test destination and review separate purpose choices. No SMS
+                provider, contact upload, or delivery is available.
+              </p>
+              <Link href="/member/messaging">Open messaging consent laboratory</Link>
+            </section>
+          ) : null}
           {canUseFamily ? (
             <section className="card">
               <h2>Need another person?</h2>
@@ -194,12 +216,32 @@ export default function MemberHomePage() {
               <Link href="/member/family">Open Family</Link>
             </section>
           ) : null}
+          {selectedScope?.isBillingManager ? (
+            <section className="card">
+              <h2>Billing</h2>
+              <p>
+                Review the founder-gated Founding Household offer and its payment-evidence state.
+              </p>
+              <Link href="/member/billing">Open billing</Link>
+            </section>
+          ) : null}
+          {process.env.NODE_ENV !== 'production' && selectedScope?.isAdministrator ? (
+            <section className="card">
+              <span className="dev-pill">Local no-card path</span>
+              <h2>Founding Household</h2>
+              <p>
+                Review a founder-issued one-time local credential and finite sponsored beta terms.
+                No payment or message is sent.
+              </p>
+              <Link href="/member/founding-household">Open Founding Household review</Link>
+            </section>
+          ) : null}
           <section className="card" data-testid="local-access-summary">
             <span className="dev-pill">Local access hypothesis</span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
             <p>
-              This development-only access record is a product hypothesis. There is no billing,
-              purchase, upgrade, or charge in this build.
+              This access record is a product hypothesis. Billing initiation is a separate,
+              founder-gated flow and may be unavailable for this household.
             </p>
             {!selectedScope?.isBillingManager ? (
               <p className="meta">

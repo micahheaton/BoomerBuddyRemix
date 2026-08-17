@@ -168,4 +168,3 @@ Require measured support capacity, automated but bounded lifecycle operations, m
 ## Current disposition
 
 The plan is ready; its external entry criteria are not. The repository has local deterministic evidence and draft runbooks, but no managed production identity/KMS, real PostgreSQL restore, deployed Replit candidate, authentic Stripe test journey, Twilio test journey, or real Founding Household evidence. The calendar therefore remains `not_started`.
-

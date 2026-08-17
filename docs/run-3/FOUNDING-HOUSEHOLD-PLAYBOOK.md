@@ -162,4 +162,3 @@ At benefit expiration or withdrawal:
 ## Evidence classification
 
 This document is `operational_design`. Current repository-local synthetic journeys are `local_simulation`. A founder-invited participant would be `real_human_closed_beta` only after identity, consent, deployment, support, and provisioning evidence exists. No real household was recruited, contacted, enrolled, observed, charged, or measured by creating this playbook.
-

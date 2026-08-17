@@ -19,6 +19,7 @@ jobs:
           node-version: 22.13.1
           cache: npm
       - run: npm ci
+      - run: npm run verify:secrets
       - run: node scripts/verify-portability.mjs
       - run: npm run format:check
       - run: npm run lint

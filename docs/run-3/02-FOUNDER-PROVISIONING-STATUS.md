@@ -27,6 +27,7 @@ Update `Status`, IDs that are safe to record, and notes as the founder completes
 | Expo/EAS | Native builds | `unknown` |  | Provision only as needed after Apple/Google path is ready |
 | Cloudflare or DNS/WAF provider | DNS + edge protection | `unknown` |  | Confirm/create founder-controlled account |
 | Apollo/enrichment | B2B enrichment | `disabled_for_real_use` | Fixtures only in Run 2 | No real outreach/enrichment without separate approval |
+| Dependency/security inventory | Current advisory, SBOM, license, provenance, and image evidence | `blocked` | Fresh registry audit was not authorized in the current execution environment; local offline/cache evidence is not fresh | Run the documented audit/SBOM gate in company-controlled CI and retain a redacted adjudication; do not paste registry credentials or private reports into prompts/source |
 | Accounting/bookkeeping | Financial system of record | `outside_repo` |  | Keep external; do not rebuild in HQ |
 | Legal/privacy review | Terms/privacy/marketing/SMS | `pending_professional` |  | Run 3 should prepare review packet; founder retains qualified reviewer |
 

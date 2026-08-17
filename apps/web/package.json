@@ -2,6 +2,7 @@
   "name": "@boomerbuddy/web",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "next dev -p 3000",
     "dev:e2e": "cross-env NEXT_PUBLIC_API_URL=http://127.0.0.1:4100 next dev -p 3100",

@@ -458,11 +458,18 @@ async function loadHouseholdEntitlements(
            WHERE f.household_id = s.household_id AND f.subscription_id = s.id
              AND f.environment = $3 AND f.state = 'active' AND f.revoked_at IS NULL
              AND f.starts_at <= $2 AND f.ends_at > $2
-             AND fb.evidence_tier = 'local_simulation'
+             AND fb.evidence_tier = CASE
+               WHEN $3 = 'production' THEN 'live_production'
+               ELSE 'local_simulation'
+             END
              AND sp.state = 'active' AND sp.starts_at <= $2
              AND (sp.ends_at IS NULL OR sp.ends_at > $2)
              AND (sp.ends_at IS NULL OR sp.ends_at >= f.ends_at)
-             AND o.kind = 'sponsor' AND o.verification_state = 'local_fixture'
+             AND o.kind = 'sponsor'
+             AND o.verification_state = CASE
+               WHEN $3 = 'production' THEN 'verified'
+               ELSE 'local_fixture'
+             END
               AND fpv.state = 'active'
               AND s.payer_person_id IS NULL AND s.source = 'sponsor'
               AND s.source_verified = true
@@ -609,12 +616,18 @@ async function loadHouseholdEntitlements(
               AND founding.environment = $2
               AND founding.state = 'active' AND founding.revoked_at IS NULL
               AND founding.starts_at <= $3 AND founding.ends_at > $3
-              AND backing.evidence_tier = 'local_simulation'
+              AND backing.evidence_tier = CASE
+                WHEN $2 = 'production' THEN 'live_production'
+                ELSE 'local_simulation'
+              END
               AND sponsorship.state = 'active' AND sponsorship.starts_at <= $3
               AND (sponsorship.ends_at IS NULL OR sponsorship.ends_at > $3)
               AND (sponsorship.ends_at IS NULL OR sponsorship.ends_at >= founding.ends_at)
               AND organization.kind = 'sponsor'
-              AND organization.verification_state = 'local_fixture'
+              AND organization.verification_state = CASE
+                WHEN $2 = 'production' THEN 'verified'
+                ELSE 'local_fixture'
+              END
               AND plan.state = 'active'
               AND subscription.payer_person_id IS NULL
               AND subscription.source = 'sponsor'

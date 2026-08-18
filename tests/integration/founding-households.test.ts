@@ -88,15 +88,14 @@ describe('Founding Household local no-card API', () => {
       credentialState: 'created_credential_unavailable',
       reused: true,
     });
-    expect(invitationReplay.json()).not.toHaveProperty('localInvitationCredential');
+    expect(invitationReplay.json()).not.toHaveProperty('invitationCredential');
     expectPrivateNoStore(policy.headers);
     expectPrivateNoStore(invitation.headers);
     expectPrivateNoStore(invitationReplay.headers);
     return {
       founderHeaders: headers,
       invitationId: invitation.json<{ invitation: { id: string } }>().invitation.id,
-      credential: invitation.json<{ localInvitationCredential: string }>()
-        .localInvitationCredential,
+      credential: invitation.json<{ invitationCredential: string }>().invitationCredential,
     };
   }
 
@@ -150,10 +149,7 @@ describe('Founding Household local no-card API', () => {
       ...browserHeaders(bob.cookie as string),
       'x-bb-household-id': 'household-harbor',
     };
-    const requestBody = {
-      householdId: 'household-harbor',
-      localInvitationCredential: issued.credential,
-    };
+    const requestBody = { invitationCredential: issued.credential };
 
     const preview = await harness.app.inject({
       method: 'POST',
@@ -271,10 +267,7 @@ describe('Founding Household local no-card API', () => {
       method: 'POST',
       url: `/v1/founding-households/invitations/${issued.invitationId}/preview`,
       headers: bobHeaders,
-      payload: {
-        householdId: 'household-harbor',
-        localInvitationCredential: issued.credential,
-      },
+      payload: { invitationCredential: issued.credential },
     });
     const previewBody = foundingHouseholdInvitationPreviewResponseSchema.parse(
       previewResponse.json(),
@@ -283,19 +276,18 @@ describe('Founding Household local no-card API', () => {
     const crossHousehold = await harness.app.inject({
       method: 'POST',
       url: `/v1/founding-households/invitations/${issued.invitationId}/preview`,
-      headers: bobHeaders,
-      payload: {
-        householdId: 'household-sunrise',
-        localInvitationCredential: issued.credential,
+      headers: {
+        ...browserHeaders(bob.cookie as string),
+        'x-bb-household-id': 'household-sunrise',
       },
+      payload: { invitationCredential: issued.credential },
     });
     const extraConsent = await harness.app.inject({
       method: 'POST',
       url: `/v1/founding-households/invitations/${issued.invitationId}/accept`,
       headers: { ...bobHeaders, 'idempotency-key': operation('accept', 3) },
       payload: {
-        householdId: 'household-harbor',
-        localInvitationCredential: issued.credential,
+        invitationCredential: issued.credential,
         serviceConsentVersion: foundingHouseholdServiceConsentVersion,
         serviceDisclosureDigest: previewBody.serviceDisclosureDigest,
         servicePolicyDigest: previewBody.servicePolicyDigest,
@@ -313,8 +305,7 @@ describe('Founding Household local no-card API', () => {
       url: `/v1/founding-households/invitations/${issued.invitationId}/accept`,
       headers: bobHeaders,
       payload: {
-        householdId: 'household-harbor',
-        localInvitationCredential: issued.credential,
+        invitationCredential: issued.credential,
         serviceConsentVersion: foundingHouseholdServiceConsentVersion,
         serviceDisclosureDigest: previewBody.serviceDisclosureDigest,
         servicePolicyDigest: previewBody.servicePolicyDigest,
@@ -332,10 +323,7 @@ describe('Founding Household local no-card API', () => {
         ...browserHeaders(terry.cookie as string),
         'x-bb-household-id': 'household-sunrise',
       },
-      payload: {
-        householdId: 'household-sunrise',
-        localInvitationCredential: issued.credential,
-      },
+      payload: { invitationCredential: issued.credential },
     });
     const enrollments = await harness.database.query(
       'SELECT 1 FROM founding_household_enrollments',
@@ -365,10 +353,7 @@ describe('Founding Household local no-card API', () => {
       method: 'POST',
       url: `/v1/founding-households/invitations/${issued.invitationId}/preview`,
       headers: customerHeaders,
-      payload: {
-        householdId: 'household-harbor',
-        localInvitationCredential: issued.credential,
-      },
+      payload: { invitationCredential: issued.credential },
     });
     const previewBody = foundingHouseholdInvitationPreviewResponseSchema.parse(
       previewResponse.json(),
@@ -378,8 +363,7 @@ describe('Founding Household local no-card API', () => {
       url: `/v1/founding-households/invitations/${issued.invitationId}/accept`,
       headers: { ...customerHeaders, 'idempotency-key': operation('accept', 3) },
       payload: {
-        householdId: 'household-harbor',
-        localInvitationCredential: issued.credential,
+        invitationCredential: issued.credential,
         serviceConsentVersion: foundingHouseholdServiceConsentVersion,
         serviceDisclosureDigest: previewBody.serviceDisclosureDigest,
         servicePolicyDigest: previewBody.servicePolicyDigest,

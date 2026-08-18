@@ -61,8 +61,12 @@ if (
     'BB_CONTINUITY_GIT_URL must identify a non-Replit, non-loopback external Git remote URL without embedded credentials',
   );
 }
-if (!/^run3-local-candidate-[0-9a-f]{12}$/u.test(candidateRef ?? '')) {
-  throw new TypeError('BB_CONTINUITY_GIT_REF must be an immutable Run 3 candidate tag');
+if (
+  !/^(?:run3-local-candidate|run3-1-replit-founding-household)-[0-9a-f]{12}$/u.test(
+    candidateRef ?? '',
+  )
+) {
+  throw new TypeError('BB_CONTINUITY_GIT_REF must be an immutable Run 3 or Run 3.1 candidate tag');
 }
 if (!/^[0-9a-f]{40}$/u.test(expectedCommit ?? '')) {
   throw new TypeError('BB_CONTINUITY_GIT_COMMIT must be the exact 40-character commit for the tag');

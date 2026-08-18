@@ -12,11 +12,13 @@ import {
   foundingHouseholdCohortKey,
   foundingHouseholdEnvironmentEvidenceTiers,
   foundingHouseholdEnvironments,
-  foundingHouseholdEvidenceTier,
+  foundingHouseholdEvidenceTierForEnvironment,
   foundingHouseholdFunnelEvidenceSources,
   foundingHouseholdFunnelStages,
   foundingHouseholdInvitationEndsAt,
   foundingHouseholdPolicyBounds,
+  foundingHouseholdProductionMaxHouseholds,
+  foundingHouseholdProductionServiceConsentVersion,
   foundingHouseholdProtectedEnrollmentConsentVersion,
   foundingHouseholdServiceConsentVersion,
   type Audience,
@@ -24,14 +26,21 @@ import {
   type FoundingHouseholdBenefitKey,
   type FoundingHouseholdEnrollmentState,
   type FoundingHouseholdEnvironment,
+  type FoundingHouseholdEvidenceTier,
   type FoundingHouseholdFunnelEvidenceSource,
   type FoundingHouseholdFunnelStage,
   type FoundingHouseholdInvitationState,
   type FoundingHouseholdPolicyState,
+  type FoundingHouseholdServiceConsentVersion,
 } from '@boomerbuddy/domain';
 import { constantTimeEqual, fingerprintMinimized } from '@boomerbuddy/security';
 
-import { appendConsentEvidence, identityEvidenceForPerson, type ConsentDocuments } from './consent';
+import {
+  appendConsentEvidence,
+  identityEvidenceForPerson,
+  type ConsentDocuments,
+  type ConsentIdentityEvidence,
+} from './consent';
 import type { Database, SqlExecutor } from './database';
 import {
   protectedEnrollment,
@@ -41,21 +50,37 @@ import {
 import { writeAuditAndOutbox } from './events';
 import { asDate, randomIdFactory, type IdFactory } from './values';
 
-const definitionVersion = 1 as const;
+const definitionVersion = 2 as const;
 const localEnvironment = 'local' as const;
 const operationKeyPattern =
   /^founding-(policy|invite|accept|invite-revoke|offboard):[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const boundedIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:/-]{1,199}$/u;
 const operationResultIdentifier = /^[A-Za-z0-9][A-Za-z0-9._/-]{1,199}$/u;
+const expiredInvitationCredential = Symbol('expired Founding Household invitation credential');
+
+export const foundingHouseholdProductionSponsorOrganizationId =
+  'organization-founding-household-production-v1' as const;
+export const foundingHouseholdProductionSponsorOrganizationName =
+  'BoomerBuddy Founding Household Sponsor' as const;
+export const foundingHouseholdProductionSponsorshipId =
+  'sponsorship-founding-household-production-v1' as const;
 
 export const foundingHouseholdServiceDisclosureText =
   'This finite Founding Household beta is sponsored by BoomerBuddy and requires no card. It provides the selected code-owned benefit only until the displayed effective end. To operate this bounded cohort during effective access, BoomerBuddy records only whether an active local account existed before enrollment, orientation became ready, a Check completed without its submitted content or result, an active Trusted Circle relationship was established without message or contact contents, an authenticated minimized feedback intake completed without treating it as useful, and a later authenticated session occurred. The founder console sees the stable internal household identifier, effective sponsor-access state, and these yes-or-no milestones, but not precise event times, Check or feedback content, message or contact contents. These operational facts are retained with the append-only enrollment history under the service retention policy; they are not research, marketing, testimonial, referral, follow-up, or media consent, and they are not evidence of willingness to pay. The accepting administrator may withdraw service consent at any time, including after founder offboarding.';
 export const foundingHouseholdServicePolicyText =
   'Founding Household service consent is purpose-limited to delivering and measuring the finite sponsored beta with the bounded operational facts named in the disclosure. Attribution stops at the earliest of withdrawal, founder offboarding, sponsor access end, or program end. Existing consent, enrollment, audit, and bounded operational event history remains append-only under the applicable service retention policy; submitted Check content is excluded, and feedback content has its own retention and withdrawal controls. Research participation, content reuse, marketing, follow-up, referral, testimonial, and media uses require separate explicit consent. Ending this cohort revokes only its sponsor chain and must preserve or rebind unrelated effective entitlements.';
+export const foundingHouseholdProductionServiceDisclosureText =
+  'This finite Founding Household beta is sponsored by BoomerBuddy and requires no card. It provides the selected code-owned benefit only until the displayed effective end. To operate this bounded cohort during effective access, BoomerBuddy records only whether an active authenticated account existed before enrollment, orientation became ready, a Check completed without its submitted content or result, an active Trusted Circle relationship was established without message or contact contents, an authenticated minimized feedback intake completed without treating it as useful, and a later authenticated session occurred. The founder console sees the stable internal household identifier, effective sponsor-access state, and these yes-or-no milestones, but not precise event times, Check or feedback content, message or contact contents. These operational facts are retained with the append-only enrollment history under the service retention policy; they are not research, marketing, testimonial, referral, follow-up, or media consent, and they are not evidence of willingness to pay. The accepting administrator may withdraw service consent at any time, including after founder offboarding.';
+export const foundingHouseholdProductionServicePolicyText =
+  'Founding Household service consent is purpose-limited to delivering and measuring the finite sponsored beta with the bounded operational facts named in the disclosure. Attribution stops at the earliest of withdrawal, founder offboarding, sponsor access end, or program end. Existing consent, enrollment, audit, and bounded operational event history remains append-only under the applicable service retention policy; submitted Check content is excluded, and feedback content has its own retention and withdrawal controls. Research participation, content reuse, marketing, follow-up, referral, testimonial, and media uses require separate explicit consent. Ending this cohort revokes only its sponsor chain and must preserve or rebind unrelated effective entitlements.';
 export const foundingHouseholdProtectedDisclosureText =
   'The accepting household administrator separately chooses protected-adult self-enrollment so they can use Check, orientation, history, and Family features within an effective entitlement. This consent can be withdrawn independently.';
 export const foundingHouseholdProtectedPolicyText =
   'Protected-adult enrollment is self-consented, versioned, append-only, and independent of payer, administrator, research, marketing, and Founding Household sponsorship authority.';
+
+/** Immutable digest written by migration 0019 for the original Run 3 definition. */
+export const foundingHouseholdLegacyDefinitionDigest =
+  'qGzxlIBWaFTEWjyyMMcMyO9MlT4glrg1Ue2IagISQZ0' as const;
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
@@ -67,6 +92,33 @@ export const foundingHouseholdServiceDocuments: ConsentDocuments = Object.freeze
   policyVersion: `${foundingHouseholdServiceConsentVersion}-policy`,
   policyDigest: sha256Hex(foundingHouseholdServicePolicyText),
 });
+
+export const foundingHouseholdProductionServiceDocuments: ConsentDocuments = Object.freeze({
+  disclosureVersion: foundingHouseholdProductionServiceConsentVersion,
+  disclosureDigest: sha256Hex(foundingHouseholdProductionServiceDisclosureText),
+  policyVersion: `${foundingHouseholdProductionServiceConsentVersion}-policy`,
+  policyDigest: sha256Hex(foundingHouseholdProductionServicePolicyText),
+});
+
+export function foundingHouseholdServiceConsentForEnvironment(
+  environment: FoundingHouseholdEnvironment,
+): {
+  readonly disclosureText: string;
+  readonly policyText: string;
+  readonly documents: ConsentDocuments;
+} {
+  return environment === 'local'
+    ? {
+        disclosureText: foundingHouseholdServiceDisclosureText,
+        policyText: foundingHouseholdServicePolicyText,
+        documents: foundingHouseholdServiceDocuments,
+      }
+    : {
+        disclosureText: foundingHouseholdProductionServiceDisclosureText,
+        policyText: foundingHouseholdProductionServicePolicyText,
+        documents: foundingHouseholdProductionServiceDocuments,
+      };
+}
 
 export const foundingHouseholdProtectedDocuments: ConsentDocuments = Object.freeze({
   disclosureVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
@@ -80,12 +132,37 @@ export interface FoundingHouseholdFounderAccess {
   readonly correlationId: string;
 }
 
+export interface FoundingHouseholdProductionBootstrapInput {
+  readonly access: FoundingHouseholdFounderAccess;
+  readonly operationKey: string;
+  readonly benefitKey: FoundingHouseholdBenefitKey;
+  readonly maxHouseholds: number;
+  readonly invitationTtlDays: number;
+  readonly accessDurationDays: number;
+  readonly programEndsAt: Date;
+  readonly sponsorshipPrivacyPolicyVersion: string;
+  readonly sponsorshipStartsAt: Date;
+  readonly sponsorshipEndsAt: Date;
+  readonly now: Date;
+}
+
 export interface FoundingHouseholdMemberAccess {
   readonly actorPersonId: string;
   readonly actorIssuer: string;
+  readonly actorIdentityId?: string;
+  readonly actorIdentitySubject?: string;
   readonly sessionId: string;
   readonly audience: Extract<Audience, 'customer' | 'mobile'>;
   readonly correlationId: string;
+}
+
+export interface FoundingHouseholdIntendedIdentity {
+  readonly identityId: string;
+  readonly issuer: string;
+  readonly subject: string;
+  readonly personId: string;
+  readonly householdId: string;
+  readonly membershipId: string;
 }
 
 export type FoundingHouseholdAuthorityClock = (
@@ -105,6 +182,15 @@ export interface FoundingHouseholdPolicyRecord {
   readonly changedAt: Date;
 }
 
+export interface FoundingHouseholdProductionBootstrapResult {
+  readonly reused: boolean;
+  readonly sponsorOrganizationId: typeof foundingHouseholdProductionSponsorOrganizationId;
+  readonly sponsorshipId: typeof foundingHouseholdProductionSponsorshipId;
+  readonly planVersionId: (typeof foundingHouseholdBenefitProfiles)[FoundingHouseholdBenefitKey]['planVersionId'];
+  readonly backingEvidenceTier: 'live_production';
+  readonly policy: FoundingHouseholdPolicyRecord;
+}
+
 export interface FoundingHouseholdCapacityRecord {
   readonly maxHouseholds: number;
   readonly activeHouseholds: number;
@@ -122,6 +208,9 @@ export interface FoundingHouseholdInvitationRecord {
   readonly state: FoundingHouseholdInvitationState;
   readonly createdAt: Date;
   readonly expiresAt: Date;
+  readonly identityBindingState: 'development_unbound' | 'verified_identity';
+  readonly intendedCustomerSubject?: string;
+  readonly householdId?: string;
 }
 
 export interface FoundingHouseholdFunnelMilestoneRecord {
@@ -157,7 +246,7 @@ export interface FoundingHouseholdEnrollmentRecord {
   readonly endsAt: Date;
   readonly effectiveEndsAt: Date;
   readonly paymentState: 'not_paid_sponsored_beta';
-  readonly evidenceTier: 'local_simulation';
+  readonly evidenceTier: FoundingHouseholdEvidenceTier;
   readonly researchConsent: false;
   readonly marketingConsent: false;
   readonly followUpConsent: false;
@@ -200,6 +289,11 @@ interface InvitationRow extends Record<string, unknown> {
   readonly state: Exclude<FoundingHouseholdInvitationState, 'expired'> | 'expired';
   readonly expires_at: unknown;
   readonly created_at: unknown;
+  readonly intended_identity_id: string | null;
+  readonly intended_identity_issuer: string | null;
+  readonly intended_identity_subject: string | null;
+  readonly intended_person_id: string | null;
+  readonly intended_household_id: string | null;
 }
 
 interface OperationRow extends Record<string, unknown> {
@@ -213,8 +307,32 @@ interface OperationRow extends Record<string, unknown> {
 interface SponsorBackingRow extends Record<string, unknown> {
   readonly sponsorship_id: string;
   readonly plan_version_id: string;
-  readonly evidence_tier: 'local_simulation';
+  readonly evidence_tier: FoundingHouseholdEvidenceTier;
   readonly sponsorship_ends_at: unknown | null;
+}
+
+interface ProductionSponsorOrganizationRow extends Record<string, unknown> {
+  readonly name: string;
+  readonly kind: string;
+  readonly verification_state: string;
+}
+
+interface ProductionSponsorshipRow extends Record<string, unknown> {
+  readonly organization_id: string;
+  readonly plan_version_id: string;
+  readonly state: string;
+  readonly privacy_policy_version: string;
+  readonly starts_at: unknown;
+  readonly ends_at: unknown | null;
+}
+
+interface ProductionSponsorBackingRow extends Record<string, unknown> {
+  readonly benefit_key: FoundingHouseholdBenefitKey;
+  readonly organization_id: string;
+  readonly sponsorship_id: string;
+  readonly plan_version_id: string;
+  readonly evidence_tier: string;
+  readonly approved_by_person_id: string | null;
 }
 
 interface AdministratorAuthorityRow extends Record<string, unknown> {
@@ -230,6 +348,9 @@ interface EnrollmentRow extends Record<string, unknown> {
   readonly benefit_key: FoundingHouseholdBenefitKey;
   readonly accepted_by_person_id: string;
   readonly accepted_session_id: string;
+  readonly accepted_identity_id: string | null;
+  readonly accepted_identity_issuer: string | null;
+  readonly accepted_identity_subject: string | null;
   readonly protected_enrollment_created: boolean;
   readonly state: 'active' | 'revoked';
   readonly revoked_at: unknown | null;
@@ -274,20 +395,29 @@ export function foundingHouseholdDefinitionDigest(): string {
         })),
         benefits: foundingHouseholdBenefitKeys.map((key) => foundingHouseholdBenefitProfiles[key]),
         bounds: foundingHouseholdPolicyBounds,
+        production: {
+          maxHouseholds: foundingHouseholdProductionMaxHouseholds,
+          invitationBinding: 'exact_active_customer_identity_and_server_bootstrap_household',
+          delivery: 'founder_manual_only',
+        },
         funnel: {
           attentionCodes: foundingHouseholdAccessAttentionCodes,
           stages: foundingHouseholdFunnelStages,
           evidenceSources: foundingHouseholdFunnelEvidenceSources,
           attributionWindow: {
-            accountReady: 'active_local_identity_created_at_or_before_enrollment_start',
+            accountReady: 'active_environment_identity_created_at_or_before_enrollment_start',
             cohortEvents:
               'enrollment_start_inclusive_to_minimum_enrollment_sponsor_subscription_allocation_grant_or_service_consent_end_exclusive',
             feedbackSubmitted:
               'authenticated_household_person_completed_minimized_safe_intake_only',
-            returnedLater: 'different_local_session_at_least_24_hours_after_enrollment_start',
+            returnedLater:
+              'different_authenticated_session_at_least_24_hours_after_enrollment_start',
           },
         },
-        serviceConsent: foundingHouseholdServiceDocuments,
+        serviceConsent: {
+          localLegacy: foundingHouseholdServiceDocuments,
+          nonlocal: foundingHouseholdProductionServiceDocuments,
+        },
         protectedEnrollmentConsent: foundingHouseholdProtectedDocuments,
       }),
     )
@@ -320,6 +450,12 @@ function invitationFromRow(row: InvitationRow, now: Date): FoundingHouseholdInvi
     state: effectiveFoundingHouseholdInvitationState(row.state, expiresAt, now),
     createdAt: asDate(row.created_at, 'founding invitation created_at'),
     expiresAt,
+    identityBindingState:
+      row.intended_identity_id === null ? 'development_unbound' : 'verified_identity',
+    ...(row.intended_identity_subject === null
+      ? {}
+      : { intendedCustomerSubject: row.intended_identity_subject }),
+    ...(row.intended_household_id === null ? {} : { householdId: row.intended_household_id }),
   };
 }
 
@@ -377,7 +513,7 @@ function enrollmentFromRow(row: EnrollmentRow, now: Date): FoundingHouseholdEnro
     endsAt,
     effectiveEndsAt,
     paymentState: 'not_paid_sponsored_beta',
-    evidenceTier: foundingHouseholdEvidenceTier,
+    evidenceTier: foundingHouseholdEvidenceTierForEnvironment(row.environment),
     researchConsent: false,
     marketingConsent: false,
     followUpConsent: false,
@@ -389,6 +525,7 @@ async function lockConfiguredFounder(
   transaction: SqlExecutor,
   configuredFounderPersonId: string | undefined,
   actorPersonId: string,
+  environment: FoundingHouseholdEnvironment,
 ): Promise<void> {
   if (configuredFounderPersonId === undefined || configuredFounderPersonId !== actorPersonId) {
     throw new DomainError('not_authorized', 'The exact configured founder identity is required');
@@ -398,8 +535,26 @@ async function lockConfiguredFounder(
      JOIN organizations organization ON organization.id = employee.organization_id
      WHERE employee.person_id = $1 AND employee.role = 'hq_owner'
        AND employee.status = 'active' AND organization.kind = 'internal'
+       AND ($2 <> 'production' OR EXISTS (
+         SELECT 1
+         FROM production_founder_bootstraps bootstrap
+         JOIN identities identity
+           ON identity.id = bootstrap.identity_id
+          AND identity.person_id = bootstrap.person_id
+          AND identity.issuer = bootstrap.issuer
+          AND identity.subject = bootstrap.subject
+          AND identity.status = 'active'
+         WHERE bootstrap.bootstrap_key = 'production-founder-v1'
+           AND bootstrap.person_id = employee.person_id
+           AND bootstrap.organization_id = organization.id
+           AND bootstrap.organization_kind = 'internal'
+           AND bootstrap.organization_verification_state = 'verified'
+           AND bootstrap.employee_assignment_id = employee.id
+           AND bootstrap.employee_role = 'hq_owner'
+           AND organization.verification_state = 'verified'
+       ))
      ORDER BY employee.id LIMIT 1 FOR UPDATE`,
-    [actorPersonId],
+    [actorPersonId, environment],
   );
   if (result.rows[0] === undefined) {
     throw new DomainError('not_authorized', 'An active internal hq_owner assignment is required');
@@ -410,18 +565,19 @@ async function bindConfiguredFounderAuthority(
   transaction: SqlExecutor,
   actorPersonId: string,
   authorityNow: Date,
+  environment: FoundingHouseholdEnvironment,
 ): Promise<void> {
   await transaction.query(
     `INSERT INTO founding_household_founder_authorities(
        cohort_key, environment, founder_person_id, bound_at
      ) VALUES ($1,$2,$3,$4)
      ON CONFLICT (cohort_key, environment) DO NOTHING`,
-    [foundingHouseholdCohortKey, localEnvironment, actorPersonId, authorityNow.toISOString()],
+    [foundingHouseholdCohortKey, environment, actorPersonId, authorityNow.toISOString()],
   );
   const result = await transaction.query<{ founder_person_id: string } & Record<string, unknown>>(
     `SELECT founder_person_id FROM founding_household_founder_authorities
      WHERE cohort_key = $1 AND environment = $2 FOR UPDATE`,
-    [foundingHouseholdCohortKey, localEnvironment],
+    [foundingHouseholdCohortKey, environment],
   );
   if (result.rows[0]?.founder_person_id !== actorPersonId) {
     throw new DomainError(
@@ -435,12 +591,16 @@ async function lockActiveAdministrator(
   transaction: SqlExecutor,
   access: FoundingHouseholdMemberAccess,
   householdId: string,
+  environment: FoundingHouseholdEnvironment,
 ): Promise<AdministratorAuthorityRow> {
-  if (access.actorIssuer !== 'boomerbuddy-dev') {
-    throw new DomainError(
-      'not_authorized',
-      'A reviewed managed identity adapter is required outside local simulation',
-    );
+  if (
+    (environment === 'local' && access.actorIssuer !== 'boomerbuddy-dev') ||
+    (environment !== 'local' &&
+      (access.actorIssuer === 'boomerbuddy-dev' ||
+        access.actorIdentityId === undefined ||
+        access.actorIdentitySubject === undefined))
+  ) {
+    throw new DomainError('not_authorized', 'The exact active environment identity is required');
   }
   const result = await transaction.query<AdministratorAuthorityRow>(
     `SELECT session.issued_at, session.expires_at
@@ -452,13 +612,45 @@ async function lockActiveAdministrator(
      JOIN sessions session ON session.id = $4
        AND session.person_id = membership.person_id
        AND session.issuer = identity.issuer
+       AND session.identity_id = identity.id
+       AND session.identity_subject = identity.subject
      WHERE membership.household_id = $1 AND membership.person_id = $2
        AND membership.status = 'active' AND administrator.status = 'active'
        AND identity.issuer = $3 AND identity.status = 'active'
+       AND ($6::text IS NULL OR identity.id = $6)
+       AND ($7::text IS NULL OR identity.subject = $7)
        AND session.audience = $5 AND session.revoked_at IS NULL
+       AND ($8::text <> 'production' OR EXISTS (
+         SELECT 1 FROM production_customer_bootstraps bootstrap
+         WHERE bootstrap.identity_id = identity.id
+           AND bootstrap.issuer = identity.issuer
+           AND bootstrap.subject = identity.subject
+           AND bootstrap.person_id = membership.person_id
+           AND bootstrap.household_id = membership.household_id
+           AND bootstrap.membership_id = membership.id
+           AND (
+             SELECT count(DISTINCT other_membership.household_id)
+             FROM household_memberships other_membership
+             JOIN household_administrator_assignments other_administrator
+               ON other_administrator.household_id = other_membership.household_id
+              AND other_administrator.person_id = other_membership.person_id
+             WHERE other_membership.person_id = bootstrap.person_id
+               AND other_membership.status = 'active'
+               AND other_administrator.status = 'active'
+           ) = 1
+       ))
      ORDER BY membership.id LIMIT 1
      FOR UPDATE OF membership, administrator, identity, session`,
-    [householdId, access.actorPersonId, access.actorIssuer, access.sessionId, access.audience],
+    [
+      householdId,
+      access.actorPersonId,
+      access.actorIssuer,
+      access.sessionId,
+      access.audience,
+      environment === 'local' ? null : access.actorIdentityId,
+      environment === 'local' ? null : access.actorIdentitySubject,
+      environment,
+    ],
   );
   const row = result.rows[0];
   if (row === undefined) {
@@ -484,6 +676,32 @@ function assertAdministratorSessionCurrent(
   }
 }
 
+async function identityEvidenceForFoundingAccess(
+  transaction: SqlExecutor,
+  access: FoundingHouseholdMemberAccess,
+  environment: FoundingHouseholdEnvironment,
+): Promise<ConsentIdentityEvidence | null> {
+  if (environment === 'local') {
+    return identityEvidenceForPerson(transaction, access.actorPersonId, access.actorIssuer);
+  }
+  if (access.actorIdentityId === undefined || access.actorIdentitySubject === undefined) {
+    return null;
+  }
+  const result = await transaction.query<
+    { id: string; issuer: string; subject: string } & Record<string, unknown>
+  >(
+    `SELECT id, issuer, subject FROM identities
+     WHERE id = $1 AND person_id = $2 AND issuer = $3 AND subject = $4
+       AND status = 'active'
+     FOR UPDATE`,
+    [access.actorIdentityId, access.actorPersonId, access.actorIssuer, access.actorIdentitySubject],
+  );
+  const row = result.rows[0];
+  return row === undefined
+    ? null
+    : { id: row.id, issuer: row.issuer, subject: row.subject, assurance: 'verified' };
+}
+
 const databaseFoundingHouseholdAuthorityClock: FoundingHouseholdAuthorityClock = async (
   transaction,
 ) => {
@@ -497,9 +715,9 @@ const databaseFoundingHouseholdAuthorityClock: FoundingHouseholdAuthorityClock =
 async function lockDefinition(transaction: SqlExecutor): Promise<void> {
   const result = await transaction.query<DefinitionRow>(
     `SELECT definition_version, definition_digest
-     FROM founding_household_program_definitions
-     WHERE cohort_key = $1 FOR UPDATE`,
-    [foundingHouseholdCohortKey],
+     FROM founding_household_program_definition_revisions
+     WHERE cohort_key = $1 AND definition_version = $2 FOR UPDATE`,
+    [foundingHouseholdCohortKey, definitionVersion],
   );
   const row = result.rows[0];
   if (
@@ -554,17 +772,20 @@ async function lockDefinition(transaction: SqlExecutor): Promise<void> {
   }
 }
 
-async function currentPolicy(transaction: SqlExecutor): Promise<PolicyRow> {
+async function currentPolicy(
+  transaction: SqlExecutor,
+  environment: FoundingHouseholdEnvironment,
+): Promise<PolicyRow> {
   const result = await transaction.query<PolicyRow>(
     `SELECT environment, revision, state, benefit_key, max_households,
             invitation_ttl_days, access_duration_days, program_ends_at, created_at
      FROM founding_household_policy_versions
      WHERE cohort_key = $1 AND environment = $2
      ORDER BY revision DESC LIMIT 1`,
-    [foundingHouseholdCohortKey, localEnvironment],
+    [foundingHouseholdCohortKey, environment],
   );
   const row = result.rows[0];
-  if (row === undefined) throw new Error('Founding Household local policy is missing');
+  if (row === undefined) throw new Error('Founding Household environment policy is missing');
   return row;
 }
 
@@ -572,7 +793,9 @@ async function currentSponsorBacking(
   transaction: SqlExecutor,
   benefitKey: FoundingHouseholdBenefitKey,
   now: Date,
+  environment: FoundingHouseholdEnvironment,
 ): Promise<SponsorBackingRow | null> {
+  const evidenceTier = foundingHouseholdEvidenceTierForEnvironment(environment);
   const result = await transaction.query<SponsorBackingRow>(
     `SELECT backing.sponsorship_id, backing.plan_version_id, backing.evidence_tier,
             sponsorship.ends_at AS sponsorship_ends_at
@@ -588,15 +811,16 @@ async function currentSponsorBacking(
        AND sponsorship.state = 'active' AND sponsorship.starts_at <= $5
        AND (sponsorship.ends_at IS NULL OR sponsorship.ends_at > $5)
        AND organization.kind = 'sponsor'
-       AND organization.verification_state = 'local_fixture'
+       AND organization.verification_state = $6
        AND plan.state = 'active'
      FOR UPDATE OF backing, sponsorship, organization, plan`,
     [
       foundingHouseholdCohortKey,
-      localEnvironment,
+      environment,
       benefitKey,
-      foundingHouseholdEvidenceTier,
+      evidenceTier,
       now.toISOString(),
+      environment === 'local' ? 'local_fixture' : 'verified',
     ],
   );
   return result.rows[0] ?? null;
@@ -628,6 +852,7 @@ async function existingOperation(
     readonly kind: OperationRow['operation_kind'];
     readonly requestDigest: string;
     readonly actorPersonId: string;
+    readonly environment: FoundingHouseholdEnvironment;
   },
 ): Promise<string | null> {
   const result = await transaction.query<OperationRow>(
@@ -639,7 +864,7 @@ async function existingOperation(
   if (row === undefined) return null;
   if (
     row.operation_kind !== input.kind ||
-    row.environment !== localEnvironment ||
+    row.environment !== input.environment ||
     row.request_digest !== input.requestDigest ||
     row.actor_person_id !== input.actorPersonId
   ) {
@@ -708,6 +933,7 @@ async function insertOperation(
     readonly actorPersonId: string;
     readonly resultReference: string;
     readonly now: Date;
+    readonly environment: FoundingHouseholdEnvironment;
   },
 ): Promise<void> {
   await transaction.query(
@@ -718,7 +944,7 @@ async function insertOperation(
     [
       input.operationKey,
       foundingHouseholdCohortKey,
-      localEnvironment,
+      input.environment,
       input.kind,
       input.requestDigest,
       input.actorPersonId,
@@ -819,13 +1045,17 @@ async function bindExistingProtectedAllocationsToFoundingGrant(
   return allocations.rows.length;
 }
 
-async function expireDueInvitations(transaction: SqlExecutor, now: Date): Promise<number> {
+async function expireDueInvitations(
+  transaction: SqlExecutor,
+  now: Date,
+  environment: FoundingHouseholdEnvironment,
+): Promise<number> {
   const result = await transaction.query(
     `UPDATE founding_household_invitations
      SET state = 'expired', credential_fingerprint = NULL, ended_at = $3
      WHERE cohort_key = $1 AND environment = $2 AND state = 'pending'
        AND expires_at <= $3`,
-    [foundingHouseholdCohortKey, localEnvironment, now.toISOString()],
+    [foundingHouseholdCohortKey, environment, now.toISOString()],
   );
   return result.rowCount;
 }
@@ -836,7 +1066,9 @@ async function writeFounderReadAudit(
   access: FoundingHouseholdFounderAccess,
   now: Date,
   expiredInvitationCount: number,
+  environment: FoundingHouseholdEnvironment,
 ): Promise<void> {
+  const evidenceTier = foundingHouseholdEvidenceTierForEnvironment(environment);
   await transaction.query(
     `INSERT INTO audit_events(
        id, household_id, actor_person_id, session_audience, action, resource_type,
@@ -848,8 +1080,8 @@ async function writeFounderReadAudit(
       access.actorPersonId,
       foundingHouseholdCohortKey,
       JSON.stringify({
-        environment: localEnvironment,
-        evidenceTier: foundingHouseholdEvidenceTier,
+        environment,
+        evidenceTier,
         expiredInvitationCount,
         externalActionExecuted: false,
         paymentCollected: false,
@@ -863,13 +1095,18 @@ async function writeFounderReadAudit(
 async function enrollmentRows(
   executor: SqlExecutor,
   now: Date,
+  environment: FoundingHouseholdEnvironment,
   householdId?: string,
   enrollmentId?: string,
 ): Promise<readonly EnrollmentRow[]> {
+  const serviceConsent = foundingHouseholdServiceConsentForEnvironment(environment);
+  const evidenceTier = foundingHouseholdEvidenceTierForEnvironment(environment);
   const result = await executor.query<EnrollmentRow>(
     `SELECT enrollment.id, enrollment.environment, enrollment.household_id,
             enrollment.invitation_id, enrollment.benefit_key,
             enrollment.accepted_by_person_id, enrollment.accepted_session_id,
+            enrollment.accepted_identity_id, enrollment.accepted_identity_issuer,
+            enrollment.accepted_identity_subject,
             enrollment.protected_enrollment_created,
             enrollment.state, enrollment.starts_at, enrollment.ends_at, enrollment.revoked_at,
        access_resolution.effective_ends_at,
@@ -877,7 +1114,12 @@ async function enrollmentRows(
        access_resolution.access_attention_code,
        (SELECT min(identity.created_at) FROM identities identity
         WHERE identity.person_id = enrollment.accepted_by_person_id
-          AND identity.issuer = 'boomerbuddy-dev'
+          AND (
+            (enrollment.accepted_identity_id IS NULL
+              AND enrollment.environment = 'local'
+              AND identity.issuer = 'boomerbuddy-dev')
+            OR identity.id = enrollment.accepted_identity_id
+          )
           AND identity.status = 'active'
           AND identity.created_at <= enrollment.starts_at) AS account_at,
        (SELECT min(orientation.updated_at) FROM orientation_states orientation
@@ -910,7 +1152,7 @@ async function enrollmentRows(
         WHERE feedback.identity_mode = 'authenticated'
           AND feedback.household_id = enrollment.household_id
           AND feedback.actor_person_id = enrollment.accepted_by_person_id
-          AND feedback.evidence_tier = 'local_simulation'
+          AND feedback.evidence_tier = $10
           AND feedback.created_at >= enrollment.starts_at
           AND feedback.created_at < access_resolution.effective_ends_at
           AND EXISTS (
@@ -921,7 +1163,7 @@ async function enrollmentRows(
         WHERE session.person_id = enrollment.accepted_by_person_id
           AND session.id <> enrollment.accepted_session_id
           AND session.audience IN ('customer','mobile')
-          AND session.issuer = 'boomerbuddy-dev'
+          AND session.issuer = COALESCE(enrollment.accepted_identity_issuer, 'boomerbuddy-dev')
           AND session.issued_at >= enrollment.starts_at + interval '24 hours'
           AND session.issued_at < access_resolution.effective_ends_at) AS returned_at
      FROM founding_household_enrollments enrollment
@@ -1189,14 +1431,15 @@ async function enrollmentRows(
      ORDER BY enrollment.created_at, enrollment.id`,
     [
       foundingHouseholdCohortKey,
-      localEnvironment,
+      environment,
       householdId ?? null,
       enrollmentId ?? null,
       now.toISOString(),
-      foundingHouseholdServiceConsentVersion,
-      foundingHouseholdServiceDocuments.disclosureDigest,
-      foundingHouseholdServiceDocuments.policyVersion,
-      foundingHouseholdServiceDocuments.policyDigest,
+      serviceConsent.documents.disclosureVersion,
+      serviceConsent.documents.disclosureDigest,
+      serviceConsent.documents.policyVersion,
+      serviceConsent.documents.policyDigest,
+      evidenceTier,
     ],
   );
   return result.rows;
@@ -1205,17 +1448,37 @@ async function enrollmentRows(
 async function invitationById(
   transaction: SqlExecutor,
   invitationId: string,
+  environment: FoundingHouseholdEnvironment,
   lock = false,
 ): Promise<InvitationRow | null> {
   const result = await transaction.query<InvitationRow>(
     `SELECT id, environment, policy_revision, benefit_key, access_duration_days,
             program_ends_at, credential_fingerprint, fingerprint_key_version,
-            state, expires_at, created_at
+            state, expires_at, created_at, intended_identity_id,
+            intended_identity_issuer, intended_identity_subject, intended_person_id,
+            intended_household_id
      FROM founding_household_invitations
      WHERE id = $1 AND cohort_key = $2 AND environment = $3${lock ? ' FOR UPDATE' : ''}`,
-    [invitationId, foundingHouseholdCohortKey, localEnvironment],
+    [invitationId, foundingHouseholdCohortKey, environment],
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * Reuses repository transaction-aware logic inside a larger atomic unit of work. The adapter never
+ * owns or closes the surrounding transaction.
+ */
+function databaseWithinTransaction(database: Database, transaction: SqlExecutor): Database {
+  return {
+    kind: database.kind,
+    query: <Row extends Record<string, unknown>>(sql: string, parameters?: readonly unknown[]) =>
+      transaction.query<Row>(sql, parameters),
+    exec: (sql: string) => transaction.exec(sql),
+    transaction: async <Result>(
+      work: (nestedTransaction: SqlExecutor) => Promise<Result>,
+    ): Promise<Result> => work(transaction),
+    close: () => Promise.reject(new Error('A transaction-scoped database cannot be closed')),
+  };
 }
 
 export class FoundingHouseholdRepository {
@@ -1273,52 +1536,229 @@ export class FoundingHouseholdRepository {
     return new Date(authorityNow);
   }
 
-  private assertLocalEnvironment(): void {
-    if (this.environment !== localEnvironment) {
-      throw new DomainError(
-        'not_authorized',
-        'A reviewed managed-identity and environment-bound sponsor release is required',
-      );
-    }
+  runtimeEnvironment(): FoundingHouseholdEnvironment {
+    return this.environment;
   }
 
-  private async expireInvitationForAuthorizedMember(input: {
-    readonly access: FoundingHouseholdMemberAccess;
-    readonly householdId: string;
-    readonly invitationId: string;
-    readonly now: Date;
-  }): Promise<void> {
-    const expired = await this.database.transaction(async (transaction) => {
+  evidenceTier(): FoundingHouseholdEvidenceTier {
+    return foundingHouseholdEvidenceTierForEnvironment(this.environment);
+  }
+
+  async bootstrapProductionProgram(
+    input: FoundingHouseholdProductionBootstrapInput,
+  ): Promise<FoundingHouseholdProductionBootstrapResult> {
+    if (this.environment !== 'production') {
+      throw new DomainError(
+        'not_authorized',
+        'The production Founding Household bootstrap requires the production repository',
+      );
+    }
+    assertIdentifier(input.access.correlationId, 'correlation identifier');
+    assertOperationKey(input.operationKey, 'policy');
+    assertIdentifier(input.sponsorshipPrivacyPolicyVersion, 'sponsorship privacy policy version');
+    if (
+      !Number.isFinite(input.sponsorshipStartsAt.getTime()) ||
+      !Number.isFinite(input.sponsorshipEndsAt.getTime()) ||
+      input.sponsorshipEndsAt <= input.sponsorshipStartsAt
+    ) {
+      throw new DomainError('invalid_input', 'Production sponsorship dates are invalid');
+    }
+
+    return this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
-      const administrator = await lockActiveAdministrator(
+      await lockConfiguredFounder(
         transaction,
-        input.access,
-        input.householdId,
+        this.configuredFounderPersonId,
+        input.access.actorPersonId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
-      assertAdministratorSessionCurrent(administrator, authorityNow);
-      const result = await transaction.query(
-        `UPDATE founding_household_invitations
-         SET state = 'expired', credential_fingerprint = NULL, ended_at = $4
-         WHERE id = $1 AND cohort_key = $2 AND environment = $3
-           AND state = 'pending' AND expires_at <= $4`,
-        [
-          input.invitationId,
-          foundingHouseholdCohortKey,
-          localEnvironment,
-          authorityNow.toISOString(),
-        ],
+      await bindConfiguredFounderAuthority(
+        transaction,
+        input.access.actorPersonId,
+        authorityNow,
+        this.environment,
       );
-      return result.rowCount === 1;
+      assertActiveFoundingHouseholdPolicy(
+        {
+          benefitKey: input.benefitKey,
+          maxHouseholds: input.maxHouseholds,
+          invitationTtlDays: input.invitationTtlDays,
+          accessDurationDays: input.accessDurationDays,
+          programEndsAt: input.programEndsAt,
+        },
+        authorityNow,
+        this.environment,
+      );
+      if (
+        input.sponsorshipStartsAt > authorityNow ||
+        input.sponsorshipEndsAt <= authorityNow ||
+        input.programEndsAt > input.sponsorshipEndsAt
+      ) {
+        throw new DomainError(
+          'invalid_input',
+          'Production sponsorship must be currently active and cover the finite program',
+        );
+      }
+
+      const planVersionId = foundingHouseholdBenefitProfiles[input.benefitKey].planVersionId;
+      const organizationResult = await transaction.query<ProductionSponsorOrganizationRow>(
+        `SELECT name, kind, verification_state FROM organizations
+         WHERE id = $1 FOR UPDATE`,
+        [foundingHouseholdProductionSponsorOrganizationId],
+      );
+      const organization = organizationResult.rows[0];
+      const organizationReused = organization !== undefined;
+      if (organization === undefined) {
+        await transaction.query(
+          `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+           VALUES ($1,$2,'sponsor','verified',$3)`,
+          [
+            foundingHouseholdProductionSponsorOrganizationId,
+            foundingHouseholdProductionSponsorOrganizationName,
+            authorityNow.toISOString(),
+          ],
+        );
+      } else if (
+        organization.name !== foundingHouseholdProductionSponsorOrganizationName ||
+        organization.kind !== 'sponsor' ||
+        organization.verification_state !== 'verified'
+      ) {
+        throw new DomainError(
+          'conflict',
+          'Production Founding Household sponsor organization conflicts with prior state',
+        );
+      }
+
+      const sponsorshipResult = await transaction.query<ProductionSponsorshipRow>(
+        `SELECT organization_id, plan_version_id, state, privacy_policy_version,
+                starts_at, ends_at
+         FROM commerce_sponsorships WHERE id = $1 FOR UPDATE`,
+        [foundingHouseholdProductionSponsorshipId],
+      );
+      const sponsorship = sponsorshipResult.rows[0];
+      const sponsorshipReused = sponsorship !== undefined;
+      if (sponsorship === undefined) {
+        await transaction.query(
+          `INSERT INTO commerce_sponsorships(
+             id, organization_id, plan_version_id, state, privacy_policy_version,
+             starts_at, ends_at, created_at
+           ) VALUES ($1,$2,$3,'active',$4,$5,$6,$7)`,
+          [
+            foundingHouseholdProductionSponsorshipId,
+            foundingHouseholdProductionSponsorOrganizationId,
+            planVersionId,
+            input.sponsorshipPrivacyPolicyVersion,
+            input.sponsorshipStartsAt.toISOString(),
+            input.sponsorshipEndsAt.toISOString(),
+            authorityNow.toISOString(),
+          ],
+        );
+      } else if (
+        sponsorship.organization_id !== foundingHouseholdProductionSponsorOrganizationId ||
+        sponsorship.plan_version_id !== planVersionId ||
+        sponsorship.state !== 'active' ||
+        sponsorship.privacy_policy_version !== input.sponsorshipPrivacyPolicyVersion ||
+        asDate(sponsorship.starts_at, 'production sponsorship starts_at').getTime() !==
+          input.sponsorshipStartsAt.getTime() ||
+        sponsorship.ends_at === null ||
+        asDate(sponsorship.ends_at, 'production sponsorship ends_at').getTime() !==
+          input.sponsorshipEndsAt.getTime()
+      ) {
+        throw new DomainError(
+          'conflict',
+          'Production Founding Household sponsorship conflicts with prior state',
+        );
+      }
+
+      const backingResult = await transaction.query<ProductionSponsorBackingRow>(
+        `SELECT benefit_key, organization_id, sponsorship_id, plan_version_id,
+                evidence_tier, approved_by_person_id
+         FROM founding_household_sponsor_backings
+         WHERE cohort_key = $1 AND environment = 'production'
+         ORDER BY benefit_key FOR UPDATE`,
+        [foundingHouseholdCohortKey],
+      );
+      const backing = backingResult.rows[0];
+      if (backingResult.rows.length > 1) {
+        throw new DomainError(
+          'conflict',
+          'Production Founding Household has more than one sponsor backing',
+        );
+      }
+      const backingReused = backing !== undefined;
+      if (backing === undefined) {
+        await transaction.query(
+          `INSERT INTO founding_household_sponsor_backings(
+             cohort_key, environment, benefit_key, organization_id, sponsorship_id,
+             plan_version_id, evidence_tier, approved_by_person_id, approved_at
+           ) VALUES ($1,'production',$2,$3,$4,$5,'live_production',$6,$7)`,
+          [
+            foundingHouseholdCohortKey,
+            input.benefitKey,
+            foundingHouseholdProductionSponsorOrganizationId,
+            foundingHouseholdProductionSponsorshipId,
+            planVersionId,
+            input.access.actorPersonId,
+            authorityNow.toISOString(),
+          ],
+        );
+      } else if (
+        backing.benefit_key !== input.benefitKey ||
+        backing.organization_id !== foundingHouseholdProductionSponsorOrganizationId ||
+        backing.sponsorship_id !== foundingHouseholdProductionSponsorshipId ||
+        backing.plan_version_id !== planVersionId ||
+        backing.evidence_tier !== 'live_production' ||
+        backing.approved_by_person_id !== input.access.actorPersonId
+      ) {
+        throw new DomainError(
+          'conflict',
+          'Production Founding Household sponsor backing conflicts with prior state',
+        );
+      }
+
+      const transactionRepository = new FoundingHouseholdRepository(
+        databaseWithinTransaction(this.database, transaction),
+        this.fingerprintKey,
+        this.fingerprintKeyVersion,
+        this.configuredFounderPersonId,
+        this.environment,
+        this.ids,
+        this.authorityClock,
+      );
+      const policyResult = await transactionRepository.configurePolicy({
+        access: input.access,
+        operationKey: input.operationKey,
+        expectedRevision: 1,
+        state: 'active',
+        benefitKey: input.benefitKey,
+        maxHouseholds: input.maxHouseholds,
+        invitationTtlDays: input.invitationTtlDays,
+        accessDurationDays: input.accessDurationDays,
+        programEndsAt: input.programEndsAt,
+        now: input.now,
+      });
+      if (policyResult.reused && (!organizationReused || !sponsorshipReused || !backingReused)) {
+        throw new DomainError(
+          'conflict',
+          'Production bootstrap operation predates its exact sponsor evidence',
+        );
+      }
+      return {
+        reused: policyResult.reused && organizationReused && sponsorshipReused && backingReused,
+        sponsorOrganizationId: foundingHouseholdProductionSponsorOrganizationId,
+        sponsorshipId: foundingHouseholdProductionSponsorshipId,
+        planVersionId,
+        backingEvidenceTier: 'live_production',
+        policy: policyResult.policy,
+      };
     });
-    if (expired) throw new DomainError('expired', 'Founding Household invitation has expired');
   }
 
   async founderConsole(input: {
     readonly access: FoundingHouseholdFounderAccess;
     readonly now: Date;
   }): Promise<FoundingHouseholdFounderConsoleRecord> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
     return this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
@@ -1326,21 +1766,28 @@ export class FoundingHouseholdRepository {
         transaction,
         this.configuredFounderPersonId,
         input.access.actorPersonId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
-      const expiredInvitationCount = await expireDueInvitations(transaction, authorityNow);
-      const policyRow = await currentPolicy(transaction);
+      const expiredInvitationCount = await expireDueInvitations(
+        transaction,
+        authorityNow,
+        this.environment,
+      );
+      const policyRow = await currentPolicy(transaction, this.environment);
       const policy = policyFromRow(policyRow);
       const invitationResult = await transaction.query<InvitationRow>(
         `SELECT id, environment, policy_revision, benefit_key, access_duration_days,
                 program_ends_at, credential_fingerprint, fingerprint_key_version,
-                state, expires_at, created_at
+                state, expires_at, created_at, intended_identity_id,
+                intended_identity_issuer, intended_identity_subject, intended_person_id,
+                intended_household_id
          FROM founding_household_invitations
          WHERE cohort_key = $1 AND environment = $2
          ORDER BY created_at DESC, id`,
-        [foundingHouseholdCohortKey, localEnvironment],
+        [foundingHouseholdCohortKey, this.environment],
       );
-      const rows = await enrollmentRows(transaction, authorityNow);
+      const rows = await enrollmentRows(transaction, authorityNow, this.environment);
       const enrollments = rows.map((row) => enrollmentFromRow(row, authorityNow));
       const invitations = invitationResult.rows.map((row) => invitationFromRow(row, authorityNow));
       const activeHouseholds = enrollments.filter((item) => item.state === 'active').length;
@@ -1354,6 +1801,7 @@ export class FoundingHouseholdRepository {
         input.access,
         authorityNow,
         expiredInvitationCount,
+        this.environment,
       );
       return {
         policy,
@@ -1388,7 +1836,6 @@ export class FoundingHouseholdRepository {
     readonly invalidatedInvitationCount: number;
     readonly externalActionExecuted: false;
   }> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
     assertOperationKey(input.operationKey, 'policy');
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
@@ -1431,12 +1878,14 @@ export class FoundingHouseholdRepository {
         transaction,
         this.configuredFounderPersonId,
         input.access.actorPersonId,
+        this.environment,
       );
       const existing = await existingOperation(transaction, {
         operationKey: input.operationKey,
         kind: 'policy',
         requestDigest: digest,
         actorPersonId: input.access.actorPersonId,
+        environment: this.environment,
       });
       if (existing !== null) {
         const operationResult = policyOperationResult(existing);
@@ -1445,7 +1894,7 @@ export class FoundingHouseholdRepository {
                   invitation_ttl_days, access_duration_days, program_ends_at, created_at
            FROM founding_household_policy_versions
            WHERE cohort_key = $1 AND environment = $2 AND revision = $3`,
-          [foundingHouseholdCohortKey, localEnvironment, operationResult.revision],
+          [foundingHouseholdCohortKey, this.environment, operationResult.revision],
         );
         const row = reusedResult.rows[0];
         if (row === undefined) throw new Error('Founding Household policy operation is incomplete');
@@ -1457,7 +1906,12 @@ export class FoundingHouseholdRepository {
         };
       }
       const authorityNow = await this.authorityNow(transaction, input.now);
-      await bindConfiguredFounderAuthority(transaction, input.access.actorPersonId, authorityNow);
+      await bindConfiguredFounderAuthority(
+        transaction,
+        input.access.actorPersonId,
+        authorityNow,
+        this.environment,
+      );
       if (
         input.state === 'active' &&
         input.benefitKey !== undefined &&
@@ -1475,10 +1929,11 @@ export class FoundingHouseholdRepository {
             programEndsAt: input.programEndsAt,
           },
           authorityNow,
+          this.environment,
         );
       }
-      await expireDueInvitations(transaction, authorityNow);
-      const current = await currentPolicy(transaction);
+      await expireDueInvitations(transaction, authorityNow, this.environment);
+      const current = await currentPolicy(transaction, this.environment);
       if (current.revision !== input.expectedRevision) {
         throw new DomainError('conflict', 'Founding Household policy revision changed');
       }
@@ -1486,7 +1941,7 @@ export class FoundingHouseholdRepository {
         const active = await transaction.query<{ count: number } & Record<string, unknown>>(
           `SELECT count(*)::integer AS count FROM founding_household_enrollments
            WHERE cohort_key = $1 AND environment = $2 AND state = 'active' AND ends_at > $3`,
-          [foundingHouseholdCohortKey, localEnvironment, authorityNow.toISOString()],
+          [foundingHouseholdCohortKey, this.environment, authorityNow.toISOString()],
         );
         if ((active.rows[0]?.count ?? 0) > input.maxHouseholds) {
           throw new DomainError('conflict', 'Policy cap is below the active household count');
@@ -1497,7 +1952,7 @@ export class FoundingHouseholdRepository {
         `SELECT id FROM founding_household_invitations
          WHERE cohort_key = $1 AND environment = $2 AND state = 'pending'
          ORDER BY id FOR UPDATE`,
-        [foundingHouseholdCohortKey, localEnvironment],
+        [foundingHouseholdCohortKey, this.environment],
       );
       await insertOperation(transaction, {
         operationKey: input.operationKey,
@@ -1506,6 +1961,7 @@ export class FoundingHouseholdRepository {
         actorPersonId: input.access.actorPersonId,
         resultReference: `${nextRevision}:${pendingInvitations.rows.length}`,
         now: authorityNow,
+        environment: this.environment,
       });
       await transaction.query(
         `INSERT INTO founding_household_policy_versions(
@@ -1515,7 +1971,7 @@ export class FoundingHouseholdRepository {
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [
           foundingHouseholdCohortKey,
-          localEnvironment,
+          this.environment,
           nextRevision,
           input.state,
           input.benefitKey ?? null,
@@ -1535,7 +1991,7 @@ export class FoundingHouseholdRepository {
          WHERE cohort_key = $1 AND environment = $2 AND state = 'pending'`,
         [
           foundingHouseholdCohortKey,
-          localEnvironment,
+          this.environment,
           authorityNow.toISOString(),
           input.operationKey,
         ],
@@ -1559,7 +2015,7 @@ export class FoundingHouseholdRepository {
           resourceId: foundingHouseholdCohortKey,
           outcome: 'completed',
           metadata: {
-            environment: localEnvironment,
+            environment: this.environment,
             invalidatedInvitations: invalidated.rowCount,
             paymentCollected: false,
             revision: nextRevision,
@@ -1571,7 +2027,7 @@ export class FoundingHouseholdRepository {
           aggregateType: 'founding_household_program',
           aggregateId: foundingHouseholdCohortKey,
           payload: {
-            environment: localEnvironment,
+            environment: this.environment,
             invalidatedInvitations: invalidated.rowCount,
             revision: nextRevision,
             state: input.state,
@@ -1580,7 +2036,7 @@ export class FoundingHouseholdRepository {
       );
       return {
         policy: {
-          environment: localEnvironment,
+          environment: this.environment,
           revision: nextRevision,
           state: input.state,
           ...(input.benefitKey === undefined ? {} : { benefitKey: input.benefitKey }),
@@ -1603,50 +2059,149 @@ export class FoundingHouseholdRepository {
 
   async createInvitation(input: {
     readonly access: FoundingHouseholdFounderAccess;
+    readonly intendedIdentity?: FoundingHouseholdIntendedIdentity;
     readonly operationKey: string;
     readonly now: Date;
   }): Promise<{
     readonly invitation: FoundingHouseholdInvitationRecord;
-    readonly localInvitationCredential?: string;
+    readonly invitationCredential?: string;
     readonly credentialState: 'created_credential_returned' | 'created_credential_unavailable';
     readonly reused: boolean;
     readonly credentialRecoverable: false;
-    readonly delivery: 'founder_manual_local_only';
+    readonly delivery: 'founder_manual_only';
     readonly externalActionExecuted: false;
   }> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
     assertOperationKey(input.operationKey, 'invite');
-    const digest = requestDigest({ action: 'invite', environment: localEnvironment });
+    if (
+      (this.environment === 'local' && input.intendedIdentity !== undefined) ||
+      (this.environment !== 'local' && input.intendedIdentity === undefined)
+    ) {
+      throw new DomainError(
+        'invalid_input',
+        'The invitation identity binding does not match the runtime environment',
+      );
+    }
+    if (input.intendedIdentity !== undefined) {
+      assertIdentifier(input.intendedIdentity.identityId, 'intended identity identifier');
+      assertIdentifier(input.intendedIdentity.issuer, 'intended identity issuer');
+      assertIdentifier(input.intendedIdentity.subject, 'intended identity subject');
+      assertIdentifier(input.intendedIdentity.personId, 'intended person identifier');
+      assertIdentifier(input.intendedIdentity.householdId, 'intended household identifier');
+      assertIdentifier(input.intendedIdentity.membershipId, 'intended membership identifier');
+      if (input.intendedIdentity.issuer === 'boomerbuddy-dev') {
+        throw new DomainError(
+          'invalid_input',
+          'Production invitations refuse development identity',
+        );
+      }
+    }
+    const digest = requestDigest({
+      action: 'invite',
+      environment: this.environment,
+      intendedIdentityId: input.intendedIdentity?.identityId ?? null,
+      intendedIdentityIssuer: input.intendedIdentity?.issuer ?? null,
+      intendedIdentitySubject: input.intendedIdentity?.subject ?? null,
+      intendedHouseholdId: input.intendedIdentity?.householdId ?? null,
+    });
     return this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
       await lockConfiguredFounder(
         transaction,
         this.configuredFounderPersonId,
         input.access.actorPersonId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
-      await bindConfiguredFounderAuthority(transaction, input.access.actorPersonId, authorityNow);
-      await expireDueInvitations(transaction, authorityNow);
+      await bindConfiguredFounderAuthority(
+        transaction,
+        input.access.actorPersonId,
+        authorityNow,
+        this.environment,
+      );
+      await expireDueInvitations(transaction, authorityNow, this.environment);
       const existing = await existingOperation(transaction, {
         operationKey: input.operationKey,
         kind: 'invite',
         requestDigest: digest,
         actorPersonId: input.access.actorPersonId,
+        environment: this.environment,
       });
       if (existing !== null) {
-        const row = await invitationById(transaction, existing);
+        const row = await invitationById(transaction, existing, this.environment);
         if (row === null) throw new Error('Founding Household invitation operation is incomplete');
         return {
           invitation: invitationFromRow(row, authorityNow),
           credentialState: 'created_credential_unavailable',
           reused: true,
           credentialRecoverable: false,
-          delivery: 'founder_manual_local_only',
+          delivery: 'founder_manual_only',
           externalActionExecuted: false,
         };
       }
-      const policy = await currentPolicy(transaction);
+      if (input.intendedIdentity !== undefined) {
+        const exactBootstrap = await transaction.query(
+          `SELECT 1
+           FROM production_customer_bootstraps bootstrap
+           JOIN identities identity
+             ON identity.id = bootstrap.identity_id
+            AND identity.person_id = bootstrap.person_id
+            AND identity.issuer = bootstrap.issuer
+            AND identity.subject = bootstrap.subject
+           JOIN household_memberships membership
+             ON membership.household_id = bootstrap.household_id
+            AND membership.id = bootstrap.membership_id
+            AND membership.person_id = bootstrap.person_id
+           JOIN household_administrator_assignments administrator
+             ON administrator.household_id = membership.household_id
+            AND administrator.person_id = membership.person_id
+           WHERE bootstrap.identity_id = $1 AND bootstrap.issuer = $2
+             AND bootstrap.subject = $3 AND bootstrap.person_id = $4
+             AND bootstrap.household_id = $5 AND bootstrap.membership_id = $6
+             AND identity.status = 'active' AND identity.issuer <> 'boomerbuddy-dev'
+             AND membership.status = 'active' AND administrator.status = 'active'
+             AND (
+               SELECT count(DISTINCT other_membership.household_id)
+               FROM household_memberships other_membership
+               JOIN household_administrator_assignments other_administrator
+                 ON other_administrator.household_id = other_membership.household_id
+                AND other_administrator.person_id = other_membership.person_id
+               WHERE other_membership.person_id = bootstrap.person_id
+                 AND other_membership.status = 'active'
+                 AND other_administrator.status = 'active'
+             ) = 1
+             AND NOT EXISTS (
+               SELECT 1 FROM founding_household_enrollments enrollment
+               WHERE enrollment.environment = $7
+                 AND enrollment.household_id = bootstrap.household_id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM entitlement_grants grant_record
+               WHERE grant_record.household_id = bootstrap.household_id
+                 AND grant_record.revoked_at IS NULL
+                 AND grant_record.starts_at <= $8
+                 AND (grant_record.ends_at IS NULL OR grant_record.ends_at > $8)
+             )
+           FOR UPDATE OF identity, membership, administrator`,
+          [
+            input.intendedIdentity.identityId,
+            input.intendedIdentity.issuer,
+            input.intendedIdentity.subject,
+            input.intendedIdentity.personId,
+            input.intendedIdentity.householdId,
+            input.intendedIdentity.membershipId,
+            this.environment,
+            authorityNow.toISOString(),
+          ],
+        );
+        if (exactBootstrap.rows.length !== 1) {
+          throw new DomainError(
+            'not_authorized',
+            'The exact active production customer bootstrap is unavailable',
+          );
+        }
+      }
+      const policy = await currentPolicy(transaction, this.environment);
       if (
         policy.state !== 'active' ||
         policy.benefit_key === null ||
@@ -1661,9 +2216,14 @@ export class FoundingHouseholdRepository {
       if (programEndsAt <= authorityNow) {
         throw new DomainError('expired', 'Founding Household policy has expired');
       }
-      const backing = await currentSponsorBacking(transaction, policy.benefit_key, authorityNow);
+      const backing = await currentSponsorBacking(
+        transaction,
+        policy.benefit_key,
+        authorityNow,
+        this.environment,
+      );
       if (backing === null) {
-        throw new DomainError('not_authorized', 'Local sponsor backing is unavailable');
+        throw new DomainError('not_authorized', 'Environment sponsor backing is unavailable');
       }
       const occupancy = await transaction.query<
         { active: number; reserved: number } & Record<string, unknown>
@@ -1675,7 +2235,7 @@ export class FoundingHouseholdRepository {
            (SELECT count(*)::integer FROM founding_household_invitations invitation
             WHERE invitation.cohort_key = $1 AND invitation.environment = $2
               AND invitation.state = 'pending' AND invitation.expires_at > $3) AS reserved`,
-        [foundingHouseholdCohortKey, localEnvironment, authorityNow.toISOString()],
+        [foundingHouseholdCohortKey, this.environment, authorityNow.toISOString()],
       );
       const counts = occupancy.rows[0] ?? { active: 0, reserved: 0 };
       if (counts.active + counts.reserved >= policy.max_households) {
@@ -1701,18 +2261,22 @@ export class FoundingHouseholdRepository {
         actorPersonId: input.access.actorPersonId,
         resultReference: invitationId,
         now: authorityNow,
+        environment: this.environment,
       });
       await transaction.query(
         `INSERT INTO founding_household_invitations(
            id, cohort_key, environment, policy_revision, benefit_key,
            access_duration_days, program_ends_at, credential_fingerprint,
            fingerprint_key_version, state, created_by_person_id, operation_key,
-           expires_at, created_at, ended_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12,$13,NULL)`,
+           expires_at, created_at, ended_at, intended_identity_id,
+           intended_identity_issuer, intended_identity_subject, intended_person_id,
+           intended_household_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12,$13,NULL,
+                   $14,$15,$16,$17,$18)`,
         [
           invitationId,
           foundingHouseholdCohortKey,
-          localEnvironment,
+          this.environment,
           policy.revision,
           policy.benefit_key,
           policy.access_duration_days,
@@ -1723,6 +2287,11 @@ export class FoundingHouseholdRepository {
           input.operationKey,
           expiresAt.toISOString(),
           authorityNow.toISOString(),
+          input.intendedIdentity?.identityId ?? null,
+          input.intendedIdentity?.issuer ?? null,
+          input.intendedIdentity?.subject ?? null,
+          input.intendedIdentity?.personId ?? null,
+          input.intendedIdentity?.householdId ?? null,
         ],
       );
       await writeAuditAndOutbox(
@@ -1742,8 +2311,8 @@ export class FoundingHouseholdRepository {
           outcome: 'completed',
           metadata: {
             benefitKey: policy.benefit_key,
-            delivery: 'founder_manual_local_only',
-            environment: localEnvironment,
+            delivery: 'founder_manual_only',
+            environment: this.environment,
             paymentCollected: false,
             policyRevision: policy.revision,
           },
@@ -1754,8 +2323,8 @@ export class FoundingHouseholdRepository {
           aggregateId: invitationId,
           payload: {
             benefitKey: policy.benefit_key,
-            delivery: 'founder_manual_local_only',
-            environment: localEnvironment,
+            delivery: 'founder_manual_only',
+            environment: this.environment,
             policyRevision: policy.revision,
             state: 'pending',
           },
@@ -1764,18 +2333,26 @@ export class FoundingHouseholdRepository {
       return {
         invitation: {
           id: invitationId,
-          environment: localEnvironment,
+          environment: this.environment,
           policyRevision: policy.revision,
           benefitKey: policy.benefit_key,
           state: 'pending',
           createdAt: authorityNow,
           expiresAt,
+          identityBindingState:
+            input.intendedIdentity === undefined ? 'development_unbound' : 'verified_identity',
+          ...(input.intendedIdentity === undefined
+            ? {}
+            : {
+                intendedCustomerSubject: input.intendedIdentity.subject,
+                householdId: input.intendedIdentity.householdId,
+              }),
         },
-        localInvitationCredential: credential,
+        invitationCredential: credential,
         credentialState: 'created_credential_returned',
         reused: false,
         credentialRecoverable: false,
-        delivery: 'founder_manual_local_only',
+        delivery: 'founder_manual_only',
         externalActionExecuted: false,
       };
     });
@@ -1783,13 +2360,15 @@ export class FoundingHouseholdRepository {
 
   private async validateCredential(
     transaction: SqlExecutor,
+    access: FoundingHouseholdMemberAccess,
+    householdId: string,
     invitationId: string,
-    localInvitationCredential: string,
+    invitationCredential: string,
     now: Date,
-  ): Promise<InvitationRow> {
-    const separator = localInvitationCredential.indexOf('.');
-    const credentialId = localInvitationCredential.slice(0, separator);
-    const secret = localInvitationCredential.slice(separator + 1);
+  ): Promise<InvitationRow | typeof expiredInvitationCredential> {
+    const separator = invitationCredential.indexOf('.');
+    const credentialId = invitationCredential.slice(0, separator);
+    const secret = invitationCredential.slice(separator + 1);
     if (
       separator < 1 ||
       credentialId !== invitationId ||
@@ -1798,8 +2377,27 @@ export class FoundingHouseholdRepository {
     ) {
       throw new DomainError('not_found', 'Founding Household invitation is unavailable');
     }
-    const row = await invitationById(transaction, invitationId, true);
+    const row = await invitationById(transaction, invitationId, this.environment, true);
     if (row === null || row.state !== 'pending' || row.credential_fingerprint === null) {
+      throw new DomainError('not_found', 'Founding Household invitation is unavailable');
+    }
+    if (
+      this.environment !== 'local' &&
+      (access.actorIdentityId === undefined ||
+        access.actorIdentitySubject === undefined ||
+        row.intended_identity_id !== access.actorIdentityId ||
+        row.intended_identity_issuer !== access.actorIssuer ||
+        row.intended_identity_subject !== access.actorIdentitySubject ||
+        row.intended_household_id !== householdId)
+    ) {
+      throw new DomainError('not_found', 'Founding Household invitation is unavailable');
+    }
+    const fingerprint = fingerprintMinimized(secret, this.fingerprintKey, {
+      tenantId: foundingHouseholdCohortKey,
+      purpose: 'founding-household-invitation',
+      keyVersion: row.fingerprint_key_version,
+    });
+    if (!constantTimeEqual(fingerprint.value, row.credential_fingerprint)) {
       throw new DomainError('not_found', 'Founding Household invitation is unavailable');
     }
     const expiresAt = asDate(row.expires_at, 'founding invitation expires_at');
@@ -1810,15 +2408,7 @@ export class FoundingHouseholdRepository {
          WHERE id = $1 AND state = 'pending'`,
         [invitationId, now.toISOString()],
       );
-      throw new DomainError('expired', 'Founding Household invitation has expired');
-    }
-    const fingerprint = fingerprintMinimized(secret, this.fingerprintKey, {
-      tenantId: foundingHouseholdCohortKey,
-      purpose: 'founding-household-invitation',
-      keyVersion: row.fingerprint_key_version,
-    });
-    if (!constantTimeEqual(fingerprint.value, row.credential_fingerprint)) {
-      throw new DomainError('not_found', 'Founding Household invitation is unavailable');
+      return expiredInvitationCredential;
     }
     return row;
   }
@@ -1827,7 +2417,7 @@ export class FoundingHouseholdRepository {
     readonly access: FoundingHouseholdMemberAccess;
     readonly householdId: string;
     readonly invitationId: string;
-    readonly localInvitationCredential: string;
+    readonly invitationCredential: string;
     readonly now: Date;
   }): Promise<{
     readonly invitation: FoundingHouseholdInvitationRecord;
@@ -1835,25 +2425,27 @@ export class FoundingHouseholdRepository {
     readonly benefit: (typeof foundingHouseholdBenefitProfiles)[FoundingHouseholdBenefitKey];
     readonly accessEndsAtIfAcceptedNow: Date;
   }> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
-    await this.expireInvitationForAuthorizedMember(input);
-    return this.database.transaction(async (transaction) => {
+    const result = await this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
       const administrator = await lockActiveAdministrator(
         transaction,
         input.access,
         input.householdId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
       assertAdministratorSessionCurrent(administrator, authorityNow);
       const invitation = await this.validateCredential(
         transaction,
+        input.access,
+        input.householdId,
         input.invitationId,
-        input.localInvitationCredential,
+        input.invitationCredential,
         authorityNow,
       );
-      const policy = await currentPolicy(transaction);
+      if (invitation === expiredInvitationCredential) return expiredInvitationCredential;
+      const policy = await currentPolicy(transaction, this.environment);
       if (
         policy.state !== 'active' ||
         policy.revision !== invitation.policy_revision ||
@@ -1867,19 +2459,20 @@ export class FoundingHouseholdRepository {
         transaction,
         invitation.benefit_key,
         authorityNow,
+        this.environment,
       );
       const profile = foundingHouseholdBenefitProfiles[invitation.benefit_key];
       if (
         backing === null ||
-        backing.evidence_tier !== foundingHouseholdEvidenceTier ||
+        backing.evidence_tier !== this.evidenceTier() ||
         backing.plan_version_id !== profile.planVersionId
       ) {
-        throw new DomainError('not_authorized', 'Local sponsor backing is unavailable');
+        throw new DomainError('not_authorized', 'Environment sponsor backing is unavailable');
       }
       const existing = await transaction.query(
         `SELECT 1 FROM founding_household_enrollments
          WHERE environment = $1 AND household_id = $2`,
-        [localEnvironment, input.householdId],
+        [this.environment, input.householdId],
       );
       if (existing.rows[0] !== undefined) {
         throw new DomainError('conflict', 'This household already has a Founding Household record');
@@ -1904,8 +2497,8 @@ export class FoundingHouseholdRepository {
           input.access.audience,
           input.invitationId,
           JSON.stringify({
-            environment: localEnvironment,
-            evidenceTier: foundingHouseholdEvidenceTier,
+            environment: this.environment,
+            evidenceTier: this.evidenceTier(),
             paymentRequired: false,
           }),
           input.access.correlationId,
@@ -1919,15 +2512,19 @@ export class FoundingHouseholdRepository {
         accessEndsAtIfAcceptedNow,
       };
     });
+    if (result === expiredInvitationCredential) {
+      throw new DomainError('expired', 'Founding Household invitation has expired');
+    }
+    return result;
   }
 
   async acceptInvitation(input: {
     readonly access: FoundingHouseholdMemberAccess;
     readonly householdId: string;
     readonly invitationId: string;
-    readonly localInvitationCredential: string;
+    readonly invitationCredential: string;
     readonly operationKey: string;
-    readonly serviceConsentVersion: typeof foundingHouseholdServiceConsentVersion;
+    readonly serviceConsentVersion: FoundingHouseholdServiceConsentVersion;
     readonly serviceDisclosureDigest: string;
     readonly servicePolicyDigest: string;
     readonly protectedEnrollmentConsentVersion: typeof foundingHouseholdProtectedEnrollmentConsentVersion;
@@ -1941,19 +2538,19 @@ export class FoundingHouseholdRepository {
     readonly paymentCollected: false;
     readonly externalActionExecuted: false;
   }> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
     assertOperationKey(input.operationKey, 'accept');
+    const serviceConsent = foundingHouseholdServiceConsentForEnvironment(this.environment);
     if (
-      input.serviceDisclosureDigest !== foundingHouseholdServiceDocuments.disclosureDigest ||
-      input.servicePolicyDigest !== foundingHouseholdServiceDocuments.policyDigest ||
+      input.serviceConsentVersion !== serviceConsent.documents.disclosureVersion ||
+      input.serviceDisclosureDigest !== serviceConsent.documents.disclosureDigest ||
+      input.servicePolicyDigest !== serviceConsent.documents.policyDigest ||
       input.protectedEnrollmentDisclosureDigest !==
         foundingHouseholdProtectedDocuments.disclosureDigest ||
       input.protectedEnrollmentPolicyDigest !== foundingHouseholdProtectedDocuments.policyDigest
     ) {
       throw new DomainError('invalid_input', 'Founding Household consent document digest changed');
     }
-    await this.expireInvitationForAuthorizedMember(input);
     const digest = requestDigest({
       householdId: input.householdId,
       invitationId: input.invitationId,
@@ -1964,12 +2561,13 @@ export class FoundingHouseholdRepository {
       serviceDisclosureDigest: input.serviceDisclosureDigest,
       servicePolicyDigest: input.servicePolicyDigest,
     });
-    return this.database.transaction(async (transaction) => {
+    const result = await this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
       const administrator = await lockActiveAdministrator(
         transaction,
         input.access,
         input.householdId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
       assertAdministratorSessionCurrent(administrator, authorityNow);
@@ -1978,26 +2576,38 @@ export class FoundingHouseholdRepository {
         kind: 'accept',
         requestDigest: digest,
         actorPersonId: input.access.actorPersonId,
+        environment: this.environment,
       });
       if (existing !== null) {
-        const rows = await enrollmentRows(transaction, authorityNow, undefined, existing);
+        const rows = await enrollmentRows(
+          transaction,
+          authorityNow,
+          this.environment,
+          undefined,
+          existing,
+        );
         const row = rows[0];
         if (row === undefined) throw new Error('Founding Household acceptance is incomplete');
         return {
           enrollment: enrollmentFromRow(row, authorityNow),
-          protectedEnrollment: row.protected_enrollment_created ? 'created' : 'already_active',
+          protectedEnrollment: row.protected_enrollment_created
+            ? ('created' as const)
+            : ('already_active' as const),
           reused: true,
-          paymentCollected: false,
-          externalActionExecuted: false,
+          paymentCollected: false as const,
+          externalActionExecuted: false as const,
         };
       }
       const invitation = await this.validateCredential(
         transaction,
+        input.access,
+        input.householdId,
         input.invitationId,
-        input.localInvitationCredential,
+        input.invitationCredential,
         authorityNow,
       );
-      const policy = await currentPolicy(transaction);
+      if (invitation === expiredInvitationCredential) return expiredInvitationCredential;
+      const policy = await currentPolicy(transaction, this.environment);
       if (
         policy.state !== 'active' ||
         policy.revision !== invitation.policy_revision ||
@@ -2010,31 +2620,40 @@ export class FoundingHouseholdRepository {
       const prior = await transaction.query(
         `SELECT 1 FROM founding_household_enrollments
          WHERE environment = $1 AND household_id = $2 FOR UPDATE`,
-        [localEnvironment, input.householdId],
+        [this.environment, input.householdId],
       );
       if (prior.rows[0] !== undefined) {
         throw new DomainError('conflict', 'This household already has a Founding Household record');
       }
-      const actorIdentity = await identityEvidenceForPerson(
+      const actorIdentity = await identityEvidenceForFoundingAccess(
         transaction,
-        input.access.actorPersonId,
-        input.access.actorIssuer,
+        input.access,
+        this.environment,
       );
-      if (actorIdentity === null || actorIdentity.assurance !== 'development') {
-        throw new DomainError('not_authenticated', 'An active local identity is required');
+      if (
+        actorIdentity === null ||
+        (this.environment === 'local' && actorIdentity.assurance !== 'development') ||
+        (this.environment !== 'local' &&
+          (actorIdentity.assurance !== 'verified' ||
+            actorIdentity.id !== input.access.actorIdentityId ||
+            actorIdentity.issuer !== input.access.actorIssuer ||
+            actorIdentity.subject !== input.access.actorIdentitySubject))
+      ) {
+        throw new DomainError('not_authenticated', 'The exact active identity is required');
       }
       const backing = await currentSponsorBacking(
         transaction,
         invitation.benefit_key,
         authorityNow,
+        this.environment,
       );
       const profile = foundingHouseholdBenefitProfiles[invitation.benefit_key];
       if (
         backing === null ||
-        backing.evidence_tier !== foundingHouseholdEvidenceTier ||
+        backing.evidence_tier !== this.evidenceTier() ||
         backing.plan_version_id !== profile.planVersionId
       ) {
-        throw new DomainError('not_authorized', 'Local sponsor backing is unavailable');
+        throw new DomainError('not_authorized', 'Environment sponsor backing is unavailable');
       }
       const programEndsAt = asDate(invitation.program_ends_at, 'invitation program end');
       const endsAt = sponsorBoundedAccessEndsAt(
@@ -2055,6 +2674,7 @@ export class FoundingHouseholdRepository {
         actorPersonId: input.access.actorPersonId,
         resultReference: enrollmentId,
         now: authorityNow,
+        environment: this.environment,
       });
       await transaction.query(
         `INSERT INTO commerce_subscriptions(
@@ -2137,7 +2757,7 @@ export class FoundingHouseholdRepository {
         correlationId: input.access.correlationId,
         effectiveAt: authorityNow,
         expiresAt: endsAt,
-        documents: foundingHouseholdServiceDocuments,
+        documents: serviceConsent.documents,
       });
       const currentProtected = await protectedEnrollment(
         transaction,
@@ -2233,14 +2853,15 @@ export class FoundingHouseholdRepository {
            benefit_key, plan_version_id, sponsorship_id, sponsorship_allocation_id,
            subscription_id, entitlement_grant_id, service_consent_id,
            protected_enrollment_created, accepted_by_person_id, accepted_session_id,
+           accepted_identity_id, accepted_identity_issuer, accepted_identity_subject,
            state, evidence_tier, operation_key, starts_at, ends_at, created_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-                   'active',$17,$18,$19,$20,$19)`,
+                   $17,$18,$19,'active',$20,$21,$22,$23,$22)`,
         [
           input.householdId,
           enrollmentId,
           foundingHouseholdCohortKey,
-          localEnvironment,
+          this.environment,
           invitation.policy_revision,
           input.invitationId,
           invitation.benefit_key,
@@ -2253,7 +2874,10 @@ export class FoundingHouseholdRepository {
           protectedEnrollmentState === 'created',
           input.access.actorPersonId,
           input.access.sessionId,
-          foundingHouseholdEvidenceTier,
+          actorIdentity.id,
+          actorIdentity.issuer,
+          actorIdentity.subject,
+          this.evidenceTier(),
           input.operationKey,
           authorityNow.toISOString(),
           endsAt.toISOString(),
@@ -2284,8 +2908,8 @@ export class FoundingHouseholdRepository {
           outcome: 'completed',
           metadata: {
             benefitKey: invitation.benefit_key,
-            environment: localEnvironment,
-            evidenceTier: foundingHouseholdEvidenceTier,
+            environment: this.environment,
+            evidenceTier: this.evidenceTier(),
             followUpConsent: false,
             marketingConsent: false,
             paymentCollected: false,
@@ -2298,24 +2922,34 @@ export class FoundingHouseholdRepository {
           aggregateId: enrollmentId,
           payload: {
             benefitKey: invitation.benefit_key,
-            environment: localEnvironment,
-            evidenceTier: foundingHouseholdEvidenceTier,
+            environment: this.environment,
+            evidenceTier: this.evidenceTier(),
             paymentCollected: false,
             state: 'active',
           },
         },
       );
-      const rows = await enrollmentRows(transaction, authorityNow, undefined, enrollmentId);
+      const rows = await enrollmentRows(
+        transaction,
+        authorityNow,
+        this.environment,
+        undefined,
+        enrollmentId,
+      );
       const row = rows[0];
       if (row === undefined) throw new Error('Founding Household enrollment was not recorded');
       return {
         enrollment: enrollmentFromRow(row, authorityNow),
-        protectedEnrollment: protectedEnrollmentState,
+        protectedEnrollment: protectedEnrollmentState as 'created' | 'already_active',
         reused: false,
-        paymentCollected: false,
-        externalActionExecuted: false,
+        paymentCollected: false as const,
+        externalActionExecuted: false as const,
       };
     });
+    if (result === expiredInvitationCredential) {
+      throw new DomainError('expired', 'Founding Household invitation has expired');
+    }
+    return result;
   }
 
   async revokeInvitation(input: {
@@ -2328,7 +2962,6 @@ export class FoundingHouseholdRepository {
     readonly reused: boolean;
     readonly externalActionExecuted: false;
   }> {
-    this.assertLocalEnvironment();
     assertIdentifier(input.access.correlationId, 'correlation identifier');
     assertOperationKey(input.operationKey, 'invite_revoke');
     const digest = requestDigest({ invitationId: input.invitationId });
@@ -2338,17 +2971,24 @@ export class FoundingHouseholdRepository {
         transaction,
         this.configuredFounderPersonId,
         input.access.actorPersonId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
-      await bindConfiguredFounderAuthority(transaction, input.access.actorPersonId, authorityNow);
+      await bindConfiguredFounderAuthority(
+        transaction,
+        input.access.actorPersonId,
+        authorityNow,
+        this.environment,
+      );
       const priorOperation = await existingOperation(transaction, {
         operationKey: input.operationKey,
         kind: 'invite_revoke',
         requestDigest: digest,
         actorPersonId: input.access.actorPersonId,
+        environment: this.environment,
       });
       if (priorOperation !== null) {
-        const prior = await invitationById(transaction, priorOperation);
+        const prior = await invitationById(transaction, priorOperation, this.environment);
         if (prior === null) throw new Error('Invitation revocation operation is incomplete');
         return {
           invitation: invitationFromRow(prior, authorityNow),
@@ -2356,8 +2996,13 @@ export class FoundingHouseholdRepository {
           externalActionExecuted: false,
         };
       }
-      await expireDueInvitations(transaction, authorityNow);
-      const invitation = await invitationById(transaction, input.invitationId, true);
+      await expireDueInvitations(transaction, authorityNow, this.environment);
+      const invitation = await invitationById(
+        transaction,
+        input.invitationId,
+        this.environment,
+        true,
+      );
       if (invitation === null || invitation.state !== 'pending') {
         throw new DomainError('not_found', 'Founding Household invitation is unavailable');
       }
@@ -2368,6 +3013,7 @@ export class FoundingHouseholdRepository {
         actorPersonId: input.access.actorPersonId,
         resultReference: input.invitationId,
         now: authorityNow,
+        environment: this.environment,
       });
       await transaction.query(
         `UPDATE founding_household_invitations
@@ -2391,13 +3037,13 @@ export class FoundingHouseholdRepository {
           resourceType: 'founding_household_invitation',
           resourceId: input.invitationId,
           outcome: 'completed',
-          metadata: { environment: localEnvironment, paymentCollected: false },
+          metadata: { environment: this.environment, paymentCollected: false },
         },
         {
           eventType: 'founding_household.invitation_revoked.v1',
           aggregateType: 'founding_household_invitation',
           aggregateId: input.invitationId,
-          payload: { environment: localEnvironment, state: 'revoked' },
+          payload: { environment: this.environment, state: 'revoked' },
         },
       );
       return {
@@ -2416,17 +3062,22 @@ export class FoundingHouseholdRepository {
     readonly householdId: string;
     readonly now: Date;
   }): Promise<FoundingHouseholdEnrollmentRecord | null> {
-    this.assertLocalEnvironment();
     return this.database.transaction(async (transaction) => {
       await lockDefinition(transaction);
       const administrator = await lockActiveAdministrator(
         transaction,
         input.access,
         input.householdId,
+        this.environment,
       );
       const authorityNow = await this.authorityNow(transaction, input.now);
       assertAdministratorSessionCurrent(administrator, authorityNow);
-      const rows = await enrollmentRows(transaction, authorityNow, input.householdId);
+      const rows = await enrollmentRows(
+        transaction,
+        authorityNow,
+        this.environment,
+        input.householdId,
+      );
       const row = rows[0];
       return row === undefined ? null : enrollmentFromRow(row, authorityNow);
     });
@@ -2447,7 +3098,6 @@ export class FoundingHouseholdRepository {
     readonly reboundTrustedCircleAllocations: number;
     readonly externalActionExecuted: false;
   }> {
-    this.assertLocalEnvironment();
     assertOperationKey(input.operationKey, 'offboard');
     const reason = input.authority === 'founder' ? 'founder_revoked' : 'household_withdrew';
     const digest = requestDigest({ householdId: input.householdId, reason });
@@ -2459,17 +3109,24 @@ export class FoundingHouseholdRepository {
           transaction,
           this.configuredFounderPersonId,
           input.access.actorPersonId,
+          this.environment,
         );
       } else {
         administrator = await lockActiveAdministrator(
           transaction,
           input.access as FoundingHouseholdMemberAccess,
           input.householdId,
+          this.environment,
         );
       }
       const authorityNow = await this.authorityNow(transaction, input.now);
       if (input.authority === 'founder') {
-        await bindConfiguredFounderAuthority(transaction, input.access.actorPersonId, authorityNow);
+        await bindConfiguredFounderAuthority(
+          transaction,
+          input.access.actorPersonId,
+          authorityNow,
+          this.environment,
+        );
       }
       if (administrator !== undefined) {
         assertAdministratorSessionCurrent(administrator, authorityNow);
@@ -2479,12 +3136,14 @@ export class FoundingHouseholdRepository {
         kind: 'offboard',
         requestDigest: digest,
         actorPersonId: input.access.actorPersonId,
+        environment: this.environment,
       });
       if (existingOperationReference !== null) {
         const operationResult = offboardOperationResult(existingOperationReference);
         const rows = await enrollmentRows(
           transaction,
           authorityNow,
+          this.environment,
           undefined,
           operationResult.enrollmentId,
         );
@@ -2517,7 +3176,7 @@ export class FoundingHouseholdRepository {
                 sponsorship_allocation_id, entitlement_grant_id, state, revoked_reason, ends_at
          FROM founding_household_enrollments
          WHERE environment = $1 AND household_id = $2 FOR UPDATE`,
-        [localEnvironment, input.householdId],
+        [this.environment, input.householdId],
       );
       const enrollment = result.rows[0];
       if (
@@ -2541,12 +3200,18 @@ export class FoundingHouseholdRepository {
             'Founding Household service consent is already inactive; replay the original request',
           );
         }
-        const actorIdentity = await identityEvidenceForPerson(
+        const actorIdentity = await identityEvidenceForFoundingAccess(
           transaction,
-          memberAccess.actorPersonId,
-          memberAccess.actorIssuer,
+          memberAccess,
+          this.environment,
         );
-        if (actorIdentity === null)
+        if (
+          actorIdentity === null ||
+          (this.environment !== 'local' &&
+            (actorIdentity.id !== memberAccess.actorIdentityId ||
+              actorIdentity.issuer !== memberAccess.actorIssuer ||
+              actorIdentity.subject !== memberAccess.actorIdentitySubject))
+        )
           throw new DomainError('not_authenticated', 'Identity unavailable');
         await appendConsentEvidence(transaction, this.ids, {
           householdId: input.householdId,
@@ -2566,7 +3231,7 @@ export class FoundingHouseholdRepository {
           sessionId: memberAccess.sessionId,
           correlationId: memberAccess.correlationId,
           effectiveAt: authorityNow,
-          documents: foundingHouseholdServiceDocuments,
+          documents: foundingHouseholdServiceConsentForEnvironment(this.environment).documents,
         });
         await insertOperation(transaction, {
           operationKey: input.operationKey,
@@ -2575,6 +3240,7 @@ export class FoundingHouseholdRepository {
           actorPersonId: memberAccess.actorPersonId,
           resultReference: `${enrollment.id}:0:0`,
           now: authorityNow,
+          environment: this.environment,
         });
         await writeAuditAndOutbox(
           transaction,
@@ -2593,7 +3259,7 @@ export class FoundingHouseholdRepository {
             resourceId: enrollment.id,
             outcome: 'completed',
             metadata: {
-              environment: localEnvironment,
+              environment: this.environment,
               sponsorChainChanged: false,
               priorOffboardingReason: 'founder_revoked',
             },
@@ -2603,13 +3269,19 @@ export class FoundingHouseholdRepository {
             aggregateType: 'founding_household_enrollment',
             aggregateId: enrollment.id,
             payload: {
-              environment: localEnvironment,
+              environment: this.environment,
               sponsorChainChanged: false,
               state: 'withdrawn',
             },
           },
         );
-        const rows = await enrollmentRows(transaction, authorityNow, undefined, enrollment.id);
+        const rows = await enrollmentRows(
+          transaction,
+          authorityNow,
+          this.environment,
+          undefined,
+          enrollment.id,
+        );
         const row = rows[0];
         if (row === undefined) throw new Error('Founding Household enrollment is unavailable');
         return {
@@ -2637,12 +3309,18 @@ export class FoundingHouseholdRepository {
       }
       if (input.authority === 'household') {
         const memberAccess = input.access as FoundingHouseholdMemberAccess;
-        const actorIdentity = await identityEvidenceForPerson(
+        const actorIdentity = await identityEvidenceForFoundingAccess(
           transaction,
-          memberAccess.actorPersonId,
-          memberAccess.actorIssuer,
+          memberAccess,
+          this.environment,
         );
-        if (actorIdentity === null)
+        if (
+          actorIdentity === null ||
+          (this.environment !== 'local' &&
+            (actorIdentity.id !== memberAccess.actorIdentityId ||
+              actorIdentity.issuer !== memberAccess.actorIssuer ||
+              actorIdentity.subject !== memberAccess.actorIdentitySubject))
+        )
           throw new DomainError('not_authenticated', 'Identity unavailable');
         await appendConsentEvidence(transaction, this.ids, {
           householdId: input.householdId,
@@ -2662,7 +3340,7 @@ export class FoundingHouseholdRepository {
           sessionId: memberAccess.sessionId,
           correlationId: memberAccess.correlationId,
           effectiveAt: authorityNow,
-          documents: foundingHouseholdServiceDocuments,
+          documents: foundingHouseholdServiceConsentForEnvironment(this.environment).documents,
         });
       }
       await transaction.query(
@@ -2684,14 +3362,14 @@ export class FoundingHouseholdRepository {
       const protectedRebinding = await reconcileProtectedMemberAllowanceBindings(transaction, {
         householdId: input.householdId,
         now: authorityNow,
-        runtimeEnvironment: localEnvironment,
+        runtimeEnvironment: this.environment === 'production' ? 'production' : 'local',
         allowPartialRebinding: true,
         onlyFromGrantId: enrollment.entitlement_grant_id,
       });
       const trustedCircleRebinding = await reconcileTrustedCircleAllowanceBindings(transaction, {
         householdId: input.householdId,
         now: authorityNow,
-        runtimeEnvironment: localEnvironment,
+        runtimeEnvironment: this.environment === 'production' ? 'production' : 'local',
         onlyFromGrantId: enrollment.entitlement_grant_id,
       });
       await insertOperation(transaction, {
@@ -2701,6 +3379,7 @@ export class FoundingHouseholdRepository {
         actorPersonId: input.access.actorPersonId,
         resultReference: `${enrollment.id}:${protectedRebinding.rebound}:${trustedCircleRebinding.rebound}`,
         now: authorityNow,
+        environment: this.environment,
       });
       await transaction.query(
         `UPDATE founding_household_enrollments
@@ -2708,7 +3387,7 @@ export class FoundingHouseholdRepository {
              revoked_reason = $5, revocation_operation_key = $6
          WHERE environment = $1 AND household_id = $2 AND state = 'active'`,
         [
-          localEnvironment,
+          this.environment,
           input.householdId,
           authorityNow.toISOString(),
           input.access.actorPersonId,
@@ -2736,7 +3415,7 @@ export class FoundingHouseholdRepository {
           resourceId: enrollment.id,
           outcome: 'completed',
           metadata: {
-            environment: localEnvironment,
+            environment: this.environment,
             reason,
             reboundProtectedAllocations: protectedRebinding.rebound,
             reboundTrustedCircleAllocations: trustedCircleRebinding.rebound,
@@ -2748,7 +3427,7 @@ export class FoundingHouseholdRepository {
           aggregateType: 'founding_household_enrollment',
           aggregateId: enrollment.id,
           payload: {
-            environment: localEnvironment,
+            environment: this.environment,
             reason,
             reboundProtectedAllocations: protectedRebinding.rebound,
             reboundTrustedCircleAllocations: trustedCircleRebinding.rebound,
@@ -2757,7 +3436,13 @@ export class FoundingHouseholdRepository {
           },
         },
       );
-      const rows = await enrollmentRows(transaction, authorityNow, undefined, enrollment.id);
+      const rows = await enrollmentRows(
+        transaction,
+        authorityNow,
+        this.environment,
+        undefined,
+        enrollment.id,
+      );
       const row = rows[0];
       if (row === undefined) throw new Error('Founding Household offboarding was not recorded');
       return {

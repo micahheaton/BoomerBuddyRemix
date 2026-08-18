@@ -14,6 +14,7 @@ import { createPGliteDatabase, type Database, type SqlExecutor } from './databas
 import { EntitlementRepository } from './entitlements';
 import {
   foundingHouseholdDefinitionDigest,
+  foundingHouseholdLegacyDefinitionDigest,
   foundingHouseholdProtectedDocuments,
   FoundingHouseholdRepository,
   foundingHouseholdServiceDocuments,
@@ -101,14 +102,14 @@ async function foundingFixture(
     operationKey: operation('invite', 2),
     now,
   });
-  if (invitation.localInvitationCredential === undefined) {
+  if (invitation.invitationCredential === undefined) {
     throw new Error('Expected local invitation credential');
   }
   if (!accept) {
     return {
       repository,
       invitationId: invitation.invitation.id,
-      invitationCredential: invitation.localInvitationCredential,
+      invitationCredential: invitation.invitationCredential,
       memberSessionId,
     };
   }
@@ -122,7 +123,7 @@ async function foundingFixture(
     },
     householdId: 'household-harbor',
     invitationId: invitation.invitation.id,
-    localInvitationCredential: invitation.localInvitationCredential,
+    invitationCredential: invitation.invitationCredential,
     operationKey: operation('accept', 3),
     serviceConsentVersion: foundingHouseholdServiceConsentVersion,
     serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,
@@ -135,7 +136,7 @@ async function foundingFixture(
   return {
     repository,
     invitationId: invitation.invitation.id,
-    invitationCredential: invitation.localInvitationCredential,
+    invitationCredential: invitation.invitationCredential,
     memberSessionId,
     enrollmentId: accepted.enrollment.id,
   };
@@ -210,6 +211,44 @@ async function insertPreexistingFoundingCatalogue(
   );
 }
 
+async function insertTestProductionFounderBootstrap(target: Database): Promise<void> {
+  await target.transaction(async (transaction) => {
+    await transaction.query(
+      `INSERT INTO identities(id, person_id, issuer, subject, status, created_at)
+       VALUES ('identity-founding-production-founder',$1,
+               'https://founder.clerk.test','founder_subject','active',$2)`,
+      [founderPersonId, now.toISOString()],
+    );
+    await transaction.query(
+      `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+       VALUES ('organization-founding-production-hq','BoomerBuddy HQ',
+               'internal','verified',$1)`,
+      [now.toISOString()],
+    );
+    await transaction.query(
+      `INSERT INTO employee_assignments(
+         id, person_id, organization_id, role, status, created_at
+       ) VALUES ('employee-founding-production-founder',$1,
+                 'organization-founding-production-hq','hq_owner','active',$2)`,
+      [founderPersonId, now.toISOString()],
+    );
+    await transaction.query(
+      `INSERT INTO production_founder_bootstraps(
+         bootstrap_key, identity_id, issuer, subject, person_id,
+         organization_id, organization_kind, organization_verification_state,
+         employee_assignment_id, employee_role, correlation_id, created_at
+       ) VALUES (
+         'production-founder-v1','identity-founding-production-founder',
+         'https://founder.clerk.test','founder_subject',$1,
+         'organization-founding-production-hq','internal','verified',
+         'employee-founding-production-founder','hq_owner',
+         'correlation:founding-production-founder',$2
+       )`,
+      [founderPersonId, now.toISOString()],
+    );
+  });
+}
+
 describe('Founding Household forward migration', () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
@@ -261,7 +300,7 @@ describe('Founding Household forward migration', () => {
       {
         cohort_key: foundingHouseholdCohortKey,
         definition_version: 1,
-        definition_digest: foundingHouseholdDefinitionDigest(),
+        definition_digest: foundingHouseholdLegacyDefinitionDigest,
       },
     ]);
     expect(policies.rows).toEqual([
@@ -274,6 +313,124 @@ describe('Founding Household forward migration', () => {
       { id: 'founding_plus_beta_v2', plan_key: 'plus', version: 2, state: 'active' },
     ]);
   });
+
+  it('applies the fresh 0001 through 0026 chain after flushing prior deferred events', async () => {
+    const sourceDirectory = await migrationDirectory();
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-founding-0026-fresh-'));
+    await copyMigrationsThrough(
+      sourceDirectory,
+      temporaryDirectory,
+      '0026_run3_1_production_founding_households.sql',
+    );
+    database = await createPGliteDatabase();
+
+    await expect(runMigrations(database, temporaryDirectory)).resolves.toHaveLength(26);
+    const revisions = await database.query<{
+      definition_version: number;
+      definition_digest: string;
+    }>(
+      `SELECT definition_version, definition_digest
+       FROM founding_household_program_definition_revisions
+       WHERE cohort_key = $1 ORDER BY definition_version`,
+      [foundingHouseholdCohortKey],
+    );
+    expect(revisions.rows).toEqual([
+      { definition_version: 1, definition_digest: foundingHouseholdLegacyDefinitionDigest },
+      { definition_version: 2, definition_digest: foundingHouseholdDefinitionDigest() },
+    ]);
+  });
+
+  it('upgrades an applied 0025 database with only additive 0026 changes', async () => {
+    const sourceDirectory = await migrationDirectory();
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-founding-0026-upgrade-'));
+    await copyMigrationsThrough(
+      sourceDirectory,
+      temporaryDirectory,
+      '0025_run3_1_authenticated_feedback.sql',
+    );
+    database = await createPGliteDatabase();
+    await expect(runMigrations(database, temporaryDirectory)).resolves.toHaveLength(25);
+
+    await copyFile(
+      join(sourceDirectory, '0026_run3_1_production_founding_households.sql'),
+      join(temporaryDirectory, '0026_run3_1_production_founding_households.sql'),
+    );
+    await expect(runMigrations(database, temporaryDirectory)).resolves.toEqual([
+      '0026_run3_1_production_founding_households.sql',
+    ]);
+    const columns = await database.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'founding_household_invitations'
+         AND column_name LIKE 'intended_%'
+       ORDER BY column_name`,
+    );
+    expect(columns.rows.map(({ column_name }) => column_name)).toEqual([
+      'intended_household_id',
+      'intended_identity_id',
+      'intended_identity_issuer',
+      'intended_identity_subject',
+      'intended_person_id',
+    ]);
+  });
+
+  it.each([
+    ['null', null, 40],
+    ['above the hard limit', 6, 41],
+  ] as const)(
+    'rejects raw-DML active production policy caps that are %s',
+    async (_label, maxHouseholds, sequence) => {
+      database = await createSeededTestDatabase(now);
+      await insertTestProductionFounderBootstrap(database);
+      const operationKey = operation('policy', sequence);
+
+      await expect(
+        withCapturedAuthority(database, now, async (transaction) => {
+          await transaction.query(
+            `INSERT INTO founding_household_founder_authorities(
+               cohort_key, environment, founder_person_id, bound_at
+             ) VALUES ($1,'production',$2,$3)
+             ON CONFLICT (cohort_key, environment) DO NOTHING`,
+            [foundingHouseholdCohortKey, founderPersonId, now.toISOString()],
+          );
+          await transaction.query(
+            `INSERT INTO founding_household_operations(
+               operation_key, cohort_key, environment, operation_kind, request_digest,
+               actor_person_id, result_reference, created_at
+             ) VALUES ($1,$2,'production','policy',$3,$4,'2:0',$5)`,
+            [
+              operationKey,
+              foundingHouseholdCohortKey,
+              'P'.repeat(43),
+              founderPersonId,
+              now.toISOString(),
+            ],
+          );
+          await transaction.query(
+            `INSERT INTO founding_household_policy_versions(
+               cohort_key, environment, revision, state, benefit_key, max_households,
+               invitation_ttl_days, access_duration_days, program_ends_at,
+               changed_by_person_id, operation_key, created_at
+             ) VALUES ($1,'production',2,'active','family_beta_v1',$2,7,30,$3,$4,$5,$6)`,
+            [
+              foundingHouseholdCohortKey,
+              maxHouseholds,
+              '2026-10-01T00:00:00.000Z',
+              founderPersonId,
+              operationKey,
+              now.toISOString(),
+            ],
+          );
+        }),
+      ).rejects.toThrow('Production Founding Household policy requires a hard cohort cap');
+
+      const activePolicies = await database.query<{ count: number }>(
+        `SELECT count(*)::integer AS count FROM founding_household_policy_versions
+         WHERE cohort_key = $1 AND environment = 'production' AND state = 'active'`,
+        [foundingHouseholdCohortKey],
+      );
+      expect(activePolicies.rows).toEqual([{ count: 0 }]);
+    },
+  );
 
   it('upgrades an applied 0018 database with only the forward 0019 migration', async () => {
     const sourceDirectory = await migrationDirectory();
@@ -506,6 +663,7 @@ describe('Founding Household forward migration', () => {
              benefit_key, plan_version_id, sponsorship_id, sponsorship_allocation_id,
              subscription_id, entitlement_grant_id, service_consent_id,
              protected_enrollment_created, accepted_by_person_id, accepted_session_id,
+             accepted_identity_id, accepted_identity_issuer, accepted_identity_subject,
              state, evidence_tier, operation_key, starts_at, ends_at,
              revoked_at, revoked_by_person_id, revoked_reason,
              revocation_operation_key, created_at
@@ -514,7 +672,8 @@ describe('Founding Household forward migration', () => {
              'family_beta_v1','founding_family_beta_v2',
              'founding-sponsorship-family-local-v1','missing-allocation',
              'missing-subscription','missing-grant','missing-consent',false,
-             'person-owner-bob',$3,'revoked','local_simulation',$4,$5,$6,$5,
+             'person-owner-bob',$3,'identity-owner-bob','boomerbuddy-dev','owner-bob',
+             'revoked','local_simulation',$4,$5,$6,$5,
              'person-owner-bob','household_withdrew',$4,$5
            )`,
           [

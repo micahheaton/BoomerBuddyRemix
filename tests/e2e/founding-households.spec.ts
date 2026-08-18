@@ -10,9 +10,7 @@ test('founder issues one local no-card credential and a household admin accepts 
   await page.getByRole('link', { name: 'Founding Households' }).click();
   await expect(page).toHaveURL(`${hqUrl}/founding-households`);
   await expect(page.getByRole('heading', { name: 'Founding Households' })).toBeVisible();
-  await expect(page.locator('body')).toContainText(
-    'Local simulation; no card and no delivery adapter',
-  );
+  await expect(page.locator('body')).toContainText('Founder-only; no card and no delivery adapter');
 
   await page.getByText('Configure the finite local cohort policy').click();
   await page.getByLabel('Hard program end').fill('2026-10-01T12:00');
@@ -47,9 +45,9 @@ test('founder issues one local no-card credential and a household admin accepts 
     }
     await route.fulfill({ response });
   });
-  await page.getByRole('button', { name: 'Issue one local credential' }).click();
+  await page.getByRole('button', { name: 'Issue one manual-delivery credential' }).click();
   await expect(page.locator('.error[role="alert"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Issue one local credential' }).click();
+  await page.getByRole('button', { name: 'Issue one manual-delivery credential' }).click();
   await expect(page.locator('.error[role="alert"]')).toContainText(
     'Credential recovery is impossible',
   );
@@ -75,11 +73,11 @@ test('founder issues one local no-card credential and a household admin accepts 
   expect(revokeKeys).toHaveLength(2);
   expect(revokeKeys[1]).toBe(revokeKeys[0]);
 
-  await page.getByRole('button', { name: 'Issue one local credential' }).click();
+  await page.getByRole('button', { name: 'Issue one manual-delivery credential' }).click();
   expect(invitationKeys).toHaveLength(3);
   expect(invitationKeys[2]).not.toBe(invitationKeys[1]);
   const credential = await page
-    .getByRole('region', { name: 'One-time local invitation credential' })
+    .getByRole('region', { name: 'One-time invitation credential' })
     .locator('code')
     .textContent();
   expect(credential).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/u);

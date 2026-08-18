@@ -4,11 +4,29 @@ import {
   assertFeedbackTransition,
   canonicalFeedbackNetworkAddress,
   feedbackAdapterRegistry,
+  feedbackEvidenceTierForEnvironment,
   isFeedbackContentReadableStatus,
   initialFeedbackQueue,
 } from './feedback';
 
 describe('feedback domain boundary', () => {
+  it('derives the evidence tier from the runtime without a caller-selectable override', () => {
+    expect(feedbackEvidenceTierForEnvironment('development')).toBe('local_simulation');
+    expect(feedbackEvidenceTierForEnvironment('test')).toBe('local_simulation');
+    expect(feedbackEvidenceTierForEnvironment('production')).toBe('live_production');
+  });
+
+  it('enables only authenticated text in production', () => {
+    expect(feedbackAdapterRegistry.find((adapter) => adapter.key === 'authenticated_text')).toEqual(
+      expect.objectContaining({ state: 'production_enabled', externalEffect: false }),
+    );
+    for (const key of ['anonymous_text', 'support_conversion'] as const) {
+      expect(feedbackAdapterRegistry.find((adapter) => adapter.key === key)).toEqual(
+        expect.objectContaining({ state: 'local_only_enabled', externalEffect: false }),
+      );
+    }
+  });
+
   it('keeps every media and provider adapter structurally disabled', () => {
     expect(
       feedbackAdapterRegistry

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   foundingHouseholdCohortKey,
   foundingHouseholdProtectedEnrollmentConsentVersion,
+  foundingHouseholdProductionServiceConsentVersion,
   foundingHouseholdServiceConsentVersion,
   ids,
   type DomainError,
@@ -16,11 +17,16 @@ import { FamilyRepository } from './family';
 import { FeedbackRepository, type FeedbackIntakeRequest } from './feedback';
 import {
   foundingHouseholdDefinitionDigest,
+  foundingHouseholdLegacyDefinitionDigest,
+  foundingHouseholdProductionSponsorOrganizationId,
+  foundingHouseholdProductionSponsorshipId,
+  foundingHouseholdProductionServiceDocuments,
   foundingHouseholdProtectedDocuments,
   FoundingHouseholdRepository,
   foundingHouseholdServiceDocuments,
   type FoundingHouseholdMemberAccess,
 } from './founding-households';
+import { ProductionIdentityRepository } from './production-identity';
 import { SessionRepository } from './sessions';
 import { HqRepository } from './hq';
 import type { IdFactory } from './values';
@@ -204,6 +210,20 @@ function feedbackRepository(database: Database): FeedbackRepository {
 }
 
 describe('FoundingHouseholdRepository', () => {
+  it('pins the additive production definition and consent documents', () => {
+    expect({
+      definition: foundingHouseholdDefinitionDigest(),
+      service: foundingHouseholdProductionServiceDocuments,
+    }).toEqual({
+      definition: '1iiZgSqZuLNp_M7OEmEEPOglKpy4AjeSjK3y2ILrDd0',
+      service: {
+        disclosureVersion: 'founding-household-service-beta-v2',
+        disclosureDigest: 'b120fec99dab8271bf106c5a44fbff7640f3cb179a72b63957d34978cc41f137',
+        policyVersion: 'founding-household-service-beta-v2-policy',
+        policyDigest: '815a516d88fef3be88b960c5f12a6b36c7be2f1c020610bfab16f7746ba197df',
+      },
+    });
+  });
   let database: Database;
   let repository: FoundingHouseholdRepository;
   let bobAccess: FoundingHouseholdMemberAccess;
@@ -251,6 +271,132 @@ describe('FoundingHouseholdRepository', () => {
     });
   }
 
+  async function provisionProductionFounder(): Promise<void> {
+    await database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO identities(id, person_id, issuer, subject, status, created_at)
+         VALUES ('identity-founding-production-founder',$1,
+                 'https://founder.clerk.test','founder_subject','active',$2)`,
+        [founderPersonId, now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+         VALUES ('organization-founding-production-hq','BoomerBuddy HQ',
+                 'internal','verified',$1)`,
+        [now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO employee_assignments(
+           id, person_id, organization_id, role, status, created_at
+         ) VALUES ('employee-founding-production-founder',$1,
+                   'organization-founding-production-hq','hq_owner','active',$2)`,
+        [founderPersonId, now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO production_founder_bootstraps(
+           bootstrap_key, identity_id, issuer, subject, person_id,
+           organization_id, organization_kind, organization_verification_state,
+           employee_assignment_id, employee_role, correlation_id, created_at
+         ) VALUES (
+           'production-founder-v1','identity-founding-production-founder',
+           'https://founder.clerk.test','founder_subject',$1,
+           'organization-founding-production-hq','internal','verified',
+           'employee-founding-production-founder','hq_owner',
+           'correlation:founding-production-founder',$2
+         )`,
+        [founderPersonId, now.toISOString()],
+      );
+    });
+  }
+
+  async function provisionProductionFounderAndSponsor(): Promise<void> {
+    await provisionProductionFounder();
+    await database.transaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+         VALUES ('organization-founding-production-sponsor','Founding Household sponsor',
+                 'sponsor','verified',$1)`,
+        [now.toISOString()],
+      );
+      await transaction.query(
+        `INSERT INTO commerce_sponsorships(
+           id, organization_id, plan_version_id, state, privacy_policy_version,
+           starts_at, ends_at, created_at
+         ) VALUES (
+           'founding-sponsorship-family-production-v1',
+           'organization-founding-production-sponsor','founding_family_beta_v2','active',
+           'founding-household-production-v1',$1,$2,$1
+         )`,
+        [now.toISOString(), '2026-10-15T00:00:00.000Z'],
+      );
+      await transaction.query(
+        `INSERT INTO founding_household_sponsor_backings(
+           cohort_key, environment, benefit_key, organization_id, sponsorship_id,
+           plan_version_id, evidence_tier, approved_by_person_id, approved_at
+         ) VALUES (
+           $1,'production','family_beta_v1','organization-founding-production-sponsor',
+           'founding-sponsorship-family-production-v1','founding_family_beta_v2',
+           'live_production',$2,$3
+         )`,
+        [foundingHouseholdCohortKey, founderPersonId, now.toISOString()],
+      );
+    });
+  }
+
+  function productionFoundingRepository(): FoundingHouseholdRepository {
+    return new FoundingHouseholdRepository(
+      database,
+      Buffer.alloc(32, 31),
+      1,
+      founderPersonId,
+      'production',
+      sequentialIds(),
+      async (_transaction, observedAt) => new Date(observedAt),
+    );
+  }
+
+  async function productionCustomer(subject: string, suffix: string) {
+    let identitySequence = 0;
+    const identities = new ProductionIdentityRepository(database, {
+      next: (prefix) => `${prefix}-founding-production-${suffix}-${++identitySequence}`,
+    });
+    const bootstrap = await identities.ensureCustomerBootstrap({
+      issuer: 'https://customer.clerk.test',
+      subject,
+      now,
+    });
+    if (bootstrap === null) throw new Error('Expected an exact production customer bootstrap');
+    const sessions = new SessionRepository(
+      database,
+      { next: () => `session-founding-production-${suffix}` },
+      'production',
+    );
+    const resolved = await sessions.resolveProviderSession({
+      identityId: bootstrap.identityId,
+      personId: bootstrap.personId,
+      issuer: bootstrap.issuer,
+      subject: bootstrap.subject,
+      providerSessionId: `provider-session-founding-production-${suffix}`,
+      audience: 'customer',
+      issuedAt: new Date(now.getTime() - 1_000),
+      expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+      now,
+    });
+    if (resolved === null) throw new Error('Expected an exact production customer session');
+    return {
+      bootstrap,
+      access: {
+        actorPersonId: bootstrap.personId,
+        actorIssuer: resolved.issuer,
+        actorIdentityId: resolved.identityId,
+        actorIdentitySubject: resolved.identitySubject,
+        sessionId: resolved.principal.sessionId,
+        audience: 'customer' as const,
+        correlationId: `correlation:founding-production-${suffix}`,
+      },
+    };
+  }
+
   async function activatePolicy(input?: {
     readonly benefitKey?: 'plus_beta_v1' | 'family_beta_v1';
     readonly maxHouseholds?: number;
@@ -279,10 +425,10 @@ describe('FoundingHouseholdRepository', () => {
       operationKey: operation('invite', sequence),
       now,
     });
-    if (result.localInvitationCredential === undefined) {
+    if (result.invitationCredential === undefined) {
       throw new Error('Expected one-time local invitation credential');
     }
-    return { ...result, credential: result.localInvitationCredential };
+    return { ...result, credential: result.invitationCredential };
   }
 
   async function acceptBobWith(
@@ -294,7 +440,7 @@ describe('FoundingHouseholdRepository', () => {
       access: bobAccess,
       householdId: 'household-harbor',
       invitationId: invitation.invitation.id,
-      localInvitationCredential: invitation.credential,
+      invitationCredential: invitation.credential,
       operationKey: operation('accept', sequence),
       serviceConsentVersion: foundingHouseholdServiceConsentVersion,
       serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,
@@ -604,7 +750,7 @@ describe('FoundingHouseholdRepository', () => {
       enrollments: [],
     });
     expect(definitions.rows).toEqual([
-      { definition_version: 1, definition_digest: foundingHouseholdDefinitionDigest() },
+      { definition_version: 1, definition_digest: foundingHouseholdLegacyDefinitionDigest },
     ]);
     expect(policies.rows).toEqual([
       { environment: 'local', state: 'disabled' },
@@ -634,7 +780,132 @@ describe('FoundingHouseholdRepository', () => {
          )`,
         [foundingHouseholdCohortKey, founderPersonId, now.toISOString()],
       ),
-    ).rejects.toThrow('not verified for its environment');
+    ).rejects.toThrow('exact active verified founder bootstrap');
+  });
+
+  it('atomically bootstraps and exact-replays one audited production sponsor and policy', async () => {
+    await provisionProductionFounder();
+    const productionRepository = productionFoundingRepository();
+    const input = {
+      access: founderAccess,
+      operationKey: operation('policy', 191),
+      benefitKey: 'family_beta_v1' as const,
+      maxHouseholds: 3,
+      invitationTtlDays: 7,
+      accessDurationDays: 30,
+      programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+      sponsorshipPrivacyPolicyVersion: 'founding-household-production-v1',
+      sponsorshipStartsAt: new Date('2026-08-16T00:00:00.000Z'),
+      sponsorshipEndsAt: new Date('2026-10-15T00:00:00.000Z'),
+      now,
+    };
+
+    const created = await productionRepository.bootstrapProductionProgram(input);
+    const replayed = await productionRepository.bootstrapProductionProgram(input);
+    expect(created).toMatchObject({
+      reused: false,
+      sponsorOrganizationId: foundingHouseholdProductionSponsorOrganizationId,
+      sponsorshipId: foundingHouseholdProductionSponsorshipId,
+      planVersionId: 'founding_family_beta_v2',
+      backingEvidenceTier: 'live_production',
+      policy: { environment: 'production', revision: 2, state: 'active', maxHouseholds: 3 },
+    });
+    expect(replayed).toEqual({ ...created, reused: true });
+
+    const evidence = await database.query<
+      {
+        organizations: number;
+        sponsorships: number;
+        backings: number;
+        policies: number;
+        audits: number;
+        outbox_events: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::integer FROM organizations WHERE id = $1
+            AND kind = 'sponsor' AND verification_state = 'verified') AS organizations,
+         (SELECT count(*)::integer FROM commerce_sponsorships WHERE id = $2
+            AND state = 'active' AND ends_at IS NOT NULL) AS sponsorships,
+         (SELECT count(*)::integer FROM founding_household_sponsor_backings
+            WHERE cohort_key = $3 AND environment = 'production'
+              AND evidence_tier = 'live_production'
+              AND approved_by_person_id = $4) AS backings,
+         (SELECT count(*)::integer FROM founding_household_policy_versions
+            WHERE cohort_key = $3 AND environment = 'production'
+              AND revision = 2 AND state = 'active' AND max_households = 3) AS policies,
+         (SELECT count(*)::integer FROM audit_events
+            WHERE founding_household_operation_key = $5
+              AND action = 'founding_household.policy_configured') AS audits,
+         (SELECT count(*)::integer FROM outbox_events
+            WHERE founding_household_operation_key = $5
+              AND event_type = 'founding_household.policy_configured.v1') AS outbox_events`,
+      [
+        foundingHouseholdProductionSponsorOrganizationId,
+        foundingHouseholdProductionSponsorshipId,
+        foundingHouseholdCohortKey,
+        founderPersonId,
+        input.operationKey,
+      ],
+    );
+    expect(evidence.rows).toEqual([
+      { organizations: 1, sponsorships: 1, backings: 1, policies: 1, audits: 1, outbox_events: 1 },
+    ]);
+
+    await expect(
+      productionRepository.bootstrapProductionProgram({ ...input, maxHouseholds: 4 }),
+    ).rejects.toMatchObject({ code: 'conflict' } satisfies Partial<DomainError>);
+    await expect(
+      productionRepository.bootstrapProductionProgram({
+        ...input,
+        operationKey: operation('policy', 192),
+        benefitKey: 'plus_beta_v1',
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' } satisfies Partial<DomainError>);
+  });
+
+  it('rolls sponsor creation back when the production policy cannot start at revision one', async () => {
+    await provisionProductionFounder();
+    const productionRepository = productionFoundingRepository();
+    await productionRepository.configurePolicy({
+      access: founderAccess,
+      operationKey: operation('policy', 193),
+      expectedRevision: 1,
+      state: 'disabled',
+      now,
+    });
+
+    await expect(
+      productionRepository.bootstrapProductionProgram({
+        access: founderAccess,
+        operationKey: operation('policy', 194),
+        benefitKey: 'family_beta_v1',
+        maxHouseholds: 3,
+        invitationTtlDays: 7,
+        accessDurationDays: 30,
+        programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+        sponsorshipPrivacyPolicyVersion: 'founding-household-production-v1',
+        sponsorshipStartsAt: new Date('2026-08-16T00:00:00.000Z'),
+        sponsorshipEndsAt: new Date('2026-10-15T00:00:00.000Z'),
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'conflict' } satisfies Partial<DomainError>);
+
+    const partial = await database.query<
+      { organizations: number; sponsorships: number; backings: number } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::integer FROM organizations WHERE id = $1) AS organizations,
+         (SELECT count(*)::integer FROM commerce_sponsorships WHERE id = $2) AS sponsorships,
+         (SELECT count(*)::integer FROM founding_household_sponsor_backings
+            WHERE cohort_key = $3 AND environment = 'production') AS backings`,
+      [
+        foundingHouseholdProductionSponsorOrganizationId,
+        foundingHouseholdProductionSponsorshipId,
+        foundingHouseholdCohortKey,
+      ],
+    );
+    expect(partial.rows).toEqual([{ organizations: 0, sponsorships: 0, backings: 0 }]);
   });
 
   it('refuses the Stage7 repository after a local database is promoted to production config', async () => {
@@ -667,6 +938,338 @@ describe('FoundingHouseholdRepository', () => {
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
+  });
+
+  it('binds a production invitation and enrollment to one exact customer bootstrap', async () => {
+    await provisionProductionFounderAndSponsor();
+    const target = await productionCustomer('customer_intended', 'intended');
+    const thief = await productionCustomer('customer_thief', 'thief');
+    const productionRepository = productionFoundingRepository();
+    await productionRepository.configurePolicy({
+      access: founderAccess,
+      operationKey: operation('policy', 101),
+      expectedRevision: 1,
+      state: 'active',
+      benefitKey: 'family_beta_v1',
+      maxHouseholds: 3,
+      invitationTtlDays: 7,
+      accessDurationDays: 30,
+      programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+      now,
+    });
+    const issued = await productionRepository.createInvitation({
+      access: founderAccess,
+      intendedIdentity: target.bootstrap,
+      operationKey: operation('invite', 102),
+      now,
+    });
+    if (issued.invitationCredential === undefined) {
+      throw new Error('Expected one-time production invitation credential');
+    }
+    expect(issued).toMatchObject({
+      delivery: 'founder_manual_only',
+      credentialRecoverable: false,
+      externalActionExecuted: false,
+      invitation: {
+        environment: 'production',
+        identityBindingState: 'verified_identity',
+        intendedCustomerSubject: target.bootstrap.subject,
+        householdId: target.bootstrap.householdId,
+      },
+    });
+
+    const ambiguous = await productionCustomer('customer_ambiguous_admin', 'ambiguous');
+    await database.query(
+      `INSERT INTO household_memberships(
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES ('household-harbor','membership-founding-production-ambiguous',$1,
+                 'member','active',$2)`,
+      [ambiguous.bootstrap.personId, now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO household_administrator_assignments(
+         household_id, person_id, status, granted_by_person_id, granted_at
+       ) VALUES ('household-harbor',$1,'active',$1,$2)`,
+      [ambiguous.bootstrap.personId, now.toISOString()],
+    );
+    await expect(
+      productionRepository.createInvitation({
+        access: founderAccess,
+        intendedIdentity: ambiguous.bootstrap,
+        operationKey: operation('invite', 104),
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
+
+    await expect(
+      productionRepository.previewInvitation({
+        access: thief.access,
+        householdId: thief.bootstrap.householdId,
+        invitationId: issued.invitation.id,
+        invitationCredential: issued.invitationCredential,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
+    await database.query(
+      `INSERT INTO identities(id, person_id, issuer, subject, status, created_at)
+       VALUES ('identity-founding-production-alternate',$1,$2,
+               'customer_alternate','active',$3)`,
+      [target.bootstrap.personId, target.bootstrap.issuer, now.toISOString()],
+    );
+    const alternateSession = await new SessionRepository(
+      database,
+      { next: () => 'session-founding-production-alternate' },
+      'production',
+    ).resolveProviderSession({
+      identityId: 'identity-founding-production-alternate',
+      personId: target.bootstrap.personId,
+      issuer: target.bootstrap.issuer,
+      subject: 'customer_alternate',
+      providerSessionId: 'provider-session-founding-production-alternate',
+      audience: 'customer',
+      issuedAt: new Date(now.getTime() - 1_000),
+      expiresAt: new Date(now.getTime() + 86_400_000),
+      now,
+    });
+    if (alternateSession === null) throw new Error('Expected alternate exact session');
+    await expect(
+      productionRepository.previewInvitation({
+        access: {
+          ...target.access,
+          sessionId: alternateSession.principal.sessionId,
+        },
+        householdId: target.bootstrap.householdId,
+        invitationId: issued.invitation.id,
+        invitationCredential: issued.invitationCredential,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
+    await expect(
+      productionRepository.previewInvitation({
+        access: target.access,
+        householdId: target.bootstrap.householdId,
+        invitationId: issued.invitation.id,
+        invitationCredential: `${issued.invitation.id}.${'x'.repeat(43)}`,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
+    const untouched = await database.query<
+      {
+        state: string;
+        credential_fingerprint: string | null;
+        enrollment_count: number;
+        accept_operation_count: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT invitation.state, invitation.credential_fingerprint,
+              (SELECT count(*)::integer FROM founding_household_enrollments) AS enrollment_count,
+              (SELECT count(*)::integer FROM founding_household_operations operation
+               WHERE operation.environment = 'production'
+                 AND operation.operation_kind = 'accept') AS accept_operation_count
+       FROM founding_household_invitations invitation WHERE invitation.id = $1`,
+      [issued.invitation.id],
+    );
+    expect(untouched.rows[0]).toMatchObject({
+      state: 'pending',
+      enrollment_count: 0,
+      accept_operation_count: 0,
+    });
+    expect(untouched.rows[0]?.credential_fingerprint).not.toBeNull();
+
+    const preview = await productionRepository.previewInvitation({
+      access: target.access,
+      householdId: target.bootstrap.householdId,
+      invitationId: issued.invitation.id,
+      invitationCredential: issued.invitationCredential,
+      now,
+    });
+    expect(preview.householdId).toBe(target.bootstrap.householdId);
+    const accepted = await productionRepository.acceptInvitation({
+      access: target.access,
+      householdId: target.bootstrap.householdId,
+      invitationId: issued.invitation.id,
+      invitationCredential: issued.invitationCredential,
+      operationKey: operation('accept', 103),
+      serviceConsentVersion: foundingHouseholdProductionServiceConsentVersion,
+      serviceDisclosureDigest: foundingHouseholdProductionServiceDocuments.disclosureDigest,
+      servicePolicyDigest: foundingHouseholdProductionServiceDocuments.policyDigest,
+      protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
+      protectedEnrollmentDisclosureDigest: foundingHouseholdProtectedDocuments.disclosureDigest,
+      protectedEnrollmentPolicyDigest: foundingHouseholdProtectedDocuments.policyDigest,
+      now,
+    });
+    expect(accepted.enrollment).toMatchObject({
+      environment: 'production',
+      householdId: target.bootstrap.householdId,
+      evidenceTier: 'live_production',
+      state: 'active',
+      paymentState: 'not_paid_sponsored_beta',
+    });
+    const lineage = await database.query<Record<string, unknown>>(
+      `SELECT enrollment.accepted_identity_id, enrollment.accepted_identity_issuer,
+              enrollment.accepted_identity_subject, consent.consent_version,
+              enrollment.evidence_tier,
+              subscription.payer_person_id
+       FROM founding_household_enrollments enrollment
+       JOIN consents consent
+         ON consent.household_id = enrollment.household_id
+        AND consent.id = enrollment.service_consent_id
+       JOIN commerce_subscriptions subscription
+         ON subscription.household_id = enrollment.household_id
+        AND subscription.id = enrollment.subscription_id
+       WHERE enrollment.id = $1`,
+      [accepted.enrollment.id],
+    );
+    expect(lineage.rows).toEqual([
+      {
+        accepted_identity_id: target.bootstrap.identityId,
+        accepted_identity_issuer: target.bootstrap.issuer,
+        accepted_identity_subject: target.bootstrap.subject,
+        consent_version: foundingHouseholdProductionServiceConsentVersion,
+        evidence_tier: 'live_production',
+        payer_person_id: null,
+      },
+    ]);
+    const offboarded = await productionRepository.offboard({
+      access: target.access,
+      authority: 'household',
+      householdId: target.bootstrap.householdId,
+      operationKey: operation('offboard', 105),
+      now: new Date(now.getTime() + 1_000),
+    });
+    expect(offboarded).toMatchObject({
+      reason: 'household_withdrew',
+      unrelatedGrantsChanged: false,
+      enrollment: {
+        environment: 'production',
+        state: 'revoked',
+        serviceConsentState: 'withdrawn',
+        evidenceTier: 'live_production',
+      },
+    });
+  });
+
+  it('serializes production cohort capacity across exact customer invitations', async () => {
+    await provisionProductionFounderAndSponsor();
+    const first = await productionCustomer('customer_capacity_one', 'capacity-one');
+    const second = await productionCustomer('customer_capacity_two', 'capacity-two');
+    const productionRepository = productionFoundingRepository();
+    await productionRepository.configurePolicy({
+      access: founderAccess,
+      operationKey: operation('policy', 111),
+      expectedRevision: 1,
+      state: 'active',
+      benefitKey: 'family_beta_v1',
+      maxHouseholds: 1,
+      invitationTtlDays: 7,
+      accessDurationDays: 30,
+      programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+      now,
+    });
+
+    const attempts = await Promise.allSettled([
+      productionRepository.createInvitation({
+        access: founderAccess,
+        intendedIdentity: first.bootstrap,
+        operationKey: operation('invite', 112),
+        now,
+      }),
+      productionRepository.createInvitation({
+        access: founderAccess,
+        intendedIdentity: second.bootstrap,
+        operationKey: operation('invite', 113),
+        now,
+      }),
+    ]);
+    expect(attempts.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(attempts.find(({ status }) => status === 'rejected')).toMatchObject({
+      status: 'rejected',
+      reason: { code: 'conflict' },
+    });
+    const stored = await database.query<{ count: number }>(
+      `SELECT count(*)::integer AS count FROM founding_household_invitations
+       WHERE environment = 'production' AND state = 'pending'`,
+    );
+    expect(stored.rows).toEqual([{ count: 1 }]);
+  });
+
+  it('terminally zeroizes revoked and expired production credentials', async () => {
+    await provisionProductionFounderAndSponsor();
+    const revokedCustomer = await productionCustomer('customer_revoked', 'revoked');
+    const expiredCustomer = await productionCustomer('customer_expired', 'expired');
+    const productionRepository = productionFoundingRepository();
+    await productionRepository.configurePolicy({
+      access: founderAccess,
+      operationKey: operation('policy', 121),
+      expectedRevision: 1,
+      state: 'active',
+      benefitKey: 'family_beta_v1',
+      maxHouseholds: 2,
+      invitationTtlDays: 1,
+      accessDurationDays: 30,
+      programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+      now,
+    });
+    const revoked = await productionRepository.createInvitation({
+      access: founderAccess,
+      intendedIdentity: revokedCustomer.bootstrap,
+      operationKey: operation('invite', 122),
+      now,
+    });
+    if (revoked.invitationCredential === undefined) throw new Error('Expected credential');
+    await productionRepository.revokeInvitation({
+      access: founderAccess,
+      invitationId: revoked.invitation.id,
+      operationKey: operation('invite-revoke', 123),
+      now: new Date(now.getTime() + 1_000),
+    });
+    await expect(
+      productionRepository.previewInvitation({
+        access: revokedCustomer.access,
+        householdId: revokedCustomer.bootstrap.householdId,
+        invitationId: revoked.invitation.id,
+        invitationCredential: revoked.invitationCredential,
+        now: new Date(now.getTime() + 2_000),
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
+
+    const expired = await productionRepository.createInvitation({
+      access: founderAccess,
+      intendedIdentity: expiredCustomer.bootstrap,
+      operationKey: operation('invite', 124),
+      now: new Date(now.getTime() + 2_000),
+    });
+    if (expired.invitationCredential === undefined) throw new Error('Expected credential');
+    await expect(
+      productionRepository.previewInvitation({
+        access: expiredCustomer.access,
+        householdId: expiredCustomer.bootstrap.householdId,
+        invitationId: expired.invitation.id,
+        invitationCredential: expired.invitationCredential,
+        now: new Date(expired.invitation.expiresAt.getTime() + 1),
+      }),
+    ).rejects.toMatchObject({ code: 'expired' } satisfies Partial<DomainError>);
+
+    const terminal = await database.query<Record<string, unknown>>(
+      `SELECT id, state, credential_fingerprint
+       FROM founding_household_invitations
+       WHERE id IN ($1,$2) ORDER BY id`,
+      [revoked.invitation.id, expired.invitation.id],
+    );
+    expect(terminal.rows).toEqual(
+      [
+        { id: revoked.invitation.id, state: 'revoked', credential_fingerprint: null },
+        { id: expired.invitation.id, state: 'expired', credential_fingerprint: null },
+      ].sort((left, right) => left.id.localeCompare(right.id)),
+    );
+    const sideEffects = await database.query<Record<string, unknown>>(
+      `SELECT
+         (SELECT count(*)::integer FROM founding_household_enrollments
+          WHERE environment = 'production') AS enrollments,
+         (SELECT count(*)::integer FROM founding_household_operations
+          WHERE environment = 'production' AND operation_kind = 'accept') AS accepts`,
+    );
+    expect(sideEffects.rows).toEqual([{ enrollments: 0, accepts: 0 }]);
   });
 
   it('excludes restored local Founding access from production entitlement projections only', async () => {
@@ -1013,7 +1616,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invite.invitation.id,
-        localInvitationCredential: invite.credential,
+        invitationCredential: invite.credential,
         now: new Date(now.getTime() + 2_000),
       }),
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
@@ -1057,13 +1660,13 @@ describe('FoundingHouseholdRepository', () => {
     const secret = first.credential.slice(first.credential.indexOf('.') + 1);
 
     expect(first.credential).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/u);
-    expect(first.localInvitationCredential).toBe(first.credential);
+    expect(first.invitationCredential).toBe(first.credential);
     expect(retry).toMatchObject({
       invitation: { id: first.invitation.id },
       reused: true,
       credentialRecoverable: false,
     });
-    expect(retry.localInvitationCredential).toBeUndefined();
+    expect(retry.invitationCredential).toBeUndefined();
     expect(stored.rows[0]).toMatchObject({ fingerprint_key_version: 1 });
     expect(stored.rows[0]?.credential_fingerprint).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(stored.rows[0]?.credential_fingerprint).not.toBe(secret);
@@ -1088,7 +1691,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
@@ -1145,7 +1748,7 @@ describe('FoundingHouseholdRepository', () => {
       access: bobAccess,
       householdId: 'household-harbor',
       invitationId: invitation.invitation.id,
-      localInvitationCredential: invitation.credential,
+      invitationCredential: invitation.credential,
       now,
     });
     const accepted = await acceptBob(invitation);
@@ -1279,7 +1882,7 @@ describe('FoundingHouseholdRepository', () => {
       access: aliceAccess,
       householdId: 'household-sunrise',
       invitationId: invitation.invitation.id,
-      localInvitationCredential: invitation.credential,
+      invitationCredential: invitation.credential,
       operationKey: operation('accept', 3),
       serviceConsentVersion: foundingHouseholdServiceConsentVersion,
       serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,
@@ -1450,7 +2053,7 @@ describe('FoundingHouseholdRepository', () => {
       access: aliceAccess,
       householdId: 'household-sunrise',
       invitationId: invitation.invitation.id,
-      localInvitationCredential: invitation.credential,
+      invitationCredential: invitation.credential,
       operationKey: operation('accept', 3),
       serviceConsentVersion: foundingHouseholdServiceConsentVersion,
       serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,
@@ -2246,7 +2849,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: `${invitation.invitation.id}.${'x'.repeat(43)}`,
+        invitationCredential: `${invitation.invitation.id}.${'x'.repeat(43)}`,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_found' } satisfies Partial<DomainError>);
@@ -2256,7 +2859,7 @@ describe('FoundingHouseholdRepository', () => {
         access: { ...bobAccess, actorIssuer: 'managed-idp' },
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
@@ -2266,7 +2869,7 @@ describe('FoundingHouseholdRepository', () => {
         access: { ...bobAccess, sessionId: 'session-does-not-exist' },
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
@@ -2280,7 +2883,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
@@ -2298,7 +2901,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now,
       }),
     ).rejects.toMatchObject({ code: 'not_authorized' } satisfies Partial<DomainError>);
@@ -2312,7 +2915,7 @@ describe('FoundingHouseholdRepository', () => {
         access: bobAccess,
         householdId: 'household-harbor',
         invitationId: invitation.invitation.id,
-        localInvitationCredential: invitation.credential,
+        invitationCredential: invitation.credential,
         now: new Date(now.getTime() + 86_400_000 + 1),
       }),
     ).rejects.toMatchObject({ code: 'expired' } satisfies Partial<DomainError>);
@@ -2969,12 +3572,14 @@ describe('FoundingHouseholdRepository', () => {
              benefit_key, plan_version_id, sponsorship_id, sponsorship_allocation_id,
              subscription_id, entitlement_grant_id, service_consent_id,
              protected_enrollment_created, accepted_by_person_id, accepted_session_id,
+             accepted_identity_id, accepted_identity_issuer, accepted_identity_subject,
              state, evidence_tier, operation_key, starts_at, ends_at, created_at
            ) VALUES (
              'household-harbor','direct-long-enrollment',$1,'local',2,$2,
              'family_beta_v1','founding_family_beta_v2','missing-sponsorship',
              'missing-allocation','missing-subscription','missing-grant','missing-consent',
-             false,$3,$4,'active','local_simulation',$5,$6,$7,$6
+             false,$3,$4,'identity-owner-bob','boomerbuddy-dev','owner-bob',
+             'active','local_simulation',$5,$6,$7,$6
            )`,
           [
             foundingHouseholdCohortKey,

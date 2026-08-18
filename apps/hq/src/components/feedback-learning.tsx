@@ -116,18 +116,18 @@ export function FeedbackLearning() {
   return (
     <>
       <div className="control-boundary" role="note">
-        <strong>The global table contains no submitted content.</strong> This local-only view
-        exposes structured metadata through the active owner-global or exact-current-assignee
-        projection. Minimized text can open only after an exact assignment and deterministic
-        redaction verification. It cannot display unsafe/quarantined text, ciphertext, destinations,
-        network keys, media, transcripts, or provider output, and it cannot contact a customer.
+        <strong>The queue contains no submitted content.</strong> This role-scoped view exposes
+        structured metadata through the active founder-owner or exact-current-assignee projection.
+        Minimized text can open only after an exact assignment and deterministic redaction
+        verification. It cannot display unsafe/quarantined text, ciphertext, destinations, network
+        keys, media, transcripts, or provider output, and it cannot contact a customer.
       </div>
       <section className="metric-grid section" aria-label="Assigned feedback queue totals">
         {queues.map(([queue, count]) => (
           <article className="metric-card" key={queue}>
             <span>{label(queue)}</span>
             <strong>{count}</strong>
-            <small>Local simulation only</small>
+            <small>Runtime-derived evidence</small>
           </article>
         ))}
         {queues.length === 0 ? <p>No feedback metadata is visible to this HQ identity.</p> : null}
@@ -211,8 +211,8 @@ export function FeedbackLearning() {
           <h2>Assigned minimized feedback {content.feedbackId}</h2>
           <p style={{ whiteSpace: 'pre-wrap' }}>{content.minimizedText}</p>
           <p className="source">
-            {label(content.redactionStatus)} · deterministic local redaction verification passed ·
-            no provider or external action
+            {label(content.redactionStatus)} · deterministic redaction verification passed · no
+            provider or external action
           </p>
         </section>
       ))}

@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { buildApp } from '../../apps/api/src/app';
-import { browserHeaders, customerOrigin, hqOrigin, login, testConfig } from './support';
+import { browserHeaders, hqOrigin, login, testConfig } from './support';
 
 describe('messaging shared composition', () => {
   let database: Database | undefined;
@@ -247,27 +247,16 @@ describe('messaging shared composition', () => {
 
   it('keeps every messaging route unavailable in production', async () => {
     database = await createSeededTestDatabase(fixedTestNow);
-    const app = await buildApp({
-      config: { ...testConfig(), environment: 'production' },
-      database,
-      initialize: false,
-      closeDatabase: false,
-      now: () => fixedTestNow,
-      logger: createLogger({ level: 'error', sink: () => undefined, clock: () => fixedTestNow }),
-    });
-    apps.push(app);
-    const response = await app.inject({
-      method: 'POST',
-      url: '/v1/messaging/local/destinations',
-      headers: { origin: customerOrigin },
-      payload: {
-        localFixtureDestination: '+12025550179',
-        timeZone: 'America/Los_Angeles',
-        locale: 'en-US',
-        jurisdiction: 'US',
-      },
-    });
-    expect(response.statusCode, response.body).toBe(404);
+    await expect(
+      buildApp({
+        config: { ...testConfig(), environment: 'production' },
+        database,
+        initialize: false,
+        closeDatabase: false,
+        now: () => fixedTestNow,
+        logger: createLogger({ level: 'error', sink: () => undefined, clock: () => fixedTestNow }),
+      }),
+    ).rejects.toThrow('Production Clerk founder configuration is incomplete');
     const rows = await database.query<{ readonly count: number }>(
       'SELECT count(*)::int AS count FROM messaging_destinations',
     );

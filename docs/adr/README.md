@@ -30,5 +30,6 @@ These decisions govern BoomerBuddy 2.0 together with the [master spec](../BOOMER
 26. [Provider-free consent-aware messaging core](./0026-provider-free-consent-aware-messaging-core.md)
 27. [Local editorial intelligence evidence boundary](./0027-local-editorial-intelligence-evidence-boundary.md)
 28. [Disabled referral-credit core](./0028-disabled-referral-credit-core.md)
+29. [Production identity-bound Founding Household activation](./0029-production-identity-bound-founding-household.md)
 
 Superseding a decision requires a new dated ADR, affected contract/test changes, migration and rollback plans, and updates to source evidence.

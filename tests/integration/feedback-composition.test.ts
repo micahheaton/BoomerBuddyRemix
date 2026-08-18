@@ -4,6 +4,7 @@ import { createSeededTestDatabase, fixedTestNow } from '@boomerbuddy/testkit';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../../apps/api/src/app';
+import { ProductionFeedbackFoundingFixture } from '../../packages/persistence/src/feedback-production-fixture.test-helper';
 import { browserHeaders, customerOrigin, login, testConfig } from './support';
 
 describe('feedback shared API composition', () => {
@@ -72,7 +73,7 @@ describe('feedback shared API composition', () => {
     expect(adapters.json()).toMatchObject({
       evidenceTier: 'local_simulation',
       adapters: expect.arrayContaining([
-        expect.objectContaining({ key: 'authenticated_text', state: 'local_only_enabled' }),
+        expect.objectContaining({ key: 'authenticated_text', state: 'production_enabled' }),
         expect.objectContaining({ key: 'external_model', state: 'structurally_disabled' }),
       ]),
     });
@@ -128,9 +129,40 @@ describe('feedback shared API composition', () => {
     expect(dueAfterIntake.rows[0]?.payload_state).toBe('encrypted_minimized');
   });
 
-  it('registers the adapters in production while every intake route remains fail closed', async () => {
-    const config = { ...testConfig(), environment: 'production' as const };
+  it('registers the adapters in production while anonymous intake remains fail closed', async () => {
+    const base = testConfig();
+    const config = {
+      ...base,
+      environment: 'production' as const,
+      identity: {
+        ...base.identity,
+        allowDevelopmentIssuer: false,
+        founderPersonId: 'person-hq-heidi',
+        clerk: {
+          customer: {
+            issuer: 'https://customer.feedback.test',
+            audience: 'boomerbuddy-customer',
+            jwtKey: 'feedback-customer-key',
+            authorizedParties: base.identity.customerOrigins,
+          },
+          hq: {
+            issuer: 'https://founder.feedback.test',
+            audience: 'boomerbuddy-hq',
+            jwtKey: 'feedback-hq-key',
+            authorizedParties: base.identity.hqOrigins,
+            maxSecondFactorAgeSeconds: 600,
+          },
+          founderSubject: 'founder_feedback_subject',
+        },
+      },
+      secrets: {
+        ...base.secrets,
+        session: Buffer.alloc(0),
+        custodyClassification: 'replit_runtime_secret_beta' as const,
+      },
+    };
     database = await createSeededTestDatabase(fixedTestNow);
+    await ProductionFeedbackFoundingFixture.create(database, fixedTestNow);
     const app = await buildApp({
       config,
       database,

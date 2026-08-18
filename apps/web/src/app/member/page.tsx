@@ -187,13 +187,17 @@ export default function MemberHomePage() {
               <p className="meta">History is unavailable in this household scope.</p>
             )}
           </section>
-          {process.env.NODE_ENV !== 'production' && selectedHouseholdId ? (
+          {selectedHouseholdId ? (
             <section className="card">
-              <span className="dev-pill">Local text-only path</span>
+              <span className="dev-pill">
+                {process.env.NODE_ENV === 'production'
+                  ? 'Private beta · text only'
+                  : 'Local text-only path'}
+              </span>
               <h2>Share feedback</h2>
               <p>
-                Record a product observation for this selected household. Media, providers, and
-                outbound follow-up are disabled.
+                Record a product observation for this selected household. Media uploads and
+                automatic outbound follow-up are disabled.
               </p>
               <Link href="/member/feedback">Open selected-household feedback</Link>
             </section>
@@ -225,19 +229,27 @@ export default function MemberHomePage() {
               <Link href="/member/billing">Open billing</Link>
             </section>
           ) : null}
-          {process.env.NODE_ENV !== 'production' && selectedScope?.isAdministrator ? (
+          {selectedScope?.isAdministrator ? (
             <section className="card">
-              <span className="dev-pill">Local no-card path</span>
+              <span className="dev-pill">
+                {process.env.NODE_ENV === 'production'
+                  ? 'Founder-sponsored · no card'
+                  : 'Local no-card path'}
+              </span>
               <h2>Founding Household</h2>
               <p>
-                Review a founder-issued one-time local credential and finite sponsored beta terms.
-                No payment or message is sent.
+                Review a founder-issued, one-time invitation and finite sponsored beta terms. No
+                payment or automatic message is sent.
               </p>
               <Link href="/member/founding-household">Open Founding Household review</Link>
             </section>
           ) : null}
           <section className="card" data-testid="local-access-summary">
-            <span className="dev-pill">Local access hypothesis</span>
+            <span className="dev-pill">
+              {process.env.NODE_ENV === 'production'
+                ? 'Current access record'
+                : 'Local access hypothesis'}
+            </span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
             <p>
               This access record is a product hypothesis. Billing initiation is a separate,
@@ -245,8 +257,8 @@ export default function MemberHomePage() {
             </p>
             {!selectedScope?.isBillingManager ? (
               <p className="meta">
-                Household plan totals are billing-manager-only in this local build. Your available
-                actions still follow the permissions for this selected household.
+                Household plan totals are billing-manager-only. Your available actions still follow
+                the permissions for this selected household.
               </p>
             ) : selectedEntitlements ? (
               <>
@@ -263,8 +275,8 @@ export default function MemberHomePage() {
               </>
             ) : entitlementsUnavailableFor === selectedHouseholdId ? (
               <p className="meta">
-                Local plan and allowance details are unavailable. The selected household permissions
-                shown in the actions above still apply.
+                Plan and allowance details are unavailable. The selected household permissions shown
+                in the actions above still apply.
               </p>
             ) : (
               <p className="meta">Loading selected-household access details…</p>

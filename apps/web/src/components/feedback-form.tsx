@@ -1,6 +1,9 @@
 'use client';
 
-import type { FeedbackIntakeResponse } from '@boomerbuddy/contracts';
+import type {
+  FeedbackConsentWithdrawalResponse,
+  FeedbackIntakeResponse,
+} from '@boomerbuddy/contracts';
 import { useRef, useState, type FormEvent } from 'react';
 import { apiBaseUrl, apiRequest, readableError } from '../lib/api';
 
@@ -66,6 +69,13 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<FeedbackIntakeResponse>();
+  const [grantedPurposes, setGrantedPurposes] = useState<Array<'follow_up' | 'research_retention'>>(
+    [],
+  );
+  const [withdrawingPurpose, setWithdrawingPurpose] = useState<
+    'follow_up' | 'research_retention'
+  >();
+  const [withdrawalNotice, setWithdrawalNotice] = useState('');
   const operation = useRef<string | undefined>(undefined);
 
   async function submit(event: FormEvent) {
@@ -80,7 +90,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
         feedbackType,
         source: {
           surface: mode === 'anonymous' ? 'web_feedback_form' : 'in_app_contextual',
-          appVersion: 'web-run3-local',
+          appVersion: 'web-run3-1',
           ...(typeof navigator === 'undefined' || !navigator.language
             ? {}
             : { locale: navigator.language }),
@@ -113,12 +123,42 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
               body: JSON.stringify(payload),
             });
       setResult(response);
+      setGrantedPurposes([
+        ...(mode === 'authenticated' && followUp ? (['follow_up'] as const) : []),
+        ...(mode === 'authenticated' && researchRetention ? (['research_retention'] as const) : []),
+      ]);
+      setWithdrawalNotice('');
       setText('');
       operation.current = undefined;
     } catch (caught) {
       setError(readableError(caught));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function withdrawConsent(purpose: 'follow_up' | 'research_retention'): Promise<void> {
+    if (mode !== 'authenticated' || result === undefined) return;
+    setWithdrawingPurpose(purpose);
+    setError('');
+    setWithdrawalNotice('');
+    try {
+      const response = await apiRequest<FeedbackConsentWithdrawalResponse>(
+        `/v1/feedback/${result.feedback.id}/consents/${purpose}/withdraw`,
+        { method: 'POST' },
+      );
+      setGrantedPurposes((current) =>
+        response.activeStoreCiphertextErased ? [] : current.filter((value) => value !== purpose),
+      );
+      setWithdrawalNotice(
+        response.activeStoreCiphertextErased
+          ? 'Consent withdrawn. The retained minimized text was erased.'
+          : 'Consent withdrawn.',
+      );
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setWithdrawingPurpose(undefined);
     }
   }
 
@@ -174,7 +214,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
             onChange={(event) => setResearchRetention(event.target.checked)}
           />
           Allow the minimized text to be retained for product-feedback research for up to 23 hours
-          in this local candidate.
+          in this candidate.
         </label>
         <p className="help">
           Without research retention, minimized text is scheduled for erasure after one hour.
@@ -187,11 +227,11 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
           </p>
         ) : null}
         <button className="button button-primary" type="submit" disabled={busy || !text.trim()}>
-          {busy ? 'Recording local feedback…' : 'Submit local feedback'}
+          {busy ? 'Recording feedback…' : 'Submit feedback'}
         </button>
       </form>
       <aside className="notice notice-warning">
-        <h2>Local evidence boundary</h2>
+        <h2>Privacy and action boundary</h2>
         <ul className="plain-list">
           <li>Supported OTP, card, and explicit credential spans are removed before encryption.</li>
           <li>Unsafe or ambiguous secret material is discarded with metadata-only quarantine.</li>
@@ -199,7 +239,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
           <li>Queued processing is not a completed classification or duplicate decision.</li>
           {mode === 'anonymous' ? (
             <li>
-              This local form provides no post-submission anonymous management credential; bounded
+              This form provides no post-submission anonymous management credential; bounded
               automatic expiry is the deletion path.
             </li>
           ) : (
@@ -210,7 +250,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
       {result ? (
         <section className="card full-span" aria-live="polite" data-testid="feedback-receipt">
           <span className="dev-pill">{result.feedback.evidenceTier}</span>
-          <h2>Feedback recorded locally</h2>
+          <h2>Feedback recorded</h2>
           <p>
             Receipt {result.feedback.id} · {result.feedback.status.replaceAll('_', ' ')} ·{' '}
             {result.feedback.redactionStatus.replaceAll('_', ' ')}
@@ -218,11 +258,33 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
           <p>Media accepted: no · Provider processed: no · External action executed: no</p>
           {result.feedback.retainedUntil ? (
             <p className="help">
-              Local ciphertext deadline: {new Date(result.feedback.retainedUntil).toLocaleString()}
+              Ciphertext deadline: {new Date(result.feedback.retainedUntil).toLocaleString()}
             </p>
           ) : (
             <p className="help">Unsafe text was not retained as ciphertext.</p>
           )}
+          {mode === 'authenticated' && grantedPurposes.length > 0 ? (
+            <div className="button-row" aria-label="Feedback consent controls">
+              {grantedPurposes.map((purpose) => (
+                <button
+                  className="button button-secondary"
+                  disabled={withdrawingPurpose !== undefined}
+                  key={purpose}
+                  onClick={() => void withdrawConsent(purpose)}
+                  type="button"
+                >
+                  {withdrawingPurpose === purpose
+                    ? 'Withdrawing…'
+                    : `Withdraw ${purpose === 'follow_up' ? 'follow-up' : 'research retention'} consent`}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {withdrawalNotice ? (
+            <p className="help" role="status">
+              {withdrawalNotice}
+            </p>
+          ) : null}
         </section>
       ) : null}
     </div>

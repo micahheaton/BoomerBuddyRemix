@@ -25,17 +25,17 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-interface LocalFoundingHouseholdProps {
+interface FoundingHouseholdProps {
   readonly selectedHouseholdId: string;
   readonly isAdministrator: boolean;
   readonly refreshPrincipal: (preferredHouseholdId?: string) => Promise<unknown>;
 }
 
-function LocalFoundingHousehold({
+function FoundingHousehold({
   selectedHouseholdId,
   isAdministrator,
   refreshPrincipal,
-}: LocalFoundingHouseholdProps) {
+}: FoundingHouseholdProps) {
   const [status, setStatus] = useState<FoundingHouseholdMemberStatusResponse>();
   const [credential, setCredential] = useState('');
   const [preview, setPreview] = useState<FoundingHouseholdInvitationPreviewResponse>();
@@ -135,7 +135,7 @@ function LocalFoundingHousehold({
     setProtectedConsent(false);
     try {
       const separator = credential.indexOf('.');
-      if (separator < 1) throw new Error('Enter the complete one-time local credential.');
+      if (separator < 1) throw new Error('Enter the complete one-time invitation credential.');
       const invitationId = credential.slice(0, separator);
       const response = await apiRequest<FoundingHouseholdInvitationPreviewResponse>(
         `${apiPaths.foundingHouseholds}/invitations/${encodeURIComponent(invitationId)}/preview`,
@@ -143,10 +143,7 @@ function LocalFoundingHousehold({
           method: 'POST',
           cache: 'no-store',
           headers: { 'X-BB-Household-Id': selectedHouseholdId },
-          body: JSON.stringify({
-            householdId: selectedHouseholdId,
-            localInvitationCredential: credential,
-          }),
+          body: JSON.stringify({ invitationCredential: credential }),
         },
       );
       if (response.householdId !== selectedHouseholdId) {
@@ -212,8 +209,7 @@ function LocalFoundingHousehold({
             'Idempotency-Key': operationFor('accept', 'accept', signature),
           },
           body: JSON.stringify({
-            householdId: selectedHouseholdId,
-            localInvitationCredential: credential,
+            invitationCredential: credential,
             serviceConsentVersion: preview.serviceConsentVersion,
             serviceDisclosureDigest: renderedServiceDisclosureDigest,
             servicePolicyDigest: renderedServicePolicyDigest,
@@ -281,8 +277,8 @@ function LocalFoundingHousehold({
     return (
       <main id="main-content" className="member-shell member-main">
         <p className="error" role="alert">
-          Household authorization was lost. The local credential, preview, consent choices, and
-          private status were cleared; sign in again before reopening this workflow.
+          Household authorization was lost. The credential, preview, consent choices, and private
+          status were cleared; sign in again before reopening this workflow.
         </p>
       </main>
     );
@@ -293,15 +289,21 @@ function LocalFoundingHousehold({
       <span className="eyebrow">Founding Household</span>
       <h1 className="member-heading">Review finite sponsored beta access</h1>
       <p className="lede">
-        This local path uses no card and sends no message. An existing active household
-        administrator must review the exact benefit and give separate service and protected-adult
-        consent before access changes.
+        This path uses no card and sends no message. The exact active household administrator must
+        review the exact benefit and give separate service and protected-adult consent before access
+        changes.
       </p>
-      <div className="notice" role="note">
-        <strong>Local simulation only.</strong> Production customer identity is not ready. This
-        screen is not evidence of a real invitation, real household, payment, conversion, or
-        production readiness.
-      </div>
+      {status ? (
+        <div className="notice" role="note">
+          <strong>
+            {status.environment === 'production'
+              ? 'Production identity-bound workflow.'
+              : `${label(status.environment)} environment workflow.`}
+          </strong>{' '}
+          Evidence is labeled {label(status.evidenceTier)}. The credential is manually delivered;
+          this screen never sends a message or collects payment.
+        </div>
+      ) : null}
       {error ? (
         <p className="error" role="alert">
           {error}
@@ -345,7 +347,7 @@ function LocalFoundingHousehold({
               attention and makes no payment claim.
             </p>
           ) : null}
-          <h3>Observed local funnel facts</h3>
+          <h3>Observed bounded funnel facts</h3>
           <ul className="plain-list">
             {status.enrollment.funnel.map((milestone) => (
               <li key={milestone.stage}>
@@ -382,7 +384,7 @@ function LocalFoundingHousehold({
       ) : (
         <>
           <form className="card form-stack" onSubmit={review}>
-            <h2>Enter the one-time local credential</h2>
+            <h2>Enter the one-time invitation credential</h2>
             <label htmlFor="founding-credential">Complete invitation credential</label>
             <input
               id="founding-credential"
@@ -410,7 +412,9 @@ function LocalFoundingHousehold({
 
           {preview ? (
             <section className="card">
-              <span className="dev-pill">No card · local simulation</span>
+              <span className="dev-pill">
+                No card · {label(status?.evidenceTier ?? preview.evidenceTier)}
+              </span>
               <h2>{preview.benefit.displayName}</h2>
               <p>
                 If accepted now, access ends no later than{' '}
@@ -491,21 +495,8 @@ function LocalFoundingHousehold({
 
 export default function FoundingHouseholdPage() {
   const { selectedHouseholdId, selectedScope, refreshPrincipal } = useHousehold();
-  if (process.env.NODE_ENV === 'production') {
-    return (
-      <main id="main-content" className="member-shell member-main">
-        <span className="eyebrow">Founding Household</span>
-        <h1 className="member-heading">Managed-identity activation is blocked</h1>
-        <div className="notice" role="note">
-          Local invitation credentials and sponsor acceptance forms are excluded from the production
-          build pending a reviewed managed-identity and environment-bound sponsor release. No
-          production access, payment, message, or household invitation is available.
-        </div>
-      </main>
-    );
-  }
   return (
-    <LocalFoundingHousehold
+    <FoundingHousehold
       key={`${selectedHouseholdId}:${String(selectedScope?.isAdministrator === true)}`}
       selectedHouseholdId={selectedHouseholdId}
       isAdministrator={selectedScope?.isAdministrator === true}

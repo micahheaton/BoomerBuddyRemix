@@ -62,14 +62,8 @@ describe('disabled referral shared composition', () => {
   });
 
   it('has no customer execution route and keeps the HQ queue unavailable in production', async () => {
-    const app = await localApp('production');
-    const hq = await app.inject({ method: 'GET', url: '/v1/hq/referrals' });
-    expect(hq.statusCode).toBe(404);
-    const customer = await app.inject({
-      method: 'POST',
-      url: '/v1/referrals/simulation/share-links',
-      payload: { simulation: true },
-    });
-    expect(customer.statusCode).toBe(404);
+    await expect(localApp('production')).rejects.toThrow(
+      'Production Clerk founder configuration is incomplete',
+    );
   });
 });

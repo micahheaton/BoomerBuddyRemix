@@ -7,8 +7,12 @@ import process from 'node:process';
 const source = resolve(process.cwd());
 const candidateRef = process.env.BB_CANDIDATE_REF;
 const expectedCommit = process.env.BB_CANDIDATE_COMMIT?.toLowerCase();
-if (!/^run3-local-candidate-[0-9a-f]{12}$/u.test(candidateRef ?? '')) {
-  throw new TypeError('BB_CANDIDATE_REF must be an immutable Run 3 candidate tag');
+if (
+  !/^(?:run3-local-candidate|run3-1-replit-founding-household)-[0-9a-f]{12}$/u.test(
+    candidateRef ?? '',
+  )
+) {
+  throw new TypeError('BB_CANDIDATE_REF must be an immutable Run 3 or Run 3.1 candidate tag');
 }
 if (!/^[0-9a-f]{40}$/u.test(expectedCommit ?? '')) {
   throw new TypeError('BB_CANDIDATE_COMMIT must be the exact 40-character commit for the tag');
@@ -76,6 +80,11 @@ try {
     throw new Error('Candidate checkout is not clean before reconstruction');
   }
   run(npm, [...npmPrefix, 'ci']);
+  run(npm, [...npmPrefix, 'run', 'verify:run3-1-deps'], clone, {
+    ...process.env,
+    BB_DEPENDENCY_EVIDENCE_DIR: join(temporaryRoot, 'dependency-evidence'),
+    BB_REQUIRE_RUN3_1_CANDIDATE_TAG: 'true',
+  });
   run('node', ['scripts/verify-portability.mjs']);
   run(npm, [...npmPrefix, 'run', 'verify:runtime-deps']);
   run(npm, [...npmPrefix, 'run', 'db:migrate'], clone, continuityEnvironment);

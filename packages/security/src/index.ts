@@ -1,4 +1,5 @@
 export * from './dev-session';
+export * from './clerk-session';
 export * from './encoding';
 export * from './encryption';
 export * from './fingerprint';

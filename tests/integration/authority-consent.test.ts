@@ -68,8 +68,12 @@ describe('authority and consent persistence', () => {
     );
     await harness.database.query(
       `INSERT INTO sessions(
-         id, person_id, audience, issuer, issued_at, expires_at, created_at
-       ) VALUES ('session-hq-support','person-hq-support','hq','boomerbuddy-dev',$1,$2,$1)`,
+         id, person_id, audience, issuer, identity_id, identity_subject,
+         provider_session_id, issued_at, last_verified_at, expires_at, created_at
+       ) VALUES (
+         'session-hq-support','person-hq-support','hq','boomerbuddy-dev',
+         'identity-hq-support','hq-support','session-hq-support',$1,$1,$2,$1
+       )`,
       [now.toISOString(), sessionExpiry.toISOString()],
     );
     await harness.database.query(
@@ -186,10 +190,13 @@ describe('authority and consent persistence', () => {
     );
     await harness.database.query(
       `INSERT INTO sessions(
-         id, person_id, audience, issuer, issued_at, expires_at, created_at
+         id, person_id, audience, issuer, identity_id, identity_subject,
+         provider_session_id, issued_at, last_verified_at, expires_at, created_at
        ) VALUES
-         ('session-pat-verified','person-protected-pat','customer','verified-idp',$1,$2,$1),
-         ('session-jordan-verified','person-trusted-jordan','customer','verified-idp',$1,$2,$1)`,
+         ('session-pat-verified','person-protected-pat','customer','verified-idp',
+          'identity-pat-verified','pat-verified','session-pat-verified',$1,$1,$2,$1),
+         ('session-jordan-verified','person-trusted-jordan','customer','verified-idp',
+          'identity-jordan-verified','jordan-verified','session-jordan-verified',$1,$1,$2,$1)`,
       [now.toISOString(), expiresAt.toISOString()],
     );
     const family = new FamilyRepository(harness.database, Buffer.alloc(32, 11), 1);

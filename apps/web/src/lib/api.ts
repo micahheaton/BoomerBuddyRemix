@@ -1,6 +1,9 @@
 import type { ErrorEnvelope } from '@boomerbuddy/contracts';
 
-export const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:4000';
+export const apiBaseUrl =
+  process.env.NODE_ENV === 'production'
+    ? '/api'
+    : (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:4000');
 const selectedHouseholdKey = 'boomerbuddy.selected-household';
 
 export function readSelectedHouseholdId(): string {

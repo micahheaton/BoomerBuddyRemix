@@ -6,6 +6,7 @@ import { publicConfigResponseSchema } from '@boomerbuddy/contracts';
 import { DomainError, seededCommercePlanVersions } from '@boomerbuddy/domain';
 import { StripeHttpTransport, type StripeTransport } from '@boomerbuddy/integrations';
 import { createLogger, createRequestId, type Logger } from '@boomerbuddy/observability';
+import { ClerkSessionTokenVerifier, type IdentityTokenVerifier } from '@boomerbuddy/security';
 import {
   createPGliteDatabase,
   createPostgresDatabase,
@@ -45,6 +46,8 @@ export interface BuildAppOptions {
   readonly stripeTransport?: StripeTransport;
   readonly stripeEvidenceLevel?:
     'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production';
+  /** Deterministic verifier seam for local tests; production defaults to Clerk's verifier. */
+  readonly identityTokenVerifier?: IdentityTokenVerifier;
 }
 
 const retentionBatchSize = 100;
@@ -197,12 +200,16 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   const database = options.database ?? (await connectDatabase(options.config));
   const closeDatabase = options.closeDatabase ?? options.database === undefined;
   const logger = options.logger ?? createLogger({ level: options.config.logLevel });
+  const identityTokenVerifier =
+    options.identityTokenVerifier ??
+    (options.config.environment === 'production' ? new ClerkSessionTokenVerifier() : undefined);
   const context: ApiContext = {
     config: options.config,
     database,
-    repositories: createRepositories(database, options.config),
+    repositories: createRepositories(database, options.config, identityTokenVerifier),
     logger,
     now: options.now ?? (() => new Date()),
+    ...(identityTokenVerifier === undefined ? {} : { identityTokenVerifier }),
   };
   const drainDueRetention = async (): Promise<boolean> => {
     let moreDue = false;
@@ -233,6 +240,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
         },
         context.now(),
       );
+    }
+    if (options.config.environment === 'production') {
+      const clerk = options.config.identity.clerk;
+      const founderPersonId = options.config.identity.founderPersonId;
+      if (clerk === undefined || founderPersonId === undefined) {
+        throw new TypeError('Production Clerk founder configuration is incomplete');
+      }
+      await context.repositories.productionIdentities.assertFounderBinding({
+        issuer: clerk.hq.issuer,
+        subject: clerk.founderSubject,
+        founderPersonId,
+      });
     }
     retentionNeedsContinuation = await drainDueRetention();
   } catch (error) {

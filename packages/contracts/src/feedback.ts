@@ -160,7 +160,7 @@ export const feedbackIntakeResponseSchema = z
         status: z.enum(['queued_unassigned', 'assigned', 'unsafe_unprocessable']),
         redactionStatus: z.enum(['minimized_clean', 'minimized_redacted', 'quarantined_discarded']),
         queue: feedbackQueueSchema,
-        evidenceTier: z.literal('local_simulation'),
+        evidenceTier: feedbackEvidenceTierSchema,
         retainedUntil: isoDateTimeSchema.optional(),
         reused: z.boolean(),
       })
@@ -192,10 +192,11 @@ export const feedbackReviewClaimResponseSchema = z
   .object({
     feedbackId: opaqueIdSchema,
     queue: feedbackQueueSchema,
+    routingState: feedbackRoutingStateSchema,
     assignmentVersion: z.number().int().positive(),
     humanReviewRequired: z.boolean(),
     reused: z.boolean(),
-    evidenceTier: z.literal('local_simulation'),
+    evidenceTier: feedbackEvidenceTierSchema,
     externalActionExecuted: z.literal(false),
   })
   .strict();
@@ -204,7 +205,7 @@ export const assignedFeedbackContentResponseSchema = z
     feedbackId: opaqueIdSchema,
     minimizedText: boundedFeedbackTextSchema,
     redactionStatus: z.enum(['minimized_clean', 'minimized_redacted']),
-    evidenceTier: z.literal('local_simulation'),
+    evidenceTier: feedbackEvidenceTierSchema,
     contentBoundary: z.literal('assigned_minimized_text'),
     externalActionExecuted: z.literal(false),
   })
@@ -228,13 +229,13 @@ export const feedbackAdapterResponseSchema = z
             'transcription',
             'external_model',
           ]),
-          state: z.enum(['local_only_enabled', 'structurally_disabled']),
+          state: z.enum(['production_enabled', 'local_only_enabled', 'structurally_disabled']),
           externalEffect: z.literal(false),
           reason: z.string().min(1).max(300),
         })
         .strict(),
     ),
-    evidenceTier: z.literal('local_simulation'),
+    evidenceTier: feedbackEvidenceTierSchema,
   })
   .strict();
 
@@ -293,6 +294,9 @@ export type SupportFeedbackConversionRequest = z.infer<
   typeof supportFeedbackConversionRequestSchema
 >;
 export type FeedbackIntakeResponse = z.infer<typeof feedbackIntakeResponseSchema>;
+export type FeedbackConsentWithdrawalResponse = z.infer<
+  typeof feedbackConsentWithdrawalResponseSchema
+>;
 export type HqFeedbackQueueResponse = z.infer<typeof hqFeedbackQueueResponseSchema>;
 export type FeedbackReviewClaimResponse = z.infer<typeof feedbackReviewClaimResponseSchema>;
 export type AssignedFeedbackContentResponse = z.infer<typeof assignedFeedbackContentResponseSchema>;

@@ -40,6 +40,7 @@ export function FoundingHouseholds() {
   const [data, setData] = useState<FoundingHouseholdFounderConsoleResponse>();
   const [draft, setDraft] = useState<PolicyDraft>(initialPolicy);
   const [oneTimeCredential, setOneTimeCredential] = useState('');
+  const [intendedCustomerSubject, setIntendedCustomerSubject] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -70,6 +71,7 @@ export function FoundingHouseholds() {
       pendingOperations.current.clear();
       setData(undefined);
       setOneTimeCredential('');
+      setIntendedCustomerSubject('');
       setLostInvitationId('');
       setNotice('');
       setAuthorizationLost(true);
@@ -106,6 +108,7 @@ export function FoundingHouseholds() {
           pendingOperations.current.clear();
           setData(undefined);
           setOneTimeCredential('');
+          setIntendedCustomerSubject('');
           setLostInvitationId('');
           setAuthorizationLost(true);
         }
@@ -146,7 +149,7 @@ export function FoundingHouseholds() {
       );
       resolveOperation('policy');
       setNotice(
-        `Local policy revision ${result.policy.revision} recorded. No invitation, message, payment, or external action ran.`,
+        `${label(data.environment)} policy revision ${result.policy.revision} recorded. No invitation, message, payment, or external action ran.`,
       );
       await load();
     } catch (caught) {
@@ -192,13 +195,20 @@ export function FoundingHouseholds() {
     setError('');
     setNotice('');
     try {
-      const signature = String(data?.policy.revision ?? 'unknown');
+      if (!data) throw new Error('Founding Household policy is unavailable.');
+      const subject = intendedCustomerSubject.trim();
+      if (data.environment === 'production' && !subject) {
+        throw new Error('Enter the exact Clerk customer subject for the intended household.');
+      }
+      const payload = data.environment === 'production' ? { intendedCustomerSubject: subject } : {};
+      const signature = JSON.stringify({ policyRevision: data.policy.revision, ...payload });
       const result = await hqRequest<CreateFoundingHouseholdInvitationResponse>(
         `${apiPaths.hqFoundingHouseholds}/invitations`,
         {
           method: 'POST',
           cache: 'no-store',
           headers: { 'Idempotency-Key': operationFor('invite', 'invite', signature) },
+          body: JSON.stringify(payload),
         },
       );
       resolveOperation('invite');
@@ -211,13 +221,14 @@ export function FoundingHouseholds() {
         await load();
         return;
       }
-      if (result.localInvitationCredential === undefined) {
+      if (result.invitationCredential === undefined) {
         throw new Error('The invitation response did not contain its one-time credential.');
       }
       setLostInvitationId('');
-      setOneTimeCredential(result.localInvitationCredential);
+      setOneTimeCredential(result.invitationCredential);
+      setIntendedCustomerSubject('');
       setNotice(
-        'One local credential was issued. It is displayed once and has not been emailed, texted, logged, or placed in a contact list.',
+        'One identity-bound credential was issued for founder-only manual delivery. It is displayed once and has not been emailed, texted, logged, or placed in a contact list.',
       );
       await load();
     } catch (caught) {
@@ -284,16 +295,6 @@ export function FoundingHouseholds() {
     }
   }
 
-  if (process.env.NODE_ENV === 'production') {
-    return (
-      <div className="control-boundary" role="note">
-        <strong>Managed-identity activation is blocked.</strong> Local Founding Household credential
-        and sponsor controls are excluded from the production build pending a reviewed
-        managed-identity and environment-bound sponsor release.
-      </div>
-    );
-  }
-
   if (authorizationLost) {
     return (
       <p className="error" role="alert">
@@ -308,10 +309,10 @@ export function FoundingHouseholds() {
   return (
     <>
       <div className="control-boundary" role="note">
-        <strong>Local simulation; no card and no delivery adapter.</strong> This founder-only
-        control plane can issue one-time local credentials and finite sponsor grants. It cannot
-        create an identity, send a message, collect payment, or make production access effective.
-        Managed customer identity remains a founder-provisioning blocker.
+        <strong>Founder-only; no card and no delivery adapter.</strong> This control plane can issue
+        one-time, finite sponsor credentials only after the server verifies its environment,
+        founder, sponsor backing, policy, and exact intended customer bootstrap. Delivery remains a
+        manual founder action; this console cannot send a message or collect payment.
       </div>
       {error ? (
         <p className="error" role="alert">
@@ -324,8 +325,8 @@ export function FoundingHouseholds() {
         </p>
       ) : null}
       {oneTimeCredential ? (
-        <section className="hq-card section" aria-label="One-time local invitation credential">
-          <span className="seed-label">Displayed once — local handoff only</span>
+        <section className="hq-card section" aria-label="One-time invitation credential">
+          <span className="seed-label">Displayed once — founder manual handoff only</span>
           <h2>Founding Household invitation</h2>
           <code>{oneTimeCredential}</code>
           <p className="source">
@@ -357,7 +358,7 @@ export function FoundingHouseholds() {
           </article>
           <article className="metric-card">
             <span>Evidence</span>
-            <strong>Local only</strong>
+            <strong>{label(data.environment)}</strong>
             <small>{data.evidenceTier.replaceAll('_', ' ')}</small>
           </article>
         </section>
@@ -365,7 +366,7 @@ export function FoundingHouseholds() {
 
       {data ? (
         <details className="hq-card action-panel section">
-          <summary>Configure the finite local cohort policy</summary>
+          <summary>Configure the finite {label(data.environment)} cohort policy</summary>
           <form className="form-grid" onSubmit={configure}>
             <label>
               Sponsor benefit
@@ -385,11 +386,11 @@ export function FoundingHouseholds() {
               </select>
             </label>
             <label>
-              Maximum households (1–25)
+              Maximum households (1–{data.environment === 'production' ? 5 : 25})
               <input
                 type="number"
                 min={1}
-                max={25}
+                max={data.environment === 'production' ? 5 : 25}
                 value={draft.maxHouseholds}
                 onChange={(event) =>
                   setDraft({ ...draft, maxHouseholds: Number(event.target.value) })
@@ -434,7 +435,9 @@ export function FoundingHouseholds() {
             </p>
             <div className="button-row form-span">
               <button className="primary" type="submit" disabled={Boolean(busy)}>
-                {busy === 'policy' ? 'Recording…' : 'Record active local policy'}
+                {busy === 'policy'
+                  ? 'Recording…'
+                  : `Record active ${label(data.environment)} policy`}
               </button>
               <button
                 className="secondary"
@@ -450,11 +453,33 @@ export function FoundingHouseholds() {
       ) : null}
 
       <section className="hq-card section">
-        <h2>Local invitation issuance</h2>
+        <h2>
+          {data?.environment === 'production' ? 'Identity-bound invitation' : 'Invitation issuance'}
+        </h2>
         <p>
-          The server stores only an HMAC fingerprint. No recipient name, email, phone number,
-          contact list, or delivery status exists in this workflow.
+          The server stores only an HMAC fingerprint. It never accepts a client-selected household,
+          person, role, or entitlement, and it has no automatic delivery path.
         </p>
+        {data?.environment === 'production' ? (
+          <label>
+            Exact Clerk customer subject
+            <input
+              type="text"
+              autoComplete="off"
+              minLength={1}
+              maxLength={200}
+              value={intendedCustomerSubject}
+              onChange={(event) => {
+                setIntendedCustomerSubject(event.target.value);
+                resolveOperation('invite');
+              }}
+            />
+            <span className="source">
+              The server combines this subject with the configured customer issuer and resolves the
+              immutable customer bootstrap before creating anything.
+            </span>
+          </label>
+        ) : null}
         <button
           className="primary"
           type="button"
@@ -463,11 +488,12 @@ export function FoundingHouseholds() {
             Boolean(oneTimeCredential) ||
             Boolean(lostInvitationId) ||
             data?.policy.state !== 'active' ||
-            data.capacity.remaining < 1
+            data.capacity.remaining < 1 ||
+            (data.environment === 'production' && !intendedCustomerSubject.trim())
           }
           onClick={() => void createInvitation()}
         >
-          {busy === 'invite' ? 'Issuing…' : 'Issue one local credential'}
+          {busy === 'invite' ? 'Issuing…' : 'Issue one manual-delivery credential'}
         </button>
       </section>
 
@@ -487,6 +513,12 @@ export function FoundingHouseholds() {
               {label(invitation.benefitKey)} · expires{' '}
               {new Date(invitation.expiresAt).toLocaleString()}
             </p>
+            {invitation.intendedCustomerSubject ? (
+              <p className="source">
+                Bound subject: {invitation.intendedCustomerSubject} · household{' '}
+                {invitation.householdId}
+              </p>
+            ) : null}
             {invitation.state === 'pending' ? (
               <button
                 className="secondary"
@@ -530,7 +562,7 @@ export function FoundingHouseholds() {
           </article>
         ))}
         {data?.invitations.length === 0 && data.enrollments.length === 0 ? (
-          <p>No local invitations or enrollments exist.</p>
+          <p>No invitations or enrollments exist in this environment.</p>
         ) : null}
       </section>
     </>

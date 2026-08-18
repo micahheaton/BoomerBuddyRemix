@@ -37,6 +37,10 @@ const releaseMigrations = [
   '0021_run3_consent_messaging.sql',
   '0022_run3_editorial_intelligence.sql',
   '0023_run3_referral_credit_engine.sql',
+  '0024_run3_1_production_identity.sql',
+  '0025_run3_1_authenticated_feedback.sql',
+  '0026_run3_1_production_founding_households.sql',
+  '0027_run3_1_feedback_founding_quota.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -108,7 +112,7 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0023 and seeds stable Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0027 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);
@@ -204,7 +208,7 @@ describe('frozen release migration and demo seed chain', () => {
     ]);
   }, 60_000);
 
-  it('keeps an old marked run1 database untouched while applying 0019 through 0023', async () => {
+  it('keeps an old marked run1 database untouched while applying 0019 through 0027', async () => {
     const sourceDirectory = await migrationDirectory();
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-release-old-seed-'));
     await copyMigrationsThrough(
@@ -256,18 +260,44 @@ describe('frozen release migration and demo seed chain', () => {
       messaging_destinations: number;
       editorial_sources: number;
       referral_programs: number;
+      production_customers: number;
+      production_founders: number;
+      production_founding_authorities: number;
+      production_founding_policies: number;
+      live_feedback: number;
+      authenticated_feedback_quota: number;
     }>(
       `SELECT
          (SELECT count(*)::integer FROM messaging_destinations) AS messaging_destinations,
          (SELECT count(*)::integer FROM editorial_source_versions) AS editorial_sources,
-         (SELECT count(*)::integer FROM run3_referral_program_versions) AS referral_programs`,
+         (SELECT count(*)::integer FROM run3_referral_program_versions) AS referral_programs,
+         (SELECT count(*)::integer FROM production_customer_bootstraps) AS production_customers,
+         (SELECT count(*)::integer FROM production_founder_bootstraps) AS production_founders,
+         (SELECT count(*)::integer FROM founding_household_founder_authorities
+          WHERE environment = 'production') AS production_founding_authorities,
+         (SELECT count(*)::integer FROM founding_household_policy_versions
+          WHERE environment = 'production' AND state = 'active') AS production_founding_policies,
+         (SELECT count(*)::integer FROM feedback_records
+          WHERE evidence_tier = 'live_production') AS live_feedback,
+         (SELECT count(*)::integer FROM feedback_authenticated_quota_charges)
+           AS authenticated_feedback_quota`,
     );
     expect(people.rows).toEqual([
       { id: 'person-owner-alice', display_name: 'Alice Owner (pre-0019)' },
     ]);
     expect(stage7Fixtures.rows).toEqual([{ organizations: 0, sponsorships: 0, backings: 0 }]);
     expect(laterStageFixtures.rows).toEqual([
-      { messaging_destinations: 0, editorial_sources: 0, referral_programs: 0 },
+      {
+        messaging_destinations: 0,
+        editorial_sources: 0,
+        referral_programs: 0,
+        production_customers: 0,
+        production_founders: 0,
+        production_founding_authorities: 0,
+        production_founding_policies: 0,
+        live_feedback: 0,
+        authenticated_feedback_quota: 0,
+      },
     ]);
   }, 60_000);
 

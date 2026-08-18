@@ -140,7 +140,7 @@ export interface FeedbackIntakeResult {
   readonly status: 'queued_unassigned' | 'assigned' | 'unsafe_unprocessable';
   readonly redactionStatus: 'minimized_clean' | 'minimized_redacted' | 'quarantined_discarded';
   readonly queue: FeedbackQueue;
-  readonly evidenceTier: 'local_simulation';
+  readonly evidenceTier: FeedbackEvidenceTier;
   readonly retainedUntil?: Date;
   readonly reused: boolean;
   readonly mediaAccepted: false;
@@ -179,10 +179,11 @@ export interface HqFeedbackQueueItem {
 export interface FeedbackReviewClaimResult {
   readonly feedbackId: string;
   readonly queue: FeedbackQueue;
+  readonly routingState: 'assigned';
   readonly assignmentVersion: number;
   readonly humanReviewRequired: boolean;
   readonly reused: boolean;
-  readonly evidenceTier: 'local_simulation';
+  readonly evidenceTier: FeedbackEvidenceTier;
   readonly externalActionExecuted: false;
 }
 
@@ -190,7 +191,7 @@ export interface AssignedFeedbackContent {
   readonly feedbackId: string;
   readonly minimizedText: string;
   readonly redactionStatus: 'minimized_clean' | 'minimized_redacted';
-  readonly evidenceTier: 'local_simulation';
+  readonly evidenceTier: FeedbackEvidenceTier;
   readonly contentBoundary: 'assigned_minimized_text';
   readonly externalActionExecuted: false;
 }
@@ -202,6 +203,7 @@ interface IntakeOperationRow extends Record<string, unknown> {
   readonly response_redaction_status: FeedbackIntakeResult['redactionStatus'] | null;
   readonly response_queue: FeedbackQueue | null;
   readonly response_retained_until: unknown | null;
+  readonly evidence_tier: FeedbackEvidenceTier | null;
 }
 
 interface HqFeedbackRow extends Record<string, unknown> {
@@ -657,12 +659,63 @@ export class FeedbackRepository {
     }
   }
 
-  private operationResult(row: IntakeOperationRow, reused: boolean): FeedbackIntakeResult {
+  private async requireLiveFoundingAccess(
+    executor: SqlExecutor,
+    input: {
+      readonly householdId: string;
+      readonly actorPersonId: string;
+      readonly authorityNow: Date;
+    },
+  ): Promise<void> {
+    const result = await executor.query<
+      { readonly enrollment_id: string | null } & Record<string, unknown>
+    >(`SELECT feedback_live_founding_enrollment_id($1,$2,$3) AS enrollment_id`, [
+      input.householdId,
+      input.actorPersonId,
+      input.authorityNow.toISOString(),
+    ]);
+    if (result.rows[0]?.enrollment_id === null || result.rows[0] === undefined) {
+      throw new DomainError(
+        'not_authorized',
+        'Live feedback requires a current Founding Household sponsored entitlement',
+      );
+    }
+  }
+
+  private async chargeLiveAuthenticatedQuota(
+    executor: SqlExecutor,
+    input: {
+      readonly operationKey: string;
+      readonly householdId: string;
+      readonly actorPersonId: string;
+      readonly authorityNow: Date;
+    },
+  ): Promise<void> {
+    const result = await executor.query<{ readonly accepted: boolean } & Record<string, unknown>>(
+      `SELECT charge_feedback_authenticated_quota($1,$2,$3,$4) AS accepted`,
+      [
+        input.operationKey,
+        input.actorPersonId,
+        input.householdId,
+        input.authorityNow.toISOString(),
+      ],
+    );
+    if (result.rows[0]?.accepted !== true) {
+      throw new DomainError('conflict', 'Live feedback hourly intake quota is exhausted');
+    }
+  }
+
+  private operationResult(
+    row: IntakeOperationRow,
+    reused: boolean,
+    evidenceTier: FeedbackEvidenceTier,
+  ): FeedbackIntakeResult {
     if (
       row.feedback_id === null ||
       row.response_status === null ||
       row.response_redaction_status === null ||
-      row.response_queue === null
+      row.response_queue === null ||
+      row.evidence_tier !== evidenceTier
     ) {
       throw new DomainError('conflict', 'Feedback intake operation is incomplete');
     }
@@ -671,7 +724,7 @@ export class FeedbackRepository {
       status: row.response_status,
       redactionStatus: row.response_redaction_status,
       queue: row.response_queue,
-      evidenceTier: 'local_simulation',
+      evidenceTier,
       ...(row.response_retained_until === null
         ? {}
         : { retainedUntil: asDate(row.response_retained_until, 'feedback retained until') }),
@@ -739,6 +792,7 @@ export class FeedbackRepository {
       readonly resultingActionType?: 'issue' | 'experiment' | 'content' | 'support_action';
       readonly resultingActionId?: string;
       readonly closeLoopState?: FeedbackCloseLoopState;
+      readonly evidenceTier: FeedbackEvidenceTier;
       readonly now: Date;
     },
   ): Promise<void> {
@@ -748,8 +802,7 @@ export class FeedbackRepository {
          duplicate_of_feedback_id, cluster_id, customer_impact_code, resulting_action_type,
          resulting_action_id, close_loop_state, reason_code, actor_kind, actor_person_id,
          service_key, evidence_tier, occurred_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
-         'local_simulation',$18)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
         this.ids.next('feedback-state'),
         input.feedbackId,
@@ -768,6 +821,7 @@ export class FeedbackRepository {
         input.actor.kind,
         'personId' in input.actor ? (input.actor.personId ?? null) : null,
         'serviceKey' in input.actor ? input.actor.serviceKey : null,
+        input.evidenceTier,
         input.now.toISOString(),
       ],
     );
@@ -781,6 +835,7 @@ export class FeedbackRepository {
       readonly feedbackVersion: number;
       readonly unsafe: boolean;
       readonly correlationId: string;
+      readonly evidenceTier: FeedbackEvidenceTier;
       readonly now: Date;
     },
   ): Promise<void> {
@@ -822,14 +877,15 @@ export class FeedbackRepository {
            id, feedback_id, processing_step, durable_job_id, expected_feedback_version,
            receipt_state, result_code, evidence_tier, provider_processed,
            external_action_executed, created_at
-         ) VALUES ($1,$2,$3,$4,$5,'queued','local_processing_not_run','local_simulation',
-           false,false,$6)`,
+         ) VALUES ($1,$2,$3,$4,$5,'queued','local_processing_not_run',$6,
+           false,false,$7)`,
         [
           this.ids.next('feedback-processing'),
           input.feedbackId,
           definition.step,
           queued.job.id,
           input.feedbackVersion,
+          input.evidenceTier,
           input.now.toISOString(),
         ],
       );
@@ -853,6 +909,7 @@ export class FeedbackRepository {
           };
       readonly requestDigest: string;
       readonly correlationId: string;
+      readonly evidenceTier: FeedbackEvidenceTier;
       readonly now: Date;
     },
   ): Promise<FeedbackIntakeResult> {
@@ -863,9 +920,12 @@ export class FeedbackRepository {
       [input.request.operationKey, input.requestDigest, intakeStartedAt.toISOString()],
     );
     const existing = await executor.query<IntakeOperationRow>(
-      `SELECT request_digest, feedback_id, response_status, response_redaction_status,
-              response_queue, response_retained_until
-       FROM feedback_intake_operations WHERE operation_key = $1 FOR UPDATE`,
+      `SELECT operation.request_digest, operation.feedback_id, operation.response_status,
+              operation.response_redaction_status, operation.response_queue,
+              operation.response_retained_until, record.evidence_tier
+       FROM feedback_intake_operations operation
+       LEFT JOIN feedback_records record ON record.id = operation.feedback_id
+       WHERE operation.operation_key = $1 FOR UPDATE OF operation`,
       [input.request.operationKey],
     );
     const operation = existing.rows[0];
@@ -873,8 +933,35 @@ export class FeedbackRepository {
     if (operation.request_digest !== input.requestDigest) {
       throw new DomainError('conflict', 'Feedback idempotency key has conflicting evidence');
     }
-    if (inserted.rowCount === 0) return this.operationResult(operation, true);
     const authorityNow = await this.authorityNow(executor, input.now);
+    if (input.evidenceTier === 'live_production') {
+      if (
+        input.identityMode !== 'authenticated' ||
+        input.householdId === undefined ||
+        input.actorPersonId === undefined
+      ) {
+        throw new DomainError(
+          'not_authorized',
+          'Live feedback requires an authenticated Founding Household participant',
+        );
+      }
+      await this.requireLiveFoundingAccess(executor, {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        authorityNow,
+      });
+      if (inserted.rowCount === 0) {
+        return this.operationResult(operation, true, input.evidenceTier);
+      }
+      await this.chargeLiveAuthenticatedQuota(executor, {
+        operationKey: input.request.operationKey,
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        authorityNow,
+      });
+    } else if (inserted.rowCount === 0) {
+      return this.operationResult(operation, true, input.evidenceTier);
+    }
 
     const minimized = minimizeSubmittedFeedbackText(input.request.text);
     const unsafe = minimized.status === 'rejected';
@@ -911,8 +998,7 @@ export class FeedbackRepository {
          app_version, build_version, locale, device_class, feedback_type, linked_object_type,
          linked_object_id, linkage_consent_version, origin_interaction_id, correlation_id,
          evidence_tier, created_at
-       ) VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,$14,
-         'local_simulation',$15)`,
+       ) VALUES ($1,1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL,$14,$15,$16)`,
       [
         feedbackId,
         input.identityMode,
@@ -928,6 +1014,7 @@ export class FeedbackRepository {
         linkedObjectId ?? null,
         link?.permitted ? link.consentVersion : null,
         input.correlationId,
+        input.evidenceTier,
         authorityNow.toISOString(),
       ],
     );
@@ -976,6 +1063,7 @@ export class FeedbackRepository {
       toStatus: 'received',
       actor,
       reasonCode: 'bounded_text_received',
+      evidenceTier: input.evidenceTier,
       now: authorityNow,
     });
     await this.insertState(executor, {
@@ -985,6 +1073,7 @@ export class FeedbackRepository {
       toStatus: unsafe ? 'unsafe_unprocessable' : 'minimized',
       actor: { kind: 'system', serviceKey: 'feedback.local_minimizer' },
       reasonCode: unsafe ? 'unsafe_text_discarded' : 'local_minimization_completed',
+      evidenceTier: input.evidenceTier,
       ...(unsafe ? { classification: 'out_of_scope_or_unsafe' as const } : {}),
       now: authorityNow,
     });
@@ -1094,6 +1183,7 @@ export class FeedbackRepository {
         toStatus: 'assigned',
         actor: { kind: 'system', serviceKey: 'feedback.local_router' },
         reasonCode: 'bounded_initial_routing',
+        evidenceTier: input.evidenceTier,
         closeLoopState: 'human_review_required',
         now: authorityNow,
       });
@@ -1106,6 +1196,7 @@ export class FeedbackRepository {
       feedbackVersion,
       unsafe,
       correlationId: input.correlationId,
+      evidenceTier: input.evidenceTier,
       now: authorityNow,
     });
     await executor.query(
@@ -1128,7 +1219,7 @@ export class FeedbackRepository {
       status: responseStatus,
       redactionStatus,
       queue,
-      evidenceTier: 'local_simulation',
+      evidenceTier: input.evidenceTier,
       ...(retainedUntil === undefined ? {} : { retainedUntil }),
       reused: false,
       mediaAccepted: false,
@@ -1142,6 +1233,7 @@ export class FeedbackRepository {
     readonly actorPersonId: string;
     readonly request: FeedbackIntakeRequest;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<FeedbackIntakeResult> {
     assertCommonInput({ ...input.request, correlationId: input.correlationId, now: input.now });
@@ -1153,6 +1245,7 @@ export class FeedbackRepository {
       sourceSurface: input.request.source.surface,
       ...(input.request.link.permitted ? { linkedObjectType: input.request.link.objectType } : {}),
     });
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
     const requestDigest = this.digestRequest({
       identityMode: 'authenticated',
       householdId: input.householdId,
@@ -1174,6 +1267,7 @@ export class FeedbackRepository {
         routing: { state: 'unassigned' },
         requestDigest,
         correlationId: input.correlationId,
+        evidenceTier,
         now: input.now,
       });
     });
@@ -1321,6 +1415,7 @@ export class FeedbackRepository {
     readonly networkAddress: string;
     readonly request: FeedbackIntakeRequest;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<FeedbackIntakeResult> {
     assertCommonInput({ ...input.request, correlationId: input.correlationId, now: input.now });
@@ -1329,6 +1424,10 @@ export class FeedbackRepository {
         'invalid_input',
         'Anonymous feedback cannot include account linkage or follow-up authority',
       );
+    }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
+    if (evidenceTier !== 'local_simulation') {
+      throw new DomainError('not_authorized', 'Anonymous feedback is unavailable in production');
     }
     assertFeedbackSourceCompatible({
       identityMode: 'anonymous',
@@ -1348,6 +1447,7 @@ export class FeedbackRepository {
           routing: { state: 'unassigned' },
           requestDigest,
           correlationId: input.correlationId,
+          evidenceTier,
           now: input.now,
         });
         await this.renewAnonymousLeaseOwnership(transaction, lease, input.now);
@@ -1368,6 +1468,7 @@ export class FeedbackRepository {
     readonly actorPersonId: string;
     readonly request: SupportFeedbackConversionInput;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<FeedbackIntakeResult> {
     assertCommonInput({ ...input.request, correlationId: input.correlationId, now: input.now });
@@ -1375,6 +1476,10 @@ export class FeedbackRepository {
       if (!stableIdPattern.test(value)) {
         throw new DomainError('invalid_input', 'Support feedback scope is invalid');
       }
+    }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
+    if (evidenceTier !== 'local_simulation') {
+      throw new DomainError('not_authorized', 'Support conversion is unavailable in production');
     }
     assertFeedbackSourceCompatible({
       identityMode: 'support_conversion',
@@ -1407,6 +1512,7 @@ export class FeedbackRepository {
             },
         requestDigest,
         correlationId: input.correlationId,
+        evidenceTier,
         now: input.now,
       });
     });
@@ -1415,6 +1521,7 @@ export class FeedbackRepository {
   async roleScopedMetadata(input: {
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<readonly HqFeedbackQueueItem[]> {
     if (
@@ -1424,6 +1531,7 @@ export class FeedbackRepository {
     ) {
       throw new DomainError('invalid_input', 'Feedback queue access is invalid');
     }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
     return this.database.transaction(async (transaction) => {
       const tentative = await this.currentInternalAssignments(transaction, input.actorPersonId);
       const tentativeOwnerProjection = tentative.some(
@@ -1440,7 +1548,7 @@ export class FeedbackRepository {
          LEFT JOIN employee_assignments assignee
            ON assignee.id = assignment.employee_assignment_id
          LEFT JOIN organizations organization ON organization.id = assignee.organization_id
-         WHERE $2::boolean OR (
+         WHERE record.evidence_tier = $3 AND ($2::boolean OR (
            assignment.routing_state = 'assigned' AND assignee.person_id = $1
            AND assignee.status = 'active' AND organization.kind = 'internal'
            AND assignee.role IN ('hq_owner', 'hq_reviewer', 'hq_support')
@@ -1459,10 +1567,10 @@ export class FeedbackRepository {
                  AND support_assignment.status = 'active'
              )
            )
-         )
+         ))
          ORDER BY assignment.occurred_at DESC, record.id DESC
          LIMIT 100 FOR UPDATE OF record`,
-        [input.actorPersonId, tentativeOwnerProjection],
+        [input.actorPersonId, tentativeOwnerProjection, evidenceTier],
       );
       const employee = await this.lockInternalAssignments(transaction, input.actorPersonId);
       const ownerProjection = employee.some((assignment) => assignment.role === 'hq_owner');
@@ -1533,7 +1641,7 @@ export class FeedbackRepository {
              AND support_assignment.status = 'active'
            LIMIT 1
          ) support_visibility ON record.identity_mode = 'support_conversion'
-         WHERE $2::boolean OR (
+         WHERE record.evidence_tier = $5 AND ($2::boolean OR (
            assignment.routing_state = 'assigned' AND assignee.person_id = $1
            AND assignee.status = 'active' AND organization.kind = 'internal'
            AND assignee.role IN ('hq_owner', 'hq_reviewer', 'hq_support')
@@ -1541,7 +1649,7 @@ export class FeedbackRepository {
              record.identity_mode <> 'support_conversion'
              OR support_visibility.currently_assigned = true
            )
-         )
+         ))
          ORDER BY assignment.occurred_at DESC, record.id DESC
          LIMIT 100`,
         [
@@ -1549,6 +1657,7 @@ export class FeedbackRepository {
           ownerProjection,
           authorityNow.toISOString(),
           [...feedbackContentReadableStatuses],
+          evidenceTier,
         ],
       );
       await transaction.query(
@@ -1565,6 +1674,7 @@ export class FeedbackRepository {
               ? 'owner_global_feedback_metadata'
               : 'exact_assigned_feedback_metadata',
             rowCount: result.rowCount,
+            evidenceTier,
           }),
           input.correlationId,
           authorityNow.toISOString(),
@@ -1610,6 +1720,7 @@ export class FeedbackRepository {
     readonly feedbackId: string;
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<FeedbackReviewClaimResult> {
     if (
@@ -1620,6 +1731,7 @@ export class FeedbackRepository {
     ) {
       throw new DomainError('invalid_input', 'Feedback review claim scope is invalid');
     }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
     return this.database.transaction(async (transaction) => {
       const tentativeAssignments = await this.currentInternalAssignments(
         transaction,
@@ -1636,17 +1748,19 @@ export class FeedbackRepository {
         {
           readonly identity_mode: FeedbackIdentityMode;
           readonly household_id: string | null;
+          readonly evidence_tier: FeedbackEvidenceTier;
           readonly payload_state: string;
           readonly retention_deadline: unknown | null;
         } & Record<string, unknown>
       >(
-        `SELECT record.identity_mode, record.household_id, payload.payload_state,
+        `SELECT record.identity_mode, record.household_id, record.evidence_tier,
+                payload.payload_state,
                 payload.retention_deadline
          FROM feedback_records record
          JOIN feedback_payloads payload ON payload.feedback_id = record.id
-         WHERE record.id = $1
+         WHERE record.id = $1 AND record.evidence_tier = $2
          FOR UPDATE OF record, payload`,
-        [input.feedbackId],
+        [input.feedbackId, evidenceTier],
       );
       const durable = record.rows[0];
       if (
@@ -1765,6 +1879,7 @@ export class FeedbackRepository {
               ? {}
               : { resultingActionId: state.resulting_action_id }),
             closeLoopState: 'human_review_required',
+            evidenceTier,
             now: authorityNow,
           });
         }
@@ -1795,10 +1910,11 @@ export class FeedbackRepository {
       return {
         feedbackId: input.feedbackId,
         queue: routing.queue,
+        routingState: 'assigned',
         assignmentVersion,
         humanReviewRequired,
         reused: alreadyAssignedToActor,
-        evidenceTier: 'local_simulation',
+        evidenceTier,
         externalActionExecuted: false,
       };
     });
@@ -1808,6 +1924,7 @@ export class FeedbackRepository {
     readonly feedbackId: string;
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<AssignedFeedbackContent> {
     if (
@@ -1818,6 +1935,7 @@ export class FeedbackRepository {
     ) {
       throw new DomainError('invalid_input', 'Assigned feedback read scope is invalid');
     }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
     return this.database.transaction(async (transaction) => {
       await this.currentInternalAssignments(transaction, input.actorPersonId);
       await this.lockFeedbackReviewMutex(transaction);
@@ -1826,6 +1944,7 @@ export class FeedbackRepository {
           readonly identity_mode: FeedbackIdentityMode;
           readonly household_id: string | null;
           readonly linked_object_id: string | null;
+          readonly evidence_tier: FeedbackEvidenceTier;
           readonly payload_state: string;
           readonly encrypted_text: string | null;
           readonly encryption_key_version: number | null;
@@ -1834,13 +1953,14 @@ export class FeedbackRepository {
         } & Record<string, unknown>
       >(
         `SELECT record.identity_mode, record.household_id, record.linked_object_id,
+                record.evidence_tier,
                 payload.payload_state, payload.encrypted_text, payload.encryption_key_version,
                 payload.redaction_status, payload.retention_deadline
          FROM feedback_records record
          JOIN feedback_payloads payload ON payload.feedback_id = record.id
-         WHERE record.id = $1
+         WHERE record.id = $1 AND record.evidence_tier = $2
          FOR UPDATE OF record, payload`,
-        [input.feedbackId],
+        [input.feedbackId, evidenceTier],
       );
       const internalAssignments = await this.lockInternalAssignments(
         transaction,
@@ -1981,7 +2101,7 @@ export class FeedbackRepository {
         feedbackId: input.feedbackId,
         minimizedText: plaintext,
         redactionStatus: record.redaction_status,
-        evidenceTier: 'local_simulation',
+        evidenceTier,
         contentBoundary: 'assigned_minimized_text',
         externalActionExecuted: false,
       };
@@ -1994,6 +2114,7 @@ export class FeedbackRepository {
       readonly feedbackId: string;
       readonly reason: 'consent_withdrawn' | 'retention_expired';
       readonly actorPersonId?: string;
+      readonly evidenceTier: FeedbackEvidenceTier;
       readonly now: Date;
     },
   ): Promise<boolean> {
@@ -2013,7 +2134,7 @@ export class FeedbackRepository {
       `INSERT INTO feedback_payload_erasure_events(
          id, feedback_id, reason, actor_kind, actor_person_id, prior_retention_deadline,
          evidence_tier, occurred_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,'local_simulation',$7)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         this.ids.next('feedback-erasure'),
         input.feedbackId,
@@ -2021,6 +2142,7 @@ export class FeedbackRepository {
         input.actorPersonId === undefined ? 'system' : 'participant',
         input.actorPersonId ?? null,
         asDate(row.retention_deadline, 'feedback retention deadline').toISOString(),
+        input.evidenceTier,
         input.now.toISOString(),
       ],
     );
@@ -2033,6 +2155,7 @@ export class FeedbackRepository {
     readonly actorPersonId: string;
     readonly purpose: 'follow_up' | 'research_retention' | 'object_linkage';
     readonly correlationId: string;
+    readonly evidenceTier?: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<{
     readonly withdrawn: boolean;
@@ -2047,6 +2170,7 @@ export class FeedbackRepository {
     ) {
       throw new DomainError('invalid_input', 'Feedback consent withdrawal scope is invalid');
     }
+    const evidenceTier = input.evidenceTier ?? 'local_simulation';
     return this.database.transaction(async (transaction) => {
       const record = await transaction.query<
         {
@@ -2073,8 +2197,9 @@ export class FeedbackRepository {
          ) state ON true
          WHERE record.id = $1 AND record.identity_mode = 'authenticated'
            AND record.household_id = $2 AND record.actor_person_id = $3
+           AND record.evidence_tier = $4
          FOR UPDATE OF record`,
-        [input.feedbackId, input.householdId, input.actorPersonId],
+        [input.feedbackId, input.householdId, input.actorPersonId, evidenceTier],
       );
       const current = record.rows[0];
       if (current === undefined) {
@@ -2120,6 +2245,7 @@ export class FeedbackRepository {
         feedbackId: input.feedbackId,
         reason: 'consent_withdrawn',
         actorPersonId: input.actorPersonId,
+        evidenceTier,
         now: authorityNow,
       });
       if (
@@ -2151,6 +2277,7 @@ export class FeedbackRepository {
             ? {}
             : { resultingActionId: current.resulting_action_id }),
           closeLoopState: current.close_loop_state,
+          evidenceTier,
           now: authorityNow,
         });
       }
@@ -2188,9 +2315,10 @@ export class FeedbackRepository {
         {
           readonly feedback_id: string;
           readonly retention_deadline: unknown;
+          readonly evidence_tier: FeedbackEvidenceTier;
         } & Record<string, unknown>
       >(
-        `SELECT record.id AS feedback_id, payload.retention_deadline
+        `SELECT record.id AS feedback_id, payload.retention_deadline, record.evidence_tier
          FROM feedback_records record
          JOIN feedback_payloads payload ON payload.feedback_id = record.id
          WHERE payload.payload_state = 'encrypted_minimized'
@@ -2210,6 +2338,7 @@ export class FeedbackRepository {
         const latest = await transaction.query<
           {
             readonly feedback_id: string;
+            readonly evidence_tier: FeedbackEvidenceTier;
             readonly version: number;
             readonly to_status: FeedbackStatus;
             readonly severity: FeedbackSeverity;
@@ -2223,7 +2352,8 @@ export class FeedbackRepository {
             readonly close_loop_state: FeedbackCloseLoopState;
           } & Record<string, unknown>
         >(
-          `SELECT record.id AS feedback_id, state.version, state.to_status, state.severity,
+          `SELECT record.id AS feedback_id, record.evidence_tier, state.version,
+                state.to_status, state.severity,
                 state.classification, state.duplicate_of_feedback_id, state.cluster_id,
                 state.customer_impact_code, state.resulting_action_type,
                 state.resulting_action_id, state.close_loop_state
@@ -2281,6 +2411,7 @@ export class FeedbackRepository {
         const erased = await this.eraseActiveStoreCiphertext(transaction, {
           feedbackId: row.feedback_id,
           reason: 'retention_expired',
+          evidenceTier: row.evidence_tier,
           now: authorityNow,
         });
         if (erased) erasedCount += 1;
@@ -2311,6 +2442,7 @@ export class FeedbackRepository {
               ? {}
               : { resultingActionId: row.resulting_action_id }),
             closeLoopState: row.close_loop_state,
+            evidenceTier: row.evidence_tier,
             now: authorityNow,
           });
         }

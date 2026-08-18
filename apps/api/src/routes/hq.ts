@@ -35,16 +35,37 @@ async function authorizeHq(request: FastifyRequest, context: ApiContext, action:
 }
 
 export function registerHqRoutes(app: FastifyInstance, context: ApiContext): void {
+  const dataState =
+    context.config.environment === 'production'
+      ? ('live_database' as const)
+      : ('local_development' as const);
+
   app.get('/v1/hq/overview', async (request) => {
     await authorizeHq(request, context, 'hq:overview');
     const value = await context.repositories.hq.overview(context.now());
     return hqOverviewResponseSchema.parse({
       metrics: value.metrics.map((metric) => ({
         ...metric,
+        label:
+          dataState === 'live_database'
+            ? metric.label.replace(/^Local /u, 'Private-beta ')
+            : metric.label,
         updatedAt: metric.updatedAt.toISOString(),
-        dataState: 'local_development',
+        source: dataState,
+        dataState,
       })),
-      alerts: value.alerts.map((alert) => ({ ...alert, dataState: 'local_development' })),
+      alerts:
+        dataState === 'live_database'
+          ? [
+              {
+                key: 'private_beta_data',
+                severity: 'info' as const,
+                message:
+                  'Metrics summarize private-beta database records. Provider, deployed-observability, human, and efficacy evidence remain separately labeled.',
+                dataState,
+              },
+            ]
+          : value.alerts.map((alert) => ({ ...alert, dataState })),
     });
   });
 
@@ -60,7 +81,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
     return hqHouseholdsResponseSchema.parse({
       households: page.items.map((household) => ({
         ...household,
-        dataState: 'local_development',
+        dataState,
       })),
       truncated: page.truncated,
     });
@@ -77,7 +98,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
       checks: checks.map((check) => ({
         ...check,
         createdAt: check.createdAt.toISOString(),
-        dataState: 'local_development',
+        dataState,
       })),
     });
   });
@@ -96,7 +117,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
       cases: page.items.map((supportCase) => ({
         ...supportCase,
         assignedAt: supportCase.assignedAt.toISOString(),
-        dataState: 'local_development',
+        dataState,
       })),
       truncated: page.truncated,
     });
@@ -117,7 +138,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
         ...reviewCase,
         ...(reviewCase.dueAt === undefined ? {} : { dueAt: reviewCase.dueAt.toISOString() }),
         updatedAt: reviewCase.updatedAt.toISOString(),
-        dataState: 'local_development',
+        dataState,
       })),
       truncated: page.truncated,
     });
@@ -130,7 +151,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
       providers: providers.map((provider) => ({
         ...provider,
         lastCheckedAt: provider.lastCheckedAt.toISOString(),
-        dataState: 'local_development',
+        dataState,
       })),
     });
   });

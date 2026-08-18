@@ -3,6 +3,35 @@ import { z } from 'zod';
 
 const booleanText = z.enum(['true', 'false']).transform((value) => value === 'true');
 const nonEmpty = z.string().trim().min(1);
+const boundedExternalIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,511}$/u;
+const boundedPersonIdentifier = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/u;
+
+function postgresConnectionString(value: string, production: boolean): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError('DATABASE_URL must be a valid PostgreSQL URL');
+  }
+  if (
+    (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') ||
+    url.hostname === '' ||
+    url.pathname === '/' ||
+    url.hash !== ''
+  ) {
+    throw new TypeError('DATABASE_URL must identify one PostgreSQL database');
+  }
+  if (production) {
+    const sslModes = url.searchParams.getAll('sslmode');
+    if (
+      sslModes.length !== 1 ||
+      !['require', 'verify-ca', 'verify-full'].includes(sslModes[0] ?? '')
+    ) {
+      throw new TypeError('Production DATABASE_URL must require encrypted PostgreSQL transport');
+    }
+  }
+  return value;
+}
 
 const environmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -16,9 +45,22 @@ const environmentSchema = z.object({
   BB_SEED_DEMO: booleanText.default(false),
   BB_ALLOW_DEV_IDENTITY: booleanText.default(true),
   BB_FOUNDER_PERSON_ID: nonEmpty.optional(),
+  BB_FOUNDER_CLERK_SUBJECT: nonEmpty.optional(),
   BB_CUSTOMER_ORIGINS: nonEmpty,
   BB_HQ_ORIGINS: nonEmpty,
-  BB_SESSION_SECRET: z.string().min(32),
+  BB_CLERK_CUSTOMER_ISSUER: nonEmpty.optional(),
+  BB_CLERK_CUSTOMER_AUDIENCE: nonEmpty.optional(),
+  BB_CLERK_CUSTOMER_JWT_KEY: nonEmpty.optional(),
+  BB_CLERK_HQ_ISSUER: nonEmpty.optional(),
+  BB_CLERK_HQ_AUDIENCE: nonEmpty.optional(),
+  BB_CLERK_HQ_JWT_KEY: nonEmpty.optional(),
+  BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .max(3_600)
+    .default(600),
+  BB_SESSION_SECRET: z.string().min(32).optional(),
   BB_ARTIFACT_KEY_BASE64: nonEmpty,
   BB_FINGERPRINT_KEY_BASE64: nonEmpty,
   BB_SAFE_WORD_PEPPER: z.string().min(16),
@@ -72,12 +114,31 @@ export interface AppConfig {
     /** Exact founder identity for consequential automation-control mutations. Omitted means fail closed. */
     readonly founderPersonId?: string;
     readonly hqOrigins: readonly string[];
+    /** Present only after the production startup invariants have all passed. */
+    readonly clerk?: {
+      readonly customer: {
+        readonly issuer: string;
+        readonly audience: string;
+        readonly jwtKey: string;
+        readonly authorizedParties: readonly string[];
+      };
+      readonly hq: {
+        readonly issuer: string;
+        readonly audience: string;
+        readonly jwtKey: string;
+        readonly authorizedParties: readonly string[];
+        readonly maxSecondFactorAgeSeconds: number;
+      };
+      readonly founderSubject: string;
+    };
   };
   readonly secrets: {
     readonly session: Buffer;
     readonly artifactEncryptionKey: Buffer;
     readonly fingerprintKey: Buffer;
     readonly safeWordPepper: Buffer;
+    /** Replit runtime secrets are an explicitly accepted, bounded beta custody tier. */
+    readonly custodyClassification?: 'local_development' | 'replit_runtime_secret_beta';
   };
   readonly commerce:
     | { readonly stripe: { readonly mode: 'disabled' } }
@@ -192,11 +253,89 @@ function origins(value: string, name: string): readonly string[] {
 
 function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void {
   if (parsed.NODE_ENV !== 'production') return;
-  // Managed identity and KMS adapters are not yet implemented. Refusing the entire
-  // production mode is more truthful than accepting raw environment keys as ready.
-  throw new TypeError(
-    'BoomerBuddy refuses production startup until managed identity and KMS adapters are configured',
-  );
+  if (parsed.BB_DATABASE_DRIVER !== 'postgres') {
+    throw new TypeError('Production requires the PostgreSQL database driver');
+  }
+  if (parsed.BB_RUN_MIGRATIONS) {
+    throw new TypeError('Production refuses runtime database migrations');
+  }
+  if (parsed.BB_SEED_DEMO) {
+    throw new TypeError('Production refuses demo data seeding');
+  }
+  if (parsed.BB_ALLOW_DEV_IDENTITY) {
+    throw new TypeError('Production refuses the development identity issuer');
+  }
+  if (parsed.BB_SESSION_SECRET !== undefined) {
+    throw new TypeError('Production refuses unused development session signing material');
+  }
+  if (parsed.BB_TRUSTED_PROXY_HOPS !== 0) {
+    throw new TypeError('Production trusted proxy hops remain zero until deployed proof exists');
+  }
+  if (parsed.BB_STRIPE_MODE !== 'disabled' || parsed.BB_TWILIO_MODE !== 'disabled') {
+    throw new TypeError('Production beta requires Stripe and Twilio to remain disabled');
+  }
+  const requiredIdentity = [
+    parsed.BB_FOUNDER_PERSON_ID,
+    parsed.BB_FOUNDER_CLERK_SUBJECT,
+    parsed.BB_CLERK_CUSTOMER_ISSUER,
+    parsed.BB_CLERK_CUSTOMER_AUDIENCE,
+    parsed.BB_CLERK_CUSTOMER_JWT_KEY,
+    parsed.BB_CLERK_HQ_ISSUER,
+    parsed.BB_CLERK_HQ_AUDIENCE,
+    parsed.BB_CLERK_HQ_JWT_KEY,
+  ];
+  if (requiredIdentity.some((value) => value === undefined)) {
+    throw new TypeError(
+      'Production requires complete customer, HQ, and founder Clerk identity configuration',
+    );
+  }
+  if (
+    !boundedPersonIdentifier.test(parsed.BB_FOUNDER_PERSON_ID as string) ||
+    !boundedExternalIdentifier.test(parsed.BB_FOUNDER_CLERK_SUBJECT as string) ||
+    (parsed.BB_CLERK_CUSTOMER_AUDIENCE as string).length > 512 ||
+    /\s/u.test(parsed.BB_CLERK_CUSTOMER_AUDIENCE as string) ||
+    (parsed.BB_CLERK_HQ_AUDIENCE as string).length > 512 ||
+    /\s/u.test(parsed.BB_CLERK_HQ_AUDIENCE as string)
+  ) {
+    throw new TypeError('Production founder and Clerk audience identifiers are invalid');
+  }
+  if (parsed.BB_CLERK_CUSTOMER_ISSUER === parsed.BB_CLERK_HQ_ISSUER) {
+    throw new TypeError('Production customer and HQ Clerk issuers must be distinct');
+  }
+  if (parsed.BB_CLERK_CUSTOMER_AUDIENCE === parsed.BB_CLERK_HQ_AUDIENCE) {
+    throw new TypeError('Production customer and HQ Clerk audiences must be distinct');
+  }
+  if (parsed.BB_CLERK_CUSTOMER_JWT_KEY === parsed.BB_CLERK_HQ_JWT_KEY) {
+    throw new TypeError('Production customer and HQ Clerk verification keys must be distinct');
+  }
+}
+
+function clerkIssuer(value: string | undefined, name: string): string {
+  if (value === undefined) throw new TypeError(`${name} is required`);
+  const url = new URL(value);
+  if (
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new TypeError(`${name} must be an HTTPS issuer origin`);
+  }
+  if (url.origin.length > 2_048) throw new TypeError(`${name} is too long`);
+  return url.origin;
+}
+
+function clerkJwtKey(value: string | undefined, name: string): string {
+  if (
+    value === undefined ||
+    !/^-----BEGIN PUBLIC KEY-----[\s\S]+-----END PUBLIC KEY-----$/u.test(value) ||
+    value.length > 8_192
+  ) {
+    throw new TypeError(`${name} must be a bounded PEM public key`);
+  }
+  return value;
 }
 
 export const stripeApiVersion = '2026-02-25.clover' as const;
@@ -343,6 +482,9 @@ function twilioConfiguration(
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = environmentSchema.parse(environment);
+  if (parsed.NODE_ENV !== 'production' && parsed.BB_SESSION_SECRET === undefined) {
+    throw new TypeError('BB_SESSION_SECRET is required outside production');
+  }
   refuseUnsafeProduction(parsed);
   const customerOrigins = origins(parsed.BB_CUSTOMER_ORIGINS, 'BB_CUSTOMER_ORIGINS');
   const hqOrigins = origins(parsed.BB_HQ_ORIGINS, 'BB_HQ_ORIGINS');
@@ -359,11 +501,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     parsed.BB_DATABASE_DRIVER === 'postgres'
       ? {
           driver: 'postgres',
-          url:
+          url: postgresConnectionString(
             parsed.DATABASE_URL ??
-            (() => {
-              throw new TypeError('DATABASE_URL is required for the PostgreSQL driver');
-            })(),
+              (() => {
+                throw new TypeError('DATABASE_URL is required for the PostgreSQL driver');
+              })(),
+            parsed.NODE_ENV === 'production',
+          ),
           runMigrations: parsed.BB_RUN_MIGRATIONS,
           seedDemo: parsed.BB_SEED_DEMO,
         }
@@ -376,9 +520,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
 
   const artifactEncryptionKey = decodeBase64Key(parsed.BB_ARTIFACT_KEY_BASE64);
   const fingerprintKey = decodeBase64Key(parsed.BB_FINGERPRINT_KEY_BASE64);
-  const session = Buffer.from(parsed.BB_SESSION_SECRET, 'utf8');
+  const session = Buffer.from(parsed.BB_SESSION_SECRET ?? '', 'utf8');
   const safeWordPepper = Buffer.from(parsed.BB_SAFE_WORD_PEPPER, 'utf8');
-  const separateSecrets = [artifactEncryptionKey, fingerprintKey, session, safeWordPepper];
+  const separateSecrets = [
+    artifactEncryptionKey,
+    fingerprintKey,
+    ...(session.byteLength === 0 ? [] : [session]),
+    safeWordPepper,
+  ];
   for (let left = 0; left < separateSecrets.length; left += 1) {
     for (let right = left + 1; right < separateSecrets.length; right += 1) {
       if (separateSecrets[left]?.equals(separateSecrets[right] ?? Buffer.alloc(0)) === true) {
@@ -386,6 +535,26 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       }
     }
   }
+
+  const clerk =
+    parsed.NODE_ENV === 'production'
+      ? {
+          customer: {
+            issuer: clerkIssuer(parsed.BB_CLERK_CUSTOMER_ISSUER, 'BB_CLERK_CUSTOMER_ISSUER'),
+            audience: parsed.BB_CLERK_CUSTOMER_AUDIENCE as string,
+            jwtKey: clerkJwtKey(parsed.BB_CLERK_CUSTOMER_JWT_KEY, 'BB_CLERK_CUSTOMER_JWT_KEY'),
+            authorizedParties: customerOrigins,
+          },
+          hq: {
+            issuer: clerkIssuer(parsed.BB_CLERK_HQ_ISSUER, 'BB_CLERK_HQ_ISSUER'),
+            audience: parsed.BB_CLERK_HQ_AUDIENCE as string,
+            jwtKey: clerkJwtKey(parsed.BB_CLERK_HQ_JWT_KEY, 'BB_CLERK_HQ_JWT_KEY'),
+            authorizedParties: hqOrigins,
+            maxSecondFactorAgeSeconds: parsed.BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS,
+          },
+          founderSubject: parsed.BB_FOUNDER_CLERK_SUBJECT as string,
+        }
+      : undefined;
 
   return {
     environment: parsed.NODE_ENV,
@@ -402,12 +571,15 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
         ? {}
         : { founderPersonId: parsed.BB_FOUNDER_PERSON_ID }),
       hqOrigins,
+      ...(clerk === undefined ? {} : { clerk }),
     },
     secrets: {
       session,
       artifactEncryptionKey,
       fingerprintKey,
       safeWordPepper,
+      custodyClassification:
+        parsed.NODE_ENV === 'production' ? 'replit_runtime_secret_beta' : 'local_development',
     },
     commerce: stripeConfiguration(parsed),
     messaging: twilioConfiguration(parsed),

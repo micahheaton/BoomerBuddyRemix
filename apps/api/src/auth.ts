@@ -9,6 +9,7 @@ import type { FastifyRequest } from 'fastify';
 
 export const customerCookieName = 'bb_customer_session';
 export const hqCookieName = 'bb_hq_session';
+export const clerkSessionCookieName = '__session';
 
 interface Credential {
   readonly audience: Audience;
@@ -43,6 +44,22 @@ function matchingOriginAudience(
   return undefined;
 }
 
+function exactProductionClerkCookie(request: FastifyRequest): string | undefined {
+  const raw = request.headers.cookie;
+  if (raw === undefined || Array.isArray(raw)) return undefined;
+  const pairs = raw
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (pairs.length !== 1) return undefined;
+  const separator = pairs[0]?.indexOf('=') ?? -1;
+  if (separator < 1 || pairs[0]?.slice(0, separator) !== clerkSessionCookieName) {
+    return undefined;
+  }
+  const value = pairs[0].slice(separator + 1);
+  return value.length === 0 ? undefined : value;
+}
+
 function credential(
   request: FastifyRequest,
   config: AppConfig,
@@ -50,7 +67,31 @@ function credential(
 ): Credential {
   const customer = request.cookies[customerCookieName];
   const hq = request.cookies[hqCookieName];
+  const clerk = request.cookies[clerkSessionCookieName];
   const bearer = bearerToken(request);
+  if (config.environment === 'production') {
+    const exactClerk = exactProductionClerkCookie(request);
+    if (
+      bearer !== undefined ||
+      customer !== undefined ||
+      hq !== undefined ||
+      clerk === undefined ||
+      exactClerk !== clerk
+    ) {
+      throw new DomainError('not_authenticated', 'Authentication is required');
+    }
+    const audience = matchingOriginAudience(request, config);
+    if (audience === undefined) {
+      throw new DomainError(
+        'not_authenticated',
+        'A trusted application origin must select the session',
+      );
+    }
+    return { audience, token: exactClerk, transport: 'cookie' };
+  }
+  if (clerk !== undefined) {
+    throw new DomainError('not_authenticated', 'Authentication is required');
+  }
   if (bearer !== undefined && (customer !== undefined || hq !== undefined)) {
     throw new DomainError('not_authenticated', 'Conflicting credentials are not accepted');
   }
@@ -166,10 +207,72 @@ export async function authenticate(
   if (selected.transport === 'cookie') {
     assertTrustedOrigin(request, config, selected.audience === 'hq' ? 'hq' : 'customer');
   }
+  if (config.environment === 'production') {
+    if (selected.audience === 'mobile' || config.identity.clerk === undefined) {
+      throw new DomainError('not_authenticated', 'Session is invalid or expired');
+    }
+    const realm =
+      selected.audience === 'hq' ? config.identity.clerk.hq : config.identity.clerk.customer;
+    let verification;
+    try {
+      verification = await repository.verifyProductionToken({
+        token: selected.token,
+        audience: selected.audience,
+        origin: originFor(request),
+        realm,
+        now,
+      });
+    } catch {
+      throw new DomainError('not_authenticated', 'Session is invalid or expired');
+    }
+    if (
+      verification.audience !== selected.audience ||
+      verification.issuer !== realm.issuer ||
+      verification.authorizedParty !== originFor(request)
+    ) {
+      throw new DomainError('not_authenticated', 'Session is invalid or expired');
+    }
+    const identity = await repository.resolveProductionIdentity({
+      audience: selected.audience,
+      issuer: verification.issuer,
+      subject: verification.subject,
+      now,
+    });
+    if (identity === null) {
+      throw new DomainError('not_authenticated', 'Session is invalid or expired');
+    }
+    const resolved = await repository.resolveProviderSession({
+      identityId: identity.identityId,
+      personId: identity.personId,
+      issuer: verification.issuer,
+      subject: verification.subject,
+      providerSessionId: verification.providerSessionId,
+      audience: selected.audience,
+      issuedAt: verification.issuedAt,
+      expiresAt: verification.expiresAt,
+      now,
+    });
+    if (
+      resolved === null ||
+      resolved.identityId !== identity.identityId ||
+      resolved.identitySubject !== verification.subject ||
+      resolved.providerSessionId !== verification.providerSessionId ||
+      resolved.principal.personId !== identity.personId ||
+      resolved.principal.issuer !== verification.issuer
+    ) {
+      throw new DomainError('not_authenticated', 'Session is invalid or expired');
+    }
+    return {
+      audience: selected.audience,
+      transport: selected.transport,
+      resolved,
+      principal: toAuthorizationPrincipal(resolved),
+    };
+  }
   const verification = verifyDevSession(selected.token, config.secrets.session, {
     audience: selected.audience,
     now,
-    production: config.environment === 'production',
+    production: false,
   });
   if (!verification.valid)
     throw new DomainError('not_authenticated', 'Session is invalid or expired');

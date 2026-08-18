@@ -54,13 +54,20 @@ export const createInvitationRequestSchema = z
   .object({
     inviteeDisplayName: z.string().trim().min(1).max(120),
     permissions: z.array(run1InvitablePermissionSchema).length(1),
+    intendedCustomerSubject: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .optional(),
   })
   .strict();
 
 export const createInvitationResponseSchema = z.object({
   invitation: invitationSchema,
   localInviteCode: z.string().min(24),
-  delivery: z.literal('local_only'),
+  delivery: z.enum(['local_only', 'recipient_manual_only']),
 });
 
 export const invitationCredentialRequestSchema = z

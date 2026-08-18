@@ -4,6 +4,7 @@ import {
   acceptFoundingHouseholdInvitationResponseSchema,
   configureFoundingHouseholdPolicyRequestSchema,
   configureFoundingHouseholdPolicyResponseSchema,
+  createFoundingHouseholdInvitationRequestSchema,
   createFoundingHouseholdInvitationResponseSchema,
   foundingHouseholdFounderConsoleResponseSchema,
   foundingHouseholdEnrollmentParamsSchema,
@@ -20,9 +21,7 @@ import {
   foundingHouseholdProtectedDocuments,
   foundingHouseholdProtectedDisclosureText,
   foundingHouseholdProtectedPolicyText,
-  foundingHouseholdServiceDocuments,
-  foundingHouseholdServiceDisclosureText,
-  foundingHouseholdServicePolicyText,
+  foundingHouseholdServiceConsentForEnvironment,
   type FoundingHouseholdEnrollmentRecord,
   type FoundingHouseholdInvitationRecord,
   type FoundingHouseholdPolicyRecord,
@@ -60,17 +59,24 @@ function policyDto(policy: FoundingHouseholdPolicyRecord) {
 function invitationDto(invitation: FoundingHouseholdInvitationRecord) {
   return {
     id: invitation.id,
+    environment: invitation.environment,
     policyRevision: invitation.policyRevision,
     benefitKey: invitation.benefitKey,
     state: invitation.state,
     createdAt: invitation.createdAt.toISOString(),
     expiresAt: invitation.expiresAt.toISOString(),
+    identityBindingState: invitation.identityBindingState,
+    ...(invitation.intendedCustomerSubject === undefined
+      ? {}
+      : { intendedCustomerSubject: invitation.intendedCustomerSubject }),
+    ...(invitation.householdId === undefined ? {} : { householdId: invitation.householdId }),
   };
 }
 
 function enrollmentDto(enrollment: FoundingHouseholdEnrollmentRecord) {
   return {
     id: enrollment.id,
+    environment: enrollment.environment,
     householdId: enrollment.householdId,
     invitationId: enrollment.invitationId,
     benefitKey: enrollment.benefitKey,
@@ -172,7 +178,9 @@ function memberAccess(auth: AuthContext, request: FastifyRequest) {
   }
   return {
     actorPersonId: auth.principal.personId,
-    actorIssuer: auth.resolved.principal.issuer,
+    actorIssuer: auth.resolved.issuer,
+    actorIdentityId: auth.resolved.identityId,
+    actorIdentitySubject: auth.resolved.identitySubject,
     sessionId: auth.principal.sessionId,
     audience: auth.audience,
     correlationId: correlationId(request),
@@ -198,8 +206,9 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
     });
     return foundingHouseholdFounderConsoleResponseSchema.parse({
       authority: 'configured_founder_active_internal_owner',
-      evidenceTier: 'local_simulation',
-      productionIdentityReady: false,
+      environment: context.repositories.foundingHouseholds.runtimeEnvironment(),
+      evidenceTier: context.repositories.foundingHouseholds.evidenceTier(),
+      productionIdentityReady: context.config.environment === 'production',
       paymentCollected: false,
       externalActionExecuted: false,
       policy: policyDto(record.policy),
@@ -242,12 +251,38 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
   app.post('/v1/hq/founding-households/invitations', async (request, reply) => {
     setPrivateNoStore(reply);
     const auth = await authorizeFounder(request, context, 'hq:founding_households:manage');
+    const body = createFoundingHouseholdInvitationRequestSchema.parse(request.body ?? {});
+    let intendedIdentity;
+    if (context.config.environment === 'production') {
+      const customerRealm = context.config.identity.clerk?.customer;
+      if (customerRealm === undefined || body.intendedCustomerSubject === undefined) {
+        throw new DomainError(
+          'invalid_input',
+          'An exact configured customer identity subject is required',
+        );
+      }
+      const bootstrap =
+        await context.repositories.productionIdentities.findCustomerBootstrapBySubject({
+          issuer: customerRealm.issuer,
+          subject: body.intendedCustomerSubject,
+        });
+      if (bootstrap === null) {
+        throw new DomainError('not_found', 'The intended customer identity is unavailable');
+      }
+      intendedIdentity = bootstrap;
+    } else if (body.intendedCustomerSubject !== undefined) {
+      throw new DomainError(
+        'invalid_input',
+        'Local invitations do not accept a production identity subject',
+      );
+    }
     const result = await context.repositories.foundingHouseholds.createInvitation({
       access: {
         actorPersonId: auth.principal.personId,
         correlationId: correlationId(request),
       },
       operationKey: idempotencyKey(request),
+      ...(intendedIdentity === undefined ? {} : { intendedIdentity }),
       now: context.now(),
     });
     return reply.code(result.reused ? 200 : 201).send(
@@ -318,8 +353,9 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
     });
     return foundingHouseholdMemberStatusResponseSchema.parse({
       enrollment: enrollment === null ? null : enrollmentDto(enrollment),
-      managedIdentityBlocker: true,
-      evidenceTier: 'local_simulation',
+      environment: context.repositories.foundingHouseholds.runtimeEnvironment(),
+      productionIdentityReady: context.config.environment === 'production',
+      evidenceTier: context.repositories.foundingHouseholds.evidenceTier(),
     });
   });
 
@@ -334,16 +370,16 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
     assertMutationOrigin(request, context.config, auth);
     const { invitationId } = foundingHouseholdInvitationParamsSchema.parse(request.params);
     const body = foundingHouseholdInvitationPreviewRequestSchema.parse(request.body);
-    if (body.householdId !== householdId) {
-      throw new DomainError('not_authorized', 'Invitation preview is outside this household');
-    }
     const result = await context.repositories.foundingHouseholds.previewInvitation({
       access: memberAccess(auth, request),
       householdId,
       invitationId,
-      localInvitationCredential: body.localInvitationCredential,
+      invitationCredential: body.invitationCredential,
       now: context.now(),
     });
+    const serviceConsent = foundingHouseholdServiceConsentForEnvironment(
+      context.repositories.foundingHouseholds.runtimeEnvironment(),
+    );
     return foundingHouseholdInvitationPreviewResponseSchema.parse({
       invitationId: result.invitation.id,
       householdId: result.householdId,
@@ -355,11 +391,11 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
       },
       invitationExpiresAt: result.invitation.expiresAt.toISOString(),
       accessEndsAtIfAcceptedNow: result.accessEndsAtIfAcceptedNow.toISOString(),
-      serviceConsentVersion: foundingHouseholdServiceDocuments.disclosureVersion,
-      serviceDisclosureText: foundingHouseholdServiceDisclosureText,
-      serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,
-      servicePolicyText: foundingHouseholdServicePolicyText,
-      servicePolicyDigest: foundingHouseholdServiceDocuments.policyDigest,
+      serviceConsentVersion: serviceConsent.documents.disclosureVersion,
+      serviceDisclosureText: serviceConsent.disclosureText,
+      serviceDisclosureDigest: serviceConsent.documents.disclosureDigest,
+      servicePolicyText: serviceConsent.policyText,
+      servicePolicyDigest: serviceConsent.documents.policyDigest,
       protectedEnrollmentConsentVersion: foundingHouseholdProtectedDocuments.disclosureVersion,
       protectedEnrollmentDisclosureText: foundingHouseholdProtectedDisclosureText,
       protectedEnrollmentDisclosureDigest: foundingHouseholdProtectedDocuments.disclosureDigest,
@@ -369,7 +405,7 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
       marketingConsentRequested: false,
       followUpConsentRequested: false,
       paymentRequired: false,
-      evidenceTier: 'local_simulation',
+      evidenceTier: context.repositories.foundingHouseholds.evidenceTier(),
     });
   });
 
@@ -384,14 +420,11 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
     assertMutationOrigin(request, context.config, auth);
     const { invitationId } = foundingHouseholdInvitationParamsSchema.parse(request.params);
     const body = acceptFoundingHouseholdInvitationRequestSchema.parse(request.body);
-    if (body.householdId !== householdId) {
-      throw new DomainError('not_authorized', 'Invitation acceptance is outside this household');
-    }
     const result = await context.repositories.foundingHouseholds.acceptInvitation({
       access: memberAccess(auth, request),
       householdId,
       invitationId,
-      localInvitationCredential: body.localInvitationCredential,
+      invitationCredential: body.invitationCredential,
       operationKey: idempotencyKey(request),
       serviceConsentVersion: body.serviceConsentVersion,
       serviceDisclosureDigest: body.serviceDisclosureDigest,

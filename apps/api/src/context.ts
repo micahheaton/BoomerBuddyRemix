@@ -1,5 +1,6 @@
 import type { AppConfig } from '@boomerbuddy/config';
 import type { Logger } from '@boomerbuddy/observability';
+import type { IdentityTokenVerifier } from '@boomerbuddy/security';
 import {
   AutomationBudgetRepository,
   BusinessOsRepository,
@@ -18,6 +19,7 @@ import {
   MessagingRepository,
   OrientationRepository,
   PublicCheckRepository,
+  ProductionIdentityRepository,
   ReferralCreditRepository,
   SessionRepository,
   type Database,
@@ -43,6 +45,7 @@ export interface ApiRepositories {
   readonly publicChecks: PublicCheckRepository;
   readonly referrals: ReferralCreditRepository;
   readonly sessions: SessionRepository;
+  readonly productionIdentities: ProductionIdentityRepository;
 }
 
 export interface ApiContext {
@@ -51,9 +54,14 @@ export interface ApiContext {
   readonly repositories: ApiRepositories;
   readonly logger: Logger;
   readonly now: () => Date;
+  readonly identityTokenVerifier?: IdentityTokenVerifier;
 }
 
-export function createRepositories(database: Database, config: AppConfig): ApiRepositories {
+export function createRepositories(
+  database: Database,
+  config: AppConfig,
+  identityTokenVerifier?: IdentityTokenVerifier,
+): ApiRepositories {
   const entitlementRuntimeEnvironment =
     config.environment === 'production' ? ('production' as const) : ('local' as const);
   const configuredFounderPersonId =
@@ -144,6 +152,12 @@ export function createRepositories(database: Database, config: AppConfig): ApiRe
       hmacKey: config.secrets.fingerprintKey,
       keyVersion: 1,
     }),
-    sessions: new SessionRepository(database, undefined, entitlementRuntimeEnvironment),
+    productionIdentities: new ProductionIdentityRepository(database),
+    sessions: new SessionRepository(
+      database,
+      undefined,
+      entitlementRuntimeEnvironment,
+      identityTokenVerifier,
+    ),
   };
 }

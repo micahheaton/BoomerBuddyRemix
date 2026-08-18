@@ -2,6 +2,7 @@ import { DomainError } from './errors';
 
 export const foundingHouseholdCohortKey = 'run3_sponsored_founding_household_v1' as const;
 
+/** Legacy alias retained for local Run 3 evidence. */
 export const foundingHouseholdEvidenceTier = 'local_simulation' as const;
 
 export const foundingHouseholdEnvironments = ['local', 'staging', 'production'] as const;
@@ -12,8 +13,25 @@ export const foundingHouseholdEnvironmentEvidenceTiers = Object.freeze({
   staging: 'deployed_staging',
   production: 'live_production',
 } as const);
+export type FoundingHouseholdEvidenceTier =
+  (typeof foundingHouseholdEnvironmentEvidenceTiers)[FoundingHouseholdEnvironment];
 
+export function foundingHouseholdEvidenceTierForEnvironment(
+  environment: FoundingHouseholdEnvironment,
+): FoundingHouseholdEvidenceTier {
+  return foundingHouseholdEnvironmentEvidenceTiers[environment];
+}
+
+/** The v1 wording remains immutable evidence for local Run 3 enrollments. */
 export const foundingHouseholdServiceConsentVersion = 'founding-household-service-beta-v1' as const;
+export const foundingHouseholdProductionServiceConsentVersion =
+  'founding-household-service-beta-v2' as const;
+export const foundingHouseholdServiceConsentVersions = [
+  foundingHouseholdServiceConsentVersion,
+  foundingHouseholdProductionServiceConsentVersion,
+] as const;
+export type FoundingHouseholdServiceConsentVersion =
+  (typeof foundingHouseholdServiceConsentVersions)[number];
 export const foundingHouseholdProtectedEnrollmentConsentVersion =
   'founding-household-protected-self-v1' as const;
 
@@ -150,6 +168,9 @@ export const foundingHouseholdPolicyBounds = Object.freeze({
   returnAfterHours: 24,
 });
 
+/** A production policy may never reserve more than the deliberately tiny first cohort. */
+export const foundingHouseholdProductionMaxHouseholds = 5 as const;
+
 function boundedInteger(value: number, min: number, max: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < min || value > max) {
     throw new DomainError(
@@ -162,6 +183,7 @@ function boundedInteger(value: number, min: number, max: number, label: string):
 export function assertActiveFoundingHouseholdPolicy(
   policy: ActiveFoundingHouseholdPolicyInput,
   now: Date,
+  environment: FoundingHouseholdEnvironment = 'local',
 ): void {
   if (!foundingHouseholdBenefitKeys.includes(policy.benefitKey)) {
     throw new DomainError('invalid_input', 'Unknown Founding Household benefit profile');
@@ -172,6 +194,15 @@ export function assertActiveFoundingHouseholdPolicy(
     foundingHouseholdPolicyBounds.maxHouseholds.max,
     'Cohort limit',
   );
+  if (
+    environment === 'production' &&
+    policy.maxHouseholds > foundingHouseholdProductionMaxHouseholds
+  ) {
+    throw new DomainError(
+      'invalid_input',
+      `Production Founding Household cohort limit cannot exceed ${foundingHouseholdProductionMaxHouseholds}`,
+    );
+  }
   boundedInteger(
     policy.invitationTtlDays,
     foundingHouseholdPolicyBounds.invitationTtlDays.min,

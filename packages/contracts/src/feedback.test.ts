@@ -5,6 +5,7 @@ import {
   createAuthenticatedFeedbackRequestSchema,
   feedbackConsentWithdrawalResponseSchema,
   feedbackIntakeResponseSchema,
+  feedbackReviewClaimResponseSchema,
   hqFeedbackQueueResponseSchema,
   supportFeedbackConversionRequestSchema,
 } from './feedback';
@@ -92,23 +93,40 @@ describe('feedback contracts', () => {
     ).toThrow();
   });
 
-  it('makes the local-only evidence and no-effect boundary explicit', () => {
-    expect(
+  it('accepts runtime-derived local and live evidence without weakening the no-effect boundary', () => {
+    for (const evidenceTier of ['local_simulation', 'live_production'] as const) {
+      expect(
+        feedbackIntakeResponseSchema.parse({
+          feedback: {
+            id: 'feedback-example',
+            status: 'queued_unassigned',
+            redactionStatus: 'minimized_clean',
+            queue: 'new_feedback',
+            evidenceTier,
+            retainedUntil: '2026-08-17T00:00:00.000Z',
+            reused: false,
+          },
+          mediaAccepted: false,
+          providerProcessed: false,
+          externalActionExecuted: false,
+        }),
+      ).toBeDefined();
+    }
+    expect(() =>
       feedbackIntakeResponseSchema.parse({
         feedback: {
           id: 'feedback-example',
           status: 'queued_unassigned',
           redactionStatus: 'minimized_clean',
           queue: 'new_feedback',
-          evidenceTier: 'local_simulation',
-          retainedUntil: '2026-08-17T00:00:00.000Z',
+          evidenceTier: 'caller_claimed_production',
           reused: false,
         },
         mediaAccepted: false,
         providerProcessed: false,
         externalActionExecuted: false,
       }),
-    ).toBeDefined();
+    ).toThrow();
     expect(
       feedbackConsentWithdrawalResponseSchema.parse({
         feedbackId: 'feedback-example',
@@ -128,6 +146,18 @@ describe('feedback contracts', () => {
         externalActionExecuted: false,
       }),
     ).toThrow();
+    expect(
+      feedbackReviewClaimResponseSchema.parse({
+        feedbackId: 'feedback-example',
+        queue: 'new_feedback',
+        routingState: 'assigned',
+        assignmentVersion: 2,
+        humanReviewRequired: true,
+        reused: false,
+        evidenceTier: 'live_production',
+        externalActionExecuted: false,
+      }),
+    ).toBeDefined();
   });
 
   it('allows only content-free owner-global or exact-assignee queue metadata', () => {

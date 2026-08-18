@@ -23,6 +23,7 @@ import {
   OperationalWorkRepository,
   OutboxDeliveryRepository,
   PublicCheckRepository,
+  ProductionIdentityRepository,
   runMigrations,
 } from '@boomerbuddy/persistence';
 import {
@@ -63,6 +64,18 @@ const database =
     ? await createPostgresDatabase(appConfig.database.url)
     : await createPGliteDatabase(appConfig.database.path);
 if (appConfig.database.runMigrations) await runMigrations(database);
+if (appConfig.environment === 'production') {
+  const clerk = appConfig.identity.clerk;
+  const founderPersonId = appConfig.identity.founderPersonId;
+  if (clerk === undefined || founderPersonId === undefined) {
+    throw new TypeError('Production Clerk founder configuration is incomplete');
+  }
+  await new ProductionIdentityRepository(database).assertFounderBinding({
+    issuer: clerk.hq.issuer,
+    subject: clerk.founderSubject,
+    founderPersonId,
+  });
+}
 const entitlementRuntimeEnvironment =
   appConfig.environment === 'production' ? ('production' as const) : ('local' as const);
 

@@ -12,8 +12,14 @@ import {
   type RestrictedAccessScope,
   type TrustedCirclePermission,
 } from '@boomerbuddy/domain';
+import type {
+  IdentityTokenVerificationInput,
+  IdentityTokenVerifier,
+  VerifiedIdentityToken,
+} from '@boomerbuddy/security';
 import type { Database } from './database';
 import { EntitlementRepository, type EntitlementRuntimeEnvironment } from './entitlements';
+import { ProductionIdentityRepository, type ProductionIdentity } from './production-identity';
 import { asDate, jsonValue, randomIdFactory, stringArray, type IdFactory } from './values';
 
 interface PersonaRow extends Record<string, unknown> {
@@ -28,8 +34,16 @@ interface SessionRow extends Record<string, unknown> {
   readonly display_name: string;
   readonly audience: string;
   readonly issuer: string;
+  readonly identity_id: string;
+  readonly identity_subject: string;
+  readonly provider_session_id: string;
   readonly expires_at: unknown;
   readonly revoked_at: unknown;
+}
+
+interface ExactIdentityRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly subject: string;
 }
 
 interface MembershipRow extends Record<string, unknown> {
@@ -84,6 +98,9 @@ export interface ResolvedSession {
   readonly principal: SessionPrincipal;
   readonly displayName: string;
   readonly issuer: string;
+  readonly identityId: string;
+  readonly identitySubject: string;
+  readonly providerSessionId: string;
   readonly householdCapabilities: readonly {
     readonly householdId: string;
     readonly capabilities: readonly Capability[];
@@ -95,7 +112,33 @@ export class SessionRepository {
     private readonly database: Database,
     private readonly idFactory: IdFactory = randomIdFactory,
     private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
+    private readonly identityTokenVerifier?: IdentityTokenVerifier,
   ) {}
+
+  async verifyProductionToken(
+    input: IdentityTokenVerificationInput,
+  ): Promise<VerifiedIdentityToken> {
+    if (this.identityTokenVerifier === undefined) {
+      throw new Error('Production identity token verifier is unavailable');
+    }
+    return this.identityTokenVerifier.verify(input);
+  }
+
+  async resolveProductionIdentity(input: {
+    readonly audience: 'customer' | 'hq';
+    readonly issuer: string;
+    readonly subject: string;
+    readonly now: Date;
+  }): Promise<ProductionIdentity | null> {
+    const identities = new ProductionIdentityRepository(this.database, this.idFactory);
+    return input.audience === 'customer'
+      ? identities.ensureCustomerBootstrap({
+          issuer: input.issuer,
+          subject: input.subject,
+          now: input.now,
+        })
+      : identities.findActiveHqIdentity({ issuer: input.issuer, subject: input.subject });
+  }
 
   async findDevPersona(subject: string): Promise<{ personId: string; displayName: string } | null> {
     const result = await this.database.query<PersonaRow>(
@@ -117,26 +160,154 @@ export class SessionRepository {
     readonly expiresAt: Date;
   }): Promise<string> {
     const sessionId = this.idFactory.next('session');
+    const identity = await this.database.query<ExactIdentityRow>(
+      `SELECT id, subject FROM identities
+       WHERE person_id = $1 AND issuer = 'boomerbuddy-dev' AND status = 'active'
+       ORDER BY id LIMIT 1`,
+      [input.personId],
+    );
+    const exactIdentity = identity.rows[0];
+    if (exactIdentity === undefined) throw new Error('Development session identity is unavailable');
     await this.database.query(
-      `INSERT INTO sessions(id, person_id, audience, issuer, issued_at, expires_at)
-       VALUES ($1,$2,$3,'boomerbuddy-dev',$4,$5)`,
+      `INSERT INTO sessions(
+         id, person_id, audience, issuer, issued_at, expires_at,
+         identity_id, identity_subject, provider_session_id, last_verified_at
+       ) VALUES ($1,$2,$3,'boomerbuddy-dev',$4,$5,$6,$7,$1,$4)`,
       [
         sessionId,
         input.personId,
         input.audience,
         input.issuedAt.toISOString(),
         input.expiresAt.toISOString(),
+        exactIdentity.id,
+        exactIdentity.subject,
       ],
     );
     return sessionId;
   }
 
   async revoke(sessionId: string, now: Date): Promise<boolean> {
-    const result = await this.database.query(
-      'UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL',
-      [sessionId, now.toISOString()],
-    );
-    return result.rowCount === 1;
+    return this.database.transaction(async (transaction) => {
+      const session = await transaction.query<
+        {
+          readonly issuer: string;
+          readonly provider_session_id: string;
+          readonly identity_id: string;
+        } & Record<string, unknown>
+      >(
+        `SELECT issuer, provider_session_id, identity_id FROM sessions
+         WHERE id = $1 AND revoked_at IS NULL FOR UPDATE`,
+        [sessionId],
+      );
+      const row = session.rows[0];
+      if (row === undefined) return false;
+      const result = await transaction.query(
+        'UPDATE sessions SET revoked_at = $2 WHERE id = $1 AND revoked_at IS NULL',
+        [sessionId, now.toISOString()],
+      );
+      if (result.rowCount !== 1) return false;
+      await transaction.query(
+        `INSERT INTO provider_session_revocations(
+           issuer, provider_session_id, identity_id, session_id, revoked_at, reason
+         ) VALUES ($1,$2,$3,$4,$5,'local_logout')
+         ON CONFLICT (issuer, provider_session_id) DO NOTHING`,
+        [row.issuer, row.provider_session_id, row.identity_id, sessionId, now.toISOString()],
+      );
+      return true;
+    });
+  }
+
+  async resolveProviderSession(input: {
+    readonly identityId: string;
+    readonly personId: string;
+    readonly issuer: string;
+    readonly subject: string;
+    readonly providerSessionId: string;
+    readonly audience: 'customer' | 'hq';
+    readonly issuedAt: Date;
+    readonly expiresAt: Date;
+    readonly now: Date;
+  }): Promise<ResolvedSession | null> {
+    if (
+      [input.issuedAt, input.expiresAt, input.now].some((value) => Number.isNaN(value.getTime())) ||
+      input.expiresAt.getTime() <= input.now.getTime() ||
+      input.expiresAt.getTime() <= input.issuedAt.getTime()
+    ) {
+      return null;
+    }
+    const sessionId = await this.database.transaction(async (transaction) => {
+      const revoked = await transaction.query(
+        `SELECT provider_session_id FROM provider_session_revocations
+         WHERE issuer = $1 AND provider_session_id = $2`,
+        [input.issuer, input.providerSessionId],
+      );
+      if (revoked.rows[0] !== undefined) return null;
+
+      let existing = await transaction.query<SessionRow>(
+        `SELECT session.id, session.person_id, person.display_name, session.audience,
+                session.issuer, session.identity_id, session.identity_subject,
+                session.provider_session_id, session.expires_at, session.revoked_at
+         FROM sessions session JOIN persons person ON person.id = session.person_id
+         WHERE session.issuer = $1 AND session.provider_session_id = $2
+         FOR UPDATE`,
+        [input.issuer, input.providerSessionId],
+      );
+      if (existing.rows[0] === undefined) {
+        const newSessionId = this.idFactory.next('session');
+        await transaction.query(
+          `INSERT INTO sessions(
+             id, person_id, audience, issuer, issued_at, expires_at, identity_id,
+             identity_subject, provider_session_id, last_verified_at
+           )
+           SELECT $1, identity.person_id, $2, identity.issuer, $3, $4,
+                  identity.id, identity.subject, $5, $6
+           FROM identities identity
+           WHERE identity.id = $7 AND identity.person_id = $8
+             AND identity.issuer = $9 AND identity.subject = $10
+             AND identity.status = 'active'
+           ON CONFLICT (issuer, provider_session_id) DO NOTHING`,
+          [
+            newSessionId,
+            input.audience,
+            input.issuedAt.toISOString(),
+            input.expiresAt.toISOString(),
+            input.providerSessionId,
+            input.now.toISOString(),
+            input.identityId,
+            input.personId,
+            input.issuer,
+            input.subject,
+          ],
+        );
+        existing = await transaction.query<SessionRow>(
+          `SELECT session.id, session.person_id, person.display_name, session.audience,
+                  session.issuer, session.identity_id, session.identity_subject,
+                  session.provider_session_id, session.expires_at, session.revoked_at
+           FROM sessions session JOIN persons person ON person.id = session.person_id
+           WHERE session.issuer = $1 AND session.provider_session_id = $2
+           FOR UPDATE`,
+          [input.issuer, input.providerSessionId],
+        );
+      }
+      const row = existing.rows[0];
+      if (
+        row === undefined ||
+        row.revoked_at !== null ||
+        row.audience !== input.audience ||
+        row.identity_id !== input.identityId ||
+        row.identity_subject !== input.subject ||
+        row.person_id !== input.personId
+      ) {
+        return null;
+      }
+      await transaction.query(
+        `UPDATE sessions SET expires_at = $2, last_verified_at = $3
+         WHERE id = $1 AND revoked_at IS NULL`,
+        [row.id, input.expiresAt.toISOString(), input.now.toISOString()],
+      );
+      return row.id;
+    });
+    return sessionId === null ? null : this.resolve(sessionId, input.audience, input.now);
   }
 
   async resolve(
@@ -145,12 +316,19 @@ export class SessionRepository {
     now: Date,
   ): Promise<ResolvedSession | null> {
     const sessionResult = await this.database.query<SessionRow>(
-      `SELECT s.id, s.person_id, p.display_name, s.audience, s.issuer, s.expires_at, s.revoked_at
+      `SELECT s.id, s.person_id, p.display_name, s.audience, s.issuer,
+              s.identity_id, s.identity_subject, s.provider_session_id,
+              s.expires_at, s.revoked_at
        FROM sessions s JOIN persons p ON p.id = s.person_id
+       JOIN identities i
+         ON i.id = s.identity_id AND i.person_id = s.person_id
+        AND i.issuer = s.issuer AND i.subject = s.identity_subject
+        AND i.status = 'active'
        WHERE s.id = $1 AND s.audience = $2
-         AND EXISTS (
-           SELECT 1 FROM identities i
-           WHERE i.person_id = s.person_id AND i.issuer = s.issuer AND i.status = 'active'
+         AND NOT EXISTS (
+           SELECT 1 FROM provider_session_revocations revoked
+           WHERE revoked.issuer = s.issuer
+             AND revoked.provider_session_id = s.provider_session_id
          )`,
       [sessionId, expectedAudience],
     );
@@ -422,6 +600,9 @@ export class SessionRepository {
       },
       displayName: session.display_name,
       issuer: session.issuer,
+      identityId: ids.identity(session.identity_id),
+      identitySubject: session.identity_subject,
+      providerSessionId: session.provider_session_id,
       householdCapabilities,
     };
   }

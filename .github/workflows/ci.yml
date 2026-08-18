@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['run3-local-candidate-*']
+    tags: ['run3-local-candidate-*', 'run3-1-replit-founding-household-*']
 
 permissions:
   contents: read
@@ -31,12 +31,13 @@ jobs:
       - run: npm run build
       - run: npm run verify:production-ui
       - run: npm run build -w @boomerbuddy/worker
-      - run: npm audit --audit-level=high
-      - run: npm sbom --sbom-format cyclonedx > boomerbuddy.cdx.json
+      - run: npm run verify:run3-1-deps
+        env:
+          BB_DEPENDENCY_EVIDENCE_DIR: ${{ runner.temp }}/run3-1-dependencies
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: run3-sbom-${{ github.sha }}
-          path: boomerbuddy.cdx.json
+          name: run3-1-dependency-evidence-${{ github.sha }}
+          path: ${{ runner.temp }}/run3-1-dependencies
           if-no-files-found: error
 
   edge:

@@ -22,6 +22,34 @@ function developmentEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function productionEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...developmentEnvironment(),
+    NODE_ENV: 'production',
+    BB_TRUSTED_PROXY_HOPS: '0',
+    BB_DATABASE_DRIVER: 'postgres',
+    DATABASE_URL: 'postgresql://test.invalid/database?sslmode=require',
+    BB_RUN_MIGRATIONS: 'false',
+    BB_SEED_DEMO: 'false',
+    BB_ALLOW_DEV_IDENTITY: 'false',
+    BB_FOUNDER_PERSON_ID: 'person-founder-production',
+    BB_FOUNDER_CLERK_SUBJECT: 'user_founder_production',
+    BB_CUSTOMER_ORIGINS: 'https://customer.test',
+    BB_HQ_ORIGINS: 'https://hq.test',
+    BB_CLERK_CUSTOMER_ISSUER: 'https://customer.clerk.test',
+    BB_CLERK_CUSTOMER_AUDIENCE: 'boomerbuddy-customer',
+    BB_CLERK_CUSTOMER_JWT_KEY:
+      '-----BEGIN PUBLIC KEY-----\ncustomer-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_HQ_ISSUER: 'https://hq.clerk.test',
+    BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-hq',
+    BB_CLERK_HQ_JWT_KEY:
+      '-----BEGIN PUBLIC KEY-----\nhq-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS: '600',
+  };
+  delete environment.BB_SESSION_SECRET;
+  return environment;
+}
+
 describe('typed configuration', () => {
   it('parses local configuration and canonicalizes origin lists', () => {
     const config = loadConfig(developmentEnvironment());
@@ -64,38 +92,109 @@ describe('typed configuration', () => {
   });
 
   it.each([
+    'https://test.invalid/database?sslmode=require',
+    'postgresql://test.invalid/database',
+    'postgresql://test.invalid/database?sslmode=disable',
+    'postgresql://test.invalid/database?sslmode=allow',
+    'postgresql://test.invalid/database?sslmode=prefer',
+  ])('refuses an unsafe production PostgreSQL URL %s', (databaseUrl) => {
+    expect(() => loadConfig({ ...productionEnvironment(), DATABASE_URL: databaseUrl })).toThrow();
+  });
+
+  it('accepts production PostgreSQL certificate verification modes', () => {
+    expect(
+      loadConfig({
+        ...productionEnvironment(),
+        DATABASE_URL: 'postgresql://test.invalid/database?sslmode=verify-full',
+      }).database,
+    ).toMatchObject({ driver: 'postgres' });
+  });
+
+  it.each([
     ['BB_ALLOW_DEV_IDENTITY', 'true'],
     ['BB_DATABASE_DRIVER', 'pglite'],
     ['BB_SEED_DEMO', 'true'],
+    ['BB_RUN_MIGRATIONS', 'true'],
+    ['BB_TRUSTED_PROXY_HOPS', '1'],
+    ['BB_STRIPE_MODE', 'test'],
   ])('refuses unsafe production setting %s', (key, value) => {
-    expect(() =>
-      loadConfig({
-        ...developmentEnvironment(),
-        NODE_ENV: 'production',
-        BB_ALLOW_DEV_IDENTITY: 'false',
-        BB_DATABASE_DRIVER: 'postgres',
-        DATABASE_URL: 'postgresql://test.invalid/database',
-        BB_SEED_DEMO: 'false',
-        BB_CUSTOMER_ORIGINS: 'https://customer.test',
-        BB_HQ_ORIGINS: 'https://hq.test',
-        [key]: value,
-      }),
-    ).toThrow();
+    expect(() => loadConfig({ ...productionEnvironment(), [key]: value })).toThrow();
   });
 
-  it('refuses production even when development switches are disabled', () => {
+  it('accepts only complete disjoint production Clerk realms and explicit beta custody', () => {
+    const config = loadConfig(productionEnvironment());
+    expect(config.identity.clerk).toMatchObject({
+      customer: {
+        issuer: 'https://customer.clerk.test',
+        audience: 'boomerbuddy-customer',
+        authorizedParties: ['https://customer.test'],
+      },
+      hq: {
+        issuer: 'https://hq.clerk.test',
+        audience: 'boomerbuddy-hq',
+        authorizedParties: ['https://hq.test'],
+        maxSecondFactorAgeSeconds: 600,
+      },
+      founderSubject: 'user_founder_production',
+    });
+    expect(config.secrets.custodyClassification).toBe('replit_runtime_secret_beta');
+    expect(config.secrets.session.byteLength).toBe(0);
+    expect(config.database).toMatchObject({
+      driver: 'postgres',
+      runMigrations: false,
+      seedDemo: false,
+    });
+
+    for (const field of [
+      'BB_FOUNDER_PERSON_ID',
+      'BB_FOUNDER_CLERK_SUBJECT',
+      'BB_CLERK_CUSTOMER_ISSUER',
+      'BB_CLERK_CUSTOMER_AUDIENCE',
+      'BB_CLERK_CUSTOMER_JWT_KEY',
+      'BB_CLERK_HQ_ISSUER',
+      'BB_CLERK_HQ_AUDIENCE',
+      'BB_CLERK_HQ_JWT_KEY',
+    ] as const) {
+      const environment = productionEnvironment();
+      delete environment[field];
+      expect(() => loadConfig(environment)).toThrow('complete customer, HQ, and founder Clerk');
+    }
     expect(() =>
       loadConfig({
-        ...developmentEnvironment(),
-        NODE_ENV: 'production',
-        BB_ALLOW_DEV_IDENTITY: 'false',
-        BB_DATABASE_DRIVER: 'postgres',
-        DATABASE_URL: 'postgresql://test.invalid/database',
-        BB_SEED_DEMO: 'false',
-        BB_CUSTOMER_ORIGINS: 'https://customer.test',
-        BB_HQ_ORIGINS: 'https://hq.test',
+        ...productionEnvironment(),
+        BB_CLERK_HQ_ISSUER: 'https://customer.clerk.test',
       }),
-    ).toThrow('refuses production startup');
+    ).toThrow('issuers must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-customer',
+      }),
+    ).toThrow('audiences must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_JWT_KEY: productionEnvironment().BB_CLERK_CUSTOMER_JWT_KEY,
+      }),
+    ).toThrow('verification keys must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_SESSION_SECRET: 'unused-production-session-secret-value',
+      }),
+    ).toThrow('unused development session signing material');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_ISSUER: 'http://hq.clerk.test',
+      }),
+    ).toThrow('HTTPS issuer origin');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_JWT_KEY: 'not-a-pem-key',
+      }),
+    ).toThrow('bounded PEM public key');
   });
 
   it('refuses shared encryption/fingerprint keys and malformed origins', () => {

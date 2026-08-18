@@ -21,6 +21,7 @@ export default function FamilyPage() {
   const { me, selectedHouseholdId, selectedScope, refreshPrincipal } = useHousehold();
   const [family, setFamily] = useState<FamilyResponse>();
   const [inviteeDisplayName, setInviteeDisplayName] = useState('');
+  const [intendedCustomerSubject, setIntendedCustomerSubject] = useState('');
   const [created, setCreated] = useState<CreateInvitationResponse>();
   const [invitationId, setInvitationId] = useState('');
   const [localInviteCode, setLocalInviteCode] = useState('');
@@ -47,7 +48,9 @@ export default function FamilyPage() {
     const timer = window.setTimeout(() => void load(selectedHouseholdId), 0);
     return () => window.clearTimeout(timer);
   }, [load, selectedHouseholdId]);
-  const canInvite = Boolean(inviteeDisplayName.trim());
+  const production = process.env.NODE_ENV === 'production';
+  const canInvite =
+    Boolean(inviteeDisplayName.trim()) && (!production || Boolean(intendedCustomerSubject.trim()));
 
   async function createInvite(event: FormEvent) {
     event.preventDefault();
@@ -61,10 +64,12 @@ export default function FamilyPage() {
         body: JSON.stringify({
           inviteeDisplayName,
           permissions: ['view_shared_checks'],
+          ...(production ? { intendedCustomerSubject } : {}),
         }),
       });
       setCreated(response);
       setInviteeDisplayName('');
+      setIntendedCustomerSubject('');
       await load(selectedHouseholdId);
     } catch (caught) {
       setError(readableError(caught));
@@ -204,8 +209,8 @@ export default function FamilyPage() {
       <span className="eyebrow">Family</span>
       <h1 className="member-heading">Your household and Trusted Circle</h1>
       <p className="lede">
-        Permissions describe exactly what another person may do. An invitation is local only and is
-        not emailed or texted.
+        Permissions describe exactly what another person may do. An invitation is manually handed to
+        the intended person and is not emailed or texted by BoomerBuddy.
       </p>
       {error && (
         <p className="error" role="alert">
@@ -223,11 +228,11 @@ export default function FamilyPage() {
         style={{ marginTop: '1.5rem' }}
         data-testid="accept-invitation"
       >
-        <h2>Accept a local invitation</h2>
+        <h2>Accept an invitation</h2>
         <p>
-          Sign in as the separately invited seeded person, then enter both one-time values given
-          directly by the protected member who initiated the invitation. Review the named people,
-          household, permission, and expiry before you decide.
+          Sign in as the separately invited person, then enter both one-time values given directly
+          by the protected member who initiated the invitation. Review the named people, household,
+          permission, and expiry before you decide.
         </p>
         <label htmlFor="invitation-id">Invitation ID</label>
         <input
@@ -240,7 +245,7 @@ export default function FamilyPage() {
             setConsentConfirmed(false);
           }}
         />
-        <label htmlFor="local-invite-code">One-time local invite code</label>
+        <label htmlFor="local-invite-code">One-time invitation credential</label>
         <input
           id="local-invite-code"
           type="password"
@@ -432,6 +437,23 @@ export default function FamilyPage() {
                 maxLength={120}
                 onChange={(event) => setInviteeDisplayName(event.target.value)}
               />
+              {production ? (
+                <>
+                  <label htmlFor="invitee-subject">Exact invited Clerk customer subject</label>
+                  <input
+                    id="invitee-subject"
+                    value={intendedCustomerSubject}
+                    required
+                    maxLength={200}
+                    autoComplete="off"
+                    onChange={(event) => setIntendedCustomerSubject(event.target.value)}
+                  />
+                  <p className="help">
+                    The server resolves this subject to one active customer identity and ignores
+                    client-supplied household, role, or entitlement claims.
+                  </p>
+                </>
+              ) : null}
               <fieldset>
                 <legend>Run 1 permission requested</legend>
                 <p>{permissionLabels.view_shared_checks}</p>
@@ -446,7 +468,11 @@ export default function FamilyPage() {
                 disabled={Boolean(busy) || !canInvite}
                 type="submit"
               >
-                {busy ? 'Creating invitation…' : 'Create local invitation'}
+                {busy
+                  ? 'Creating invitation…'
+                  : production
+                    ? 'Create identity-bound invitation'
+                    : 'Create local invitation'}
               </button>
             </form>
           )}
@@ -457,10 +483,12 @@ export default function FamilyPage() {
               aria-live="polite"
               data-testid="invite-created"
             >
-              <h2>Local invitation created</h2>
+              <h2>
+                {production ? 'Identity-bound invitation created' : 'Local invitation created'}
+              </h2>
               <p>
-                Share these one-time development values directly with the intended person. They are
-                not sent automatically and will not appear again in invitation history.
+                Share these one-time values directly with the intended person. They are not sent
+                automatically and will not appear again in invitation history.
               </p>
               <p>
                 Invitation ID: <strong className="invite-id">{created.invitation.id}</strong>
@@ -469,7 +497,7 @@ export default function FamilyPage() {
                 One-time code: <strong className="invite-code">{created.localInviteCode}</strong>
               </p>
               <p className="meta">
-                Delivery: local only · Expires{' '}
+                Delivery: {created.delivery.replaceAll('_', ' ')} · Expires{' '}
                 {new Date(created.invitation.expiresAt).toLocaleString()}
               </p>
             </section>

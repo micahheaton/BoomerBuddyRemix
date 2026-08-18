@@ -6,23 +6,24 @@ export default async function FeedbackPage() {
     return <HqScreen view="feedback" />;
   }
 
+  const { FeedbackLearning } = await import('../../components/feedback-learning');
+
   return (
     <main className="hq-content" id="hq-main">
       <div className="hq-content-inner">
         <div className="hq-title-row">
           <div>
-            <span className="seed-label">Production blocked</span>
+            <span className="seed-label">Live production evidence</span>
             <h1 className="hq-title">Feedback review</h1>
           </div>
           <Link className="hq-button secondary" href="/">
             Owner HQ
           </Link>
         </div>
-        <div className="control-boundary" role="status">
-          <strong>Feedback review is not activated.</strong> Production access remains blocked until
-          identity, privacy, retention, managed-storage, human-review, platform, and founder gates
-          are independently satisfied.
-        </div>
+        <p className="subtitle">
+          Founder-only role-scoped metadata and explicitly claimed minimized text.
+        </p>
+        <FeedbackLearning />
       </div>
     </main>
   );

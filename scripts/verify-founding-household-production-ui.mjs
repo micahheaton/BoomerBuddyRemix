@@ -7,18 +7,31 @@ const routes = [
     name: 'HQ Founding Household',
     directory: resolve('apps/hq/.next/server/app/founding-households'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
-    requiredText: 'Managed-identity activation is blocked',
+    requiredText: ['Exact Clerk customer subject', 'Issue one manual-delivery credential'],
+    forbiddenText: ['Managed-identity activation is blocked', 'Issue one local credential'],
   },
   {
     name: 'member Founding Household',
     directory: resolve('apps/web/.next/server/app/member/founding-household'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
-    requiredText: 'Managed-identity activation is blocked',
+    requiredText: [
+      'Enter the one-time invitation credential',
+      'Accept finite sponsored beta — no card',
+    ],
+    forbiddenText: ['Managed-identity activation is blocked'],
   },
   {
     name: 'member home',
     directory: resolve('apps/web/.next/server/app/member'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
+    requiredText: ['Open Founding Household review', 'Open selected-household feedback'],
+  },
+  {
+    name: 'customer sign in',
+    directory: resolve('apps/web/.next/server/app/sign-in'),
+    staticDirectory: resolve('apps/web/.next/static/chunks'),
+    requiredText: ['Private Founding Household beta', 'Sign in to BoomerBuddy'],
+    forbiddenText: ['Choose a seeded person', 'Enter local member area'],
   },
   {
     name: 'member messaging',
@@ -55,23 +68,20 @@ const routes = [
     name: 'member feedback',
     directory: resolve('apps/web/.next/server/app/member/feedback'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
-    requiredText: 'Feedback intake is not activated',
-    forbiddenText: ['Submit local feedback'],
+    requiredText: ['Share a product observation.', 'Submit feedback'],
+    forbiddenText: ['Feedback intake is not activated', 'Submit local feedback'],
   },
   {
     name: 'HQ feedback review',
     directory: resolve('apps/hq/.next/server/app/feedback'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
-    requiredText: 'Feedback review is not activated',
-    forbiddenText: ['Claim exact review', 'Open minimized text'],
+    requiredText: ['Feedback review', 'Claim exact review', 'Open minimized text'],
+    forbiddenText: ['Feedback review is not activated'],
   },
 ];
 const forbiddenAcrossRoute = [
-  'Complete invitation credential',
   'Issue one local credential',
-  'Accept finite sponsored beta',
   'Record active local policy',
-  'Open Founding Household review',
   'Open messaging consent laboratory',
   'Record local fixture',
   'Choose this purpose',
@@ -81,6 +91,13 @@ const forbiddenAcrossRoute = [
   'No local referral attribution has been issued',
 ];
 const forbiddenInRenderedPayload = ['localInvitationCredential'];
+const productionUiExpectation = process.env.BB_PRODUCTION_UI_EXPECTATION ?? 'unconfigured_identity';
+if (!['unconfigured_identity', 'configured_static'].includes(productionUiExpectation)) {
+  throw new Error(
+    'BB_PRODUCTION_UI_EXPECTATION must be unconfigured_identity or configured_static',
+  );
+}
+const identityUnavailableText = 'Production identity is unavailable.';
 
 function isMissing(error) {
   return typeof error === 'object' && error !== null && error.code === 'ENOENT';
@@ -174,8 +191,27 @@ async function generatedRouteText(directory, staticDirectory) {
 
 for (const route of routes) {
   const generated = await generatedRouteText(route.directory, route.staticDirectory);
-  if (route.requiredText !== undefined && !generated.combined.includes(route.requiredText)) {
-    throw new Error(`${route.name} did not render the production managed-identity blocker`);
+  const requiredText =
+    route.requiredText === undefined
+      ? []
+      : Array.isArray(route.requiredText)
+        ? route.requiredText
+        : [route.requiredText];
+  if (productionUiExpectation === 'unconfigured_identity') {
+    if (!generated.generatedBody.includes(identityUnavailableText)) {
+      throw new Error(`${route.name} did not render the missing-identity fail-closed boundary`);
+    }
+  } else {
+    if (generated.generatedBody.includes(identityUnavailableText)) {
+      throw new Error(`${route.name} rendered the missing-identity boundary in configured mode`);
+    }
+    for (const value of requiredText) {
+      if (!generated.combined.includes(value)) {
+        throw new Error(
+          `${route.name} did not retain the configured production boundary: ${value}`,
+        );
+      }
+    }
   }
   for (const value of forbiddenAcrossRoute) {
     if (generated.generatedBody.includes(value)) {
@@ -183,7 +219,11 @@ for (const route of routes) {
     }
   }
   for (const value of route.forbiddenText ?? []) {
-    if (generated.combined.includes(value)) {
+    const inspectedText =
+      productionUiExpectation === 'configured_static'
+        ? generated.combined
+        : generated.generatedBody;
+    if (inspectedText.includes(value)) {
       throw new Error(`${route.name} retained the local-only production UI text: ${value}`);
     }
   }
@@ -222,5 +262,7 @@ for (const value of [
 }
 
 process.stdout.write(
-  'Static production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; hydrated production-browser proof remains unproved.\n',
+  productionUiExpectation === 'unconfigured_identity'
+    ? 'Static production route bodies fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
+    : 'Configured static production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
 );

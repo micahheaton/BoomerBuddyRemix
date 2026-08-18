@@ -2,13 +2,15 @@ import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema, providerStateSchema } from './common';
 import { riskSchema } from './checks';
 
+const hqDataStateSchema = z.enum(['local_development', 'live_database']);
+
 export const metricCardSchema = z.object({
   key: z.string().min(1).max(80),
   label: z.string().min(1).max(160),
   value: z.number(),
   source: z.string().min(1).max(160),
   updatedAt: isoDateTimeSchema,
-  dataState: z.literal('local_development'),
+  dataState: hqDataStateSchema,
 });
 
 export const hqOverviewResponseSchema = z.object({
@@ -18,7 +20,7 @@ export const hqOverviewResponseSchema = z.object({
       key: z.string(),
       severity: z.enum(['info', 'warning', 'critical']),
       message: z.string(),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });
@@ -31,7 +33,7 @@ export const hqHouseholdsResponseSchema = z.object({
       memberCount: z.number().int().nonnegative(),
       orientationReadyCount: z.number().int().nonnegative(),
       entitlementState: z.enum(['active', 'inactive']),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
   truncated: z.boolean(),
@@ -46,7 +48,7 @@ export const hqChecksResponseSchema = z.object({
       risk: riskSchema,
       providerState: providerStateSchema,
       createdAt: isoDateTimeSchema,
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });
@@ -63,7 +65,7 @@ export const hqSupportQueueResponseSchema = z
           purposeCode: z.enum(['customer_support']),
           status: z.literal('open'),
           assignedAt: isoDateTimeSchema,
-          dataState: z.literal('local_development'),
+          dataState: hqDataStateSchema,
         })
         .strict(),
     ),
@@ -91,7 +93,7 @@ export const hqReviewQueueResponseSchema = z
           ]),
           dueAt: isoDateTimeSchema.optional(),
           updatedAt: isoDateTimeSchema,
-          dataState: z.literal('local_development'),
+          dataState: hqDataStateSchema,
         })
         .strict(),
     ),
@@ -106,7 +108,7 @@ export const hqProviderHealthResponseSchema = z.object({
       state: providerStateSchema,
       lastCheckedAt: isoDateTimeSchema,
       detail: z.string(),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });

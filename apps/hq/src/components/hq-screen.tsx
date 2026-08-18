@@ -16,6 +16,7 @@ import { BusinessOsContent, type BusinessOsView } from './business-os';
 import { FeedbackLearning } from './feedback-learning';
 import { FounderProvisioning } from './founder-provisioning';
 import { FoundingHouseholds } from './founding-households';
+import { ProductionHqSignOut } from './production-identity';
 import { hqRequest, readableError } from '../lib/api';
 
 export type HqView =
@@ -37,7 +38,7 @@ type HouseholdResponse = {
     memberCount: number;
     orientationReadyCount: number;
     entitlementState: 'active' | 'inactive';
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
   truncated: boolean;
 };
@@ -49,7 +50,7 @@ type ChecksResponse = {
     risk: string;
     providerState: string;
     createdAt: string;
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
 };
 type ProvidersResponse = {
@@ -58,7 +59,7 @@ type ProvidersResponse = {
     state: string;
     lastCheckedAt: string;
     detail: string;
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
 };
 type AuditResponse = {
@@ -73,14 +74,20 @@ type AuditResponse = {
   }>;
 };
 
+const productionRuntime = process.env.NODE_ENV === 'production';
+
 const titles: Record<HqView, { title: string; subtitle: string }> = {
   overview: {
     title: 'Owner operating view',
-    subtitle: 'Local and explicitly imported evidence only. Nothing here is production evidence.',
+    subtitle: productionRuntime
+      ? 'Private-beta database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
+      : 'Local and explicitly imported evidence only. Nothing here is production evidence.',
   },
   customers: {
     title: 'Customers and access',
-    subtitle: 'Household, orientation, and entitlement summaries from local development data.',
+    subtitle: productionRuntime
+      ? 'Bounded household, orientation, and entitlement summaries from the private-beta database.'
+      : 'Household, orientation, and entitlement summaries from local development data.',
   },
   fraud: {
     title: 'Fraud and review',
@@ -106,8 +113,9 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   },
   feedback: {
     title: 'Feedback learning',
-    subtitle:
-      'Local role-scoped metadata and explicitly assigned minimized text; no provider or external action runs.',
+    subtitle: productionRuntime
+      ? 'Founder-scoped metadata and explicitly claimed minimized text; no media, provider, or outbound action runs.'
+      : 'Local role-scoped metadata and explicitly assigned minimized text; no provider or external action runs.',
   },
   provisioning: {
     title: 'Founder provisioning',
@@ -116,8 +124,9 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   },
   'founding-households': {
     title: 'Founding Households',
-    subtitle:
-      'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
+    subtitle: productionRuntime
+      ? 'Founder-gated, finite, identity-bound sponsor access—no card, automatic messaging, or public enrollment.'
+      : 'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
   },
   targets: {
     title: 'Credit-union segmentation',
@@ -137,15 +146,23 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   },
 };
 
-function DataLabel({ state = 'local_development' }: { state?: 'local_development' | 'seeded' }) {
+function DataLabel({
+  state = 'local_development',
+}: {
+  state?: 'local_development' | 'live_database' | 'seeded';
+}) {
   return (
     <span className="seed-label">
-      {state === 'seeded' ? 'Seeded research data' : 'Local development data (seed + this run)'}
+      {state === 'seeded'
+        ? 'Seeded research data'
+        : productionRuntime
+          ? 'Private-beta database evidence'
+          : 'Local development data (seed + this run)'}
     </span>
   );
 }
 
-function SignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void }) {
+function DevelopmentSignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void }) {
   const [personaId, setPersonaId] = useState<DevPersonaId>('hq-heidi');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -213,7 +230,7 @@ function Shell({
   const isOwner = me.principal.roles.includes('hq_owner');
   const canReview = me.principal.roles.includes('hq_reviewer');
   const canSupport = me.principal.roles.includes('hq_support');
-  const feedbackNavigationEnabled = process.env.NODE_ENV !== 'production';
+  const feedbackNavigationEnabled = process.env.NODE_ENV !== 'production' || isOwner;
   const editorialNavigationEnabled = process.env.NODE_ENV !== 'production';
   return (
     <>
@@ -222,7 +239,9 @@ function Shell({
           <span className="hq-brand-mark">BB</span>
           <span>BoomerBuddy HQ</span>
         </Link>
-        <span className="environment">Local development</span>
+        <span className="environment">
+          {process.env.NODE_ENV === 'production' ? 'Private beta' : 'Local development'}
+        </span>
         <span>{me.principal.displayName}</span>
       </header>
       <div className="hq-layout">
@@ -299,7 +318,7 @@ function Shell({
               Founder provisioning
             </Link>
           )}
-          {isOwner && process.env.NODE_ENV !== 'production' && (
+          {isOwner && (
             <Link
               aria-current={view === 'founding-households' ? 'page' : undefined}
               href="/founding-households"
@@ -312,9 +331,13 @@ function Shell({
               System & audit
             </Link>
           )}
-          <button className="secondary" type="button" onClick={onSignOut}>
-            Sign out
-          </button>
+          {process.env.NODE_ENV === 'production' ? (
+            <ProductionHqSignOut onSignedOut={onSignOut} />
+          ) : (
+            <button className="secondary" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
         </nav>
         <main className="hq-content" id="hq-main">
           <div className="hq-content-inner">
@@ -347,7 +370,14 @@ function Customers() {
         {error}
       </p>
     );
-  if (!data) return <p role="status">Loading local development customers…</p>;
+  if (!data)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading private-beta customers…'
+          : 'Loading local development customers…'}
+      </p>
+    );
   return (
     <div className="table-wrap">
       <table>
@@ -399,7 +429,14 @@ function OwnerFraud() {
         {error}
       </p>
     );
-  if (!data) return <p role="status">Loading local development review queue…</p>;
+  if (!data)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading the private-beta review queue…'
+          : 'Loading local development review queue…'}
+      </p>
+    );
   return (
     <>
       <div className="notice">
@@ -674,7 +711,14 @@ function System() {
         {error}
       </p>
     );
-  if (!providers || !audit) return <p role="status">Loading local development system data…</p>;
+  if (!providers || !audit)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading private-beta system data…'
+          : 'Loading local development system data…'}
+      </p>
+    );
   return (
     <>
       <section className="metric-grid">
@@ -909,7 +953,33 @@ export function HqScreen({ view }: { view: HqView }) {
         <p role="status">Opening the authorized HQ workspace…</p>
       </main>
     );
-  if (!me) return <SignIn onSuccess={setMe} />;
+  if (!me) {
+    if (process.env.NODE_ENV !== 'production') return <DevelopmentSignIn onSuccess={setMe} />;
+    if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+      return (
+        <main id="hq-main" className="sign-in-shell">
+          <div className="sign-in-card">
+            <span className="seed-label">Access closed</span>
+            <h1>HQ identity is not configured</h1>
+            <p className="error" role="alert">
+              BoomerBuddy HQ remains unavailable until the separate Clerk HQ application and exact
+              founder binding are configured.
+            </p>
+          </div>
+        </main>
+      );
+    }
+    return (
+      <main id="hq-main" className="sign-in-shell">
+        <div className="sign-in-card">
+          <span className="seed-label">Founder-only private beta</span>
+          <h1>BoomerBuddy HQ</h1>
+          <p>Authenticate through the separately configured HQ identity realm.</p>
+          <Link href="/sign-in">Open secure HQ sign in</Link>
+        </div>
+      </main>
+    );
+  }
   const businessOsView: BusinessOsView | undefined =
     view === 'overview'
       ? 'owner'
@@ -917,7 +987,14 @@ export function HqScreen({ view }: { view: HqView }) {
         ? view
         : undefined;
   return (
-    <Shell me={me} view={view} onSignOut={() => void signOut()}>
+    <Shell
+      me={me}
+      view={view}
+      onSignOut={() => {
+        if (process.env.NODE_ENV === 'production') setMe(undefined);
+        else void signOut();
+      }}
+    >
       {businessOsView ? (
         <BusinessOsContent view={businessOsView} />
       ) : view === 'customers' ? (

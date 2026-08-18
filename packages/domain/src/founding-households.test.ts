@@ -6,7 +6,9 @@ import {
   effectiveFoundingHouseholdInvitationState,
   foundingHouseholdAccessEndsAt,
   foundingHouseholdBenefitProfiles,
+  foundingHouseholdEvidenceTierForEnvironment,
   foundingHouseholdInvitationEndsAt,
+  foundingHouseholdProductionMaxHouseholds,
 } from './founding-households';
 
 const now = new Date('2026-08-16T12:00:00.000Z');
@@ -88,6 +90,26 @@ describe('Founding Household domain policy', () => {
         now,
       ),
     ).toThrow();
+  });
+
+  it('maps evidence to the runtime environment and hard-caps production at five', () => {
+    expect(foundingHouseholdEvidenceTierForEnvironment('local')).toBe('local_simulation');
+    expect(foundingHouseholdEvidenceTierForEnvironment('staging')).toBe('deployed_staging');
+    expect(foundingHouseholdEvidenceTierForEnvironment('production')).toBe('live_production');
+    expect(foundingHouseholdProductionMaxHouseholds).toBe(5);
+    expect(() =>
+      assertActiveFoundingHouseholdPolicy(
+        {
+          benefitKey: 'family_beta_v1',
+          maxHouseholds: 6,
+          invitationTtlDays: 7,
+          accessDurationDays: 45,
+          programEndsAt: new Date('2026-10-01T00:00:00.000Z'),
+        },
+        now,
+        'production',
+      ),
+    ).toThrow('cannot exceed 5');
   });
 
   it('caps invitation and access ends at the immutable policy end', () => {

@@ -20,6 +20,8 @@ import {
   DomainError,
   canonicalFeedbackNetworkAddress,
   feedbackAdapterRegistry,
+  feedbackEvidenceTierForEnvironment,
+  type FeedbackEvidenceTier,
 } from '@boomerbuddy/domain';
 import type { SessionRepository } from '@boomerbuddy/persistence';
 import type { FastifyInstance, FastifyReply } from 'fastify';
@@ -31,13 +33,14 @@ interface FeedbackRouteRepository {
     readonly actorPersonId: string;
     readonly request: CreateAuthenticatedFeedbackRequest;
     readonly correlationId: string;
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<{
     readonly id: string;
     readonly status: string;
     readonly redactionStatus: string;
     readonly queue: string;
-    readonly evidenceTier: 'local_simulation';
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly retainedUntil?: Date;
     readonly reused: boolean;
   }>;
@@ -45,13 +48,14 @@ interface FeedbackRouteRepository {
     readonly networkAddress: string;
     readonly request: CreateAnonymousFeedbackRequest;
     readonly correlationId: string;
+    readonly evidenceTier: 'local_simulation';
     readonly now: Date;
   }): Promise<{
     readonly id: string;
     readonly status: string;
     readonly redactionStatus: string;
     readonly queue: string;
-    readonly evidenceTier: 'local_simulation';
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly retainedUntil?: Date;
     readonly reused: boolean;
   }>;
@@ -61,13 +65,14 @@ interface FeedbackRouteRepository {
     readonly actorPersonId: string;
     readonly request: SupportFeedbackConversionRequest;
     readonly correlationId: string;
+    readonly evidenceTier: 'local_simulation';
     readonly now: Date;
   }): Promise<{
     readonly id: string;
     readonly status: string;
     readonly redactionStatus: string;
     readonly queue: string;
-    readonly evidenceTier: 'local_simulation';
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly retainedUntil?: Date;
     readonly reused: boolean;
   }>;
@@ -77,6 +82,7 @@ interface FeedbackRouteRepository {
     readonly actorPersonId: string;
     readonly purpose: 'follow_up' | 'research_retention' | 'object_linkage';
     readonly correlationId: string;
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<{
     readonly withdrawn: boolean;
@@ -85,12 +91,14 @@ interface FeedbackRouteRepository {
   roleScopedMetadata(input: {
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<readonly FeedbackQueueItemLike[]>;
   claimForReview(input: {
     readonly feedbackId: string;
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<{
     readonly feedbackId: string;
@@ -98,19 +106,20 @@ interface FeedbackRouteRepository {
     readonly assignmentVersion: number;
     readonly humanReviewRequired: boolean;
     readonly reused: boolean;
-    readonly evidenceTier: 'local_simulation';
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly externalActionExecuted: false;
   }>;
   readAssignedMinimizedText(input: {
     readonly feedbackId: string;
     readonly actorPersonId: string;
     readonly correlationId: string;
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly now: Date;
   }): Promise<{
     readonly feedbackId: string;
     readonly minimizedText: string;
     readonly redactionStatus: 'minimized_clean' | 'minimized_redacted';
-    readonly evidenceTier: 'local_simulation';
+    readonly evidenceTier: FeedbackEvidenceTier;
     readonly contentBoundary: 'assigned_minimized_text';
     readonly externalActionExecuted: false;
   }>;
@@ -169,12 +178,26 @@ export interface FeedbackRouteServices {
   readonly now: () => Date;
 }
 
-function assertLocalOnly(config: AppConfig): void {
+function assertNonProductionOnly(config: AppConfig): void {
   if (config.environment === 'production') {
     throw new DomainError(
       'not_found',
       'Feedback intake is unavailable until the founder activation gates are complete',
     );
+  }
+}
+
+function assertProductionFounder(
+  config: AppConfig,
+  principal: { readonly personId: string; readonly roles: readonly string[] },
+): void {
+  if (
+    config.environment === 'production' &&
+    (config.identity.founderPersonId === undefined ||
+      principal.personId !== config.identity.founderPersonId ||
+      !principal.roles.includes('hq_owner'))
+  ) {
+    throw new DomainError('not_authorized', 'Production feedback review requires the founder role');
   }
 }
 
@@ -212,12 +235,12 @@ export function registerFeedbackRoutes(
   app.get('/v1/feedback/adapters', () =>
     feedbackAdapterResponseSchema.parse({
       adapters: feedbackAdapterRegistry,
-      evidenceTier: 'local_simulation',
+      evidenceTier: feedbackEvidenceTierForEnvironment(services.config.environment),
     }),
   );
 
   app.post('/v1/public/feedback', async (request, reply) => {
-    assertLocalOnly(services.config);
+    assertNonProductionOnly(services.config);
     const now = services.now();
     const body = createAnonymousFeedbackRequestSchema.parse(request.body);
     const result = await services.feedback.createAnonymous({
@@ -226,14 +249,15 @@ export function registerFeedbackRoutes(
       networkAddress: canonicalFeedbackNetworkAddress(request.ip),
       request: body,
       correlationId: correlationId(request),
+      evidenceTier: 'local_simulation',
       now,
     });
     return reply.code(result.reused ? 200 : 201).send(intakeResponse(result));
   });
 
   app.post('/v1/feedback', async (request, reply) => {
-    assertLocalOnly(services.config);
     const now = services.now();
+    const evidenceTier = feedbackEvidenceTierForEnvironment(services.config.environment);
     const auth = await authenticate(
       request,
       services.sessions,
@@ -249,14 +273,15 @@ export function registerFeedbackRoutes(
       actorPersonId: auth.principal.personId,
       request: body,
       correlationId: correlationId(request),
+      evidenceTier,
       now,
     });
     return reply.code(result.reused ? 200 : 201).send(intakeResponse(result));
   });
 
   app.post('/v1/feedback/:feedbackId/consents/:purpose/withdraw', async (request) => {
-    assertLocalOnly(services.config);
     const now = services.now();
+    const evidenceTier = feedbackEvidenceTierForEnvironment(services.config.environment);
     const auth = await authenticate(
       request,
       services.sessions,
@@ -273,6 +298,7 @@ export function registerFeedbackRoutes(
       actorPersonId: auth.principal.personId,
       purpose: params.purpose,
       correlationId: correlationId(request),
+      evidenceTier,
       now,
     });
     return feedbackConsentWithdrawalResponseSchema.parse({
@@ -287,7 +313,7 @@ export function registerFeedbackRoutes(
   app.post(
     '/v1/hq/households/:householdId/support-cases/:supportCaseId/feedback',
     async (request, reply) => {
-      assertLocalOnly(services.config);
+      assertNonProductionOnly(services.config);
       const now = services.now();
       const auth = await authenticate(request, services.sessions, services.config, ['hq'], now);
       assertMutationOrigin(request, services.config, auth);
@@ -299,6 +325,7 @@ export function registerFeedbackRoutes(
         actorPersonId: auth.principal.personId,
         request: body,
         correlationId: correlationId(request),
+        evidenceTier: 'local_simulation',
         now,
       });
       return reply.code(result.reused ? 200 : 201).send(intakeResponse(result));
@@ -307,12 +334,14 @@ export function registerFeedbackRoutes(
 
   app.get('/v1/hq/feedback', async (request, reply) => {
     setPrivateNoStore(reply);
-    assertLocalOnly(services.config);
     const now = services.now();
+    const evidenceTier = feedbackEvidenceTierForEnvironment(services.config.environment);
     const auth = await authenticate(request, services.sessions, services.config, ['hq'], now);
+    assertProductionFounder(services.config, auth.principal);
     const feedback = await services.feedback.roleScopedMetadata({
       actorPersonId: auth.principal.personId,
       correlationId: correlationId(request),
+      evidenceTier,
       now,
     });
     return hqFeedbackQueueResponseSchema.parse({
@@ -334,15 +363,17 @@ export function registerFeedbackRoutes(
   });
 
   app.post('/v1/hq/feedback/:feedbackId/claim', async (request) => {
-    assertLocalOnly(services.config);
     const now = services.now();
+    const evidenceTier = feedbackEvidenceTierForEnvironment(services.config.environment);
     const auth = await authenticate(request, services.sessions, services.config, ['hq'], now);
+    assertProductionFounder(services.config, auth.principal);
     assertMutationOrigin(request, services.config, auth);
     const params = feedbackReviewParamsSchema.parse(request.params);
     const result = await services.feedback.claimForReview({
       feedbackId: params.feedbackId,
       actorPersonId: auth.principal.personId,
       correlationId: correlationId(request),
+      evidenceTier,
       now,
     });
     return feedbackReviewClaimResponseSchema.parse(result);
@@ -350,14 +381,16 @@ export function registerFeedbackRoutes(
 
   app.get('/v1/hq/feedback/:feedbackId/content', async (request, reply) => {
     setPrivateNoStore(reply);
-    assertLocalOnly(services.config);
     const now = services.now();
+    const evidenceTier = feedbackEvidenceTierForEnvironment(services.config.environment);
     const auth = await authenticate(request, services.sessions, services.config, ['hq'], now);
+    assertProductionFounder(services.config, auth.principal);
     const params = feedbackReviewParamsSchema.parse(request.params);
     const result = await services.feedback.readAssignedMinimizedText({
       feedbackId: params.feedbackId,
       actorPersonId: auth.principal.personId,
       correlationId: correlationId(request),
+      evidenceTier,
       now,
     });
     return assignedFeedbackContentResponseSchema.parse(result);

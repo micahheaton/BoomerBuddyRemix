@@ -18,7 +18,8 @@ describe('release candidate controls', () => {
       expect(source).toContain("capture('git', ['rev-parse', 'HEAD'])");
       expect(source).toContain("capture('git', ['status', '--porcelain'])");
       expect(source.match(/capture\('git', \['status', '--porcelain'\]\)/gu)).toHaveLength(2);
-      expect(source).toContain('/^run3-local-candidate-[0-9a-f]{12}$/u');
+      expect(source).toContain('run3-1-replit-founding-household');
+      expect(source).toContain('run3-local-candidate');
       expect(source).toContain('/^[0-9a-f]{40}$/u');
     }
 
@@ -34,7 +35,7 @@ describe('release candidate controls', () => {
     });
     expect(rejected.status).not.toBe(0);
     expect(`${rejected.stdout}${rejected.stderr}`).toContain(
-      'BB_CANDIDATE_REF must be an immutable Run 3 candidate tag',
+      'BB_CANDIDATE_REF must be an immutable Run 3 or Run 3.1 candidate tag',
     );
 
     const mismatchedSuffix = spawnSync(process.execPath, ['scripts/clean-clone-check.mjs'], {
@@ -153,6 +154,10 @@ describe('release candidate controls', () => {
       join(root, 'scripts/verify-runtime-dependency-scope.mjs'),
       'utf8',
     );
+    const run31DependencyVerifier = await readFile(
+      join(root, 'scripts/verify-run3-1-dependencies.mjs'),
+      'utf8',
+    );
     const productionUiVerifier = await readFile(
       join(root, 'scripts/verify-founding-household-production-ui.mjs'),
       'utf8',
@@ -167,9 +172,9 @@ describe('release candidate controls', () => {
       scripts: Record<string, string>;
     };
 
-    expect(workflow).toContain("tags: ['run3-local-candidate-*']");
-    expect(workflow).toContain('npm audit --audit-level=high');
-    expect(workflow).not.toContain('npm audit --omit=dev');
+    expect(workflow).toContain("'run3-local-candidate-*', 'run3-1-replit-founding-household-*'");
+    expect(workflow).toContain('npm run verify:run3-1-deps');
+    expect(workflow).toContain('BB_DEPENDENCY_EVIDENCE_DIR');
     expect(workflow).toContain('npm run test:coverage');
     expect(workflow).toContain('npm run test:e2e');
     expect(workflow).toContain('npm run verify:runtime-deps');
@@ -235,12 +240,23 @@ describe('release candidate controls', () => {
     expect(packageJson.scripts['verify:runtime-deps']).toBe(
       'node scripts/verify-runtime-dependency-scope.mjs',
     );
+    expect(packageJson.scripts['verify:run3-1-deps']).toBe(
+      'node scripts/verify-run3-1-dependencies.mjs',
+    );
+    expect(run31DependencyVerifier).toContain('candidateCommit');
+    expect(run31DependencyVerifier).toContain('candidateTag');
+    expect(run31DependencyVerifier).toContain('evidence-manifest.json');
+    expect(run31DependencyVerifier).toContain("git(['tag', '--points-at', candidateCommit])");
+    expect(run31DependencyVerifier).toContain("git(['status', '--porcelain'])");
+    expect(run31DependencyVerifier).toContain('output directory must be empty');
+    expect(cleanClone).toContain("BB_REQUIRE_RUN3_1_CANDIDATE_TAG: 'true'");
     expect(packageJson.scripts['verify:production-ui']).toBe(
       'node scripts/verify-founding-household-production-ui.mjs',
     );
     expect(webPackage.scripts.build).toContain('node ../../scripts/normalize-next-env.mjs web');
     expect(hqPackage.scripts.build).toContain('node ../../scripts/normalize-next-env.mjs hq');
     expect(cleanClone).toContain("npmPrefix, 'run', 'verify:production-ui'");
+    expect(cleanClone).toContain("npmPrefix, 'run', 'verify:run3-1-deps'");
     expect(lossDrill).toContain("npmPrefix, 'run', 'verify:production-ui'");
     expect(lossDrill).toContain('sourceUrlExcludedReplitMarkerAndLoopback: true');
     expect(lossDrill).not.toContain('sourceRecoveredOutsideReplit: true');

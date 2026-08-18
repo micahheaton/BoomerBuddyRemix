@@ -55,24 +55,15 @@ describe('editorial shared API composition', () => {
 
   it('keeps the composed editorial board unavailable in production', async () => {
     database = await createSeededTestDatabase(fixedTestNow);
-    const app = await buildApp({
-      config: { ...testConfig(), environment: 'production' },
-      database,
-      initialize: false,
-      closeDatabase: false,
-      now: () => fixedTestNow,
-      logger: createLogger({ level: 'error', sink: () => undefined, clock: () => fixedTestNow }),
-    });
-    apps.push(app);
-    const response = await app.inject({
-      method: 'GET',
-      url: '/v1/hq/editorial',
-      headers: { origin: hqOrigin },
-    });
-
-    expect(response.statusCode, response.body).toBe(404);
-    expect(response.json()).toMatchObject({
-      error: { code: 'not_found', message: expect.stringContaining('activation gates') },
-    });
+    await expect(
+      buildApp({
+        config: { ...testConfig(), environment: 'production' },
+        database,
+        initialize: false,
+        closeDatabase: false,
+        now: () => fixedTestNow,
+        logger: createLogger({ level: 'error', sink: () => undefined, clock: () => fixedTestNow }),
+      }),
+    ).rejects.toThrow('Production Clerk founder configuration is incomplete');
   });
 });

@@ -8,15 +8,15 @@ import {
 } from '../../apps/worker/src/feedback-retention';
 
 describe('feedback retention worker foundation', () => {
-  it('enqueues a content-free local-only maintenance job', async () => {
+  it('enqueues a content-free retention-only maintenance job', async () => {
     const enqueue = vi.fn().mockResolvedValue(undefined);
     const now = new Date('2026-08-17T12:00:00.000Z');
     await enqueueFeedbackRetention({ jobs: { enqueue }, now, batch: 1_000 });
     expect(enqueue).toHaveBeenCalledWith({
       type: feedbackRetentionJobType,
-      version: 1,
+      version: 2,
       classification: 'internal',
-      payload: { batch: 100, localOnly: true },
+      payload: { batch: 100, externalEffect: false, retentionOnly: true },
       idempotencyKey: feedbackRetentionIntervalKey(now),
       scheduledAt: now,
       maxAttempts: 8,
@@ -39,9 +39,9 @@ describe('feedback retention worker foundation', () => {
       job: {
         id: 'job-feedback-retention',
         type: feedbackRetentionJobType,
-        version: 1,
+        version: 2,
         classification: 'internal',
-        payload: { batch: 25, localOnly: true },
+        payload: { batch: 25, externalEffect: false, retentionOnly: true },
         idempotencyKey: 'feedback-retention-test',
         state: 'running',
         priority: 0,
@@ -76,9 +76,9 @@ describe('feedback retention worker foundation', () => {
       job: {
         id: 'job-feedback-retention-partial',
         type: feedbackRetentionJobType,
-        version: 1,
+        version: 2,
         classification: 'internal',
-        payload: { batch: 25, localOnly: true },
+        payload: { batch: 25, externalEffect: false, retentionOnly: true },
         idempotencyKey: 'feedback-retention-partial',
         state: 'running',
         priority: 0,
@@ -100,7 +100,44 @@ describe('feedback retention worker foundation', () => {
     );
   });
 
-  it('rejects a malformed or non-local maintenance job without erasing anything', async () => {
+  it('safely drains an exact legacy provider-free job into the current retention-only schema', async () => {
+    const now = new Date('2026-08-17T12:00:00.000Z');
+    const purgeDue = vi.fn().mockResolvedValue(0);
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+    const handler = createFeedbackRetentionHandler({
+      feedback: { purgeDue },
+      jobs: { enqueue },
+      clock: () => now,
+    });
+    await handler({
+      job: {
+        id: 'job-feedback-retention-legacy',
+        type: feedbackRetentionJobType,
+        version: 1,
+        classification: 'internal',
+        payload: { batch: 25, localOnly: true },
+        idempotencyKey: 'feedback-retention-legacy',
+        state: 'running',
+        priority: 0,
+        attempts: 1,
+        maxAttempts: 8,
+        nextAttemptAt: now,
+        correlationId: 'feedback-retention-legacy',
+      },
+      idempotencyKey: 'feedback-retention-legacy',
+      signal: new AbortController().signal,
+      heartbeat: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(purgeDue).toHaveBeenCalledWith({ now, limit: 25 });
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        version: 2,
+        payload: { batch: 25, externalEffect: false, retentionOnly: true },
+      }),
+    );
+  });
+
+  it('rejects a malformed or non-retention-only job without erasing anything', async () => {
     const now = new Date('2026-08-17T12:00:00.000Z');
     const purgeDue = vi.fn().mockResolvedValue(0);
     const enqueue = vi.fn().mockResolvedValue(undefined);
@@ -114,9 +151,14 @@ describe('feedback retention worker foundation', () => {
         job: {
           id: 'job-feedback-retention-malformed',
           type: feedbackRetentionJobType,
-          version: 1,
+          version: 2,
           classification: 'internal',
-          payload: { batch: 25, localOnly: false, text: 'must-not-be-accepted' },
+          payload: {
+            batch: 25,
+            externalEffect: false,
+            retentionOnly: true,
+            text: 'must-not-be-accepted',
+          },
           idempotencyKey: 'feedback-retention-malformed',
           state: 'running',
           priority: 0,
@@ -129,7 +171,7 @@ describe('feedback retention worker foundation', () => {
         signal: new AbortController().signal,
         heartbeat: vi.fn().mockResolvedValue(undefined),
       }),
-    ).rejects.toThrow('exact content-free local-only job');
+    ).rejects.toThrow('exact content-free retention-only job');
     expect(purgeDue).not.toHaveBeenCalled();
     expect(enqueue).not.toHaveBeenCalled();
   });

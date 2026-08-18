@@ -99,14 +99,14 @@ describe('runtime-environment entitlement threading', () => {
       operationKey: 'founding-invite:00000000-0000-4000-8000-000000000092',
       now,
     });
-    if (invitation.localInvitationCredential === undefined) {
+    if (invitation.invitationCredential === undefined) {
       throw new Error('Expected a one-time local invitation credential');
     }
     await founding.acceptInvitation({
       access: aliceAccess,
       householdId: 'household-sunrise',
       invitationId: invitation.invitation.id,
-      localInvitationCredential: invitation.localInvitationCredential,
+      invitationCredential: invitation.invitationCredential,
       operationKey: 'founding-accept:00000000-0000-4000-8000-000000000093',
       serviceConsentVersion: foundingHouseholdServiceConsentVersion,
       serviceDisclosureDigest: foundingHouseholdServiceDocuments.disclosureDigest,

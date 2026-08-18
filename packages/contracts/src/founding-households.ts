@@ -2,19 +2,27 @@ import {
   foundingHouseholdAccessAttentionCodes,
   foundingHouseholdBenefitKeys,
   foundingHouseholdEnrollmentStates,
-  foundingHouseholdEvidenceTier,
+  foundingHouseholdEnvironmentEvidenceTiers,
+  foundingHouseholdEnvironments,
   foundingHouseholdFunnelEvidenceSources,
   foundingHouseholdFunnelStages,
   foundingHouseholdInvitationStates,
   foundingHouseholdPolicyStates,
   foundingHouseholdProtectedEnrollmentConsentVersion,
-  foundingHouseholdServiceConsentVersion,
+  foundingHouseholdServiceConsentVersions,
 } from '@boomerbuddy/domain';
 import { z } from 'zod';
 
 import { isoDateTimeSchema, opaqueIdSchema } from './common';
 
 export const foundingHouseholdBenefitKeySchema = z.enum(foundingHouseholdBenefitKeys);
+export const foundingHouseholdEnvironmentSchema = z.enum(foundingHouseholdEnvironments);
+export const foundingHouseholdEvidenceTierSchema = z.enum(
+  Object.values(foundingHouseholdEnvironmentEvidenceTiers),
+);
+export const foundingHouseholdServiceConsentVersionSchema = z.enum(
+  foundingHouseholdServiceConsentVersions,
+);
 export const foundingHouseholdPolicyStateSchema = z.enum(foundingHouseholdPolicyStates);
 export const foundingHouseholdInvitationStateSchema = z.enum(foundingHouseholdInvitationStates);
 export const foundingHouseholdEnrollmentStateSchema = z.enum(foundingHouseholdEnrollmentStates);
@@ -91,13 +99,36 @@ export const foundingHouseholdCapacitySchema = z
 export const foundingHouseholdInvitationSchema = z
   .object({
     id: opaqueIdSchema,
+    environment: foundingHouseholdEnvironmentSchema,
     policyRevision: z.number().int().positive(),
     benefitKey: foundingHouseholdBenefitKeySchema,
     state: foundingHouseholdInvitationStateSchema,
     createdAt: isoDateTimeSchema,
     expiresAt: isoDateTimeSchema,
+    identityBindingState: z.enum(['development_unbound', 'verified_identity']),
+    intendedCustomerSubject: z.string().min(1).max(200).optional(),
+    householdId: opaqueIdSchema.optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const bound = value.identityBindingState === 'verified_identity';
+    if (
+      bound !== (value.intendedCustomerSubject !== undefined && value.householdId !== undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Verified invitations require an exact customer subject and household binding',
+        path: ['identityBindingState'],
+      });
+    }
+    if (value.environment === 'production' && !bound) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Production invitations require verified identity binding',
+        path: ['identityBindingState'],
+      });
+    }
+  });
 
 export const foundingHouseholdFunnelMilestoneSchema = z
   .object({
@@ -110,6 +141,7 @@ export const foundingHouseholdFunnelMilestoneSchema = z
 export const foundingHouseholdEnrollmentSchema = z
   .object({
     id: opaqueIdSchema,
+    environment: foundingHouseholdEnvironmentSchema,
     householdId: opaqueIdSchema,
     invitationId: opaqueIdSchema,
     benefitKey: foundingHouseholdBenefitKeySchema,
@@ -131,7 +163,7 @@ export const foundingHouseholdEnrollmentSchema = z
     endsAt: isoDateTimeSchema,
     effectiveEndsAt: isoDateTimeSchema,
     paymentState: z.literal('not_paid_sponsored_beta'),
-    evidenceTier: z.literal(foundingHouseholdEvidenceTier),
+    evidenceTier: foundingHouseholdEvidenceTierSchema,
     researchConsent: z.literal(false),
     marketingConsent: z.literal(false),
     followUpConsent: z.literal(false),
@@ -142,8 +174,9 @@ export const foundingHouseholdEnrollmentSchema = z
 export const foundingHouseholdFounderConsoleResponseSchema = z
   .object({
     authority: z.literal('configured_founder_active_internal_owner'),
-    evidenceTier: z.literal(foundingHouseholdEvidenceTier),
-    productionIdentityReady: z.literal(false),
+    environment: foundingHouseholdEnvironmentSchema,
+    evidenceTier: foundingHouseholdEvidenceTierSchema,
+    productionIdentityReady: z.boolean(),
     paymentCollected: z.literal(false),
     externalActionExecuted: z.literal(false),
     policy: foundingHouseholdPolicySchema,
@@ -162,31 +195,43 @@ export const configureFoundingHouseholdPolicyResponseSchema = z
   })
   .strict();
 
+export const createFoundingHouseholdInvitationRequestSchema = z
+  .object({
+    intendedCustomerSubject: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .regex(/^[A-Za-z0-9_-]+$/u)
+      .optional(),
+  })
+  .strict();
+
 export const createFoundingHouseholdInvitationResponseSchema = z
   .object({
     invitation: foundingHouseholdInvitationSchema,
-    localInvitationCredential: foundingHouseholdInvitationCredentialSchema.optional(),
+    invitationCredential: foundingHouseholdInvitationCredentialSchema.optional(),
     credentialState: z.enum(['created_credential_returned', 'created_credential_unavailable']),
     reused: z.boolean(),
     credentialRecoverable: z.literal(false),
-    delivery: z.literal('founder_manual_local_only'),
+    delivery: z.literal('founder_manual_only'),
     externalActionExecuted: z.literal(false),
   })
   .strict()
   .superRefine((value, context) => {
     if (
       value.credentialState === 'created_credential_returned' &&
-      (value.localInvitationCredential === undefined || value.reused)
+      (value.invitationCredential === undefined || value.reused)
     ) {
       context.addIssue({
         code: 'custom',
         message: 'A newly returned invitation must include its one-time credential',
-        path: ['localInvitationCredential'],
+        path: ['invitationCredential'],
       });
     }
     if (
       value.credentialState === 'created_credential_unavailable' &&
-      (value.localInvitationCredential !== undefined || !value.reused)
+      (value.invitationCredential !== undefined || !value.reused)
     ) {
       context.addIssue({
         code: 'custom',
@@ -206,8 +251,7 @@ export const foundingHouseholdEnrollmentParamsSchema = z
 
 export const foundingHouseholdInvitationPreviewRequestSchema = z
   .object({
-    householdId: opaqueIdSchema,
-    localInvitationCredential: foundingHouseholdInvitationCredentialSchema,
+    invitationCredential: foundingHouseholdInvitationCredentialSchema,
   })
   .strict();
 
@@ -225,7 +269,7 @@ export const foundingHouseholdInvitationPreviewResponseSchema = z
       .strict(),
     invitationExpiresAt: isoDateTimeSchema,
     accessEndsAtIfAcceptedNow: isoDateTimeSchema,
-    serviceConsentVersion: z.literal(foundingHouseholdServiceConsentVersion),
+    serviceConsentVersion: foundingHouseholdServiceConsentVersionSchema,
     serviceDisclosureText: z.string().min(1).max(4_000),
     serviceDisclosureDigest: z.string().regex(/^[a-f0-9]{64}$/u),
     servicePolicyText: z.string().min(1).max(4_000),
@@ -241,15 +285,14 @@ export const foundingHouseholdInvitationPreviewResponseSchema = z
     marketingConsentRequested: z.literal(false),
     followUpConsentRequested: z.literal(false),
     paymentRequired: z.literal(false),
-    evidenceTier: z.literal(foundingHouseholdEvidenceTier),
+    evidenceTier: foundingHouseholdEvidenceTierSchema,
   })
   .strict();
 
 export const acceptFoundingHouseholdInvitationRequestSchema = z
   .object({
-    householdId: opaqueIdSchema,
-    localInvitationCredential: foundingHouseholdInvitationCredentialSchema,
-    serviceConsentVersion: z.literal(foundingHouseholdServiceConsentVersion),
+    invitationCredential: foundingHouseholdInvitationCredentialSchema,
+    serviceConsentVersion: foundingHouseholdServiceConsentVersionSchema,
     serviceDisclosureDigest: z.string().regex(/^[a-f0-9]{64}$/u),
     servicePolicyDigest: z.string().regex(/^[a-f0-9]{64}$/u),
     serviceConsentAccepted: z.literal(true),
@@ -295,13 +338,17 @@ export const offboardFoundingHouseholdResponseSchema = z
 export const foundingHouseholdMemberStatusResponseSchema = z
   .object({
     enrollment: foundingHouseholdEnrollmentSchema.nullable(),
-    managedIdentityBlocker: z.literal(true),
-    evidenceTier: z.literal(foundingHouseholdEvidenceTier),
+    environment: foundingHouseholdEnvironmentSchema,
+    productionIdentityReady: z.boolean(),
+    evidenceTier: foundingHouseholdEvidenceTierSchema,
   })
   .strict();
 
 export type ConfigureFoundingHouseholdPolicyRequest = z.infer<
   typeof configureFoundingHouseholdPolicyRequestSchema
+>;
+export type CreateFoundingHouseholdInvitationRequest = z.infer<
+  typeof createFoundingHouseholdInvitationRequestSchema
 >;
 export type FoundingHouseholdFounderConsoleResponse = z.infer<
   typeof foundingHouseholdFounderConsoleResponseSchema

@@ -120,6 +120,14 @@ export const feedbackEvidenceTiers = [
 ] as const;
 export type FeedbackEvidenceTier = (typeof feedbackEvidenceTiers)[number];
 
+export type FeedbackRuntimeEnvironment = 'development' | 'test' | 'production';
+
+export function feedbackEvidenceTierForEnvironment(
+  environment: FeedbackRuntimeEnvironment,
+): 'local_simulation' | 'live_production' {
+  return environment === 'production' ? 'live_production' : 'local_simulation';
+}
+
 export const feedbackChannelClasses = ['account_email', 'account_sms', 'in_app'] as const;
 export type FeedbackChannelClass = (typeof feedbackChannelClasses)[number];
 
@@ -136,7 +144,7 @@ export interface FeedbackAdapterDefinition {
     | 'inbound_email'
     | 'transcription'
     | 'external_model';
-  readonly state: 'local_only_enabled' | 'structurally_disabled';
+  readonly state: 'production_enabled' | 'local_only_enabled' | 'structurally_disabled';
   readonly externalEffect: false;
   readonly reason: string;
 }
@@ -144,9 +152,10 @@ export interface FeedbackAdapterDefinition {
 export const feedbackAdapterRegistry: readonly FeedbackAdapterDefinition[] = [
   {
     key: 'authenticated_text',
-    state: 'local_only_enabled',
+    state: 'production_enabled',
     externalEffect: false,
-    reason: 'Bounded text is minimized and encrypted locally before any review.',
+    reason:
+      'Authenticated bounded text is minimized and encrypted before role-scoped review in every runtime.',
   },
   {
     key: 'anonymous_text',

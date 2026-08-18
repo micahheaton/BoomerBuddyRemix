@@ -20,7 +20,6 @@ export async function composeFeedbackWorker(input: {
   readonly now: Date;
   readonly clock?: () => Date;
 }): Promise<FeedbackWorkerComposition> {
-  if (input.environment === 'production') return { handlers: {} };
   await enqueueFeedbackRetention({ jobs: input.jobs, now: input.now });
   return {
     handlers: {

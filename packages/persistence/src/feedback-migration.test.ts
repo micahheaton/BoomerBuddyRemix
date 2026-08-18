@@ -43,6 +43,221 @@ describe('feedback learning forward migration', () => {
     expect(tables.rows[0]?.count).toBeGreaterThanOrEqual(10);
   });
 
+  it('applies 0025 forward-only and rejects caller-invented production evidence lineage', async () => {
+    const source = await migrationDirectory();
+    temporaryDirectory = await mkdtemp(
+      join(tmpdir(), 'boomerbuddy-feedback-production-migration-'),
+    );
+    const files = (await readdir(source))
+      .filter(
+        (file) =>
+          /^\d+_[a-z0-9_]+\.sql$/u.test(file) && file <= '0025_run3_1_authenticated_feedback.sql',
+      )
+      .sort((left, right) => left.localeCompare(right));
+    for (const file of files.filter((file) => file !== '0025_run3_1_authenticated_feedback.sql')) {
+      await copyFile(join(source, file), join(temporaryDirectory, file));
+    }
+    database = await createPGliteDatabase();
+    await runMigrations(database, temporaryDirectory);
+    await copyFile(
+      join(source, '0025_run3_1_authenticated_feedback.sql'),
+      join(temporaryDirectory, '0025_run3_1_authenticated_feedback.sql'),
+    );
+    await expect(runMigrations(database, temporaryDirectory)).resolves.toEqual([
+      '0025_run3_1_authenticated_feedback.sql',
+    ]);
+
+    const now = '2026-08-17T12:00:00.000Z';
+    await database.query(
+      `INSERT INTO persons(id, display_name, created_at)
+       VALUES ('person-feedback-live','Feedback Live',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO households(id, name, created_at)
+       VALUES ('household-feedback-live','Feedback Live',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO household_memberships(
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES ('household-feedback-live','membership-feedback-live','person-feedback-live',
+         'member','active',$1)`,
+      [now],
+    );
+
+    await expect(
+      database.query(
+        `INSERT INTO feedback_records(
+           id, schema_version, identity_mode, source_surface, device_class, feedback_type,
+           correlation_id, evidence_tier, created_at
+         ) VALUES ('feedback-live-anonymous',1,'anonymous','web_feedback_form','unknown',
+           'product_feedback','feedback-live-anonymous','live_production',$1)`,
+        [now],
+      ),
+    ).rejects.toThrow();
+
+    await database.query(
+      `INSERT INTO feedback_records(
+         id, schema_version, identity_mode, household_id, actor_person_id, source_surface,
+         device_class, feedback_type, correlation_id, evidence_tier, created_at
+       ) VALUES ('feedback-live-authenticated',1,'authenticated','household-feedback-live',
+         'person-feedback-live','web_feedback_form','unknown','product_feedback',
+         'feedback-live-authenticated','live_production',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO feedback_payloads(
+         feedback_id, payload_state, redaction_status, detected_classes, redaction_counts,
+         created_at
+       ) VALUES ('feedback-live-authenticated','discarded_unsafe','quarantined_discarded',
+         '[]'::jsonb,'{}'::jsonb,$1)`,
+      [now],
+    );
+    await expect(
+      database.query(
+        `INSERT INTO feedback_state_events(
+           id, feedback_id, version, from_status, to_status, severity, classification,
+           close_loop_state, reason_code, actor_kind, actor_person_id, evidence_tier, occurred_at
+         ) VALUES ('feedback-live-state-mismatch','feedback-live-authenticated',1,NULL,'received',
+           'unassessed','unclassified','not_requested','bounded_text_received','participant',
+           'person-feedback-live','local_simulation',$1)`,
+        [now],
+      ),
+    ).rejects.toThrow(/evidence tier/iu);
+    await expect(
+      database.query(
+        `INSERT INTO feedback_state_events(
+           id, feedback_id, version, from_status, to_status, severity, classification,
+           close_loop_state, reason_code, actor_kind, actor_person_id, evidence_tier, occurred_at
+         ) VALUES ('feedback-live-state-valid','feedback-live-authenticated',1,NULL,'received',
+           'unassessed','unclassified','not_requested','bounded_text_received','participant',
+           'person-feedback-live','live_production',$1)`,
+        [now],
+      ),
+    ).resolves.toBeDefined();
+
+    const triggers = await database.query<{ trigger_name: string }>(
+      `SELECT DISTINCT trigger_name FROM information_schema.triggers
+       WHERE trigger_name IN (
+         'feedback_state_evidence_tier_lineage',
+         'feedback_processing_evidence_tier_lineage',
+         'feedback_erasure_evidence_tier_lineage'
+       ) ORDER BY trigger_name`,
+    );
+    expect(triggers.rows.map((row) => row.trigger_name)).toEqual([
+      'feedback_erasure_evidence_tier_lineage',
+      'feedback_processing_evidence_tier_lineage',
+      'feedback_state_evidence_tier_lineage',
+    ]);
+  });
+
+  it('applies additive 0027 quota and Founding guards after a clean 0026 prefix', async () => {
+    const source = await migrationDirectory();
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-feedback-quota-migration-'));
+    const files = (await readdir(source))
+      .filter(
+        (file) =>
+          /^\d+_[a-z0-9_]+\.sql$/u.test(file) &&
+          file <= '0026_run3_1_production_founding_households.sql',
+      )
+      .sort((left, right) => left.localeCompare(right));
+    for (const file of files) {
+      await copyFile(join(source, file), join(temporaryDirectory, file));
+    }
+    database = await createPGliteDatabase();
+    await runMigrations(database, temporaryDirectory);
+    await copyFile(
+      join(source, '0027_run3_1_feedback_founding_quota.sql'),
+      join(temporaryDirectory, '0027_run3_1_feedback_founding_quota.sql'),
+    );
+    await expect(runMigrations(database, temporaryDirectory)).resolves.toEqual([
+      '0027_run3_1_feedback_founding_quota.sql',
+    ]);
+    const tables = await database.query<{ readonly table_name: string } & Record<string, unknown>>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_name IN (
+         'feedback_authenticated_quota_buckets',
+         'feedback_authenticated_quota_charges'
+       ) ORDER BY table_name`,
+    );
+    expect(tables.rows.map(({ table_name }) => table_name)).toEqual([
+      'feedback_authenticated_quota_buckets',
+      'feedback_authenticated_quota_charges',
+    ]);
+    const triggers = await database.query<
+      { readonly trigger_name: string } & Record<string, unknown>
+    >(
+      `SELECT DISTINCT trigger_name FROM information_schema.triggers
+       WHERE trigger_name IN (
+         'feedback_live_founding_access_guard',
+         'feedback_authenticated_quota_charges_immutable',
+         'feedback_authenticated_quota_buckets_guard'
+       ) ORDER BY trigger_name`,
+    );
+    expect(triggers.rows.map(({ trigger_name }) => trigger_name)).toEqual([
+      'feedback_authenticated_quota_buckets_guard',
+      'feedback_authenticated_quota_charges_immutable',
+      'feedback_live_founding_access_guard',
+    ]);
+  });
+
+  it('rejects a 0027 upgrade that would grandfather orphaned live feedback', async () => {
+    const source = await migrationDirectory();
+    temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-feedback-quota-orphan-'));
+    const files = (await readdir(source))
+      .filter(
+        (file) =>
+          /^\d+_[a-z0-9_]+\.sql$/u.test(file) &&
+          file <= '0026_run3_1_production_founding_households.sql',
+      )
+      .sort((left, right) => left.localeCompare(right));
+    for (const file of files) {
+      await copyFile(join(source, file), join(temporaryDirectory, file));
+    }
+    database = await createPGliteDatabase();
+    await runMigrations(database, temporaryDirectory);
+    const now = '2026-08-17T12:00:00.000Z';
+    await database.query(
+      `INSERT INTO persons(id, display_name, created_at)
+       VALUES ('person-feedback-orphan','Feedback Orphan',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO households(id, name, created_at)
+       VALUES ('household-feedback-orphan','Feedback Orphan',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO household_memberships(
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES ('household-feedback-orphan','membership-feedback-orphan',
+         'person-feedback-orphan','member','active',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO feedback_records(
+         id, schema_version, identity_mode, household_id, actor_person_id, source_surface,
+         device_class, feedback_type, correlation_id, evidence_tier, created_at
+       ) VALUES ('feedback-orphan-live',1,'authenticated','household-feedback-orphan',
+         'person-feedback-orphan','in_app_contextual','desktop','product_feedback',
+         'feedback-orphan-live','live_production',$1)`,
+      [now],
+    );
+    await copyFile(
+      join(source, '0027_run3_1_feedback_founding_quota.sql'),
+      join(temporaryDirectory, '0027_run3_1_feedback_founding_quota.sql'),
+    );
+    await expect(runMigrations(database, temporaryDirectory)).rejects.toThrow(
+      /Existing live feedback lacks an exact Founding Household entitlement/iu,
+    );
+    const applied = await database.query<{ readonly count: number } & Record<string, unknown>>(
+      `SELECT count(*)::integer AS count FROM schema_migrations
+       WHERE version = '0027_run3_1_feedback_founding_quota.sql'`,
+    );
+    expect(applied.rows).toEqual([{ count: 0 }]);
+  });
+
   it('enforces fresh-install retention and same-transaction erasure evidence at commit', async () => {
     database = await createPGliteDatabase();
     await runMigrations(database);

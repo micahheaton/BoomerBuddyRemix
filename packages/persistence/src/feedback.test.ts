@@ -8,6 +8,7 @@ import {
   type FeedbackIntakeRequest,
   type FeedbackProtection,
 } from './feedback';
+import { ProductionFeedbackFoundingFixture } from './feedback-production-fixture.test-helper';
 import type { IdFactory } from './values';
 
 const encryptionKey = Buffer.alloc(32, 37);
@@ -163,6 +164,7 @@ describe('feedback learning repository', () => {
     expect(claim).toMatchObject({
       feedbackId: created.id,
       queue: 'new_feedback',
+      routingState: 'assigned',
       assignmentVersion: 2,
       humanReviewRequired: true,
       reused: false,
@@ -217,6 +219,180 @@ describe('feedback learning repository', () => {
         now: fixedTestNow,
       }),
     ).resolves.toEqual([]);
+  });
+
+  it('keeps live authenticated feedback tenant-bound and visible only through the live founder review path', async () => {
+    const founding = await ProductionFeedbackFoundingFixture.create(database, fixedTestNow);
+    const enrollee = await founding.enroll('review-path');
+    const created = await repository.createAuthenticated({
+      householdId: enrollee.householdId,
+      actorPersonId: enrollee.actorPersonId,
+      request: request({
+        text: 'The Check explanation was difficult to understand.',
+        followUp: {
+          granted: true,
+          purpose: 'feedback_follow_up',
+          consentVersion: 'feedback-follow-up-v1',
+          channelClass: 'in_app',
+        },
+      }),
+      correlationId: 'feedback-live-production-create',
+      evidenceTier: 'live_production',
+      now: fixedTestNow,
+    });
+    expect(created).toMatchObject({
+      status: 'queued_unassigned',
+      evidenceTier: 'live_production',
+      providerProcessed: false,
+      externalActionExecuted: false,
+    });
+
+    const lineage = await database.query<{
+      record_tier: string;
+      state_tiers: unknown;
+      processing_tiers: unknown;
+    }>(
+      `SELECT record.evidence_tier AS record_tier,
+              (SELECT jsonb_agg(DISTINCT state.evidence_tier)
+               FROM feedback_state_events state
+               WHERE state.feedback_id = record.id) AS state_tiers,
+              (SELECT jsonb_agg(DISTINCT processing.evidence_tier)
+               FROM feedback_processing_jobs processing
+               WHERE processing.feedback_id = record.id) AS processing_tiers
+       FROM feedback_records record WHERE record.id = $1`,
+      [created.id],
+    );
+    expect(lineage.rows[0]).toEqual({
+      record_tier: 'live_production',
+      state_tiers: ['live_production'],
+      processing_tiers: ['live_production'],
+    });
+
+    await expect(
+      repository.roleScopedMetadata({
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-hidden-from-local-projection',
+        evidenceTier: 'local_simulation',
+        now: fixedTestNow,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.roleScopedMetadata({
+        actorPersonId: 'person-hq-riley',
+        correlationId: 'feedback-live-reviewer-unassigned-denied',
+        evidenceTier: 'live_production',
+        now: fixedTestNow,
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      repository.claimForReview({
+        feedbackId: created.id,
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-wrong-tier-claim',
+        evidenceTier: 'local_simulation',
+        now: fixedTestNow,
+      }),
+    ).rejects.toThrow(/unavailable/iu);
+    await expect(
+      repository.claimForReview({
+        feedbackId: 'feedback-guessed-production-id',
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-guessed-claim',
+        evidenceTier: 'live_production',
+        now: fixedTestNow,
+      }),
+    ).rejects.toThrow(/unavailable/iu);
+
+    const queue = await repository.roleScopedMetadata({
+      actorPersonId: 'person-hq-heidi',
+      correlationId: 'feedback-live-founder-queue',
+      evidenceTier: 'live_production',
+      now: fixedTestNow,
+    });
+    expect(queue).toEqual([
+      expect.objectContaining({
+        id: created.id,
+        householdId: enrollee.householdId,
+        evidenceTier: 'live_production',
+        selfClaimAvailable: true,
+        contentReadAuthorized: false,
+      }),
+    ]);
+    await repository.claimForReview({
+      feedbackId: created.id,
+      actorPersonId: 'person-hq-heidi',
+      correlationId: 'feedback-live-founder-claim',
+      evidenceTier: 'live_production',
+      now: fixedTestNow,
+    });
+    await expect(
+      repository.readAssignedMinimizedText({
+        feedbackId: created.id,
+        actorPersonId: 'person-hq-riley',
+        correlationId: 'feedback-live-wrong-role-read',
+        evidenceTier: 'live_production',
+        now: fixedTestNow,
+      }),
+    ).rejects.toThrow(/unavailable/iu);
+    await expect(
+      repository.readAssignedMinimizedText({
+        feedbackId: 'feedback-guessed-production-id',
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-guessed-read',
+        evidenceTier: 'live_production',
+        now: fixedTestNow,
+      }),
+    ).rejects.toThrow(/unavailable/iu);
+    await expect(
+      repository.readAssignedMinimizedText({
+        feedbackId: created.id,
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-founder-read',
+        evidenceTier: 'live_production',
+        now: fixedTestNow,
+      }),
+    ).resolves.toMatchObject({
+      feedbackId: created.id,
+      minimizedText: 'The Check explanation was difficult to understand.',
+      evidenceTier: 'live_production',
+      externalActionExecuted: false,
+    });
+
+    for (const hostileScope of [
+      { householdId: 'household-harbor', actorPersonId: enrollee.actorPersonId },
+      { householdId: enrollee.householdId, actorPersonId: 'person-protected-pat' },
+    ]) {
+      await expect(
+        repository.withdrawAuthenticatedConsent({
+          feedbackId: created.id,
+          ...hostileScope,
+          purpose: 'follow_up',
+          correlationId: `feedback-live-hostile-withdraw-${hostileScope.householdId}`,
+          evidenceTier: 'live_production',
+          now: new Date(fixedTestNow.getTime() + 30_000),
+        }),
+      ).rejects.toThrow(/authority/iu);
+    }
+    await expect(
+      repository.withdrawAuthenticatedConsent({
+        feedbackId: created.id,
+        householdId: enrollee.householdId,
+        actorPersonId: enrollee.actorPersonId,
+        purpose: 'follow_up',
+        correlationId: 'feedback-live-exact-withdraw',
+        evidenceTier: 'live_production',
+        now: new Date(fixedTestNow.getTime() + 30_000),
+      }),
+    ).resolves.toEqual({ withdrawn: true, activeStoreCiphertextErased: true });
+    await expect(
+      repository.readAssignedMinimizedText({
+        feedbackId: created.id,
+        actorPersonId: 'person-hq-heidi',
+        correlationId: 'feedback-live-read-after-withdrawal',
+        evidenceTier: 'live_production',
+        now: new Date(fixedTestNow.getTime() + 30_000),
+      }),
+    ).rejects.toThrow(/unavailable/iu);
   });
 
   it('quarantines every submitted reserved placeholder before minimization without retaining the submitted span', async () => {
@@ -1819,10 +1995,12 @@ describe('feedback learning repository', () => {
     });
   });
 
-  it('erases expired active-store ciphertext without backup or provider deletion claims', async () => {
+  it('erases expired live-production ciphertext without backup or provider deletion claims', async () => {
+    const founding = await ProductionFeedbackFoundingFixture.create(database, fixedTestNow);
+    const enrollee = await founding.enroll('retention');
     const created = await repository.createAuthenticated({
-      householdId: 'household-sunrise',
-      actorPersonId: 'person-owner-alice',
+      householdId: enrollee.householdId,
+      actorPersonId: enrollee.actorPersonId,
       request: request({
         researchRetention: {
           granted: true,
@@ -1832,6 +2010,7 @@ describe('feedback learning repository', () => {
         },
       }),
       correlationId: 'feedback-retention-create',
+      evidenceTier: 'live_production',
       now: fixedTestNow,
     });
     databaseAuthorityNow = new Date(fixedTestNow.getTime() + 61 * 60_000);
@@ -1845,17 +2024,21 @@ describe('feedback learning repository', () => {
       payload_state: string;
       encrypted_text: string | null;
       to_status: string;
+      state_evidence_tier: string;
       reason: string;
+      erasure_evidence_tier: string;
       consent_state: string;
     }>(
-      `SELECT payload.payload_state, payload.encrypted_text, state.to_status, erasure.reason,
+      `SELECT payload.payload_state, payload.encrypted_text, state.to_status,
+              state.evidence_tier AS state_evidence_tier, erasure.reason,
+              erasure.evidence_tier AS erasure_evidence_tier,
               (SELECT consent.state FROM feedback_consent_events consent
                WHERE consent.feedback_id = payload.feedback_id
                  AND consent.purpose = 'research_retention'
                ORDER BY consent.sequence DESC LIMIT 1) AS consent_state
        FROM feedback_payloads payload
        JOIN LATERAL (
-         SELECT event.to_status FROM feedback_state_events event
+         SELECT event.to_status, event.evidence_tier FROM feedback_state_events event
          WHERE event.feedback_id = payload.feedback_id ORDER BY event.version DESC LIMIT 1
        ) state ON true
        JOIN feedback_payload_erasure_events erasure ON erasure.feedback_id = payload.feedback_id
@@ -1866,13 +2049,16 @@ describe('feedback learning repository', () => {
       payload_state: 'payload_erased',
       encrypted_text: null,
       to_status: 'retention_expired',
+      state_evidence_tier: 'live_production',
       reason: 'retention_expired',
+      erasure_evidence_tier: 'live_production',
       consent_state: 'expired',
     });
     await expect(
       repository.roleScopedMetadata({
         actorPersonId: 'person-hq-heidi',
         correlationId: 'feedback-retention-expired-metadata',
+        evidenceTier: 'live_production',
         now: new Date('2050-01-01T00:00:00.000Z'),
       }),
     ).resolves.toEqual([
@@ -1888,6 +2074,7 @@ describe('feedback learning repository', () => {
         feedbackId: created.id,
         actorPersonId: 'person-hq-heidi',
         correlationId: 'feedback-retention-expired-content',
+        evidenceTier: 'live_production',
         now: fixedTestNow,
       }),
     ).rejects.toThrow('unavailable');
@@ -1895,15 +2082,18 @@ describe('feedback learning repository', () => {
       provider_processed: boolean;
       external_action_executed: boolean;
       result_code: string;
+      evidence_tier: string;
     }>(
-      'SELECT provider_processed, external_action_executed, result_code FROM feedback_processing_jobs',
+      `SELECT provider_processed, external_action_executed, result_code, evidence_tier
+       FROM feedback_processing_jobs`,
     );
     expect(
       receiptClaims.rows.every(
         (receipt) =>
           !receipt.provider_processed &&
           !receipt.external_action_executed &&
-          receipt.result_code === 'local_processing_not_run',
+          receipt.result_code === 'local_processing_not_run' &&
+          receipt.evidence_tier === 'live_production',
       ),
     ).toBe(true);
   });

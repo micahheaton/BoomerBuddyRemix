@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from './index';
+import { assertStripeOnlineRuntimePermitted, loadConfig } from './index';
 
 function developmentEnvironment(): NodeJS.ProcessEnv {
   return {
@@ -22,6 +22,34 @@ function developmentEnvironment(): NodeJS.ProcessEnv {
   };
 }
 
+function productionEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {
+    ...developmentEnvironment(),
+    NODE_ENV: 'production',
+    BB_TRUSTED_PROXY_HOPS: '0',
+    BB_DATABASE_DRIVER: 'postgres',
+    DATABASE_URL: 'postgresql://test.invalid/database?sslmode=require',
+    BB_RUN_MIGRATIONS: 'false',
+    BB_SEED_DEMO: 'false',
+    BB_ALLOW_DEV_IDENTITY: 'false',
+    BB_FOUNDER_PERSON_ID: 'person-founder-production',
+    BB_FOUNDER_CLERK_SUBJECT: 'user_founder_production',
+    BB_CUSTOMER_ORIGINS: 'https://customer.test',
+    BB_HQ_ORIGINS: 'https://hq.test',
+    BB_CLERK_CUSTOMER_ISSUER: 'https://customer.clerk.test',
+    BB_CLERK_CUSTOMER_AUDIENCE: 'boomerbuddy-customer',
+    BB_CLERK_CUSTOMER_JWT_KEY:
+      '-----BEGIN PUBLIC KEY-----\ncustomer-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_HQ_ISSUER: 'https://hq.clerk.test',
+    BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-hq',
+    BB_CLERK_HQ_JWT_KEY:
+      '-----BEGIN PUBLIC KEY-----\nhq-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS: '600',
+  };
+  delete environment.BB_SESSION_SECRET;
+  return environment;
+}
+
 describe('typed configuration', () => {
   it('parses local configuration and canonicalizes origin lists', () => {
     const config = loadConfig(developmentEnvironment());
@@ -35,6 +63,13 @@ describe('typed configuration', () => {
     expect(config.api.trustedProxyHops).toBe(0);
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
+    expect(config.messaging).toEqual({
+      twilio: {
+        mode: 'disabled',
+        runtimeNetworkPermitted: false,
+        credentialLoadingPermitted: false,
+      },
+    });
   });
 
   it('keeps demo bootstrap opt-in when the switch is omitted', () => {
@@ -57,38 +92,109 @@ describe('typed configuration', () => {
   });
 
   it.each([
+    'https://test.invalid/database?sslmode=require',
+    'postgresql://test.invalid/database',
+    'postgresql://test.invalid/database?sslmode=disable',
+    'postgresql://test.invalid/database?sslmode=allow',
+    'postgresql://test.invalid/database?sslmode=prefer',
+  ])('refuses an unsafe production PostgreSQL URL %s', (databaseUrl) => {
+    expect(() => loadConfig({ ...productionEnvironment(), DATABASE_URL: databaseUrl })).toThrow();
+  });
+
+  it('accepts production PostgreSQL certificate verification modes', () => {
+    expect(
+      loadConfig({
+        ...productionEnvironment(),
+        DATABASE_URL: 'postgresql://test.invalid/database?sslmode=verify-full',
+      }).database,
+    ).toMatchObject({ driver: 'postgres' });
+  });
+
+  it.each([
     ['BB_ALLOW_DEV_IDENTITY', 'true'],
     ['BB_DATABASE_DRIVER', 'pglite'],
     ['BB_SEED_DEMO', 'true'],
+    ['BB_RUN_MIGRATIONS', 'true'],
+    ['BB_TRUSTED_PROXY_HOPS', '1'],
+    ['BB_STRIPE_MODE', 'test'],
   ])('refuses unsafe production setting %s', (key, value) => {
-    expect(() =>
-      loadConfig({
-        ...developmentEnvironment(),
-        NODE_ENV: 'production',
-        BB_ALLOW_DEV_IDENTITY: 'false',
-        BB_DATABASE_DRIVER: 'postgres',
-        DATABASE_URL: 'postgresql://test.invalid/database',
-        BB_SEED_DEMO: 'false',
-        BB_CUSTOMER_ORIGINS: 'https://customer.test',
-        BB_HQ_ORIGINS: 'https://hq.test',
-        [key]: value,
-      }),
-    ).toThrow();
+    expect(() => loadConfig({ ...productionEnvironment(), [key]: value })).toThrow();
   });
 
-  it('refuses production even when development switches are disabled', () => {
+  it('accepts only complete disjoint production Clerk realms and explicit beta custody', () => {
+    const config = loadConfig(productionEnvironment());
+    expect(config.identity.clerk).toMatchObject({
+      customer: {
+        issuer: 'https://customer.clerk.test',
+        audience: 'boomerbuddy-customer',
+        authorizedParties: ['https://customer.test'],
+      },
+      hq: {
+        issuer: 'https://hq.clerk.test',
+        audience: 'boomerbuddy-hq',
+        authorizedParties: ['https://hq.test'],
+        maxSecondFactorAgeSeconds: 600,
+      },
+      founderSubject: 'user_founder_production',
+    });
+    expect(config.secrets.custodyClassification).toBe('replit_runtime_secret_beta');
+    expect(config.secrets.session.byteLength).toBe(0);
+    expect(config.database).toMatchObject({
+      driver: 'postgres',
+      runMigrations: false,
+      seedDemo: false,
+    });
+
+    for (const field of [
+      'BB_FOUNDER_PERSON_ID',
+      'BB_FOUNDER_CLERK_SUBJECT',
+      'BB_CLERK_CUSTOMER_ISSUER',
+      'BB_CLERK_CUSTOMER_AUDIENCE',
+      'BB_CLERK_CUSTOMER_JWT_KEY',
+      'BB_CLERK_HQ_ISSUER',
+      'BB_CLERK_HQ_AUDIENCE',
+      'BB_CLERK_HQ_JWT_KEY',
+    ] as const) {
+      const environment = productionEnvironment();
+      delete environment[field];
+      expect(() => loadConfig(environment)).toThrow('complete customer, HQ, and founder Clerk');
+    }
     expect(() =>
       loadConfig({
-        ...developmentEnvironment(),
-        NODE_ENV: 'production',
-        BB_ALLOW_DEV_IDENTITY: 'false',
-        BB_DATABASE_DRIVER: 'postgres',
-        DATABASE_URL: 'postgresql://test.invalid/database',
-        BB_SEED_DEMO: 'false',
-        BB_CUSTOMER_ORIGINS: 'https://customer.test',
-        BB_HQ_ORIGINS: 'https://hq.test',
+        ...productionEnvironment(),
+        BB_CLERK_HQ_ISSUER: 'https://customer.clerk.test',
       }),
-    ).toThrow('refuses production startup');
+    ).toThrow('issuers must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-customer',
+      }),
+    ).toThrow('audiences must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_JWT_KEY: productionEnvironment().BB_CLERK_CUSTOMER_JWT_KEY,
+      }),
+    ).toThrow('verification keys must be distinct');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_SESSION_SECRET: 'unused-production-session-secret-value',
+      }),
+    ).toThrow('unused development session signing material');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_ISSUER: 'http://hq.clerk.test',
+      }),
+    ).toThrow('HTTPS issuer origin');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_HQ_JWT_KEY: 'not-a-pem-key',
+      }),
+    ).toThrow('bounded PEM public key');
   });
 
   it('refuses shared encryption/fingerprint keys and malformed origins', () => {
@@ -122,22 +228,127 @@ describe('typed configuration', () => {
     ).toThrow('must be disjoint');
   });
 
-  it('requires a complete test-only Stripe configuration when enabled', () => {
+  it('requires a complete environment-specific Stripe configuration when enabled', () => {
     expect(() => loadConfig({ ...developmentEnvironment(), BB_STRIPE_MODE: 'test' })).toThrow(
-      'complete test credentials',
+      'complete environment-specific credentials',
     );
     const config = loadConfig({
       ...developmentEnvironment(),
       BB_STRIPE_MODE: 'test',
-      BB_STRIPE_SECRET_KEY: 'sk_test_fixture_12345678',
-      BB_STRIPE_WEBHOOK_SECRET: 'whsec_fixture_12345678',
-      BB_STRIPE_API_VERSION: '2026-07-29.fixture',
-      BB_STRIPE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
-      BB_STRIPE_PLUS_MONTHLY_PRICE_ID: 'price_plus_month_fixture',
-      BB_STRIPE_PLUS_ANNUAL_PRICE_ID: 'price_plus_year_fixture',
-      BB_STRIPE_FAMILY_MONTHLY_PRICE_ID: 'price_family_month_fixture',
-      BB_STRIPE_FAMILY_ANNUAL_PRICE_ID: 'price_family_year_fixture',
+      BB_STRIPE_TEST_ACCOUNT_ID: 'acct_fixture1234',
+      BB_STRIPE_TEST_API_KEY: 'rk_test_fixture_12345678',
+      BB_STRIPE_TEST_WEBHOOK_SECRET: 'whsec_fixture_12345678',
+      BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
+      BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
+      BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
     });
-    expect(config.commerce.stripe).toMatchObject({ mode: 'test' });
+    expect(config.commerce.stripe).toMatchObject({
+      mode: 'test',
+      environment: 'test',
+      apiVersion: '2026-02-25.clover',
+      runtimeInitiationPermitted: true,
+      offer: {
+        offerId: 'founding_family_monthly_v1',
+        currency: 'usd',
+        unitAmountMinor: 1499,
+        quantity: 1,
+      },
+    });
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_STRIPE_MODE: 'test',
+        BB_STRIPE_TEST_ACCOUNT_ID: 'acct_fixture1234',
+        BB_STRIPE_TEST_API_KEY: 'sk_test_fixture_12345678',
+        BB_STRIPE_TEST_WEBHOOK_SECRET: 'whsec_fixture_12345678',
+        BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
+        BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
+        BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+      }),
+    ).toThrow('complete environment-specific credentials');
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_STRIPE_MODE: 'test',
+        BB_STRIPE_LIVE_ACCOUNT_ID: 'acct_livefixture1',
+      }),
+    ).toThrow('test mode refuses live Stripe configuration values');
+  });
+
+  it('refuses raw live secrets and inactive Stripe environment families in every mode', () => {
+    for (const [name, value] of [
+      ['BB_STRIPE_LIVE_API_KEY', 'sk_live_fixture_12345678'],
+      ['BB_STRIPE_LIVE_WEBHOOK_SECRET', 'whsec_live_fixture_12345678'],
+    ] as const) {
+      expect(() => loadConfig({ ...developmentEnvironment(), [name]: value })).toThrow(
+        'Live Stripe secrets cannot be loaded from raw environment keys',
+      );
+    }
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_STRIPE_TEST_ACCOUNT_ID: 'acct_fixture1234',
+      }),
+    ).toThrow('disabled mode refuses all Stripe configuration values');
+  });
+
+  it('refuses every Twilio mode, credential, and callback value', () => {
+    expect(() => loadConfig({ ...developmentEnvironment(), BB_TWILIO_MODE: 'test' })).toThrow();
+    for (const [name, value] of [
+      ['BB_TWILIO_ACCOUNT_SID', 'AC_fixture'],
+      ['BB_TWILIO_AUTH_TOKEN', 'synthetic-token'],
+      ['BB_TWILIO_MESSAGING_SERVICE_SID', 'MG_fixture'],
+      ['BB_TWILIO_TOLL_FREE_NUMBER_SID', 'PN_fixture'],
+      ['BB_TWILIO_INBOUND_WEBHOOK_BASE_URL', 'https://example.invalid/twilio'],
+      ['BB_TWILIO_STATUS_CALLBACK_BASE_URL', 'https://example.invalid/status'],
+    ] as const) {
+      expect(() => loadConfig({ ...developmentEnvironment(), [name]: value })).toThrow(
+        'Twilio configuration and credentials are refused',
+      );
+    }
+  });
+
+  it('accepts reviewed test keys and keeps live configuration offline without raw secrets', () => {
+    const commonLive = {
+      ...developmentEnvironment(),
+      BB_STRIPE_MODE: 'live',
+      BB_STRIPE_LIVE_ACCOUNT_ID: 'acct_livefixture1',
+      BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_live_cancel_fixture',
+      BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: 'prod_live_family_fixture',
+      BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: 'price_live_family_fixture',
+    };
+    expect(() =>
+      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'sk_live_fixture_12345678' }),
+    ).toThrow('raw environment keys');
+    expect(() =>
+      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'rk_test_fixture_12345678' }),
+    ).toThrow('raw environment keys');
+    const liveConfig = loadConfig(commonLive);
+    expect(liveConfig.commerce.stripe).toMatchObject({
+      mode: 'live',
+      environment: 'production',
+      runtimeInitiationPermitted: false,
+      runtimeNetworkPermitted: false,
+      credentialCustody: 'managed_identity_kms_unavailable',
+      requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
+    });
+    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'api')).toThrow(
+      'offline-only; api startup is refused',
+    );
+    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'worker')).toThrow(
+      'offline-only; worker startup is refused',
+    );
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+      }),
+    ).toThrow('raw environment keys');
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        BB_STRIPE_TEST_ACCOUNT_ID: 'acct_fixture1234',
+      }),
+    ).toThrow('live mode refuses test Stripe configuration values');
   });
 });

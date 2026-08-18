@@ -11,6 +11,7 @@ import {
   assertMutationOrigin,
   assertTrustedOrigin,
   authenticate,
+  clerkSessionCookieName,
   customerCookieName,
   hqCookieName,
   principalDto,
@@ -112,8 +113,17 @@ export function registerSessionRoutes(app: FastifyInstance, context: ApiContext)
     );
     assertMutationOrigin(request, context.config, auth);
     await context.repositories.sessions.revoke(auth.resolved.principal.sessionId, now);
-    if (auth.audience === 'customer') reply.clearCookie(customerCookieName, { path: '/' });
-    if (auth.audience === 'hq') reply.clearCookie(hqCookieName, { path: '/' });
+    if (context.config.environment === 'production') {
+      reply.clearCookie(clerkSessionCookieName, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: true,
+        path: '/',
+      });
+    } else {
+      if (auth.audience === 'customer') reply.clearCookie(customerCookieName, { path: '/' });
+      if (auth.audience === 'hq') reply.clearCookie(hqCookieName, { path: '/' });
+    }
     return reply.code(204).send();
   });
 }

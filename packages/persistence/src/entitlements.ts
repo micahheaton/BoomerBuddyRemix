@@ -393,8 +393,15 @@ export async function hasEffectiveProtectedEnrollment(
   personId: string,
   now: Date,
   lock = false,
+  runtimeEnvironment: EntitlementRuntimeEnvironment = 'local',
 ): Promise<boolean> {
-  const entitlements = await loadHouseholdEntitlements(executor, householdId, now, lock);
+  const entitlements = await loadHouseholdEntitlements(
+    executor,
+    householdId,
+    now,
+    lock,
+    runtimeEnvironment,
+  );
   const enrollment = await protectedEnrollment(executor, householdId, personId, lock);
   return (
     enrollment !== null &&
@@ -404,29 +411,116 @@ export async function hasEffectiveProtectedEnrollment(
   );
 }
 
+export type EntitlementRuntimeEnvironment = 'local' | 'production';
+
 async function loadHouseholdEntitlements(
   executor: SqlExecutor,
   householdId: string,
   now: Date,
   lockSubscriptions = false,
+  runtimeEnvironment: EntitlementRuntimeEnvironment = 'local',
 ): Promise<HouseholdEntitlements> {
   const commerce = await executor.query<CommerceRow>(
     `SELECT
        s.id AS subscription_id, s.source, s.lifecycle, s.source_verified, s.precedence,
        s.current_period_starts_at, s.current_period_ends_at, s.reconciliation_state,
-       CASE WHEN s.source <> 'sponsor' THEN true ELSE EXISTS (
-         SELECT 1 FROM entitlement_grants sg
-         JOIN commerce_sponsorship_allocations sa
-           ON sa.household_id = sg.household_id AND sa.id = sg.sponsorship_id
-         JOIN commerce_sponsorships sp ON sp.id = sa.sponsorship_id
-         JOIN organizations o ON o.id = sp.organization_id
-         WHERE sg.household_id = s.household_id AND sg.subscription_id = s.id
-           AND sa.state = 'active' AND sa.source_verified = true
-           AND sa.starts_at <= $2 AND (sa.ends_at IS NULL OR sa.ends_at > $2)
-           AND sp.state = 'active' AND sp.starts_at <= $2
-           AND (sp.ends_at IS NULL OR sp.ends_at > $2)
-           AND o.verification_state IN ('local_fixture','verified')
-         ) END AS sponsor_backing_verified,
+       CASE
+         WHEN EXISTS (
+           SELECT 1 FROM founding_household_enrollments f
+           WHERE f.household_id = s.household_id AND f.subscription_id = s.id
+         ) THEN EXISTS (
+           SELECT 1
+           FROM founding_household_enrollments f
+           JOIN founding_household_sponsor_backings fb
+             ON fb.cohort_key = f.cohort_key AND fb.environment = f.environment
+            AND fb.benefit_key = f.benefit_key AND fb.sponsorship_id = f.sponsorship_id
+            AND fb.plan_version_id = f.plan_version_id
+           JOIN commerce_sponsorships sp
+             ON sp.id = f.sponsorship_id AND sp.organization_id = fb.organization_id
+            AND sp.plan_version_id = f.plan_version_id
+           JOIN organizations o ON o.id = fb.organization_id
+           JOIN commerce_plan_versions fpv ON fpv.id = f.plan_version_id
+           JOIN commerce_sponsorship_allocations sa
+             ON sa.household_id = f.household_id AND sa.id = f.sponsorship_allocation_id
+            AND sa.sponsorship_id = f.sponsorship_id AND sa.plan_version_id = f.plan_version_id
+           JOIN entitlement_grants sg
+             ON sg.household_id = f.household_id AND sg.id = f.entitlement_grant_id
+            AND sg.subscription_id = f.subscription_id
+            AND sg.sponsorship_id = f.sponsorship_allocation_id
+            AND sg.plan_version_id = f.plan_version_id
+           JOIN consent_current_projections service_consent
+             ON service_consent.household_id = f.household_id
+            AND service_consent.consent_id = f.service_consent_id
+           JOIN consent_evidence service_evidence
+             ON service_evidence.household_id = service_consent.household_id
+            AND service_evidence.consent_id = service_consent.consent_id
+            AND service_evidence.id = service_consent.latest_evidence_id
+           WHERE f.household_id = s.household_id AND f.subscription_id = s.id
+             AND f.environment = $3 AND f.state = 'active' AND f.revoked_at IS NULL
+             AND f.starts_at <= $2 AND f.ends_at > $2
+             AND fb.evidence_tier = CASE
+               WHEN $3 = 'production' THEN 'live_production'
+               ELSE 'local_simulation'
+             END
+             AND sp.state = 'active' AND sp.starts_at <= $2
+             AND (sp.ends_at IS NULL OR sp.ends_at > $2)
+             AND (sp.ends_at IS NULL OR sp.ends_at >= f.ends_at)
+             AND o.kind = 'sponsor'
+             AND o.verification_state = CASE
+               WHEN $3 = 'production' THEN 'verified'
+               ELSE 'local_fixture'
+             END
+              AND fpv.state = 'active'
+              AND s.payer_person_id IS NULL AND s.source = 'sponsor'
+              AND s.source_verified = true
+             AND s.lifecycle = 'active'
+             AND s.reconciliation_state = 'not_required'
+             AND s.plan_version_id = f.plan_version_id
+             AND s.current_period_starts_at = f.starts_at
+             AND s.current_period_ends_at = f.ends_at
+             AND s.ended_at IS NULL
+             AND sa.state = 'active' AND sa.source_verified = true
+             AND sa.starts_at = f.starts_at AND sa.ends_at = f.ends_at
+             AND sg.source = 'sponsor' AND sg.source_verified = true
+             AND sg.starts_at = f.starts_at AND sg.ends_at = f.ends_at
+             AND sg.revoked_at IS NULL AND sg.capabilities = fpv.capabilities
+             AND service_consent.state = 'active'
+             AND service_consent.purpose = 'founding_household_service_beta'
+             AND service_consent.actor_person_id = f.accepted_by_person_id
+             AND service_consent.subject_person_id = f.accepted_by_person_id
+             AND service_consent.effective_at = f.starts_at
+             AND service_consent.expires_at = f.ends_at
+             AND service_consent.updated_at = f.starts_at
+             AND service_consent.scope @> jsonb_build_object(
+               'benefitKey', f.benefit_key,
+               'cohortKey', f.cohort_key,
+               'followUpConsent', false,
+               'marketingConsent', false,
+               'researchConsent', false
+             )
+             AND service_evidence.action = 'accept'
+             AND service_evidence.effective_at = f.starts_at
+             AND service_evidence.expires_at = f.ends_at
+             AND service_evidence.recorded_at = f.starts_at
+             AND service_evidence.session_id = f.accepted_session_id
+             AND service_evidence.supersedes_evidence_id IS NULL
+              AND service_evidence.scope = service_consent.scope
+          )
+         WHEN s.source <> 'sponsor' THEN true
+         ELSE EXISTS (
+           SELECT 1 FROM entitlement_grants sg
+           JOIN commerce_sponsorship_allocations sa
+             ON sa.household_id = sg.household_id AND sa.id = sg.sponsorship_id
+           JOIN commerce_sponsorships sp ON sp.id = sa.sponsorship_id
+           JOIN organizations o ON o.id = sp.organization_id
+           WHERE sg.household_id = s.household_id AND sg.subscription_id = s.id
+             AND sa.state = 'active' AND sa.source_verified = true
+             AND sa.starts_at <= $2 AND (sa.ends_at IS NULL OR sa.ends_at > $2)
+             AND sp.state = 'active' AND sp.starts_at <= $2
+             AND (sp.ends_at IS NULL OR sp.ends_at > $2)
+             AND o.verification_state IN ('local_fixture','verified')
+         )
+       END AS sponsor_backing_verified,
        CASE WHEN s.source = 'sponsor' THEN EXISTS (
          SELECT 1 FROM entitlement_grants lg
          JOIN commerce_sponsorship_allocations la
@@ -451,16 +545,137 @@ async function loadHouseholdEntitlements(
      FROM commerce_subscriptions s
      JOIN commerce_plan_versions pv ON pv.id = s.plan_version_id
      JOIN commerce_product_versions p ON p.id = pv.product_version_id
-     WHERE s.household_id = $1 ORDER BY s.precedence DESC, s.id${
-       lockSubscriptions ? ' FOR UPDATE OF s' : ''
-     }`,
-    [householdId, now.toISOString()],
+     WHERE s.household_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM founding_household_enrollments founding
+         WHERE founding.household_id = s.household_id
+           AND founding.subscription_id = s.id
+           AND founding.environment <> $3
+       )
+     ORDER BY s.precedence DESC, s.id${lockSubscriptions ? ' FOR UPDATE OF s' : ''}`,
+    [householdId, now.toISOString(), runtimeEnvironment],
   );
   const grantRows = await executor.query<GrantRow>(
-    `SELECT household_id, id, source, capabilities, starts_at, ends_at, revoked_at,
-            source_verified, precedence, plan_version_id, subscription_id, sponsorship_id
-     FROM entitlement_grants WHERE household_id = $1 ORDER BY precedence DESC, id`,
-    [householdId],
+    `SELECT grant_record.household_id, grant_record.id, grant_record.source,
+            grant_record.capabilities, grant_record.starts_at, grant_record.ends_at,
+            grant_record.revoked_at, grant_record.source_verified, grant_record.precedence,
+            grant_record.plan_version_id, grant_record.subscription_id,
+            grant_record.sponsorship_id
+      FROM entitlement_grants grant_record
+      WHERE grant_record.household_id = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM founding_household_enrollments founding
+          WHERE founding.household_id = grant_record.household_id
+            AND (
+              founding.entitlement_grant_id = grant_record.id
+              OR founding.subscription_id = grant_record.subscription_id
+            )
+            AND founding.environment <> $2
+        )
+        AND (
+          NOT EXISTS (
+            SELECT 1 FROM founding_household_enrollments founding
+            WHERE founding.household_id = grant_record.household_id
+              AND (
+                founding.entitlement_grant_id = grant_record.id
+                OR founding.subscription_id = grant_record.subscription_id
+              )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM founding_household_enrollments founding
+            JOIN founding_household_sponsor_backings backing
+              ON backing.cohort_key = founding.cohort_key
+             AND backing.environment = founding.environment
+             AND backing.benefit_key = founding.benefit_key
+             AND backing.sponsorship_id = founding.sponsorship_id
+             AND backing.plan_version_id = founding.plan_version_id
+            JOIN commerce_sponsorships sponsorship
+              ON sponsorship.id = founding.sponsorship_id
+             AND sponsorship.organization_id = backing.organization_id
+             AND sponsorship.plan_version_id = founding.plan_version_id
+            JOIN organizations organization ON organization.id = backing.organization_id
+            JOIN commerce_plan_versions plan ON plan.id = founding.plan_version_id
+            JOIN commerce_subscriptions subscription
+              ON subscription.household_id = founding.household_id
+             AND subscription.id = founding.subscription_id
+            JOIN commerce_sponsorship_allocations allocation
+              ON allocation.household_id = founding.household_id
+             AND allocation.id = founding.sponsorship_allocation_id
+             AND allocation.sponsorship_id = founding.sponsorship_id
+             AND allocation.plan_version_id = founding.plan_version_id
+            JOIN consent_current_projections service_consent
+              ON service_consent.household_id = founding.household_id
+             AND service_consent.consent_id = founding.service_consent_id
+            JOIN consent_evidence service_evidence
+              ON service_evidence.household_id = service_consent.household_id
+             AND service_evidence.consent_id = service_consent.consent_id
+             AND service_evidence.id = service_consent.latest_evidence_id
+            WHERE founding.household_id = grant_record.household_id
+              AND founding.entitlement_grant_id = grant_record.id
+              AND founding.environment = $2
+              AND founding.state = 'active' AND founding.revoked_at IS NULL
+              AND founding.starts_at <= $3 AND founding.ends_at > $3
+              AND backing.evidence_tier = CASE
+                WHEN $2 = 'production' THEN 'live_production'
+                ELSE 'local_simulation'
+              END
+              AND sponsorship.state = 'active' AND sponsorship.starts_at <= $3
+              AND (sponsorship.ends_at IS NULL OR sponsorship.ends_at > $3)
+              AND (sponsorship.ends_at IS NULL OR sponsorship.ends_at >= founding.ends_at)
+              AND organization.kind = 'sponsor'
+              AND organization.verification_state = CASE
+                WHEN $2 = 'production' THEN 'verified'
+                ELSE 'local_fixture'
+              END
+              AND plan.state = 'active'
+              AND subscription.payer_person_id IS NULL
+              AND subscription.source = 'sponsor'
+              AND subscription.source_verified = true
+              AND subscription.lifecycle = 'active'
+              AND subscription.reconciliation_state = 'not_required'
+              AND subscription.plan_version_id = founding.plan_version_id
+              AND subscription.current_period_starts_at = founding.starts_at
+              AND subscription.current_period_ends_at = founding.ends_at
+              AND subscription.ended_at IS NULL
+              AND allocation.state = 'active' AND allocation.source_verified = true
+              AND allocation.starts_at = founding.starts_at
+              AND allocation.ends_at = founding.ends_at
+              AND grant_record.source = 'sponsor' AND grant_record.source_verified = true
+              AND grant_record.subscription_id = founding.subscription_id
+              AND grant_record.sponsorship_id = founding.sponsorship_allocation_id
+              AND grant_record.plan_version_id = founding.plan_version_id
+              AND grant_record.starts_at = founding.starts_at
+              AND grant_record.ends_at = founding.ends_at
+              AND grant_record.revoked_at IS NULL
+              AND grant_record.capabilities = plan.capabilities
+              AND service_consent.state = 'active'
+              AND service_consent.purpose = 'founding_household_service_beta'
+              AND service_consent.actor_person_id = founding.accepted_by_person_id
+              AND service_consent.subject_person_id = founding.accepted_by_person_id
+              AND service_consent.effective_at = founding.starts_at
+              AND service_consent.expires_at = founding.ends_at
+              AND service_consent.updated_at = founding.starts_at
+              AND service_consent.scope @> jsonb_build_object(
+                'benefitKey', founding.benefit_key,
+                'cohortKey', founding.cohort_key,
+                'followUpConsent', false,
+                'marketingConsent', false,
+                'researchConsent', false
+              )
+              AND service_evidence.action = 'accept'
+              AND service_evidence.effective_at = founding.starts_at
+              AND service_evidence.expires_at = founding.ends_at
+              AND service_evidence.recorded_at = founding.starts_at
+              AND service_evidence.session_id = founding.accepted_session_id
+              AND service_evidence.supersedes_evidence_id IS NULL
+              AND service_evidence.scope = service_consent.scope
+          )
+        )
+      ORDER BY grant_record.precedence DESC, grant_record.id${
+        lockSubscriptions ? ' FOR UPDATE OF grant_record' : ''
+      }`,
+    [householdId, runtimeEnvironment, now.toISOString()],
   );
   const grants = grantRows.rows.map(grantFromRow);
   const subject = { kind: 'household' as const, householdId: ids.household(householdId) };
@@ -548,6 +763,7 @@ export async function rebindCommerceAllowanceToEffectiveGrant(
     readonly subjectKind: 'protected_member' | 'trusted_circle_person';
     readonly subjectId: string;
     readonly now: Date;
+    readonly runtimeEnvironment?: EntitlementRuntimeEnvironment;
   },
 ): Promise<'not_found' | 'already_effective' | 'rebound'> {
   const entitlements = await loadHouseholdEntitlements(
@@ -555,6 +771,7 @@ export async function rebindCommerceAllowanceToEffectiveGrant(
     input.householdId,
     input.now,
     true,
+    input.runtimeEnvironment ?? 'local',
   );
   const allocationResult = await executor.query<AllowanceAllocationRow>(
     `SELECT id, entitlement_grant_id
@@ -599,6 +816,8 @@ export async function reconcileTrustedCircleAllowanceBindings(
   input: {
     readonly householdId: string;
     readonly now: Date;
+    readonly runtimeEnvironment?: EntitlementRuntimeEnvironment;
+    readonly onlyFromGrantId?: string;
   },
 ): Promise<{ readonly rebound: number }> {
   const entitlements = await loadHouseholdEntitlements(
@@ -606,6 +825,7 @@ export async function reconcileTrustedCircleAllowanceBindings(
     input.householdId,
     input.now,
     true,
+    input.runtimeEnvironment ?? 'local',
   );
   const counter = entitlements.portfolio.allowances.find(
     (allowance) => allowance.kind === 'trusted_circle_participants',
@@ -640,7 +860,12 @@ export async function reconcileTrustedCircleAllowanceBindings(
   );
   const contributingGrantIds = new Set<string>(entitlements.portfolio.contributingGrantIds);
   const stale = allocations.rows
-    .filter((allocation) => !contributingGrantIds.has(allocation.entitlement_grant_id))
+    .filter(
+      (allocation) =>
+        !contributingGrantIds.has(allocation.entitlement_grant_id) &&
+        (input.onlyFromGrantId === undefined ||
+          allocation.entitlement_grant_id === input.onlyFromGrantId),
+    )
     .slice(0, counter.remaining);
   for (const allocation of stale) {
     const rebound = await executor.query(
@@ -663,6 +888,9 @@ export async function reconcileProtectedMemberAllowanceBindings(
   input: {
     readonly householdId: string;
     readonly now: Date;
+    readonly runtimeEnvironment?: EntitlementRuntimeEnvironment;
+    readonly allowPartialRebinding?: boolean;
+    readonly onlyFromGrantId?: string;
   },
 ): Promise<{ readonly rebound: number }> {
   const entitlements = await loadHouseholdEntitlements(
@@ -670,6 +898,7 @@ export async function reconcileProtectedMemberAllowanceBindings(
     input.householdId,
     input.now,
     true,
+    input.runtimeEnvironment ?? 'local',
   );
   const counter = entitlements.portfolio.allowances.find(
     (allowance) => allowance.kind === 'protected_members',
@@ -702,11 +931,17 @@ export async function reconcileProtectedMemberAllowanceBindings(
   );
   const contributingGrantIds = new Set<string>(entitlements.portfolio.contributingGrantIds);
   const stale = allocations.rows.filter(
-    (allocation) => !contributingGrantIds.has(allocation.entitlement_grant_id),
+    (allocation) =>
+      !contributingGrantIds.has(allocation.entitlement_grant_id) &&
+      (input.onlyFromGrantId === undefined ||
+        allocation.entitlement_grant_id === input.onlyFromGrantId),
   );
-  if (stale.length === 0 || stale.length > counter.remaining) return { rebound: 0 };
+  if (stale.length === 0 || (!input.allowPartialRebinding && stale.length > counter.remaining)) {
+    return { rebound: 0 };
+  }
+  const eligible = input.allowPartialRebinding ? stale.slice(0, counter.remaining) : stale;
   const replacementGrantId = availableAllowanceGrantId(entitlements, 'protected_members');
-  for (const allocation of stale) {
+  for (const allocation of eligible) {
     const rebound = await executor.query(
       `UPDATE commerce_allowance_allocations
        SET entitlement_grant_id = $3
@@ -718,7 +953,7 @@ export async function reconcileProtectedMemberAllowanceBindings(
       throw new DomainError('conflict', 'Protected-member allowance reconciliation failed');
     }
   }
-  return { rebound: stale.length };
+  return { rebound: eligible.length };
 }
 
 export async function allocateCommerceAllowance(
@@ -730,6 +965,7 @@ export async function allocateCommerceAllowance(
     readonly subjectKind: 'protected_member' | 'trusted_circle_person';
     readonly subjectId: string;
     readonly now: Date;
+    readonly runtimeEnvironment?: EntitlementRuntimeEnvironment;
   },
 ): Promise<void> {
   const entitlements = await loadHouseholdEntitlements(
@@ -737,6 +973,7 @@ export async function allocateCommerceAllowance(
     input.householdId,
     input.now,
     true,
+    input.runtimeEnvironment ?? 'local',
   );
   const grantId = availableAllowanceGrantId(entitlements, input.kind);
   await executor.query(
@@ -778,10 +1015,17 @@ export class EntitlementRepository {
   constructor(
     private readonly database: Database,
     private readonly idFactory: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
   ) {}
 
   forHousehold(householdId: string, now: Date): Promise<HouseholdEntitlements> {
-    return loadHouseholdEntitlements(this.database, householdId, now);
+    return loadHouseholdEntitlements(
+      this.database,
+      householdId,
+      now,
+      false,
+      this.runtimeEnvironment,
+    );
   }
 
   allocate(input: {
@@ -795,6 +1039,7 @@ export class EntitlementRepository {
       allocateCommerceAllowance(transaction, {
         ...input,
         allocationId: this.idFactory.next('allocation'),
+        runtimeEnvironment: this.runtimeEnvironment,
       }),
     );
   }
@@ -821,7 +1066,13 @@ export class EntitlementRepository {
       if (membership.rows.length !== 1) {
         throw new DomainError('not_authorized', 'An active household membership is required');
       }
-      await loadHouseholdEntitlements(transaction, input.householdId, input.now, true);
+      await loadHouseholdEntitlements(
+        transaction,
+        input.householdId,
+        input.now,
+        true,
+        this.runtimeEnvironment,
+      );
       const current = await protectedEnrollment(
         transaction,
         input.householdId,
@@ -835,6 +1086,7 @@ export class EntitlementRepository {
           subjectKind: 'protected_member',
           subjectId: input.personId,
           now: input.now,
+          runtimeEnvironment: this.runtimeEnvironment,
         });
         return {
           householdId: input.householdId,
@@ -853,6 +1105,7 @@ export class EntitlementRepository {
         subjectKind: 'protected_member',
         subjectId: input.personId,
         now: input.now,
+        runtimeEnvironment: this.runtimeEnvironment,
       });
       const actorIdentity = await identityEvidenceForPerson(
         transaction,

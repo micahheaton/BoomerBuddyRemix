@@ -1,10 +1,11 @@
 import type { Metadata } from 'next';
 import { cssVariableText } from '@boomerbuddy/design';
+import { IdentityProvider } from '../components/identity-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'BoomerBuddy HQ — owner control plane',
-  description: 'Local and imported operating evidence for BoomerBuddy owner decisions.',
+  description: 'Role-scoped operating evidence for BoomerBuddy owner decisions.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -14,10 +15,12 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <style dangerouslySetInnerHTML={{ __html: cssVariableText() }} />
       </head>
       <body>
-        <a className="skip-link" href="#hq-main">
-          Skip to main content
-        </a>
-        {children}
+        <IdentityProvider>
+          <a className="skip-link" href="#hq-main">
+            Skip to main content
+          </a>
+          {children}
+        </IdentityProvider>
       </body>
     </html>
   );

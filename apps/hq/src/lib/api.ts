@@ -1,6 +1,9 @@
 import type { ErrorEnvelope } from '@boomerbuddy/contracts';
 
-const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:4000';
+const baseUrl =
+  process.env.NODE_ENV === 'production'
+    ? '/api'
+    : (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:4000');
 
 export class HqApiError extends Error {
   constructor(

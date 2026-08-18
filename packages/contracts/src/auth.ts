@@ -16,6 +16,7 @@ export const devPersonaIdSchema = z.enum([
   'protected-olivia',
   'hq-heidi',
   'hq-riley',
+  'hq-sam',
 ]);
 
 export const devSessionRequestSchema = z.object({ personaId: devPersonaIdSchema }).strict();

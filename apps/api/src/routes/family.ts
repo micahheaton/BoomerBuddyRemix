@@ -63,6 +63,38 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
     assertMutationOrigin(request, context.config, auth);
     const household = selectedHousehold(auth, request);
     const body = createInvitationRequestSchema.parse(request.body);
+    let intendedIdentity;
+    let inviteeDisplayName = body.inviteeDisplayName;
+    if (context.config.environment === 'production') {
+      const customerRealm = context.config.identity.clerk?.customer;
+      if (customerRealm === undefined || body.intendedCustomerSubject === undefined) {
+        throw new DomainError(
+          'invalid_input',
+          'An exact configured customer identity subject is required',
+        );
+      }
+      const bootstrap =
+        await context.repositories.productionIdentities.findCustomerBootstrapBySubject({
+          issuer: customerRealm.issuer,
+          subject: body.intendedCustomerSubject,
+        });
+      if (bootstrap === null) {
+        throw new DomainError('not_found', 'The intended customer identity is unavailable');
+      }
+      if (bootstrap.personId === auth.principal.personId) {
+        throw new DomainError(
+          'invalid_input',
+          'A protected member cannot invite their own identity',
+        );
+      }
+      intendedIdentity = { issuer: bootstrap.issuer, subject: bootstrap.subject };
+      inviteeDisplayName = bootstrap.displayName;
+    } else if (body.intendedCustomerSubject !== undefined) {
+      throw new DomainError(
+        'invalid_input',
+        'Local invitations do not accept a production identity subject',
+      );
+    }
     assertAuthorized({
       principal: auth.principal,
       action: 'family:invite',
@@ -79,10 +111,11 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       householdId: household.householdId,
       invitedByPersonId: auth.principal.personId,
       protectedPersonId: auth.principal.personId,
-      inviteeDisplayName: body.inviteeDisplayName,
+      inviteeDisplayName,
       permissions: body.permissions,
       audience: auth.audience,
       actorIssuer: auth.resolved.principal.issuer,
+      ...(intendedIdentity === undefined ? {} : { intendedIdentity }),
       sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
@@ -96,7 +129,8 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
           createdAt: result.invitation.createdAt.toISOString(),
         },
         localInviteCode: result.localInviteCode,
-        delivery: 'local_only',
+        delivery:
+          context.config.environment === 'production' ? 'recipient_manual_only' : 'local_only',
       }),
     );
   });

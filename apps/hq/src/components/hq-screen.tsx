@@ -5,21 +5,31 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type {
   BrowserSessionResponse,
   DevPersonaId,
+  HqReviewQueueResponse,
   HqRevenueResponse,
+  HqSupportQueueResponse,
   MeResponse,
   PrivacyRequestDto,
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
 import { BusinessOsContent, type BusinessOsView } from './business-os';
+import { FeedbackLearning } from './feedback-learning';
+import { FounderProvisioning } from './founder-provisioning';
+import { FoundingHouseholds } from './founding-households';
+import { ProductionHqSignOut } from './production-identity';
 import { hqRequest, readableError } from '../lib/api';
 
 export type HqView =
   | 'overview'
   | 'customers'
   | 'fraud'
+  | 'support'
   | 'revenue'
   | 'system'
   | 'privacy'
+  | 'feedback'
+  | 'provisioning'
+  | 'founding-households'
   | Exclude<BusinessOsView, 'owner'>;
 type HouseholdResponse = {
   households: Array<{
@@ -28,8 +38,9 @@ type HouseholdResponse = {
     memberCount: number;
     orientationReadyCount: number;
     entitlementState: 'active' | 'inactive';
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
+  truncated: boolean;
 };
 type ChecksResponse = {
   checks: Array<{
@@ -39,7 +50,7 @@ type ChecksResponse = {
     risk: string;
     providerState: string;
     createdAt: string;
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
 };
 type ProvidersResponse = {
@@ -48,7 +59,7 @@ type ProvidersResponse = {
     state: string;
     lastCheckedAt: string;
     detail: string;
-    dataState: 'local_development';
+    dataState: 'local_development' | 'live_database';
   }>;
 };
 type AuditResponse = {
@@ -63,19 +74,29 @@ type AuditResponse = {
   }>;
 };
 
+const productionRuntime = process.env.NODE_ENV === 'production';
+
 const titles: Record<HqView, { title: string; subtitle: string }> = {
   overview: {
     title: 'Owner operating view',
-    subtitle: 'Local and explicitly imported evidence only. Nothing here is production evidence.',
+    subtitle: productionRuntime
+      ? 'Private-beta database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
+      : 'Local and explicitly imported evidence only. Nothing here is production evidence.',
   },
   customers: {
     title: 'Customers and access',
-    subtitle: 'Household, orientation, and entitlement summaries from local development data.',
+    subtitle: productionRuntime
+      ? 'Bounded household, orientation, and entitlement summaries from the private-beta database.'
+      : 'Household, orientation, and entitlement summaries from local development data.',
   },
   fraud: {
     title: 'Fraud and review',
     subtitle:
       'Operational result metadata only. Submitted artifact content is excluded by contract.',
+  },
+  support: {
+    title: 'Assigned support',
+    subtitle: 'Only active cases assigned to this support employee. Customer content is excluded.',
   },
   revenue: {
     title: 'Revenue workspace',
@@ -88,7 +109,24 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   privacy: {
     title: 'Privacy operations',
     subtitle:
-      'Identity review and content-free fulfillment planning; Run 2 does not claim completed export or erasure.',
+      'Identity review and content-free Run 3 inventory planning; no completed export, correction, restriction, or erasure is claimed.',
+  },
+  feedback: {
+    title: 'Feedback learning',
+    subtitle: productionRuntime
+      ? 'Founder-scoped metadata and explicitly claimed minimized text; no media, provider, or outbound action runs.'
+      : 'Local role-scoped metadata and explicitly assigned minimized text; no provider or external action runs.',
+  },
+  provisioning: {
+    title: 'Founder provisioning',
+    subtitle:
+      'Secret-free provider status, exact manual gates, and evidence tiers. Status never activates a provider.',
+  },
+  'founding-households': {
+    title: 'Founding Households',
+    subtitle: productionRuntime
+      ? 'Founder-gated, finite, identity-bound sponsor access—no card, automatic messaging, or public enrollment.'
+      : 'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
   },
   targets: {
     title: 'Credit-union segmentation',
@@ -108,15 +146,23 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   },
 };
 
-function DataLabel({ state = 'local_development' }: { state?: 'local_development' | 'seeded' }) {
+function DataLabel({
+  state = 'local_development',
+}: {
+  state?: 'local_development' | 'live_database' | 'seeded';
+}) {
   return (
     <span className="seed-label">
-      {state === 'seeded' ? 'Seeded research data' : 'Local development data (seed + this run)'}
+      {state === 'seeded'
+        ? 'Seeded research data'
+        : productionRuntime
+          ? 'Private-beta database evidence'
+          : 'Local development data (seed + this run)'}
     </span>
   );
 }
 
-function SignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void }) {
+function DevelopmentSignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void }) {
   const [personaId, setPersonaId] = useState<DevPersonaId>('hq-heidi');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -154,6 +200,7 @@ function SignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void }) {
           >
             <option value="hq-heidi">Heidi — HQ owner</option>
             <option value="hq-riley">Riley — HQ reviewer</option>
+            <option value="hq-sam">Sam — HQ support</option>
           </select>
           {error && (
             <p className="error" role="alert">
@@ -180,8 +227,11 @@ function Shell({
   onSignOut: () => void;
   children: ReactNode;
 }) {
-  const reviewerOnly =
-    me.principal.roles.includes('hq_reviewer') && !me.principal.roles.includes('hq_owner');
+  const isOwner = me.principal.roles.includes('hq_owner');
+  const canReview = me.principal.roles.includes('hq_reviewer');
+  const canSupport = me.principal.roles.includes('hq_support');
+  const feedbackNavigationEnabled = process.env.NODE_ENV !== 'production' || isOwner;
+  const editorialNavigationEnabled = process.env.NODE_ENV !== 'production';
   return (
     <>
       <header className="hq-topbar">
@@ -189,65 +239,105 @@ function Shell({
           <span className="hq-brand-mark">BB</span>
           <span>BoomerBuddy HQ</span>
         </Link>
-        <span className="environment">Local development</span>
+        <span className="environment">
+          {process.env.NODE_ENV === 'production' ? 'Private beta' : 'Local development'}
+        </span>
         <span>{me.principal.displayName}</span>
       </header>
       <div className="hq-layout">
         <nav className="hq-nav" aria-label="HQ navigation">
-          {!reviewerOnly && <span className="nav-heading">Operate</span>}
-          {!reviewerOnly && (
+          {isOwner && <span className="nav-heading">Operate</span>}
+          {isOwner && (
             <Link aria-current={view === 'overview' ? 'page' : undefined} href="/">
               Overview
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
             <Link aria-current={view === 'customers' ? 'page' : undefined} href="/customers">
               Customers
             </Link>
           )}
-          <Link aria-current={view === 'fraud' ? 'page' : undefined} href="/fraud">
-            Fraud & review
-          </Link>
-          {!reviewerOnly && <span className="nav-heading">Build revenue</span>}
-          {!reviewerOnly && (
+          {(isOwner || canReview) && (
+            <Link aria-current={view === 'fraud' ? 'page' : undefined} href="/fraud">
+              Fraud & review
+            </Link>
+          )}
+          {canSupport && (
+            <Link aria-current={view === 'support' ? 'page' : undefined} href="/support">
+              Assigned support
+            </Link>
+          )}
+          {canSupport && process.env.NODE_ENV !== 'production' && (
+            <Link href="/messaging">Messaging support</Link>
+          )}
+          {feedbackNavigationEnabled && (isOwner || canReview || canSupport) && (
+            <Link aria-current={view === 'feedback' ? 'page' : undefined} href="/feedback">
+              Feedback learning
+            </Link>
+          )}
+          {editorialNavigationEnabled && (isOwner || canReview) && (
+            <Link href="/editorial">Editorial intelligence</Link>
+          )}
+          {process.env.NODE_ENV !== 'production' && (isOwner || canReview) && (
+            <Link href="/referrals">Referral credit evidence</Link>
+          )}
+          {isOwner && <span className="nav-heading">Build revenue</span>}
+          {isOwner && (
             <Link aria-current={view === 'targets' ? 'page' : undefined} href="/targets">
               Credit-union targets
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
             <Link aria-current={view === 'pipeline' ? 'page' : undefined} href="/pipeline">
               Opportunity pipeline
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
             <Link aria-current={view === 'revenue' ? 'page' : undefined} href="/revenue">
               Revenue research
             </Link>
           )}
-          {!reviewerOnly && <span className="nav-heading">Govern</span>}
-          {!reviewerOnly && (
+          {isOwner && <span className="nav-heading">Govern</span>}
+          {isOwner && (
             <Link aria-current={view === 'attention' ? 'page' : undefined} href="/attention">
               Owner attention
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
             <Link aria-current={view === 'autonomy' ? 'page' : undefined} href="/autonomy">
               Autonomy controls
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
             <Link aria-current={view === 'privacy' ? 'page' : undefined} href="/privacy">
               Privacy requests
             </Link>
           )}
-          {!reviewerOnly && (
+          {isOwner && (
+            <Link aria-current={view === 'provisioning' ? 'page' : undefined} href="/provisioning">
+              Founder provisioning
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'founding-households' ? 'page' : undefined}
+              href="/founding-households"
+            >
+              Founding Households
+            </Link>
+          )}
+          {isOwner && (
             <Link aria-current={view === 'system' ? 'page' : undefined} href="/system">
               System & audit
             </Link>
           )}
-          <button className="secondary" type="button" onClick={onSignOut}>
-            Sign out
-          </button>
+          {process.env.NODE_ENV === 'production' ? (
+            <ProductionHqSignOut onSignedOut={onSignOut} />
+          ) : (
+            <button className="secondary" type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          )}
         </nav>
         <main className="hq-content" id="hq-main">
           <div className="hq-content-inner">
@@ -280,7 +370,14 @@ function Customers() {
         {error}
       </p>
     );
-  if (!data) return <p role="status">Loading local development customers…</p>;
+  if (!data)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading private-beta customers…'
+          : 'Loading local development customers…'}
+      </p>
+    );
   return (
     <div className="table-wrap">
       <table>
@@ -313,11 +410,12 @@ function Customers() {
           ))}
         </tbody>
       </table>
+      {data.truncated ? <p className="notice">Showing the first 100 households.</p> : null}
     </div>
   );
 }
 
-function Fraud() {
+function OwnerFraud() {
   const [data, setData] = useState<ChecksResponse>();
   const [error, setError] = useState('');
   useEffect(() => {
@@ -331,7 +429,14 @@ function Fraud() {
         {error}
       </p>
     );
-  if (!data) return <p role="status">Loading local development review queue…</p>;
+  if (!data)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading the private-beta review queue…'
+          : 'Loading local development review queue…'}
+      </p>
+    );
   return (
     <>
       <div className="notice">
@@ -380,6 +485,119 @@ function Fraud() {
   );
 }
 
+function AssignedReviewQueue() {
+  const [data, setData] = useState<HqReviewQueueResponse>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    hqRequest<HqReviewQueueResponse>(apiPaths.hqReviewQueue)
+      .then(setData)
+      .catch((caught) => setError(readableError(caught)));
+  }, []);
+  if (error)
+    return (
+      <p className="error" role="alert">
+        {error}
+      </p>
+    );
+  if (!data) return <p role="status">Loading assigned local review work…</p>;
+  return (
+    <>
+      <div className="notice">
+        <strong>Assigned-only projection:</strong> household identity, Check activity, risk output,
+        provider output, summaries, and submitted content are excluded. Assignment does not grant
+        restricted-content access.
+      </div>
+      <div className="table-wrap section">
+        <table>
+          <caption>
+            Assigned fraud work cases — <DataLabel />
+          </caption>
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Severity</th>
+              <th>State</th>
+              <th>Routing</th>
+              <th>Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.cases.map((reviewCase) => (
+              <tr key={reviewCase.id}>
+                <td>{reviewCase.id}</td>
+                <td>{reviewCase.severity}</td>
+                <td>{reviewCase.state.replaceAll('_', ' ')}</td>
+                <td>{reviewCase.routingClass.replaceAll('_', ' ')}</td>
+                <td>
+                  {reviewCase.dueAt ? new Date(reviewCase.dueAt).toLocaleString() : 'No due time'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.cases.length === 0 ? <p>No fraud work cases are assigned.</p> : null}
+        {data.truncated ? <p className="notice">Showing the first 100 assigned cases.</p> : null}
+      </div>
+    </>
+  );
+}
+
+function SupportQueue() {
+  const [data, setData] = useState<HqSupportQueueResponse>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    hqRequest<HqSupportQueueResponse>(apiPaths.hqSupportQueue)
+      .then(setData)
+      .catch((caught) => setError(readableError(caught)));
+  }, []);
+  if (error)
+    return (
+      <p className="error" role="alert">
+        {error}
+      </p>
+    );
+  if (!data) return <p role="status">Loading assigned local support cases…</p>;
+  return (
+    <>
+      <div className="notice">
+        <strong>Assigned-only projection:</strong> this queue excludes household rosters,
+        orientation, entitlement, Check/risk metadata, and submitted content. Restricted resources
+        still require a separate exact, time-bound grant.
+      </div>
+      <div className="table-wrap section">
+        <table>
+          <caption>
+            Assigned support cases — <DataLabel />
+          </caption>
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Household</th>
+              <th>Purpose code</th>
+              <th>Assigned</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.cases.map((supportCase) => (
+              <tr key={supportCase.id}>
+                <td>{supportCase.id}</td>
+                <td>
+                  {supportCase.householdName}
+                  <div className="source">ID: {supportCase.householdId}</div>
+                </td>
+                <td>{supportCase.purposeCode}</td>
+                <td>{new Date(supportCase.assignedAt).toLocaleString()}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {data.cases.length === 0 ? <p>No support cases are assigned.</p> : null}
+        {data.truncated ? <p className="notice">Showing the first 100 assigned cases.</p> : null}
+      </div>
+    </>
+  );
+}
+
 function Revenue() {
   const [data, setData] = useState<HqRevenueResponse>();
   const [error, setError] = useState('');
@@ -397,6 +615,9 @@ function Revenue() {
   if (!data) return <p role="status">Loading seeded revenue workspace…</p>;
   return (
     <>
+      {data.truncated ? (
+        <p className="notice">Each revenue workspace collection is capped at 100 records.</p>
+      ) : null}
       <section className="metric-grid">
         {data.savedSearches.map((search) => (
           <article className="hq-card" key={search.id}>
@@ -490,7 +711,14 @@ function System() {
         {error}
       </p>
     );
-  if (!providers || !audit) return <p role="status">Loading local development system data…</p>;
+  if (!providers || !audit)
+    return (
+      <p role="status">
+        {productionRuntime
+          ? 'Loading private-beta system data…'
+          : 'Loading local development system data…'}
+      </p>
+    );
   return (
     <>
       <section className="metric-grid">
@@ -542,6 +770,7 @@ function System() {
 
 type PrivacyQueueResponse = {
   requests: PrivacyRequestDto[];
+  truncated: boolean;
   fulfillmentMode: 'evidence_plan_only';
   limitation: string;
 };
@@ -613,6 +842,12 @@ function PrivacyOperations() {
         </p>
       </div>
       <section className="control-grid section" aria-label="Privacy request queue">
+        {data?.truncated ? (
+          <p className="notice" role="status">
+            Showing the newest 100 privacy requests. Refine or resolve the queue before relying on
+            this view for completeness.
+          </p>
+        ) : null}
         {(data?.requests ?? []).map((request) => {
           const nextAction =
             request.state === 'received'
@@ -682,12 +917,23 @@ export function HqScreen({ view }: { view: HqView }) {
       .catch(() => setMe(undefined))
       .finally(() => setChecking(false));
   }, []);
-  const reviewerOnly =
-    me?.principal.roles.includes('hq_reviewer') === true &&
-    me.principal.roles.includes('hq_owner') === false;
+  const isOwner = me?.principal.roles.includes('hq_owner') === true;
+  const canReview = me?.principal.roles.includes('hq_reviewer') === true;
+  const canSupport = me?.principal.roles.includes('hq_support') === true;
+  const viewAllowed =
+    me === undefined
+      ? true
+      : view === 'fraud'
+        ? isOwner || canReview
+        : view === 'feedback'
+          ? isOwner || canReview || canSupport
+          : view === 'support'
+            ? canSupport
+            : isOwner;
+  const authorizedLanding = isOwner ? '/' : canReview ? '/fraud' : canSupport ? '/support' : '/';
   useEffect(() => {
-    if (reviewerOnly && view !== 'fraud') window.location.replace('/fraud');
-  }, [reviewerOnly, view]);
+    if (me && !viewAllowed) window.location.replace(authorizedLanding);
+  }, [authorizedLanding, me, viewAllowed]);
   async function signOut() {
     try {
       await hqRequest(apiPaths.currentSession, { method: 'DELETE' });
@@ -701,13 +947,39 @@ export function HqScreen({ view }: { view: HqView }) {
         <p role="status">Checking HQ session…</p>
       </main>
     );
-  if (reviewerOnly && view !== 'fraud')
+  if (me && !viewAllowed)
     return (
       <main id="hq-main" className="sign-in-shell">
-        <p role="status">Opening the authorized review queue…</p>
+        <p role="status">Opening the authorized HQ workspace…</p>
       </main>
     );
-  if (!me) return <SignIn onSuccess={setMe} />;
+  if (!me) {
+    if (process.env.NODE_ENV !== 'production') return <DevelopmentSignIn onSuccess={setMe} />;
+    if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+      return (
+        <main id="hq-main" className="sign-in-shell">
+          <div className="sign-in-card">
+            <span className="seed-label">Access closed</span>
+            <h1>HQ identity is not configured</h1>
+            <p className="error" role="alert">
+              BoomerBuddy HQ remains unavailable until the separate Clerk HQ application and exact
+              founder binding are configured.
+            </p>
+          </div>
+        </main>
+      );
+    }
+    return (
+      <main id="hq-main" className="sign-in-shell">
+        <div className="sign-in-card">
+          <span className="seed-label">Founder-only private beta</span>
+          <h1>BoomerBuddy HQ</h1>
+          <p>Authenticate through the separately configured HQ identity realm.</p>
+          <Link href="/sign-in">Open secure HQ sign in</Link>
+        </div>
+      </main>
+    );
+  }
   const businessOsView: BusinessOsView | undefined =
     view === 'overview'
       ? 'owner'
@@ -715,17 +987,36 @@ export function HqScreen({ view }: { view: HqView }) {
         ? view
         : undefined;
   return (
-    <Shell me={me} view={view} onSignOut={() => void signOut()}>
+    <Shell
+      me={me}
+      view={view}
+      onSignOut={() => {
+        if (process.env.NODE_ENV === 'production') setMe(undefined);
+        else void signOut();
+      }}
+    >
       {businessOsView ? (
         <BusinessOsContent view={businessOsView} />
       ) : view === 'customers' ? (
         <Customers />
       ) : view === 'fraud' ? (
-        <Fraud />
+        isOwner ? (
+          <OwnerFraud />
+        ) : (
+          <AssignedReviewQueue />
+        )
+      ) : view === 'support' ? (
+        <SupportQueue />
       ) : view === 'revenue' ? (
         <Revenue />
       ) : view === 'privacy' ? (
         <PrivacyOperations />
+      ) : view === 'feedback' ? (
+        <FeedbackLearning />
+      ) : view === 'provisioning' ? (
+        <FounderProvisioning />
+      ) : view === 'founding-households' ? (
+        <FoundingHouseholds />
       ) : (
         <System />
       )}

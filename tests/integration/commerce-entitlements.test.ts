@@ -300,7 +300,7 @@ describe('provider-neutral commerce and household allowances', () => {
       `INSERT INTO commerce_plan_versions(
          id, product_version_id, plan_key, version, display_name, state,
          capabilities, allowances, prices, available_from, created_at
-       ) SELECT 'family_retired_v2', product_version_id, plan_key, 2, 'Retired Family',
+       ) SELECT 'family_retired_v3', product_version_id, plan_key, 3, 'Retired Family',
            'retired', capabilities, allowances, prices, available_from, $1
          FROM commerce_plan_versions WHERE id = 'family_v1'`,
       [harness.clock.now().toISOString()],
@@ -310,7 +310,7 @@ describe('provider-neutral commerce and household allowances', () => {
          household_id, id, plan_version_id, source, lifecycle, source_verified, precedence,
          current_period_starts_at, current_period_ends_at, reconciliation_state,
          created_at, updated_at
-       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v2',
+       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v3',
          'local','active',true,999,$1,$2,'not_required',$1,$1),
          ('household-sunrise','subscription-web-hypothesis','plus_v1',
          'web','active',true,998,$1,$2,'pending',$1,$1)`,
@@ -334,7 +334,7 @@ describe('provider-neutral commerce and household allowances', () => {
        ) VALUES
          ('household-sunrise','grant-retired-local','local',
           '["check:text","family:manage"]'::jsonb,$1,true,999,
-          'family_retired_v2','subscription-retired-local'),
+          'family_retired_v3','subscription-retired-local'),
          ('household-sunrise','grant-web-hypothesis','web',
           '["check:text","family:manage"]'::jsonb,$1,true,998,
           'plus_v1','subscription-web-hypothesis')`,
@@ -986,15 +986,65 @@ describe('provider-neutral commerce and household allowances', () => {
       trustedCircleGrants: [],
       capabilities: [],
     });
+    const checkoutExpiry = new Date(now.getTime() + 23 * 60 * 60_000 + 5 * 60_000);
+    const localCheckoutExpiry = new Date(checkoutExpiry.getTime() + 5 * 60_000);
+    await harness.database.query(
+      `INSERT INTO commerce_event_inbox(
+         id, provider, environment, external_event_id, event_type, payload_hmac,
+         fingerprint_key_version, authenticity, status, received_at,
+         provider_api_version, provider_object_id, provider_event_created_at,
+         application_state
+       ) VALUES (
+         'checkout-event-sunrise-family-replacement','stripe','test',
+         'evt_checkout_sunrise_family_replacement','checkout.session.completed',
+         'fixture-checkout-hmac',1,'verified','processed',$1,'2026-02-25.clover',
+         'cs_test_sunrise_family_replacement',$1,'applied'
+       )`,
+      [now.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO commerce_checkout_intents(
+         household_id, id, subscription_id, requested_by_person_id,
+         billing_authority_person_id, plan_version_id, offer_id, billing_interval,
+         provider_price_id, provider, environment, idempotency_key, state,
+         provider_session_id, created_at, updated_at, expires_at,
+         server_operation_id, provider_idempotency_key, provider_requested_expires_at,
+         provider_returned_expires_at, dispatch_state
+       ) VALUES (
+         'household-sunrise','checkout-intent-sunrise-family-replacement',
+         'subscription-sunrise-family-replacement','person-owner-alice','person-owner-alice',
+         'family_v1','founding_family_monthly_v1','month','price_test_family_monthly',
+         'stripe','test','checkout-operation-sunrise-family-replacement','session_created',
+         'cs_test_sunrise_family_replacement',$1,$1,$2,
+         'checkout-operation-sunrise-family-replacement',
+         'bb:test:checkout:sunrise-family-replacement',$3,$3,'session_recorded'
+       )`,
+      [now.toISOString(), localCheckoutExpiry.toISOString(), checkoutExpiry.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO commerce_stripe_checkout_completions(
+         provider_session_id, environment, household_id, checkout_intent_id,
+         subscription_id, provider_subscription_id, provider_customer_id,
+         provider_payment_intent_id, source_inbox_id, provider_event_id,
+         payment_status, session_status, amount_total, currency, completed_at,
+         provider_expires_at
+       ) VALUES (
+         'cs_test_sunrise_family_replacement','test','household-sunrise',
+         'checkout-intent-sunrise-family-replacement','subscription-sunrise-family-replacement',
+         'sub_sunrise_family_replacement_test','cus_sunrise_family_replacement',
+         'pi_checkout_sunrise_family_replacement','checkout-event-sunrise-family-replacement',
+         'evt_checkout_sunrise_family_replacement','paid','complete',1499,'usd',$1,$2
+       )`,
+      [now.toISOString(), checkoutExpiry.toISOString()],
+    );
     const replacementEvent = await commerce.captureVerifiedProviderEvent({
       provider: 'stripe',
       environment: 'test',
-      externalEventId: 'evt_sunrise_family_replacement_active',
-      eventType: 'customer.subscription.updated',
-      rawPayload:
-        '{"id":"evt_sunrise_family_replacement_active","type":"customer.subscription.updated"}',
-      providerApiVersion: '2026-06-30.basil',
-      providerObjectId: 'sub_sunrise_family_replacement_test',
+      externalEventId: 'evt_sunrise_family_replacement_paid',
+      eventType: 'invoice.paid',
+      rawPayload: '{"id":"in_sunrise_family_replacement","type":"invoice.paid"}',
+      providerApiVersion: '2026-02-25.clover',
+      providerObjectId: 'in_sunrise_family_replacement',
       providerEventCreatedAt: now,
       normalizedLifecycle: 'active',
       now,
@@ -1004,9 +1054,9 @@ describe('provider-neutral commerce and household allowances', () => {
         inboxId: replacementEvent.id,
         provider: 'stripe',
         environment: 'test',
-        externalEventId: 'evt_sunrise_family_replacement_active',
-        providerApiVersion: '2026-06-30.basil',
-        providerObjectId: 'sub_sunrise_family_replacement_test',
+        externalEventId: 'evt_sunrise_family_replacement_paid',
+        providerApiVersion: '2026-02-25.clover',
+        providerObjectId: 'in_sunrise_family_replacement',
         providerEventCreatedAt: now,
         householdId: 'household-sunrise',
         subscriptionId: 'subscription-sunrise-family-replacement',
@@ -1014,7 +1064,33 @@ describe('provider-neutral commerce and household allowances', () => {
         lifecycle: 'active',
         currentPeriodStartsAt: now,
         currentPeriodEndsAt: future,
-        accessEvidence: { kind: 'initial_server_binding' },
+        accessEvidence: {
+          kind: 'payment_confirmed',
+          sourceInboxId: replacementEvent.id,
+          evidence: {
+            providerInvoiceId: 'in_sunrise_family_replacement',
+            externalSubscriptionId: 'sub_sunrise_family_replacement_test',
+            providerSubscriptionItemId: 'si_sunrise_family_replacement',
+            providerInvoiceLineId: 'il_sunrise_family_replacement',
+            providerInvoicePaymentId: 'inpay_sunrise_family_replacement',
+            providerProductId: 'prod_test_family',
+            providerPaymentIntentId: 'pi_invoice_sunrise_family_replacement',
+            providerPriceId: 'price_test_family_monthly',
+            billingReason: 'subscription_create',
+            amountPaid: 1499,
+            amountRemaining: 0,
+            currency: 'usd',
+            quantity: 1,
+            discountAmount: 0,
+            taxAmount: 0,
+            invoiceDiscountsEmpty: true,
+            invoiceTaxesEmpty: true,
+            invoiceCreditsEmpty: true,
+            currentPeriodStartsAt: now,
+            currentPeriodEndsAt: future,
+            providerPaidAt: now,
+          },
+        },
         now,
       }),
     ).resolves.toMatchObject({ outcome: 'applied', lifecycle: 'active' });

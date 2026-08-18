@@ -2,10 +2,11 @@
   "name": "@boomerbuddy/api",
   "version": "0.1.0",
   "private": true,
+  "license": "UNLICENSED",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "dev:e2e": "cross-env NODE_ENV=test BB_API_PORT=4100 BB_PGLITE_PATH=:memory: BB_SEED_DEMO=true BB_ALLOW_DEV_IDENTITY=true BB_CUSTOMER_ORIGINS=http://127.0.0.1:3100 BB_HQ_ORIGINS=http://127.0.0.1:3101 BB_SESSION_SECRET=local-e2e-session-secret-not-for-production BB_ARTIFACT_KEY_BASE64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= BB_FINGERPRINT_KEY_BASE64=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE= BB_SAFE_WORD_PEPPER=local-e2e-safe-word-pepper-not-for-production tsx src/server.ts",
+    "dev:e2e": "cross-env NODE_ENV=test BB_API_PORT=4100 BB_PGLITE_PATH=:memory: BB_SEED_DEMO=true BB_ALLOW_DEV_IDENTITY=true BB_FOUNDER_PERSON_ID=person-hq-heidi BB_CUSTOMER_ORIGINS=http://127.0.0.1:3100 BB_HQ_ORIGINS=http://127.0.0.1:3101 BB_SESSION_SECRET=local-e2e-session-secret-not-for-production BB_ARTIFACT_KEY_BASE64=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= BB_FINGERPRINT_KEY_BASE64=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE= BB_SAFE_WORD_PEPPER=local-e2e-safe-word-pepper-not-for-production tsx src/server.ts",
     "build": "tsup --config tsup.config.ts",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"

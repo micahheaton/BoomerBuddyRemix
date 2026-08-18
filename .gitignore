@@ -19,8 +19,14 @@ test-results/
 .env
 .env.*
 !.env.example
+.netrc
+.npmrc
+*.jks
 *.pem
 *.key
+*.keystore
+*.p12
+*.pfx
 
 # Local databases and temporary data
 *.db

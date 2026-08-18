@@ -16,29 +16,53 @@ async function expectNoSeriousOrCriticalAxeViolations(page: Page, label: string)
   expect(blocking, `${label}\n${details}`).toEqual([]);
 }
 
-test('public, member, and HQ landmark pages have zero serious or critical axe violations', async ({
-  page,
-}) => {
-  for (const path of ['/', '/how-it-works', '/pricing', '/trust', '/sign-in']) {
-    await page.goto(`${customerUrl}${path}`);
-    await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
-  }
-  await signInCustomer(page);
-  for (const path of [
-    '/member',
-    '/member/check',
-    '/member/history',
-    '/member/family',
-    '/member/orientation',
-  ]) {
-    await page.goto(`${customerUrl}${path}`);
-    await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
-  }
+async function gotoReady(page: Page, url: string, heading: string | RegExp): Promise<void> {
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+}
 
+test('public landmark pages have zero serious or critical axe violations', async ({ page }) => {
+  const pages = [
+    ['/', /From suspicious to a safer next step/u],
+    ['/how-it-works', 'A calmer way to handle something suspicious'],
+    ['/pricing', 'Pricing is still a hypothesis'],
+    ['/trust', 'Designed to show its limits'],
+    ['/sign-in', 'Choose a seeded person'],
+  ] as const;
+  for (const [path, heading] of pages) {
+    await gotoReady(page, `${customerUrl}${path}`, heading);
+    await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
+  }
+});
+
+test('member landmark pages have zero serious or critical axe violations', async ({ page }) => {
+  await signInCustomer(page);
+  const pages = [
+    ['/member', /^Hello,/u],
+    ['/member/check', 'Check something suspicious'],
+    ['/member/history', 'Your check records'],
+    ['/member/family', 'Your household and Trusted Circle'],
+    ['/member/orientation', 'Orientation'],
+    ['/member/founding-household', 'Review finite sponsored beta access'],
+  ] as const;
+  for (const [path, heading] of pages) {
+    await gotoReady(page, `${customerUrl}${path}`, heading);
+    await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
+  }
+});
+
+test('HQ landmark pages have zero serious or critical axe violations', async ({ page }) => {
   await signInHq(page);
   await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /');
-  await page.goto(`${hqUrl}/fraud`);
+  await gotoReady(page, `${hqUrl}/fraud`, 'Fraud and review');
+  await expect(page.getByText('Content exclusion:', { exact: false })).toBeVisible();
   await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /fraud');
+  await gotoReady(page, `${hqUrl}/provisioning`, 'Founder provisioning');
+  await expect(page.getByRole('region', { name: 'Provisioning status summary' })).toBeVisible();
+  await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /provisioning');
+  await gotoReady(page, `${hqUrl}/founding-households`, 'Founding Households');
+  await expect(page.getByRole('region', { name: 'Founding Household capacity' })).toBeVisible();
+  await expectNoSeriousOrCriticalAxeViolations(page, 'HQ /founding-households');
 });
 
 test('keyboard focus, live result announcement, 200% zoom, and 320px reflow remain usable', async ({

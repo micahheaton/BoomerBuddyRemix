@@ -8,6 +8,7 @@ import {
   hasEffectiveProtectedEnrollment,
   rebindCommerceAllowanceToEffectiveGrant,
   releaseCommerceAllowance,
+  type EntitlementRuntimeEnvironment,
 } from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import { appendConsentEvidence, identityEvidenceForPerson } from './consent';
@@ -160,6 +161,7 @@ export class FamilyRepository {
     private readonly fingerprintKey: Uint8Array,
     private readonly fingerprintKeyVersion: number,
     private readonly idFactory: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
   ) {}
 
   async list(
@@ -240,10 +242,11 @@ export class FamilyRepository {
     const visibleMembers = actor.is_administrator
       ? members.rows
       : members.rows.filter((row) => visiblePersonIds.has(row.person_id));
-    const entitlements = await new EntitlementRepository(this.database).forHousehold(
-      householdId,
-      now,
-    );
+    const entitlements = await new EntitlementRepository(
+      this.database,
+      undefined,
+      this.runtimeEnvironment,
+    ).forHousehold(householdId, now);
     const contributingGrantIds = new Set<string>(entitlements.portfolio.contributingGrantIds);
     const invitationRows = await this.database.query<InvitationRow>(
       `SELECT household_id, id, protected_person_id, consent_id, invitee_display_name,
@@ -361,6 +364,7 @@ export class FamilyRepository {
         input.protectedPersonId,
         input.now,
         true,
+        this.runtimeEnvironment,
       );
       if (!hasEnrollment) {
         throw new DomainError('not_authorized', 'Protected-member consent is required');
@@ -533,6 +537,8 @@ export class FamilyRepository {
         invitation.householdId,
         invitation.protectedPersonId,
         now,
+        false,
+        this.runtimeEnvironment,
       ))
     ) {
       return null;
@@ -772,6 +778,7 @@ export class FamilyRepository {
           invitation.protected_person_id,
           input.now,
           true,
+          this.runtimeEnvironment,
         ))
       ) {
         throw new DomainError('not_found', 'Invitation is invalid or unavailable');
@@ -854,6 +861,7 @@ export class FamilyRepository {
         subjectKind: 'trusted_circle_person',
         subjectId: input.acceptingPersonId,
         now: input.now,
+        runtimeEnvironment: this.runtimeEnvironment,
       });
       if (allowanceBinding === 'not_found') {
         await allocateCommerceAllowance(transaction, {
@@ -863,6 +871,7 @@ export class FamilyRepository {
           subjectKind: 'trusted_circle_person',
           subjectId: input.acceptingPersonId,
           now: input.now,
+          runtimeEnvironment: this.runtimeEnvironment,
         });
       }
       const consentEvidenceId = await appendConsentEvidence(transaction, this.idFactory, {

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { apiRequest, setSelectedHouseholdId } from '../lib/api';
 import { Brand } from './brand';
 import { householdScopeSummary, useHousehold } from './household-context';
+import { ProductionSignOut } from './production-sign-out';
 
 export function MemberHeader() {
   const router = useRouter();
@@ -48,9 +49,13 @@ export function MemberHeader() {
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}
-          <button className="button-secondary" type="button" disabled={busy} onClick={signOut}>
-            {busy ? 'Signing out…' : 'Sign out'}
-          </button>
+          {process.env.NODE_ENV === 'production' ? (
+            <ProductionSignOut />
+          ) : (
+            <button className="button-secondary" type="button" disabled={busy} onClick={signOut}>
+              {busy ? 'Signing out…' : 'Sign out'}
+            </button>
+          )}
         </nav>
         {me.principal.households.length > 1 && (
           <div className="household-switcher">

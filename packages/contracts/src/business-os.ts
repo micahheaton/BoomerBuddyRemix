@@ -132,6 +132,7 @@ export const opportunityQueueItemSchema = z.object({
 
 export const opportunityQueueResponseSchema = z.object({
   opportunities: z.array(opportunityQueueItemSchema),
+  truncated: z.boolean(),
   consequentialOutreachAutomatic: z.literal(false),
 });
 
@@ -151,6 +152,7 @@ export const ownerAttentionItemSchema = z.object({
 
 export const ownerAttentionResponseSchema = z.object({
   items: z.array(ownerAttentionItemSchema),
+  truncated: z.boolean(),
 });
 
 export const ownerBriefResponseSchema = z.object({
@@ -172,8 +174,8 @@ export const putAutonomyPolicyRequestSchema = z.object({
   allowedDataClasses: z.array(attributionTokenSchema).max(20),
   allowedTools: z.array(attributionTokenSchema).max(20),
   autonomy: autonomyClassSchema,
-  budgetCents: z.number().int().nonnegative().max(1_000_000),
   enabled: z.boolean(),
+  maxCostPerOperationCents: z.number().int().nonnegative().max(1_000_000),
   requiresAudit: z.literal(true),
 });
 
@@ -185,8 +187,11 @@ export const evaluateAutomationRequestSchema = z.object({
 });
 
 export const evaluateAutomationResponseSchema = z.object({
+  actionExecuted: z.literal(false),
   allowed: z.boolean(),
+  cumulativeBudgetReserved: z.literal(false),
   disposition: z.enum(['auto', 'approval', 'human', 'professional', 'blocked']),
+  evaluationOnly: z.literal(true),
   reasons: z.array(z.string()),
   runId: opaqueIdSchema,
 });
@@ -195,6 +200,71 @@ export const automationGlobalControlResponseSchema = z.object({
   killSwitch: z.boolean(),
   updatedAt: isoDateTimeSchema,
   updatedByPersonId: opaqueIdSchema.optional(),
+  version: z.number().int().positive(),
+});
+
+export const automationBudgetScopeKindSchema = z.enum([
+  'company',
+  'agent',
+  'action',
+  'tool',
+  'policy',
+]);
+
+export const automationBudgetPeriodKindSchema = z.enum(['day', 'month']);
+
+export const putAutomationBudgetCapRequestSchema = z
+  .object({
+    confirmation: z.literal('CONFIGURE_BUDGET_CAP'),
+    enabled: z.boolean(),
+    limitCents: z.number().int().nonnegative().max(100_000_000),
+    periodKind: automationBudgetPeriodKindSchema,
+    scopeKey: attributionTokenSchema,
+    scopeKind: automationBudgetScopeKindSchema,
+  })
+  .strict();
+
+export const overrideAutomationBudgetWindowRequestSchema = z
+  .object({
+    additionalCents: z.number().int().positive().max(100_000_000),
+    capId: opaqueIdSchema,
+    confirmation: z.literal('EXPAND_BUDGET_CAP'),
+    overrideKey: attributionTokenSchema,
+    reasonCode: attributionTokenSchema,
+  })
+  .strict();
+
+export const automationBudgetCapSchema = z.object({
+  availableCents: z.number().int(),
+  committedCents: z.number().int().nonnegative(),
+  enabled: z.boolean(),
+  id: opaqueIdSchema,
+  limitCents: z.number().int().nonnegative(),
+  overrideCents: z.number().int().nonnegative(),
+  periodEnd: isoDateTimeSchema,
+  periodKind: automationBudgetPeriodKindSchema,
+  periodStart: isoDateTimeSchema,
+  reservedCents: z.number().int().nonnegative(),
+  scopeKey: attributionTokenSchema,
+  scopeKind: automationBudgetScopeKindSchema,
+  version: z.number().int().positive(),
+});
+
+export const automationBudgetStatusResponseSchema = z.object({
+  caps: z.array(automationBudgetCapSchema),
+  currency: z.literal('USD'),
+  evidenceState: z.literal('persistent_local_ledger'),
+  externalExecutionEnabled: z.literal(false),
+  generatedAt: isoDateTimeSchema,
+  killSwitch: z.boolean(),
+  requiredScopes: z.tuple([
+    z.literal('company_day'),
+    z.literal('company_month'),
+    z.literal('agent'),
+    z.literal('action'),
+    z.literal('tool'),
+    z.literal('policy'),
+  ]),
 });
 
 export const putAutomationGlobalControlRequestSchema = z
@@ -266,9 +336,10 @@ export const privacyRequestSchema = z.object({
 
 export const privacyRequestListResponseSchema = z.object({
   requests: z.array(privacyRequestSchema),
+  truncated: z.boolean(),
   fulfillmentMode: z.literal('evidence_plan_only'),
   limitation: z.literal(
-    'Run 2 records identity review and a content-free fulfillment plan; it does not claim completed export or erasure.',
+    'Records identity review and a content-free Run 3 inventory plan; it does not claim completed export, correction, restriction, or erasure.',
   ),
 });
 
@@ -282,6 +353,7 @@ export const advancePrivacyRequestSchema = z
   .strict();
 
 export type CreditUnionTargetsResponse = z.infer<typeof creditUnionTargetsResponseSchema>;
+export type AutomationBudgetStatusResponse = z.infer<typeof automationBudgetStatusResponseSchema>;
 export type OpportunityQueueResponse = z.infer<typeof opportunityQueueResponseSchema>;
 export type OwnerBriefResponse = z.infer<typeof ownerBriefResponseSchema>;
 export type PrivacyRequestDto = z.infer<typeof privacyRequestSchema>;

@@ -45,7 +45,11 @@ describe('Business OS persistence', () => {
   it('imports a provenance-locked NCUA universe idempotently and creates explainable targets', async () => {
     database = await createPGliteDatabase();
     await runMigrations(database);
-    const repository = new BusinessOsRepository(database, deterministicIds());
+    const repository = new BusinessOsRepository(
+      database,
+      deterministicIds(),
+      'person-business-founder',
+    );
     const context = { correlationId: 'test-ncua-import', now: new Date('2026-08-16T12:00:00Z') };
     const input = {
       records: [creditUnion],
@@ -73,7 +77,11 @@ describe('Business OS persistence', () => {
   it('runs opportunity hygiene, owner attention, health, privacy, and autonomy fail-closed', async () => {
     database = await createPGliteDatabase();
     await runMigrations(database);
-    const repository = new BusinessOsRepository(database, deterministicIds());
+    const repository = new BusinessOsRepository(
+      database,
+      deterministicIds(),
+      'person-business-founder',
+    );
     const now = new Date('2026-08-16T12:00:00Z');
     const context = { correlationId: 'test-business-os', now };
     await repository.importNcuaSnapshot({
@@ -232,7 +240,19 @@ describe('Business OS persistence', () => {
         identityVerificationState: 'verified',
         plan: expect.objectContaining({
           kind: 'export_manifest',
+          dataCategories: expect.arrayContaining([
+            'account_identity',
+            'commerce_and_entitlements',
+            'feedback_learning_evidence',
+            'messaging_evidence',
+            'referral_evidence',
+          ]),
           requiresProfessionalReview: true,
+          recordCounts: expect.objectContaining({
+            account_identity: expect.any(Number),
+            audit_and_outbox_evidence: expect.any(Number),
+            privacy_request_evidence: 1,
+          }),
         }),
       }),
     );
@@ -261,15 +281,32 @@ describe('Business OS persistence', () => {
       ]),
     ).rejects.toThrow('append-only');
 
+    await database.query(
+      `INSERT INTO persons(id, display_name, created_at)
+       VALUES ('person-business-founder','Business Founder',$1)`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO organizations(id, name, kind, verification_state, created_at)
+       VALUES ('organization-business-internal','Business Internal','internal','local_fixture',$1)`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO employee_assignments(id, person_id, organization_id, role, status, created_at)
+       VALUES ('employee-business-founder','person-business-founder',
+               'organization-business-internal','hq_owner','active',$1)`,
+      [now.toISOString()],
+    );
     await repository.putAutomationPolicy({
+      approvedByPersonId: 'person-business-founder',
       now,
       policy: {
         action: 'create_internal_task',
         allowedDataClasses: ['public'],
         allowedTools: ['hq'],
         autonomy: 'auto',
-        budgetCents: 10,
         enabled: true,
+        maxCostPerOperationCents: 10,
         requiresAudit: true,
       },
     });
@@ -408,4 +445,159 @@ describe('Business OS persistence', () => {
       steps: 0,
     });
   }, 20_000);
+
+  it('requires a locked internal founder organization for policy and global-control mutation', async () => {
+    database = await createPGliteDatabase();
+    await runMigrations(database);
+    const now = new Date('2026-08-17T18:00:00.000Z');
+    const founderId = 'person-business-authority-founder';
+    await database.query(
+      `INSERT INTO persons(id, display_name, created_at)
+       VALUES ($1,'Business Authority Founder',$2)`,
+      [founderId, now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO organizations(id, name, kind, verification_state, created_at) VALUES
+       ('organization-business-authority-internal','Business Authority Internal',
+        'internal','local_fixture',$1),
+       ('organization-business-authority-sponsor','Business Authority Sponsor',
+        'sponsor','local_fixture',$1)`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO employee_assignments(
+         id, person_id, organization_id, role, status, created_at
+       ) VALUES
+       ('assignment-business-authority-null',$1,NULL,'hq_owner','active',$2),
+       ('assignment-business-authority-sponsor',$1,
+        'organization-business-authority-sponsor','hq_owner','active',$2)`,
+      [founderId, now.toISOString()],
+    );
+    const repository = new BusinessOsRepository(database, deterministicIds(), founderId);
+    const policy = (action: string) => ({
+      action,
+      allowedDataClasses: ['public'],
+      allowedTools: ['hq'],
+      autonomy: 'auto' as const,
+      enabled: true,
+      maxCostPerOperationCents: 10,
+      requiresAudit: true,
+    });
+
+    await expect(
+      repository.putAutomationPolicy({
+        approvedByPersonId: founderId,
+        correlationId: 'business-authority-null-sponsor-policy',
+        now,
+        policy: policy('create_internal_task'),
+      }),
+    ).rejects.toThrow('active founder owner assignment');
+    await expect(
+      repository.setGlobalAutomationKillSwitch({
+        correlationId: 'business-authority-null-sponsor-control',
+        killSwitch: false,
+        now,
+        updatedByPersonId: founderId,
+      }),
+    ).rejects.toThrow('active founder owner assignment');
+    const deniedWrites = await database.query<
+      { controls: number; policies: number } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM autonomy_policies) AS policies,
+         (SELECT count(*)::int FROM automation_global_control_history) AS controls`,
+    );
+    expect(deniedWrites.rows[0]).toEqual({ controls: 1, policies: 0 });
+
+    await database.query(
+      `INSERT INTO employee_assignments(
+         id, person_id, organization_id, role, status, created_at
+       ) VALUES ('assignment-business-authority-internal',$1,
+                 'organization-business-authority-internal','hq_owner','active',$2)`,
+      [founderId, now.toISOString()],
+    );
+    await expect(
+      repository.putAutomationPolicy({
+        approvedByPersonId: founderId,
+        correlationId: 'business-authority-dual-policy',
+        now,
+        policy: policy('create_internal_task'),
+      }),
+    ).resolves.toBeTruthy();
+    await expect(
+      repository.setGlobalAutomationKillSwitch({
+        correlationId: 'business-authority-dual-control',
+        killSwitch: false,
+        now,
+        updatedByPersonId: founderId,
+      }),
+    ).resolves.toBeUndefined();
+    await database.query(
+      `DELETE FROM employee_assignments
+       WHERE id IN ('assignment-business-authority-null',
+                    'assignment-business-authority-sponsor')`,
+    );
+
+    const proveRace = async (suffix: string, mutation: () => Promise<unknown>): Promise<void> => {
+      const before = await database!.query<{ total: number } & Record<string, unknown>>(
+        'SELECT count(*)::int AS total FROM automation_global_control_history',
+      );
+      const race = await Promise.allSettled([
+        repository.setGlobalAutomationKillSwitch({
+          correlationId: `business-authority-race-${suffix}`,
+          killSwitch: true,
+          now,
+          updatedByPersonId: founderId,
+        }),
+        mutation(),
+      ]);
+      expect(
+        race[1]?.status,
+        race[1]?.status === 'rejected' ? String(race[1].reason) : undefined,
+      ).toBe('fulfilled');
+      const after = await database!.query<{ total: number } & Record<string, unknown>>(
+        'SELECT count(*)::int AS total FROM automation_global_control_history',
+      );
+      expect(after.rows[0]?.total).toBe(
+        (before.rows[0]?.total ?? 0) + (race[0]?.status === 'fulfilled' ? 1 : 0),
+      );
+      await expect(
+        repository.setGlobalAutomationKillSwitch({
+          correlationId: `business-authority-after-${suffix}`,
+          killSwitch: true,
+          now,
+          updatedByPersonId: founderId,
+        }),
+      ).rejects.toThrow('active founder owner assignment');
+    };
+
+    await proveRace('organization-kind', () =>
+      database!.query(
+        `UPDATE organizations SET kind = 'sponsor'
+         WHERE id = 'organization-business-authority-internal'`,
+      ),
+    );
+    await database.query(
+      `UPDATE organizations SET kind = 'internal'
+       WHERE id = 'organization-business-authority-internal'`,
+    );
+    await proveRace('assignment-repoint', () =>
+      database!.query(
+        `UPDATE employee_assignments
+         SET organization_id = 'organization-business-authority-sponsor'
+         WHERE id = 'assignment-business-authority-internal'`,
+      ),
+    );
+    await database.query(
+      `UPDATE employee_assignments
+       SET organization_id = 'organization-business-authority-internal'
+       WHERE id = 'assignment-business-authority-internal'`,
+    );
+    await proveRace('assignment-suspend', () =>
+      database!.query(
+        `UPDATE employee_assignments SET status = 'suspended'
+         WHERE id = 'assignment-business-authority-internal'`,
+      ),
+    );
+  });
 });

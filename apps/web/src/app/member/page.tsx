@@ -187,6 +187,32 @@ export default function MemberHomePage() {
               <p className="meta">History is unavailable in this household scope.</p>
             )}
           </section>
+          {selectedHouseholdId ? (
+            <section className="card">
+              <span className="dev-pill">
+                {process.env.NODE_ENV === 'production'
+                  ? 'Private beta · text only'
+                  : 'Local text-only path'}
+              </span>
+              <h2>Share feedback</h2>
+              <p>
+                Record a product observation for this selected household. Media uploads and
+                automatic outbound follow-up are disabled.
+              </p>
+              <Link href="/member/feedback">Open selected-household feedback</Link>
+            </section>
+          ) : null}
+          {process.env.NODE_ENV !== 'production' ? (
+            <section className="card">
+              <span className="dev-pill">Provider-free local simulation</span>
+              <h2>Messaging consent laboratory</h2>
+              <p>
+                Record a fictional test destination and review separate purpose choices. No SMS
+                provider, contact upload, or delivery is available.
+              </p>
+              <Link href="/member/messaging">Open messaging consent laboratory</Link>
+            </section>
+          ) : null}
           {canUseFamily ? (
             <section className="card">
               <h2>Need another person?</h2>
@@ -194,17 +220,45 @@ export default function MemberHomePage() {
               <Link href="/member/family">Open Family</Link>
             </section>
           ) : null}
+          {selectedScope?.isBillingManager ? (
+            <section className="card">
+              <h2>Billing</h2>
+              <p>
+                Review the founder-gated Founding Household offer and its payment-evidence state.
+              </p>
+              <Link href="/member/billing">Open billing</Link>
+            </section>
+          ) : null}
+          {selectedScope?.isAdministrator ? (
+            <section className="card">
+              <span className="dev-pill">
+                {process.env.NODE_ENV === 'production'
+                  ? 'Founder-sponsored · no card'
+                  : 'Local no-card path'}
+              </span>
+              <h2>Founding Household</h2>
+              <p>
+                Review a founder-issued, one-time invitation and finite sponsored beta terms. No
+                payment or automatic message is sent.
+              </p>
+              <Link href="/member/founding-household">Open Founding Household review</Link>
+            </section>
+          ) : null}
           <section className="card" data-testid="local-access-summary">
-            <span className="dev-pill">Local access hypothesis</span>
+            <span className="dev-pill">
+              {process.env.NODE_ENV === 'production'
+                ? 'Current access record'
+                : 'Local access hypothesis'}
+            </span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
             <p>
-              This development-only access record is a product hypothesis. There is no billing,
-              purchase, upgrade, or charge in this build.
+              This access record is a product hypothesis. Billing initiation is a separate,
+              founder-gated flow and may be unavailable for this household.
             </p>
             {!selectedScope?.isBillingManager ? (
               <p className="meta">
-                Household plan totals are billing-manager-only in this local build. Your available
-                actions still follow the permissions for this selected household.
+                Household plan totals are billing-manager-only. Your available actions still follow
+                the permissions for this selected household.
               </p>
             ) : selectedEntitlements ? (
               <>
@@ -221,8 +275,8 @@ export default function MemberHomePage() {
               </>
             ) : entitlementsUnavailableFor === selectedHouseholdId ? (
               <p className="meta">
-                Local plan and allowance details are unavailable. The selected household permissions
-                shown in the actions above still apply.
+                Plan and allowance details are unavailable. The selected household permissions shown
+                in the actions above still apply.
               </p>
             ) : (
               <p className="meta">Loading selected-household access details…</p>

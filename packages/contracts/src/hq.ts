@@ -2,13 +2,15 @@ import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema, providerStateSchema } from './common';
 import { riskSchema } from './checks';
 
+const hqDataStateSchema = z.enum(['local_development', 'live_database']);
+
 export const metricCardSchema = z.object({
   key: z.string().min(1).max(80),
   label: z.string().min(1).max(160),
   value: z.number(),
   source: z.string().min(1).max(160),
   updatedAt: isoDateTimeSchema,
-  dataState: z.literal('local_development'),
+  dataState: hqDataStateSchema,
 });
 
 export const hqOverviewResponseSchema = z.object({
@@ -18,7 +20,7 @@ export const hqOverviewResponseSchema = z.object({
       key: z.string(),
       severity: z.enum(['info', 'warning', 'critical']),
       message: z.string(),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });
@@ -31,9 +33,10 @@ export const hqHouseholdsResponseSchema = z.object({
       memberCount: z.number().int().nonnegative(),
       orientationReadyCount: z.number().int().nonnegative(),
       entitlementState: z.enum(['active', 'inactive']),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
+  truncated: z.boolean(),
 });
 
 export const hqChecksResponseSchema = z.object({
@@ -45,10 +48,58 @@ export const hqChecksResponseSchema = z.object({
       risk: riskSchema,
       providerState: providerStateSchema,
       createdAt: isoDateTimeSchema,
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });
+
+export const hqSupportQueueResponseSchema = z
+  .object({
+    projection: z.literal('assigned_support_queue'),
+    cases: z.array(
+      z
+        .object({
+          id: opaqueIdSchema,
+          householdId: opaqueIdSchema,
+          householdName: z.string().min(1).max(160),
+          purposeCode: z.enum(['customer_support']),
+          status: z.literal('open'),
+          assignedAt: isoDateTimeSchema,
+          dataState: hqDataStateSchema,
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+  })
+  .strict();
+
+export const hqReviewQueueResponseSchema = z
+  .object({
+    projection: z.literal('assigned_review_queue'),
+    cases: z.array(
+      z
+        .object({
+          id: opaqueIdSchema,
+          severity: z.enum(['low', 'medium', 'high', 'critical']),
+          state: z.enum(['open', 'triaged', 'in_progress']),
+          routingClass: z.enum([
+            'self_service',
+            'ai_assisted',
+            'l1_human',
+            'trust_safety',
+            'billing',
+            'security_privacy',
+            'founder',
+          ]),
+          dueAt: isoDateTimeSchema.optional(),
+          updatedAt: isoDateTimeSchema,
+          dataState: hqDataStateSchema,
+        })
+        .strict(),
+    ),
+    truncated: z.boolean(),
+  })
+  .strict();
 
 export const hqProviderHealthResponseSchema = z.object({
   providers: z.array(
@@ -57,7 +108,7 @@ export const hqProviderHealthResponseSchema = z.object({
       state: providerStateSchema,
       lastCheckedAt: isoDateTimeSchema,
       detail: z.string(),
-      dataState: z.literal('local_development'),
+      dataState: hqDataStateSchema,
     }),
   ),
 });
@@ -105,6 +156,7 @@ export const hqRevenueResponseSchema = z.object({
       dataState: z.literal('seeded'),
     }),
   ),
+  truncated: z.boolean(),
 });
 
 export const publicConfigResponseSchema = z.object({
@@ -126,5 +178,7 @@ export const publicConfigResponseSchema = z.object({
 });
 
 export type HqOverviewResponse = z.infer<typeof hqOverviewResponseSchema>;
+export type HqSupportQueueResponse = z.infer<typeof hqSupportQueueResponseSchema>;
+export type HqReviewQueueResponse = z.infer<typeof hqReviewQueueResponseSchema>;
 export type HqRevenueResponse = z.infer<typeof hqRevenueResponseSchema>;
 export type PublicConfigResponse = z.infer<typeof publicConfigResponseSchema>;

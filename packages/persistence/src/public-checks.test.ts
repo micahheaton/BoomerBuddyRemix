@@ -140,6 +140,81 @@ describe('privacy-bounded public Check persistence', () => {
     expect(stored).not.toContain(secondAddress);
   });
 
+  it('separates current-network abuse controls from short-lived continuity proof', async () => {
+    const firstKey = repository.clientKeyForNetworkAddress('198.51.100.23');
+    const changedKey = repository.clientKeyForNetworkAddress('2001:db8::23');
+    const thirdKey = repository.clientKeyForNetworkAddress('203.0.113.23');
+    const grant = await repository.createContext({
+      attribution: { source: 'direct', campaign: 'none' },
+      clientKey: firstKey,
+      now,
+    });
+    const serialized = JSON.stringify(
+      await database.query<Record<string, unknown>>(
+        `SELECT token_hmac, client_key_hmac, continuity_hmac
+         FROM public_check_contexts`,
+      ),
+    );
+    expect(serialized).not.toContain(grant.token);
+    expect(serialized).not.toContain(grant.continuityProof);
+
+    await expect(
+      repository.consumeContext({
+        token: grant.token,
+        continuityProof: grant.continuityProof,
+        clientKey: changedKey,
+        now,
+      }),
+    ).resolves.toEqual(expect.objectContaining({ source: 'direct' }));
+    await expect(
+      repository.consumeContext({ token: grant.token, clientKey: thirdKey, now }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+
+    const replacement = grant.continuityProof.endsWith('A') ? 'B' : 'A';
+    await expect(
+      repository.consumeContext({
+        token: grant.token,
+        continuityProof: `${grant.continuityProof.slice(0, -1)}${replacement}`,
+        clientKey: firstKey,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+
+    const quota = await database.query<
+      { scope_key: string; used_count: number } & Record<string, unknown>
+    >(
+      `SELECT scope_key, used_count FROM public_check_quota_buckets
+       WHERE scope = 'global_public_check' AND scope_key <> 'global'`,
+    );
+    expect(quota.rows).toContainEqual({ scope_key: changedKey, used_count: 1 });
+    expect(quota.rows).not.toContainEqual(expect.objectContaining({ scope_key: firstKey }));
+  });
+
+  it('keeps migrated legacy contexts network-bound', async () => {
+    const originalKey = repository.clientKeyForNetworkAddress('198.51.100.24');
+    const changedKey = repository.clientKeyForNetworkAddress('198.51.100.25');
+    const grant = await repository.createContext({
+      attribution: { source: 'organic', campaign: 'none' },
+      clientKey: originalKey,
+      now,
+    });
+    await database.query(
+      `UPDATE public_check_contexts
+       SET continuity_hmac = NULL, continuity_hmac_key_version = NULL`,
+    );
+    await expect(
+      repository.consumeContext({
+        token: grant.token,
+        continuityProof: grant.continuityProof,
+        clientKey: changedKey,
+        now,
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(
+      repository.consumeContext({ token: grant.token, clientKey: originalKey, now }),
+    ).resolves.toEqual(expect.objectContaining({ source: 'organic' }));
+  });
+
   it('holds bounded expiring analysis leases per client and globally', async () => {
     repository = new PublicCheckRepository(
       database,

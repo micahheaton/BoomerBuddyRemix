@@ -18,6 +18,10 @@ export const publicCheckContextTokenSchema = z
   .string()
   .regex(/^public_context_[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{32,}$/u)
   .max(256);
+export const publicCheckContinuityProofSchema = z
+  .string()
+  .regex(/^public_continuity_[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{32,}$/u)
+  .max(256);
 export const publicCheckConversionTokenSchema = z
   .string()
   .regex(/^public_result_[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{32,}$/u)
@@ -38,6 +42,7 @@ export const createPublicCheckContextRequestSchema = z
 export const createPublicCheckContextResponseSchema = z.object({
   context: z.object({
     token: publicCheckContextTokenSchema,
+    continuityProof: publicCheckContinuityProofSchema,
     expiresAt: isoDateTimeSchema,
     remainingChecks: z.number().int().min(1).max(3),
   }),
@@ -47,6 +52,7 @@ export const createPublicCheckRequestSchema = z.discriminatedUnion('kind', [
   z
     .object({
       contextToken: publicCheckContextTokenSchema,
+      continuityProof: publicCheckContinuityProofSchema.optional(),
       kind: z.literal('text'),
       content: boundedContent(20_000, 16_384),
     })
@@ -54,6 +60,7 @@ export const createPublicCheckRequestSchema = z.discriminatedUnion('kind', [
   z
     .object({
       contextToken: publicCheckContextTokenSchema,
+      continuityProof: publicCheckContinuityProofSchema.optional(),
       kind: z.literal('url'),
       content: boundedContent(2_048, 4_096),
     })
@@ -95,6 +102,10 @@ export const createPublicCheckResponseSchema = z.object({
     conversionGrant: z.object({
       token: publicCheckConversionTokenSchema,
       expiresAt: isoDateTimeSchema,
+      semanticsVersion: z.literal('single-success-retry-v1'),
+      singleSuccessfulConversion: z.literal(true),
+      retryableWithSameCredentialOwnerAndConsent: z.literal(true),
+      // Compatibility alias: this means one owned Check, not one HTTP attempt.
       oneTime: z.literal(true),
     }),
   }),

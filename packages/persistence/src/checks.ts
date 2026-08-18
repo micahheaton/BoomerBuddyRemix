@@ -7,7 +7,10 @@ import {
 } from '@boomerbuddy/security';
 import type { Audience } from '@boomerbuddy/domain';
 import type { Database, SqlExecutor } from './database';
-import { hasEffectiveProtectedEnrollment } from './entitlements';
+import {
+  hasEffectiveProtectedEnrollment,
+  type EntitlementRuntimeEnvironment,
+} from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import {
   asDate,
@@ -185,6 +188,7 @@ export class CheckRepository {
     private readonly database: Database,
     private readonly protection: ArtifactProtection,
     private readonly idFactory: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
   ) {}
 
   async create(input: CreateStoredCheckInput): Promise<StoredCheck> {
@@ -228,6 +232,7 @@ export class CheckRepository {
       input.actorPersonId,
       input.now,
       true,
+      this.runtimeEnvironment,
     );
     if (!hasEnrollment) {
       throw new DomainError('not_authorized', 'Protected-member enrollment is required');
@@ -570,6 +575,7 @@ export class CheckRepository {
         input.ownerPersonId,
         input.now,
         true,
+        this.runtimeEnvironment,
       );
       if (!hasEnrollment) {
         throw new DomainError('not_authorized', 'Protected-member enrollment is required');

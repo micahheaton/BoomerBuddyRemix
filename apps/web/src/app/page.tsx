@@ -12,8 +12,8 @@ export default function HomePage() {
             <h1>From suspicious to a safer next step—together.</h1>
             <p className="lede">
               BoomerBuddy helps you slow down, check a suspicious text or link, and involve someone
-              you trust. Public Check works without an account in this local rules-only build; no
-              live reputation provider is connected.
+              you trust. Public Check works without an account. Its rules-only result can be wrong
+              and is not calibrated real-world fraud-detection evidence.
             </p>
             <div className="button-row">
               <Link className="button button-primary" href="/check">
@@ -50,7 +50,7 @@ export default function HomePage() {
                 <div className="step-number">2</div>
                 <h3>Read the limits</h3>
                 <p>
-                  See a risk level, evidence sufficiency, explicit limitations, and the local
+                  See a risk level, evidence sufficiency, explicit limitations, and the available
                   provider state.
                 </p>
               </article>
@@ -75,8 +75,8 @@ export default function HomePage() {
             <article className="card">
               <h3>Your people stay in the loop</h3>
               <p>
-                Family controls make consent and permissions visible. Local invites are not sent by
-                email or text.
+                Family controls make consent and permissions visible. BoomerBuddy does not
+                automatically email or text invitations.
               </p>
             </article>
           </div>

@@ -1,8 +1,14 @@
 import { existsSync } from 'node:fs';
-import { loadConfig, loadEnvironmentFile } from '@boomerbuddy/config';
-import { createLogger } from '@boomerbuddy/observability';
-import { StripeHttpTransport, StripeTestAdapter } from '@boomerbuddy/integrations';
+import { randomUUID } from 'node:crypto';
 import {
+  assertStripeOnlineRuntimePermitted,
+  loadConfig,
+  loadEnvironmentFile,
+} from '@boomerbuddy/config';
+import { createLogger } from '@boomerbuddy/observability';
+import { StripeHttpTransport } from '@boomerbuddy/integrations';
+import {
+  AutomationBudgetRepository,
   BusinessOsRepository,
   CheckRepository,
   CommerceOperationsRepository,
@@ -10,11 +16,14 @@ import {
   createPGliteDatabase,
   createPostgresDatabase,
   DurableJobRepository,
+  FeedbackRepository,
   GrowthRuntimeRepository,
   growthProjectionEventTypes,
+  MessagingRepository,
   OperationalWorkRepository,
   OutboxDeliveryRepository,
   PublicCheckRepository,
+  ProductionIdentityRepository,
   runMigrations,
 } from '@boomerbuddy/persistence';
 import {
@@ -24,12 +33,27 @@ import {
   retentionIntervalKey,
   type JobHandler,
 } from '@boomerbuddy/platform';
+import {
+  automationBudgetMaintenanceJobType,
+  createAutomationBudgetMaintenanceHandler,
+  enqueueAutomationBudgetMaintenance,
+} from './automation-budget-maintenance';
 import { createStripeReconciliationHandler } from './commerce-reconciliation';
+import { composeFeedbackWorker } from './feedback-composition';
+import { composeProviderFreeMessagingWorker } from './messaging-composition';
+import {
+  createStripeInventoryHandler,
+  enqueueStripeInventory,
+  stripeInventoryJobType,
+} from './stripe-inventory';
+import { createStripeSessionRetryHandler, stripeSessionRetryJobType } from './stripe-session-retry';
+import { createWorkerStripeAdapter } from './stripe-adapter';
 import { createGrowthRuntimeHandlers, enqueueGrowthRuntimeJobs } from './growth-runtime';
 import { createOperationalHandlers, seedOperationalSchedules } from './operational-handlers';
 
 if (existsSync('.env')) loadEnvironmentFile();
 const appConfig = loadConfig();
+assertStripeOnlineRuntimePermitted(appConfig, 'worker');
 const workerConfig = loadWorkerRuntimeConfig();
 const logger = createLogger({
   level: appConfig.logLevel,
@@ -40,22 +64,69 @@ const database =
     ? await createPostgresDatabase(appConfig.database.url)
     : await createPGliteDatabase(appConfig.database.path);
 if (appConfig.database.runMigrations) await runMigrations(database);
+if (appConfig.environment === 'production') {
+  const clerk = appConfig.identity.clerk;
+  const founderPersonId = appConfig.identity.founderPersonId;
+  if (clerk === undefined || founderPersonId === undefined) {
+    throw new TypeError('Production Clerk founder configuration is incomplete');
+  }
+  await new ProductionIdentityRepository(database).assertFounderBinding({
+    issuer: clerk.hq.issuer,
+    subject: clerk.founderSubject,
+    founderPersonId,
+  });
+}
+const entitlementRuntimeEnvironment =
+  appConfig.environment === 'production' ? ('production' as const) : ('local' as const);
 
 const jobs = new DurableJobRepository(database);
+const automationBudget = new AutomationBudgetRepository(
+  database,
+  undefined,
+  appConfig.identity.founderPersonId,
+);
 const outbox = new OutboxDeliveryRepository(database);
-const checks = new CheckRepository(database, {
-  encryptionKey: appConfig.secrets.artifactEncryptionKey,
-  encryptionKeyVersion: 1,
-  fingerprintKey: appConfig.secrets.fingerprintKey,
-  fingerprintKeyVersion: 1,
-});
+const checks = new CheckRepository(
+  database,
+  {
+    encryptionKey: appConfig.secrets.artifactEncryptionKey,
+    encryptionKeyVersion: 1,
+    fingerprintKey: appConfig.secrets.fingerprintKey,
+    fingerprintKeyVersion: 1,
+  },
+  undefined,
+  entitlementRuntimeEnvironment,
+);
 const publicChecks = new PublicCheckRepository(database, {
   encryptionKey: appConfig.secrets.artifactEncryptionKey,
   encryptionKeyVersion: 1,
   hmacKey: appConfig.secrets.fingerprintKey,
   hmacKeyVersion: 1,
 });
-const commerce = new CommerceOperationsRepository(database, appConfig.secrets.fingerprintKey, 1);
+const feedback = new FeedbackRepository(database, {
+  encryptionKey: appConfig.secrets.artifactEncryptionKey,
+  encryptionKeyVersion: 1,
+  fingerprintKey: appConfig.secrets.fingerprintKey,
+  fingerprintKeyVersion: 1,
+});
+const messaging = new MessagingRepository(
+  database,
+  {
+    encryptionKey: appConfig.secrets.artifactEncryptionKey,
+    encryptionKeyVersion: 1,
+    fingerprintKey: appConfig.secrets.fingerprintKey,
+    fingerprintKeyVersion: 1,
+  },
+  undefined,
+  entitlementRuntimeEnvironment,
+);
+const commerce = new CommerceOperationsRepository(
+  database,
+  appConfig.secrets.fingerprintKey,
+  1,
+  undefined,
+  entitlementRuntimeEnvironment,
+);
 const commerceRuntime = new CommerceRuntimeRepository(database);
 const businessOs = new BusinessOsRepository(database);
 const growth = new GrowthRuntimeRepository(database);
@@ -69,13 +140,20 @@ const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
   const now = new Date();
   const deleted = await checks.purgeDue({ now, limit: batch });
   const publicDeleted = await publicChecks.purgeExpired(now);
+  const messagingDeleted =
+    entitlementRuntimeEnvironment === 'local'
+      ? await messaging.purgeExpiredSupportContent({ limit: batch, now })
+      : [];
   await heartbeat();
   const next = nextRetentionSchedule({
     currentJobId: job.id,
     intervalMs: retentionIntervalMs,
     now,
     workWasFound:
-      deleted.length === batch || publicDeleted.contexts > 0 || publicDeleted.results > 0,
+      deleted.length === batch ||
+      publicDeleted.contexts > 0 ||
+      publicDeleted.results > 0 ||
+      messagingDeleted.length === batch,
   });
   await jobs.enqueue({
     type: 'retention.sweep',
@@ -88,6 +166,16 @@ const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
 };
 
 const now = new Date();
+const feedbackComposition = await composeFeedbackWorker({
+  environment: appConfig.environment,
+  feedback,
+  jobs,
+  now,
+});
+const messagingComposition = composeProviderFreeMessagingWorker({
+  environment: appConfig.environment,
+  messaging,
+});
 await jobs.enqueue({
   type: 'retention.sweep',
   payload: { batch: 100 },
@@ -96,32 +184,72 @@ await jobs.enqueue({
   maxAttempts: 8,
   correlationId: retentionIntervalKey(now, retentionIntervalMs),
 });
+await enqueueAutomationBudgetMaintenance({ jobs, now, batch: 25 });
 await enqueueGrowthRuntimeJobs({ jobs, now, batch: 100 });
-await seedOperationalSchedules({ jobs, now });
+await seedOperationalSchedules({ environment: appConfig.environment, jobs, now });
 
 const handlers: Record<string, JobHandler> = {
   'retention.sweep': retentionHandler,
+  ...feedbackComposition.handlers,
+  ...messagingComposition.handlers,
+  [automationBudgetMaintenanceJobType]: createAutomationBudgetMaintenanceHandler({
+    budgets: automationBudget,
+    jobs,
+  }),
   ...createGrowthRuntimeHandlers({ growth, jobs }),
   ...createOperationalHandlers({
+    environment: appConfig.environment,
     jobs,
     operations,
     fingerprintKey: appConfig.secrets.fingerprintKey,
   }),
 };
 if (appConfig.commerce.stripe.mode === 'test') {
+  const stripe = appConfig.commerce.stripe;
+  const runtimeRunId = `worker-${randomUUID()}`;
+  const stripeAdapter = createWorkerStripeAdapter({
+    transport: new StripeHttpTransport(stripe.apiKey, stripe.apiVersion),
+    customerOrigins: appConfig.identity.customerOrigins,
+    configuration: {
+      environment: stripe.environment,
+      accountId: stripe.accountId,
+      apiVersion: stripe.apiVersion,
+      portalConfigurationId: stripe.cancelOnlyPortalConfigurationId,
+      offer: stripe.offer,
+    },
+  });
   handlers['commerce.reconcile'] = createStripeReconciliationHandler({
     businessOs,
     commerce,
     commerceRuntime,
-    provider: new StripeTestAdapter(
-      new StripeHttpTransport(
-        appConfig.commerce.stripe.secretKey,
-        appConfig.commerce.stripe.apiVersion,
-      ),
-      { authorize: async () => ({ allowed: false, reason: 'worker_has_no_checkout_authority' }) },
-      new Set(),
-      appConfig.commerce.stripe.apiVersion,
-    ),
+    jobs,
+    provider: stripeAdapter,
+  });
+  handlers[stripeSessionRetryJobType] = createStripeSessionRetryHandler({
+    businessOs,
+    commerceRuntime,
+    provider: stripeAdapter,
+    evidenceLevel: 'stripe_test',
+    transportKind: 'stripe_https',
+    runtimeRunId,
+    authenticityKind: 'provider_read',
+    runtimeInitiationPermitted: stripe.runtimeInitiationPermitted,
+  });
+  handlers[stripeInventoryJobType] = createStripeInventoryHandler({
+    businessOs,
+    commerceRuntime,
+    jobs,
+    provider: stripeAdapter,
+    runtimeRunId,
+  });
+  await enqueueStripeInventory({
+    jobs,
+    environment: stripe.environment,
+    accountId: stripe.accountId,
+    apiVersion: stripe.apiVersion,
+    evidenceTier: 'stripe_test',
+    transportKind: 'stripe_https',
+    scheduledAt: now,
   });
 }
 

@@ -44,7 +44,14 @@ function hqPrincipal(role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_suppor
     audience: 'hq',
     roles: [role],
     households: [],
-    organizations: [{ employeeAssignmentId: 'employee-support', role, status: 'active' }],
+    organizations: [
+      {
+        employeeAssignmentId: 'employee-support',
+        organizationKind: 'internal',
+        role,
+        status: 'active',
+      },
+    ],
   });
 }
 
@@ -424,7 +431,12 @@ describe('deny-by-default authorization', () => {
       ...assigned,
       roles: ['hq_owner'],
       organizations: [
-        { employeeAssignmentId: 'employee-support', role: 'hq_owner', status: 'active' },
+        {
+          employeeAssignmentId: 'employee-support',
+          organizationKind: 'internal',
+          role: 'hq_owner',
+          status: 'active',
+        },
       ],
     });
     expect(
@@ -461,6 +473,347 @@ describe('deny-by-default authorization', () => {
         resource: { ...artifact, resourceId: 'artifact-other' },
       }).allowed,
     ).toBe(false);
+    const message = {
+      ...artifact,
+      resourceType: 'messaging_inbound',
+      resourceId: 'message-event-exact',
+    } as const;
+    const messageGranted = principal({
+      ...assigned,
+      restrictedAccess: [
+        {
+          grantId: ids.restrictedAccessGrant('grant-message-exact'),
+          caseId,
+          householdId: home,
+          employeeAssignmentId: 'employee-support',
+          purpose: 'customer_support',
+          resourceType: 'messaging_inbound',
+          resourceId: 'message-event-exact',
+          expiresAt: new Date('2026-08-16T20:00:00.000Z'),
+        },
+      ],
+    });
+    expect(
+      authorize({
+        principal: messageGranted,
+        action: 'hq:restricted_resource:read',
+        resource: message,
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: messageGranted,
+        action: 'hq:restricted_resource:read',
+        resource: { ...message, resourceId: 'message-event-other' },
+      }).allowed,
+    ).toBe(false);
+  });
+
+  it('keeps global HQ projections owner-only and delegated queues assignment-bound', () => {
+    const hq: Resource = { kind: 'hq' };
+    const globalActions = ['hq:households:list', 'hq:reviews:list'] as const;
+    const delegatedActions = ['hq:support_queue:list', 'hq:review_queue:list'] as const;
+    const owner = hqPrincipal('hq_owner');
+    const reviewer = hqPrincipal('hq_reviewer');
+    const support = hqPrincipal('hq_support');
+
+    for (const action of globalActions) {
+      expect(authorize({ principal: owner, action, resource: hq }).allowed).toBe(true);
+      expect(authorize({ principal: reviewer, action, resource: hq }).reason).toBe(
+        'insufficient_role',
+      );
+      expect(authorize({ principal: support, action, resource: hq }).reason).toBe(
+        'insufficient_role',
+      );
+    }
+
+    expect(
+      authorize({ principal: reviewer, action: 'hq:review_queue:list', resource: hq }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({ principal: reviewer, action: 'hq:support_queue:list', resource: hq }).reason,
+    ).toBe('insufficient_role');
+    expect(
+      authorize({ principal: support, action: 'hq:support_queue:list', resource: hq }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({ principal: support, action: 'hq:review_queue:list', resource: hq }).reason,
+    ).toBe('insufficient_role');
+
+    for (const action of delegatedActions) {
+      expect(authorize({ principal: owner, action, resource: hq }).reason).toBe(
+        'insufficient_role',
+      );
+    }
+
+    const ownerWithReviewerClaimOnly = principal({
+      ...owner,
+      roles: ['hq_owner', 'hq_reviewer'],
+    });
+    expect(
+      authorize({
+        principal: ownerWithReviewerClaimOnly,
+        action: 'hq:review_queue:list',
+        resource: hq,
+      }).reason,
+    ).toBe('insufficient_role');
+
+    const ownerWithReviewerAssignment = principal({
+      ...owner,
+      roles: ['hq_owner', 'hq_reviewer'],
+      organizations: [
+        ...owner.organizations,
+        {
+          employeeAssignmentId: 'employee-reviewer',
+          organizationKind: 'internal',
+          role: 'hq_reviewer',
+          status: 'active',
+        },
+      ],
+    });
+    expect(
+      authorize({
+        principal: ownerWithReviewerAssignment,
+        action: 'hq:review_queue:list',
+        resource: hq,
+      }).allowed,
+    ).toBe(true);
+
+    for (const roleAndAction of [
+      ['hq_owner', 'hq:households:list'],
+      ['hq_owner', 'hq:reviews:list'],
+      ['hq_reviewer', 'hq:review_queue:list'],
+      ['hq_support', 'hq:support_queue:list'],
+    ] as const) {
+      const [role, action] = roleAndAction;
+      const active = hqPrincipal(role);
+      const suspended = principal({
+        ...active,
+        organizations: active.organizations.map((assignment) => ({
+          ...assignment,
+          status: 'suspended' as const,
+        })),
+      });
+      expect(authorize({ principal: suspended, action, resource: hq }).reason).toBe(
+        'inactive_relationship',
+      );
+    }
+
+    for (const audience of ['customer', 'mobile'] as const) {
+      const wrongAudience = principal({
+        ...reviewer,
+        audience,
+      });
+      for (const action of [...globalActions, ...delegatedActions]) {
+        expect(authorize({ principal: wrongAudience, action, resource: hq }).reason).toBe(
+          'wrong_audience',
+        );
+      }
+    }
+  });
+
+  it('limits founder provisioning to the exact configured founder with an active internal owner assignment', () => {
+    const configuredFounder = ids.person('person-founder-provisioning');
+    const resource: Resource = {
+      kind: 'founder_provisioning',
+      configuredFounderPersonId: configuredFounder,
+    };
+    const exactFounder = principal({
+      ...hqPrincipal('hq_owner'),
+      personId: configuredFounder,
+    });
+
+    for (const action of [
+      'hq:founder_provisioning:read',
+      'hq:founder_provisioning:manage',
+    ] as const) {
+      expect(authorize({ principal: exactFounder, action, resource }).allowed).toBe(true);
+      expect(
+        authorize({
+          principal: exactFounder,
+          action,
+          resource: { kind: 'founder_provisioning' },
+        }).reason,
+      ).toBe('insufficient_role');
+      expect(
+        authorize({
+          principal: hqPrincipal('hq_owner'),
+          action,
+          resource,
+        }).reason,
+      ).toBe('insufficient_role');
+      expect(
+        authorize({
+          principal: principal({
+            ...exactFounder,
+            organizations: [],
+            roles: ['hq_owner'],
+          }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('inactive_relationship');
+      expect(
+        authorize({
+          principal: principal({
+            ...exactFounder,
+            organizations: exactFounder.organizations.map((assignment) => ({
+              ...assignment,
+              organizationKind: 'sponsor' as const,
+            })),
+          }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('inactive_relationship');
+      expect(
+        authorize({
+          principal: principal({
+            ...exactFounder,
+            organizations: exactFounder.organizations.map((assignment) => ({
+              ...assignment,
+              status: 'suspended' as const,
+            })),
+          }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('inactive_relationship');
+      expect(
+        authorize({
+          principal: principal({ ...exactFounder, audience: 'customer' }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('wrong_audience');
+      expect(authorize({ principal: exactFounder, action, resource: { kind: 'hq' } }).reason).toBe(
+        'unsupported_action_resource',
+      );
+    }
+  });
+
+  it('limits Founding Household programme management to the exact configured internal founder', () => {
+    const configuredFounder = ids.person('person-founding-households-founder');
+    const resource: Resource = {
+      kind: 'founding_household_program',
+      configuredFounderPersonId: configuredFounder,
+    };
+    const exactFounder = principal({
+      ...hqPrincipal('hq_owner'),
+      personId: configuredFounder,
+    });
+
+    for (const action of [
+      'hq:founding_households:read',
+      'hq:founding_households:manage',
+    ] as const) {
+      expect(authorize({ principal: exactFounder, action, resource }).allowed).toBe(true);
+      expect(
+        authorize({
+          principal: hqPrincipal('hq_owner'),
+          action,
+          resource,
+        }).reason,
+      ).toBe('insufficient_role');
+      expect(
+        authorize({
+          principal: principal({
+            ...exactFounder,
+            organizations: exactFounder.organizations.map((assignment) => ({
+              ...assignment,
+              organizationKind: 'sponsor' as const,
+            })),
+          }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('inactive_relationship');
+      expect(
+        authorize({
+          principal: principal({ ...exactFounder, audience: 'customer' }),
+          action,
+          resource,
+        }).reason,
+      ).toBe('wrong_audience');
+      expect(
+        authorize({ principal: exactFounder, action, resource: { kind: 'founder_provisioning' } })
+          .reason,
+      ).toBe('unsupported_action_resource');
+    }
+  });
+
+  it('requires active household-administrator scope and a credential for local acceptance', () => {
+    const administrator = principal({
+      roles: ['household_administrator'],
+      households: [
+        householdScope({ isAdministrator: true, isProtectedMember: false, capabilities: [] }),
+      ],
+    });
+    const invitation: Resource = {
+      kind: 'founding_household',
+      householdId: home,
+      scope: { kind: 'invitation', credentialPresented: true },
+    };
+    const status: Resource = {
+      kind: 'founding_household',
+      householdId: home,
+      scope: { kind: 'status' },
+    };
+
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'founding_household:view',
+        resource: invitation,
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'founding_household:accept',
+        resource: invitation,
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'founding_household:offboard',
+        resource: status,
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'founding_household:accept',
+        resource: {
+          ...invitation,
+          scope: { kind: 'invitation', credentialPresented: false },
+        },
+      }).allowed,
+    ).toBe(false);
+    expect(
+      authorize({
+        principal: principal({
+          households: [householdScope({ isAdministrator: false, capabilities: [] })],
+        }),
+        action: 'founding_household:view',
+        resource: status,
+      }).reason,
+    ).toBe('insufficient_role');
+    expect(
+      authorize({
+        principal: principal({ ...administrator, audience: 'hq' }),
+        action: 'founding_household:view',
+        resource: status,
+      }).reason,
+    ).toBe('wrong_audience');
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'founding_household:view',
+        resource: { ...status, householdId: other },
+      }).reason,
+    ).toBe('outside_tenant');
   });
 
   it('exports central Business OS read and manage actions with distinct HQ policy', () => {

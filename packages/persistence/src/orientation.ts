@@ -11,7 +11,10 @@ import {
 } from '@boomerbuddy/domain';
 import { createSafeWordVerifier } from '@boomerbuddy/security';
 import type { Database, SqlExecutor } from './database';
-import { hasEffectiveProtectedEnrollment } from './entitlements';
+import {
+  hasEffectiveProtectedEnrollment,
+  type EntitlementRuntimeEnvironment,
+} from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import {
   asDate,
@@ -91,6 +94,7 @@ export class OrientationRepository {
     private readonly database: Database,
     private readonly safeWordPepper: Uint8Array,
     private readonly idFactory: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
   ) {}
 
   async get(householdId: string, personId: string, now: Date): Promise<StoredOrientation> {
@@ -133,6 +137,8 @@ export class OrientationRepository {
         input.householdId,
         input.subjectPersonId,
         input.now,
+        false,
+        this.runtimeEnvironment,
       ))
     ) {
       throw new DomainError('not_authorized', 'Protected-member enrollment is required');
@@ -178,6 +184,8 @@ export class OrientationRepository {
         input.householdId,
         input.subjectPersonId,
         input.now,
+        false,
+        this.runtimeEnvironment,
       ))
     ) {
       throw new DomainError('not_authorized', 'Protected-member enrollment is required');
@@ -203,6 +211,7 @@ export class OrientationRepository {
           input.subjectPersonId,
           input.now,
           true,
+          this.runtimeEnvironment,
         ))
       ) {
         throw new DomainError('not_authorized', 'Protected-member enrollment is required');
@@ -297,6 +306,7 @@ export class OrientationRepository {
           input.subjectPersonId,
           input.now,
           true,
+          this.runtimeEnvironment,
         ))
       ) {
         throw new DomainError('not_authorized', 'Protected-member enrollment is required');

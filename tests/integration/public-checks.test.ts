@@ -27,6 +27,22 @@ describe('privacy-bounded public Check journey', () => {
     return response.json<{ context: { token: string } }>().context.token;
   }
 
+  async function contextGrant(remoteAddress: string): Promise<{
+    readonly token: string;
+    readonly continuityProof: string;
+  }> {
+    const response = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/public/check-contexts',
+      remoteAddress,
+      payload: { attribution: { source: 'direct', campaign: 'none' } },
+    });
+    expect(response.statusCode).toBe(201);
+    return response.json<{
+      context: { token: string; continuityProof: string };
+    }>().context;
+  }
+
   it('returns a redacted transient result without creating customer artifacts or analyses', async () => {
     const beforeArtifacts = await harness.database.query<
       { total: number } & Record<string, unknown>
@@ -51,7 +67,13 @@ describe('privacy-bounded public Check journey', () => {
         id: string;
         risk: string;
         inputSafety: { flags: string[] };
-        conversionGrant: { token: string; oneTime: boolean };
+        conversionGrant: {
+          token: string;
+          oneTime: boolean;
+          semanticsVersion: string;
+          singleSuccessfulConversion: boolean;
+          retryableWithSameCredentialOwnerAndConsent: boolean;
+        };
       };
     }>();
     expect(body.result.risk).toMatch(/^(unknown|caution|high_concern)$/u);
@@ -59,6 +81,13 @@ describe('privacy-bounded public Check journey', () => {
       expect.arrayContaining(['contained_one_time_code', 'contained_payment_card']),
     );
     expect(body.result.conversionGrant.oneTime).toBe(true);
+    expect(body.result.conversionGrant).toEqual(
+      expect.objectContaining({
+        semanticsVersion: 'single-success-retry-v1',
+        singleSuccessfulConversion: true,
+        retryableWithSameCredentialOwnerAndConsent: true,
+      }),
+    );
     expect(response.body).not.toContain(otp);
     expect(response.body).not.toContain(card);
 
@@ -77,6 +106,60 @@ describe('privacy-bounded public Check journey', () => {
     );
     expect(JSON.stringify(stored.rows[0])).not.toContain(otp);
     expect(JSON.stringify(stored.rows[0])).not.toContain(card);
+  });
+
+  it('uses a memory-only continuity proof across network changes without moving abuse quotas', async () => {
+    const firstNetwork = '198.51.100.41';
+    const secondNetwork = '2001:db8::41';
+    const grant = await contextGrant(firstNetwork);
+    const stored = JSON.stringify(
+      await harness.database.query<Record<string, unknown>>(
+        `SELECT token_hmac, client_key_hmac, continuity_hmac
+         FROM public_check_contexts`,
+      ),
+    );
+    expect(stored).not.toContain(grant.token);
+    expect(stored).not.toContain(grant.continuityProof);
+    expect(stored).not.toContain(firstNetwork);
+
+    const changedNetwork = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/public/checks',
+      remoteAddress: secondNetwork,
+      payload: {
+        contextToken: grant.token,
+        continuityProof: grant.continuityProof,
+        kind: 'text',
+        content: 'Unexpected payment request; pause and verify independently.',
+      },
+    });
+    expect(changedNetwork.statusCode).toBe(201);
+
+    const secondNetworkKey = new PublicCheckRepository(harness.database, {
+      encryptionKey: Buffer.alloc(32, 7),
+      encryptionKeyVersion: 1,
+      hmacKey: Buffer.alloc(32, 11),
+      hmacKeyVersion: 1,
+    }).clientKeyForNetworkAddress(secondNetwork);
+    const quota = await harness.database.query<
+      { scope_key: string; used_count: number } & Record<string, unknown>
+    >(
+      `SELECT scope_key, used_count FROM public_check_quota_buckets
+       WHERE scope = 'global_public_check' AND scope_key <> 'global'`,
+    );
+    expect(quota.rows).toContainEqual({ scope_key: secondNetworkKey, used_count: 1 });
+
+    const withoutProof = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/public/checks',
+      remoteAddress: '203.0.113.41',
+      payload: {
+        contextToken: grant.token,
+        kind: 'text',
+        content: 'A second bounded attempt from another network.',
+      },
+    });
+    expect(withoutProof.statusCode).toBe(404);
   });
 
   it('requires authentication and explicit consent, then saves exactly once as actor-owned', async () => {
@@ -141,6 +224,7 @@ describe('privacy-bounded public Check journey', () => {
         analysis_id: string;
         save_consent: boolean;
         consent_version: string;
+        semantics_version: string;
         session_audience: string;
         credential_hmac: string;
       } & Record<string, unknown>
@@ -155,6 +239,7 @@ describe('privacy-bounded public Check journey', () => {
         analysis_id: check.id,
         save_consent: true,
         consent_version: 'public-check-save-v1',
+        semantics_version: 'single-success-retry-v1',
         session_audience: 'customer',
       }),
     );
@@ -281,6 +366,77 @@ describe('privacy-bounded public Check journey', () => {
       },
     });
     expect(wrongToken.statusCode).toBe(404);
+  });
+
+  it('serializes concurrent matching retries and rejects a concurrent owner mismatch', async () => {
+    const analyzed = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/public/checks',
+      payload: {
+        contextToken: await contextToken(),
+        kind: 'text',
+        content: 'Unexpected account request; stop and use an independently verified channel.',
+      },
+    });
+    const result = analyzed.json<{
+      result: { id: string; conversionGrant: { token: string } };
+    }>().result;
+    const pat = await login(harness.app, 'protected-pat');
+    const olivia = await login(harness.app, 'protected-olivia');
+    const payload = {
+      conversionToken: result.conversionGrant.token,
+      saveConsent: true,
+      consentVersion: 'public-check-save-v1',
+    };
+    const [ownerAttempt, mismatchAttempt] = await Promise.all([
+      harness.app.inject({
+        method: 'POST',
+        url: `/v1/public/checks/${result.id}/save`,
+        headers: browserHeaders(pat.cookie ?? ''),
+        payload,
+      }),
+      harness.app.inject({
+        method: 'POST',
+        url: `/v1/public/checks/${result.id}/save`,
+        headers: browserHeaders(olivia.cookie ?? ''),
+        payload,
+      }),
+    ]);
+    expect([ownerAttempt.statusCode, mismatchAttempt.statusCode].sort()).toEqual([201, 404]);
+    const conversion = await harness.database.query<
+      { actor_person_id: string; total: number } & Record<string, unknown>
+    >(
+      `SELECT actor_person_id, count(*)::int AS total
+       FROM public_check_conversions WHERE result_id = $1
+       GROUP BY actor_person_id`,
+      [result.id],
+    );
+    expect(conversion.rows).toHaveLength(1);
+    expect(conversion.rows[0]?.total).toBe(1);
+
+    const winningCookie =
+      conversion.rows[0]?.actor_person_id === 'person-protected-pat'
+        ? (pat.cookie ?? '')
+        : (olivia.cookie ?? '');
+    const [firstRetry, secondRetry] = await Promise.all([
+      harness.app.inject({
+        method: 'POST',
+        url: `/v1/public/checks/${result.id}/save`,
+        headers: browserHeaders(winningCookie),
+        payload,
+      }),
+      harness.app.inject({
+        method: 'POST',
+        url: `/v1/public/checks/${result.id}/save`,
+        headers: browserHeaders(winningCookie),
+        payload,
+      }),
+    ]);
+    expect(firstRetry.statusCode).toBe(200);
+    expect(secondRetry.statusCode).toBe(200);
+    expect(firstRetry.json<{ check: { id: string } }>().check.id).toBe(
+      secondRetry.json<{ check: { id: string } }>().check.id,
+    );
   });
 
   it('rolls back Check creation and grant consumption when conversion evidence cannot commit', async () => {

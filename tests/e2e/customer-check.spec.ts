@@ -5,7 +5,7 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await signInCustomer(page);
   const localAccess = page.getByTestId('local-access-summary');
   await expect(localAccess).toContainText('Local access hypothesis');
-  await expect(localAccess).toContainText('There is no billing');
+  await expect(localAccess).toContainText('Billing initiation is a separate, founder-gated flow');
   await expect(localAccess).toContainText('Protected adults');
   await expect(localAccess).toContainText('Trusted Circle participants');
   await page.getByRole('link', { name: 'Check', exact: true }).click();

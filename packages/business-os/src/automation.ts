@@ -6,8 +6,8 @@ export interface AutomationPolicy {
   allowedDataClasses: string[];
   allowedTools: string[];
   autonomy: AutonomyClass;
-  budgetCents: number;
   enabled: boolean;
+  maxCostPerOperationCents: number;
   requiresAudit: boolean;
 }
 
@@ -124,8 +124,8 @@ export function authorizeAutomation(
   ) {
     reasons.push('The request includes an unapproved data class.');
   }
-  if (policy !== undefined && request.estimatedCostCents > policy.budgetCents) {
-    reasons.push('The request exceeds the policy budget.');
+  if (policy !== undefined && request.estimatedCostCents > policy.maxCostPerOperationCents) {
+    reasons.push('The request exceeds the per-operation cost ceiling.');
   }
   if (policy?.autonomy === 'auto' && !isAutoEligibleAction(request.action)) {
     reasons.push('This action is not eligible for autonomous execution.');

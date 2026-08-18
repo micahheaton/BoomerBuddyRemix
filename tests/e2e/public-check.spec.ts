@@ -46,7 +46,9 @@ test('anonymous Public Check uses bounded attribution and saves only after expli
 
   await page.getByRole('button', { name: 'Save with my consent' }).click();
   await expect(page.getByRole('button', { name: 'Saved to active household' })).toBeDisabled();
-  await expect(result).toContainText('one-time anonymous grant is now consumed');
+  await expect(result).toContainText(
+    'Retrying the same save for the same owner and consent returns this one saved Check.',
+  );
 });
 
 test('Public Check strips an existing session and household scope from anonymous requests', async ({

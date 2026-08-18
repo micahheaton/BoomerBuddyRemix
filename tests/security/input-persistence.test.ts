@@ -317,7 +317,7 @@ describe('input, persistence, and no-network security', () => {
       loadConfig({
         NODE_ENV: 'production',
         BB_DATABASE_DRIVER: 'postgres',
-        DATABASE_URL: 'postgres://user:password@localhost:5432/boomerbuddy',
+        DATABASE_URL: 'postgres://user:password@localhost:5432/boomerbuddy?sslmode=require',
         BB_RUN_MIGRATIONS: 'true',
         BB_SEED_DEMO: 'false',
         BB_ALLOW_DEV_IDENTITY: 'false',
@@ -328,7 +328,7 @@ describe('input, persistence, and no-network security', () => {
         BB_FINGERPRINT_KEY_BASE64: Buffer.alloc(32, 4).toString('base64'),
         BB_SAFE_WORD_PEPPER: 'a-secure-production-safe-word-pepper',
       }),
-    ).toThrow(/refuses production/iu);
+    ).toThrow('Production refuses runtime database migrations');
   });
 
   it('rolls back safe-word disposition, verifier, and step completion together', async () => {

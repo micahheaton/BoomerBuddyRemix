@@ -40,6 +40,7 @@ export function testConfig(): AppConfig {
     identity: {
       allowDevelopmentIssuer: true,
       customerOrigins: [customerOrigin],
+      founderPersonId: 'person-hq-heidi',
       hqOrigins: [hqOrigin],
     },
     secrets: {

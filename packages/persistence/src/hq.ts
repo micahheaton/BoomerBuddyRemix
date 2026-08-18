@@ -1,6 +1,7 @@
+import { DomainError, type CorrelationId, type PersonId } from '@boomerbuddy/domain';
 import type { Database } from './database';
-import { EntitlementRepository } from './entitlements';
-import { asDate } from './values';
+import { EntitlementRepository, type EntitlementRuntimeEnvironment } from './entitlements';
+import { asDate, randomIdFactory, type IdFactory } from './values';
 
 interface OverviewRow extends Record<string, unknown> {
   readonly households: number;
@@ -23,6 +24,30 @@ interface HqCheckRow extends Record<string, unknown> {
   readonly risk: 'lower_concern' | 'caution' | 'high_concern' | 'unknown';
   readonly provider_state: 'mock' | 'unknown' | 'unavailable' | 'verified';
   readonly created_at: unknown;
+}
+
+interface HqSupportCaseRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly household_id: string;
+  readonly household_name: string;
+  readonly status: 'open';
+  readonly assigned_at: unknown;
+}
+
+interface HqReviewCaseRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly severity: 'low' | 'medium' | 'high' | 'critical';
+  readonly state: 'open' | 'triaged' | 'in_progress';
+  readonly routing_class:
+    | 'self_service'
+    | 'ai_assisted'
+    | 'l1_human'
+    | 'trust_safety'
+    | 'billing'
+    | 'security_privacy'
+    | 'founder';
+  readonly due_at: unknown | null;
+  readonly updated_at: unknown;
 }
 
 interface ProviderRow extends Record<string, unknown> {
@@ -65,8 +90,60 @@ interface OpportunityRow extends Record<string, unknown> {
   readonly next_action_at: unknown;
 }
 
+export interface HqProjectionAccess {
+  readonly actorPersonId: PersonId;
+  readonly correlationId: CorrelationId;
+  readonly now: Date;
+}
+
+type HqEmployeeRole = 'hq_owner' | 'hq_reviewer' | 'hq_support';
+type HqProjection =
+  'owner_households' | 'owner_checks' | 'assigned_review_queue' | 'assigned_support_queue';
+
 export class HqRepository {
-  constructor(private readonly database: Database) {}
+  constructor(
+    private readonly database: Database,
+    private readonly ids: IdFactory = randomIdFactory,
+    private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
+  ) {}
+
+  private async assertActiveRole(actorPersonId: PersonId, role: HqEmployeeRole): Promise<void> {
+    const result = await this.database.query<Record<string, unknown>>(
+      `SELECT 1 FROM employee_assignments employee
+       JOIN organizations organization ON organization.id = employee.organization_id
+       WHERE employee.person_id = $1 AND employee.role = $2 AND employee.status = 'active'
+         AND organization.kind = 'internal'
+       LIMIT 1`,
+      [actorPersonId, role],
+    );
+    if (result.rows.length === 0) {
+      throw new DomainError(
+        'not_authorized',
+        'HQ projection access requires a current internal employee assignment',
+      );
+    }
+  }
+
+  private async auditProjectionAccess(
+    access: HqProjectionAccess,
+    projection: HqProjection,
+  ): Promise<void> {
+    await this.database.query(
+      `INSERT INTO audit_events(
+         id, household_id, actor_person_id, session_audience, action, resource_type,
+         resource_id, outcome, metadata, correlation_id, occurred_at
+       ) VALUES ($1,NULL,$2,'hq','hq.metadata_projection.read','hq_projection',
+         $3,'allowed',$4::jsonb,$5,$6)`,
+      [
+        this.ids.next('audit'),
+        access.actorPersonId,
+        projection,
+        JSON.stringify({ projection }),
+        access.correlationId,
+        access.now.toISOString(),
+      ],
+    );
+  }
 
   async overview(now: Date): Promise<{
     readonly metrics: readonly {
@@ -100,7 +177,11 @@ export class HqRepository {
         'SELECT id FROM households ORDER BY id',
       ),
     ]);
-    const entitlementRepository = new EntitlementRepository(this.database);
+    const entitlementRepository = new EntitlementRepository(
+      this.database,
+      undefined,
+      this.runtimeEnvironment,
+    );
     const entitlementStates = await Promise.all(
       households.rows.map((household) => entitlementRepository.forHousehold(household.id, now)),
     );
@@ -162,7 +243,7 @@ export class HqRepository {
     };
   }
 
-  async households(now: Date): Promise<
+  async ownerHouseholds(access: HqProjectionAccess): Promise<
     readonly {
       readonly id: string;
       readonly name: string;
@@ -171,19 +252,35 @@ export class HqRepository {
       readonly entitlementState: 'active' | 'inactive';
     }[]
   > {
-    const result = await this.database.query<HqHouseholdRow>(`
+    await this.assertActiveRole(access.actorPersonId, 'hq_owner');
+    await this.auditProjectionAccess(access, 'owner_households');
+    const result = await this.database.query<HqHouseholdRow>(
+      `
       SELECT h.id, h.name,
         count(DISTINCT m.id)::int AS member_count,
         count(DISTINCT o.person_id) FILTER (WHERE o.status = 'ready')::int AS orientation_ready_count
       FROM households h
       LEFT JOIN household_memberships m ON m.household_id = h.id AND m.status = 'active'
       LEFT JOIN orientation_states o ON o.household_id = h.id
+      WHERE EXISTS (
+        SELECT 1 FROM employee_assignments employee
+        JOIN organizations organization ON organization.id = employee.organization_id
+        WHERE employee.person_id = $1 AND employee.role = 'hq_owner'
+          AND employee.status = 'active' AND organization.kind = 'internal'
+      )
       GROUP BY h.id, h.name ORDER BY h.name
-    `);
-    const entitlementRepository = new EntitlementRepository(this.database);
+      LIMIT 101
+    `,
+      [access.actorPersonId],
+    );
+    const entitlementRepository = new EntitlementRepository(
+      this.database,
+      undefined,
+      this.runtimeEnvironment,
+    );
     return Promise.all(
       result.rows.map(async (row) => {
-        const entitlements = await entitlementRepository.forHousehold(row.id, now);
+        const entitlements = await entitlementRepository.forHousehold(row.id, access.now);
         return {
           id: row.id,
           name: row.name,
@@ -198,7 +295,7 @@ export class HqRepository {
     );
   }
 
-  async checks(now: Date): Promise<
+  async ownerChecks(access: HqProjectionAccess): Promise<
     readonly {
       readonly id: string;
       readonly householdId: string;
@@ -208,14 +305,22 @@ export class HqRepository {
       readonly createdAt: Date;
     }[]
   > {
+    await this.assertActiveRole(access.actorPersonId, 'hq_owner');
+    await this.auditProjectionAccess(access, 'owner_checks');
     const result = await this.database.query<HqCheckRow>(
       `
       SELECT a.id, a.household_id, r.kind, a.risk, a.provider_state, a.created_at
       FROM analyses a JOIN artifacts r ON r.household_id = a.household_id AND r.id = a.artifact_id
       WHERE a.state = 'completed' AND r.state = 'active' AND r.delete_after > $1
+        AND EXISTS (
+          SELECT 1 FROM employee_assignments employee
+          JOIN organizations organization ON organization.id = employee.organization_id
+          WHERE employee.person_id = $2 AND employee.role = 'hq_owner'
+            AND employee.status = 'active' AND organization.kind = 'internal'
+        )
       ORDER BY a.created_at DESC LIMIT 100
     `,
-      [now.toISOString()],
+      [access.now.toISOString(), access.actorPersonId],
     );
     return result.rows.map((row) => ({
       id: row.id,
@@ -224,6 +329,85 @@ export class HqRepository {
       risk: row.risk,
       providerState: row.provider_state,
       createdAt: asDate(row.created_at, 'analyses.created_at'),
+    }));
+  }
+
+  async assignedSupportCases(access: HqProjectionAccess): Promise<
+    readonly {
+      readonly id: string;
+      readonly householdId: string;
+      readonly householdName: string;
+      readonly purposeCode: 'customer_support';
+      readonly status: 'open';
+      readonly assignedAt: Date;
+    }[]
+  > {
+    await this.assertActiveRole(access.actorPersonId, 'hq_support');
+    await this.auditProjectionAccess(access, 'assigned_support_queue');
+    const result = await this.database.query<HqSupportCaseRow>(
+      `SELECT support_case.id, support_case.household_id,
+              household.name AS household_name, support_case.status,
+              assignment.assigned_at
+       FROM support_case_assignments assignment
+       JOIN support_cases support_case
+         ON support_case.household_id = assignment.household_id
+        AND support_case.id = assignment.case_id
+       JOIN households household ON household.id = support_case.household_id
+       JOIN employee_assignments employee
+         ON employee.id = assignment.employee_assignment_id
+       JOIN organizations organization ON organization.id = employee.organization_id
+       WHERE employee.person_id = $1 AND employee.role = 'hq_support'
+         AND employee.status = 'active' AND assignment.status = 'active'
+         AND support_case.status = 'open' AND organization.kind = 'internal'
+       ORDER BY assignment.assigned_at, support_case.id
+       LIMIT 101`,
+      [access.actorPersonId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      householdId: row.household_id,
+      householdName: row.household_name,
+      purposeCode: 'customer_support',
+      status: row.status,
+      assignedAt: asDate(row.assigned_at, 'support_case_assignments.assigned_at'),
+    }));
+  }
+
+  async assignedReviewCases(access: HqProjectionAccess): Promise<
+    readonly {
+      readonly id: string;
+      readonly severity: HqReviewCaseRow['severity'];
+      readonly state: HqReviewCaseRow['state'];
+      readonly routingClass: HqReviewCaseRow['routing_class'];
+      readonly dueAt?: Date;
+      readonly updatedAt: Date;
+    }[]
+  > {
+    await this.assertActiveRole(access.actorPersonId, 'hq_reviewer');
+    await this.auditProjectionAccess(access, 'assigned_review_queue');
+    const result = await this.database.query<HqReviewCaseRow>(
+      `SELECT work_case.id, work_case.severity, work_case.state,
+              work_case.routing_class, work_case.due_at, work_case.updated_at
+       FROM hq_work_cases work_case
+       WHERE work_case.assigned_person_id = $1 AND work_case.case_kind = 'fraud'
+         AND work_case.state IN ('open','triaged','in_progress')
+         AND EXISTS (
+           SELECT 1 FROM employee_assignments employee
+           JOIN organizations organization ON organization.id = employee.organization_id
+           WHERE employee.person_id = $1 AND employee.role = 'hq_reviewer'
+             AND employee.status = 'active' AND organization.kind = 'internal'
+         )
+       ORDER BY work_case.due_at NULLS LAST, work_case.updated_at, work_case.id
+       LIMIT 101`,
+      [access.actorPersonId],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      severity: row.severity,
+      state: row.state,
+      routingClass: row.routing_class,
+      ...(row.due_at === null ? {} : { dueAt: asDate(row.due_at, 'hq_work_cases.due_at') }),
+      updatedAt: asDate(row.updated_at, 'hq_work_cases.updated_at'),
     }));
   }
 
@@ -297,13 +481,13 @@ export class HqRepository {
   }> {
     const [searches, targets, opportunities] = await Promise.all([
       this.database.query<SavedSearchRow>(
-        'SELECT id, name, source, result_count FROM saved_searches ORDER BY name',
+        'SELECT id, name, source, result_count FROM saved_searches ORDER BY name LIMIT 101',
       ),
       this.database.query<TargetRow>(
-        'SELECT id, name, segment, verification_state FROM target_accounts ORDER BY name',
+        'SELECT id, name, segment, verification_state FROM target_accounts ORDER BY name LIMIT 101',
       ),
       this.database.query<OpportunityRow>(
-        'SELECT id, account_id, stage, owner, next_action, next_action_at FROM opportunities ORDER BY next_action_at',
+        'SELECT id, account_id, stage, owner, next_action, next_action_at FROM opportunities ORDER BY next_action_at LIMIT 101',
       ),
     ]);
     return {

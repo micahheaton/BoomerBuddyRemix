@@ -1,15 +1,15 @@
-entrypoint = "README.md"
+entrypoint = "scripts/replit-service.mjs"
 modules = ["nodejs-22"]
-run = "npm run dev"
+run = "npm run replit:start"
+
+[packager.features]
+enabledForHosting = false
+
+[deployment]
+build = "npm run replit:build"
+run = "npm run replit:start"
+ignorePorts = true
 
 [[ports]]
 localPort = 3000
 externalPort = 80
-
-[[ports]]
-localPort = 3001
-externalPort = 3001
-
-[[ports]]
-localPort = 4000
-externalPort = 4000

@@ -68,8 +68,12 @@ describe('authority and consent persistence', () => {
     );
     await harness.database.query(
       `INSERT INTO sessions(
-         id, person_id, audience, issuer, issued_at, expires_at, created_at
-       ) VALUES ('session-hq-support','person-hq-support','hq','boomerbuddy-dev',$1,$2,$1)`,
+         id, person_id, audience, issuer, identity_id, identity_subject,
+         provider_session_id, issued_at, last_verified_at, expires_at, created_at
+       ) VALUES (
+         'session-hq-support','person-hq-support','hq','boomerbuddy-dev',
+         'identity-hq-support','hq-support','session-hq-support',$1,$1,$2,$1
+       )`,
       [now.toISOString(), sessionExpiry.toISOString()],
     );
     await harness.database.query(
@@ -90,9 +94,13 @@ describe('authority and consent persistence', () => {
          household_id, id, case_id, employee_assignment_id, resource_type,
          resource_id, purpose, assurance, status, granted_by_person_id,
          granted_at, expires_at
-       ) VALUES ('household-sunrise','restricted-grant-exact','support-case-exact',
-         'employee-hq-support','artifact','artifact-exact','Inspect customer-selected artifact',
-         'step_up_verified','active','person-owner-alice',$1,$2)`,
+       ) VALUES
+         ('household-sunrise','restricted-grant-exact','support-case-exact',
+          'employee-hq-support','artifact','artifact-exact','Inspect customer-selected artifact',
+          'step_up_verified','active','person-owner-alice',$1,$2),
+         ('household-sunrise','restricted-grant-message','support-case-exact',
+          'employee-hq-support','messaging_inbound','message-event-exact','customer_support',
+          'step_up_verified','active','person-owner-alice',$1,$2)`,
       [now.toISOString(), grantExpiry.toISOString()],
     );
 
@@ -112,14 +120,24 @@ describe('authority and consent persistence', () => {
         employeeAssignmentId: 'employee-hq-support',
       }),
     ]);
-    expect(active?.principal.restrictedAccessScopes).toEqual([
-      expect.objectContaining({
-        grantId: 'restricted-grant-exact',
-        caseId: 'support-case-exact',
-        resourceType: 'artifact',
-        resourceId: 'artifact-exact',
-      }),
-    ]);
+    expect(active?.principal.restrictedAccessScopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          grantId: 'restricted-grant-exact',
+          caseId: 'support-case-exact',
+          resourceType: 'artifact',
+          resourceId: 'artifact-exact',
+        }),
+        expect.objectContaining({
+          grantId: 'restricted-grant-message',
+          caseId: 'support-case-exact',
+          purpose: 'customer_support',
+          resourceType: 'messaging_inbound',
+          resourceId: 'message-event-exact',
+        }),
+      ]),
+    );
+    expect(active?.principal.restrictedAccessScopes).toHaveLength(2);
 
     const afterGrantExpiry = await sessions.resolve(
       'session-hq-support',
@@ -172,10 +190,13 @@ describe('authority and consent persistence', () => {
     );
     await harness.database.query(
       `INSERT INTO sessions(
-         id, person_id, audience, issuer, issued_at, expires_at, created_at
+         id, person_id, audience, issuer, identity_id, identity_subject,
+         provider_session_id, issued_at, last_verified_at, expires_at, created_at
        ) VALUES
-         ('session-pat-verified','person-protected-pat','customer','verified-idp',$1,$2,$1),
-         ('session-jordan-verified','person-trusted-jordan','customer','verified-idp',$1,$2,$1)`,
+         ('session-pat-verified','person-protected-pat','customer','verified-idp',
+          'identity-pat-verified','pat-verified','session-pat-verified',$1,$1,$2,$1),
+         ('session-jordan-verified','person-trusted-jordan','customer','verified-idp',
+          'identity-jordan-verified','jordan-verified','session-jordan-verified',$1,$1,$2,$1)`,
       [now.toISOString(), expiresAt.toISOString()],
     );
     const family = new FamilyRepository(harness.database, Buffer.alloc(32, 11), 1);

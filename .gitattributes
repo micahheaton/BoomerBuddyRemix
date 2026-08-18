@@ -1,0 +1,4 @@
+* text=auto eol=lf
+packages/persistence/migrations/*.sql text eol=lf
+apps/hq/next-env.d.ts text eol=lf
+apps/web/next-env.d.ts text eol=lf

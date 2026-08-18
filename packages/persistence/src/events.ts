@@ -6,6 +6,7 @@ export interface OperationalEventContext {
   readonly householdId?: string;
   readonly actorPersonId?: string;
   readonly audience?: Audience;
+  readonly foundingHouseholdOperationKey?: string;
   readonly correlationId: string;
   readonly now: Date;
 }
@@ -53,8 +54,9 @@ export async function writeAuditAndOutbox(
   await transaction.query(
     `INSERT INTO audit_events(
        id, household_id, actor_person_id, session_audience, action, resource_type,
-       resource_id, outcome, metadata, correlation_id, occurred_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)`,
+       resource_id, outcome, metadata, correlation_id, occurred_at,
+       founding_household_operation_key
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12)`,
     [
       ids.next('audit'),
       context.householdId ?? null,
@@ -67,6 +69,7 @@ export async function writeAuditAndOutbox(
       JSON.stringify(metadata),
       context.correlationId,
       context.now.toISOString(),
+      context.foundingHouseholdOperationKey ?? null,
     ],
   );
   const eventId = ids.next('event');
@@ -74,8 +77,8 @@ export async function writeAuditAndOutbox(
     `INSERT INTO outbox_events(
        id, event_type, event_version, aggregate_type, aggregate_id, household_id,
        actor_person_id, correlation_id, classification, payload, occurred_at, available_at,
-       next_attempt_at
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'internal',$9::jsonb,$10,$10,$10)`,
+       next_attempt_at, founding_household_operation_key
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'internal',$9::jsonb,$10,$10,$10,$11)`,
     [
       eventId,
       outbox.eventType,
@@ -87,6 +90,7 @@ export async function writeAuditAndOutbox(
       context.correlationId,
       JSON.stringify(outbox.payload),
       context.now.toISOString(),
+      context.foundingHouseholdOperationKey ?? null,
     ],
   );
 }

@@ -116,7 +116,7 @@ test('invitation review can be declined and a cancelled code cannot be reused', 
   await signInCustomer(page, 'trusted-jordan');
   await page.getByRole('link', { name: 'Family', exact: true }).click();
   await page.getByLabel('Invitation ID').fill(invitationId);
-  await page.getByLabel('One-time local invite code').fill(inviteCode);
+  await page.getByLabel('One-time invitation credential').fill(inviteCode);
   await page.getByRole('button', { name: 'Review invitation' }).click();
   const preview = page.getByTestId('invitation-preview');
   await expect(preview).toContainText('Sunrise Household');
@@ -144,7 +144,7 @@ test('invitation review can be declined and a cancelled code cannot be reused', 
   await signInCustomer(page, 'trusted-jordan');
   await page.getByRole('link', { name: 'Family', exact: true }).click();
   await page.getByLabel('Invitation ID').fill(invitationId);
-  await page.getByLabel('One-time local invite code').fill(inviteCode);
+  await page.getByLabel('One-time invitation credential').fill(inviteCode);
   await page.getByRole('button', { name: 'Review invitation' }).click();
   await expect(page.locator('p.error[role="alert"]')).toContainText('invalid or unavailable');
 });
@@ -178,7 +178,7 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
   await signInCustomer(page, 'trusted-jordan');
   await page.getByRole('link', { name: 'Family', exact: true }).click();
   await page.getByLabel('Invitation ID').fill(invitationId!);
-  await page.getByLabel('One-time local invite code').fill(inviteCode!);
+  await page.getByLabel('One-time invitation credential').fill(inviteCode!);
   await page.getByRole('button', { name: 'Review invitation' }).click();
   const preview = page.getByTestId('invitation-preview');
   await expect(preview).toContainText('Sunrise Household');
@@ -279,7 +279,7 @@ test('a multi-household actor keeps protected and Trusted Circle scopes separate
 
     await page.getByRole('link', { name: 'Family', exact: true }).click();
     await page.getByLabel('Invitation ID').fill(invitation.invitation.id);
-    await page.getByLabel('One-time local invite code').fill(invitation.localInviteCode);
+    await page.getByLabel('One-time invitation credential').fill(invitation.localInviteCode);
     await page.getByRole('button', { name: 'Review invitation' }).click();
     const invitationPreview = page.getByTestId('invitation-preview');
     await expect(invitationPreview).toContainText('Sunrise Household');

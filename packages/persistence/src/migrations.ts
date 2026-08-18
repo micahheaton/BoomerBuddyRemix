@@ -8,6 +8,45 @@ interface MigrationRow extends Record<string, unknown> {
   readonly checksum: string;
 }
 
+function hashMigrationSql(sql: string): string {
+  return createHash('sha256').update(sql).digest('hex');
+}
+
+function migrationChecksums(sql: string): {
+  readonly canonical: string;
+  readonly acceptedLegacy: ReadonlySet<string>;
+} {
+  const normalized = sql.replace(/\r\n?/gu, '\n');
+  return {
+    canonical: hashMigrationSql(normalized),
+    acceptedLegacy: new Set([
+      hashMigrationSql(sql),
+      hashMigrationSql(normalized.replace(/\n/gu, '\r\n')),
+      hashMigrationSql(normalized.replace(/\n/gu, '\r')),
+    ]),
+  };
+}
+
+function assertUniqueMigrationVersions(files: readonly string[]): void {
+  const filesByVersion = new Map<string, string[]>();
+  for (const file of files) {
+    const separator = file.indexOf('_');
+    const numericPrefix = file.slice(0, separator);
+    const version = numericPrefix.replace(/^0+(?=\d)/u, '');
+    const matchingFiles = filesByVersion.get(version) ?? [];
+    matchingFiles.push(file);
+    filesByVersion.set(version, matchingFiles);
+  }
+
+  for (const [version, matchingFiles] of filesByVersion) {
+    if (matchingFiles.length > 1) {
+      throw new Error(
+        `Duplicate migration numeric version ${version}: ${matchingFiles.join(', ')}`,
+      );
+    }
+  }
+}
+
 async function existingDirectory(candidates: readonly string[]): Promise<string> {
   for (const candidate of candidates) {
     try {
@@ -36,10 +75,17 @@ export async function runMigrations(
   const files = (await readdir(migrationPath))
     .filter((file) => /^\d+_[a-z0-9_]+\.sql$/u.test(file))
     .sort((left, right) => left.localeCompare(right));
+  assertUniqueMigrationVersions(files);
   const migrations = await Promise.all(
     files.map(async (file) => {
       const sql = await readFile(`${migrationPath}/${file}`, 'utf8');
-      return { file, sql, checksum: createHash('sha256').update(sql).digest('hex') };
+      const checksums = migrationChecksums(sql);
+      return {
+        file,
+        sql,
+        checksum: checksums.canonical,
+        acceptedLegacyChecksums: checksums.acceptedLegacy,
+      };
     }),
   );
   const applied: string[] = [];
@@ -54,18 +100,42 @@ export async function runMigrations(
         applied_at timestamptz NOT NULL DEFAULT now()
       )
     `);
-    for (const migration of migrations) {
-      const existing = await transaction.query<MigrationRow>(
-        'SELECT version, checksum FROM schema_migrations WHERE version = $1',
-        [migration.file],
-      );
-      const row = existing.rows[0];
-      if (row !== undefined) {
-        if (row.checksum !== migration.checksum) {
-          throw new Error(`Migration checksum changed after application: ${migration.file}`);
+    const recorded = await transaction.query<MigrationRow>(
+      'SELECT version, checksum FROM schema_migrations',
+    );
+    const appliedRows = [...recorded.rows].sort((left, right) =>
+      left.version.localeCompare(right.version),
+    );
+    const migrationsByFile = new Map(migrations.map((migration) => [migration.file, migration]));
+    const missingFromDisk = appliedRows
+      .filter((row) => !migrationsByFile.has(row.version))
+      .map((row) => row.version);
+    if (missingFromDisk.length > 0) {
+      throw new Error(`Applied migrations are missing from disk: ${missingFromDisk.join(', ')}`);
+    }
+    for (const row of appliedRows) {
+      const migration = migrationsByFile.get(row.version);
+      if (migration === undefined) throw new Error(`Missing migration: ${row.version}`);
+      if (row.checksum !== migration.checksum) {
+        if (!migration.acceptedLegacyChecksums.has(row.checksum)) {
+          throw new Error(`Migration checksum changed after application: ${row.version}`);
         }
-        continue;
+        await transaction.query(
+          'UPDATE schema_migrations SET checksum = $1 WHERE version = $2 AND checksum = $3',
+          [migration.checksum, row.version, row.checksum],
+        );
       }
+    }
+    const expectedPrefix = migrations
+      .slice(0, appliedRows.length)
+      .map((migration) => migration.file);
+    const actualPrefix = appliedRows.map((row) => row.version);
+    if (expectedPrefix.some((version, index) => version !== actualPrefix[index])) {
+      throw new Error(
+        `Applied migration history is not an exact prefix of disk manifest: expected ${expectedPrefix.join(', ')}, found ${actualPrefix.join(', ')}`,
+      );
+    }
+    for (const migration of migrations.slice(appliedRows.length)) {
       await transaction.exec(migration.sql);
       await transaction.query('INSERT INTO schema_migrations(version, checksum) VALUES ($1, $2)', [
         migration.file,

@@ -1,5 +1,6 @@
 'use client';
 
+import { SignIn } from '@clerk/nextjs';
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contracts';
@@ -40,7 +41,7 @@ const personas: Array<{ id: DevPersonaId; name: string; detail: string }> = [
   },
 ];
 
-export default function SignInPage() {
+function DevelopmentSignIn() {
   const router = useRouter();
   const [personaId, setPersonaId] = useState<DevPersonaId>('owner-alice');
   const [busy, setBusy] = useState(false);
@@ -106,4 +107,51 @@ export default function SignInPage() {
       <PublicFooter />
     </>
   );
+}
+
+function ProductionSignIn() {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    return (
+      <>
+        <PublicHeader />
+        <main id="main-content" className="page-shell narrow">
+          <span className="eyebrow">Member sign in</span>
+          <h1 className="page-title">Sign-in is not configured</h1>
+          <p className="error" role="alert">
+            Member access is closed. Ask the BoomerBuddy founder to complete the identity setup
+            before trying again.
+          </p>
+        </main>
+        <PublicFooter />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PublicHeader />
+      <main id="main-content" className="page-shell narrow">
+        <span className="eyebrow">Private Founding Household beta</span>
+        <h1 className="page-title">Sign in to BoomerBuddy</h1>
+        <p className="lede">
+          Use the identity the founder invited. Signing in does not grant household access; an
+          exact, unexpired invitation and your consent are still required.
+        </p>
+        <div className="card" style={{ marginTop: '2rem', display: 'grid', placeItems: 'center' }}>
+          <SignIn
+            path="/sign-in"
+            routing="path"
+            withSignUp={false}
+            forceRedirectUrl="/member"
+            fallbackRedirectUrl="/member"
+          />
+        </div>
+      </main>
+      <PublicFooter />
+    </>
+  );
+}
+
+export default function SignInPage() {
+  return process.env.NODE_ENV === 'production' ? <ProductionSignIn /> : <DevelopmentSignIn />;
 }

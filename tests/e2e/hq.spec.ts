@@ -40,15 +40,44 @@ test('HQ labels local runtime provenance and excludes customer artifact content'
   await expect(page.locator('body')).toContainText('no artifact content');
 });
 
-test('HQ reviewer is routed to the review-only surface', async ({ page }) => {
+test('HQ reviewer is routed to an assigned metadata-minimal review queue', async ({ page }) => {
   await page.goto(hqUrl);
   await page.getByLabel('HQ persona').selectOption('hq-riley');
   await page.getByRole('button', { name: 'Enter local HQ' }).click();
   await expect(page).toHaveURL(`${hqUrl}/fraud`);
   await expect(page.getByRole('heading', { name: 'Fraud and review' })).toBeVisible();
+  await expect(page.getByText('case-seeded-riley-review')).toBeVisible();
+  await expect(page.locator('body')).toContainText('Assigned-only projection');
+  await expect(page.locator('body')).not.toContainText('Sunrise Household');
+  await expect(page.locator('body')).not.toContainText('Harbor Household');
+  await expect(page.locator('body')).not.toContainText('analysis-seed');
   await expect(page.getByRole('link', { name: 'Fraud & review' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Overview' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Customers' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Revenue' })).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'System & audit' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Founder provisioning' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Founding Households' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Assigned support' })).toHaveCount(0);
+});
+
+test('HQ support is routed to only its exact active assigned case', async ({ page }) => {
+  await page.goto(hqUrl);
+  await page.getByLabel('HQ persona').selectOption('hq-sam');
+  await page.getByRole('button', { name: 'Enter local HQ' }).click();
+  await expect(page).toHaveURL(`${hqUrl}/support`);
+  await expect(page.getByRole('heading', { name: 'Assigned support' })).toBeVisible();
+  await expect(page.getByText('support-case-seeded-sam')).toBeVisible();
+  await expect(page.getByText('Sunrise Household')).toBeVisible();
+  await expect(page.getByText('customer_support')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('Resolve a synthetic navigation request');
+  await expect(page.locator('body')).not.toContainText('Harbor Household');
+  await expect(page.locator('body')).not.toContainText('analysis-seed');
+  await expect(page.getByRole('link', { name: 'Assigned support' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Fraud & review' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Overview' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Customers' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'System & audit' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Founder provisioning' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: 'Founding Households' })).toHaveCount(0);
 });

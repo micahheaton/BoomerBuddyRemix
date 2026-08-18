@@ -2,6 +2,7 @@ import { assertAuthorized, type Action } from '@boomerbuddy/authorization';
 import {
   createOpportunityRequestSchema,
   advancePrivacyRequestSchema,
+  automationBudgetStatusResponseSchema,
   automationGlobalControlResponseSchema,
   creditUnionTargetsQuerySchema,
   creditUnionTargetsResponseSchema,
@@ -10,9 +11,11 @@ import {
   opportunityQueueResponseSchema,
   ownerAttentionResponseSchema,
   ownerBriefResponseSchema,
+  overrideAutomationBudgetWindowRequestSchema,
   privacyRequestListResponseSchema,
   privacyRequestParamsSchema,
   putAutonomyPolicyRequestSchema,
+  putAutomationBudgetCapRequestSchema,
   putAutomationGlobalControlRequestSchema,
   setOpportunityNextActionRequestSchema,
   transitionOpportunityRequestSchema,
@@ -22,6 +25,15 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { assertMutationOrigin, authenticate, correlationId } from '../auth';
 import type { ApiContext } from '../context';
+
+const queuePageSize = 100;
+
+function bounded<T>(items: readonly T[]): {
+  readonly items: readonly T[];
+  readonly truncated: boolean;
+} {
+  return { items: items.slice(0, queuePageSize), truncated: items.length > queuePageSize };
+}
 import { privacyRequestDto } from './privacy';
 
 const opportunityParamsSchema = z.object({
@@ -92,8 +104,10 @@ export function registerBusinessOsRoutes(app: FastifyInstance, context: ApiConte
 
   app.get('/v1/hq/business-os/opportunities', async (request) => {
     await authorizeBusinessOs(request, context, 'hq:business_os:read');
+    const page = bounded(await context.repositories.businessOs.opportunityQueue(context.now()));
     return opportunityQueueResponseSchema.parse({
-      opportunities: await context.repositories.businessOs.opportunityQueue(context.now()),
+      opportunities: page.items,
+      truncated: page.truncated,
       consequentialOutreachAutomatic: false,
     });
   });
@@ -168,26 +182,27 @@ export function registerBusinessOsRoutes(app: FastifyInstance, context: ApiConte
 
   app.get('/v1/hq/business-os/attention', async (request) => {
     await authorizeBusinessOs(request, context, 'hq:business_os:read');
-    const items = await context.repositories.businessOs.ownerAttention();
+    const page = bounded(await context.repositories.businessOs.ownerAttention());
     return ownerAttentionResponseSchema.parse({
-      items: items.map((item) => ({
+      items: page.items.map((item) => ({
         ...item,
         createdAt: item.createdAt.toISOString(),
         updatedAt: item.updatedAt.toISOString(),
         ...(item.deadline === undefined ? {} : { deadline: item.deadline.toISOString() }),
       })),
+      truncated: page.truncated,
     });
   });
 
   app.get('/v1/hq/business-os/privacy-requests', async (request) => {
     await authorizeBusinessOs(request, context, 'hq:business_os:manage');
+    const requests = await context.repositories.businessOs.listPrivacyRequests({ limit: 101 });
     return privacyRequestListResponseSchema.parse({
-      requests: (await context.repositories.businessOs.listPrivacyRequests()).map(
-        privacyRequestDto,
-      ),
+      requests: requests.slice(0, 100).map(privacyRequestDto),
+      truncated: requests.length > 100,
       fulfillmentMode: 'evidence_plan_only',
       limitation:
-        'Run 2 records identity review and a content-free fulfillment plan; it does not claim completed export or erasure.',
+        'Records identity review and a content-free Run 3 inventory plan; it does not claim completed export, correction, restriction, or erasure.',
     });
   });
 
@@ -256,23 +271,92 @@ export function registerBusinessOsRoutes(app: FastifyInstance, context: ApiConte
       correlationId: correlationId(request),
       now,
     });
+    const control = await context.repositories.businessOs.globalAutomationControl();
     return automationGlobalControlResponseSchema.parse({
-      killSwitch: body.killSwitch,
-      updatedAt: now.toISOString(),
-      updatedByPersonId: auth.principal.personId,
+      ...control,
+      updatedAt: control.updatedAt.toISOString(),
     });
+  });
+
+  app.get('/v1/hq/business-os/autonomy/budgets', async (request) => {
+    await authorizeBusinessOs(request, context, 'hq:business_os:read');
+    const now = context.now();
+    const [control, caps] = await Promise.all([
+      context.repositories.businessOs.globalAutomationControl(),
+      context.repositories.automationBudget.status(now),
+    ]);
+    return automationBudgetStatusResponseSchema.parse({
+      caps: caps.map((cap) => ({
+        ...cap,
+        periodEnd: cap.periodEnd.toISOString(),
+        periodStart: cap.periodStart.toISOString(),
+      })),
+      currency: 'USD',
+      evidenceState: 'persistent_local_ledger',
+      externalExecutionEnabled: false,
+      generatedAt: now.toISOString(),
+      killSwitch: control.killSwitch,
+      requiredScopes: ['company_day', 'company_month', 'agent', 'action', 'tool', 'policy'],
+    });
+  });
+
+  app.put('/v1/hq/business-os/autonomy/budgets/caps', async (request, reply) => {
+    const auth = await authorizeBusinessOs(request, context, 'hq:business_os:manage');
+    const body = putAutomationBudgetCapRequestSchema.parse(request.body);
+    const now = context.now();
+    try {
+      const capId = await context.repositories.automationBudget.putCap({
+        approvedByPersonId: auth.principal.personId,
+        context: operationalContext(request, auth.principal.personId, now),
+        enabled: body.enabled,
+        limitCents: body.limitCents,
+        periodKind: body.periodKind,
+        scopeKey: body.scopeKey,
+        scopeKind: body.scopeKind,
+      });
+      return reply.code(200).send({ capId, actionExecuted: false });
+    } catch (error) {
+      if (error instanceof TypeError) throw new DomainError('invalid_input', error.message);
+      throw error;
+    }
+  });
+
+  app.post('/v1/hq/business-os/autonomy/budgets/overrides', async (request, reply) => {
+    const auth = await authorizeBusinessOs(request, context, 'hq:business_os:manage');
+    const body = overrideAutomationBudgetWindowRequestSchema.parse(request.body);
+    const now = context.now();
+    try {
+      const result = await context.repositories.automationBudget.overrideCurrentWindow({
+        additionalCents: body.additionalCents,
+        approvedByPersonId: auth.principal.personId,
+        capId: body.capId,
+        context: operationalContext(request, auth.principal.personId, now),
+        overrideKey: body.overrideKey,
+        reasonCode: body.reasonCode,
+      });
+      return reply
+        .code(200)
+        .send({ actionExecuted: false, overridden: true, reused: result.reused });
+    } catch (error) {
+      if (error instanceof TypeError) throw new DomainError('invalid_input', error.message);
+      throw error;
+    }
   });
 
   app.post('/v1/hq/business-os/autonomy/evaluate', async (request) => {
     await authorizeBusinessOs(request, context, 'hq:business_os:manage');
     const body = evaluateAutomationRequestSchema.parse(request.body);
     const control = await context.repositories.businessOs.globalAutomationControl();
-    return evaluateAutomationResponseSchema.parse(
-      await context.repositories.businessOs.evaluateAutomation({
-        request: body,
-        globalKillSwitch: control.killSwitch,
-        now: context.now(),
-      }),
-    );
+    const decision = await context.repositories.businessOs.evaluateAutomation({
+      request: body,
+      globalKillSwitch: control.killSwitch,
+      now: context.now(),
+    });
+    return evaluateAutomationResponseSchema.parse({
+      ...decision,
+      actionExecuted: false,
+      cumulativeBudgetReserved: false,
+      evaluationOnly: true,
+    });
   });
 }

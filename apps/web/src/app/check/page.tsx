@@ -13,6 +13,7 @@ type PublicAttribution = {
 
 type PublicContext = {
   token: string;
+  continuityProof: string;
   expiresAt: string;
   remainingChecks: number;
 };
@@ -36,7 +37,14 @@ type PublicCheckResult = {
     >;
   };
   expiresAt: string;
-  conversionGrant: { token: string; expiresAt: string; oneTime: true };
+  conversionGrant: {
+    token: string;
+    expiresAt: string;
+    semanticsVersion: 'single-success-retry-v1';
+    singleSuccessfulConversion: true;
+    retryableWithSameCredentialOwnerAndConsent: true;
+    oneTime: true;
+  };
 };
 
 const riskText: Record<CheckResult['risk'], string> = {
@@ -121,7 +129,12 @@ export default function PublicCheckPage() {
       const activeContext = await currentContext();
       const response = await apiRequest<{ result: PublicCheckResult }>('/v1/public/checks', {
         method: 'POST',
-        body: JSON.stringify({ contextToken: activeContext.token, kind, content }),
+        body: JSON.stringify({
+          contextToken: activeContext.token,
+          continuityProof: activeContext.continuityProof,
+          kind,
+          content,
+        }),
       });
       setContext({ ...activeContext, remainingChecks: activeContext.remainingChecks - 1 });
       setResult(response.result);
@@ -154,7 +167,7 @@ export default function PublicCheckPage() {
       );
       setSavedCheck(response.check);
       setSaveStatus(
-        'Saved to your active household after explicit consent. The one-time anonymous grant is now consumed.',
+        'Saved to your active household after explicit consent. Retrying the same save for the same owner and consent returns this one saved Check.',
       );
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
@@ -266,8 +279,14 @@ export default function PublicCheckPage() {
                 temporary conversion payload is encrypted.
               </li>
               <li>
-                The one-time save grant expires after 15 minutes. A retention sweep clears expired
-                payloads; refreshing this page immediately discards your displayed result and grant.
+                The save grant creates at most one owned Check. A matching retry can recover that
+                same saved Check. The initial save opportunity expires after 15 minutes, and a
+                retention sweep clears expired payloads; refreshing immediately discards the
+                memory-only grants.
+              </li>
+              <li>
+                A separate short-lived continuity proof keeps this tab usable through ordinary
+                network changes. Current-network quotas and concurrency controls still apply.
               </li>
               <li>
                 Acquisition context accepts only bounded source and campaign categories. Raw URL
@@ -341,8 +360,9 @@ export default function PublicCheckPage() {
                 <h3 id="optional-save-heading">Optional: save to your household</h3>
                 <p>
                   Saving is never automatic. It requires an authenticated protected-adult scope,
-                  this explicit action, and the unexpired one-time grant. The saved Check uses the
-                  already-redacted payload.
+                  this explicit action, and the unexpired single-success grant. A matching retry can
+                  return only the same owned Check. The saved Check uses the already-redacted
+                  payload.
                 </p>
                 <button
                   className="button-secondary"

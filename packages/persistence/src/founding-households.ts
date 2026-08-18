@@ -706,7 +706,11 @@ const databaseFoundingHouseholdAuthorityClock: FoundingHouseholdAuthorityClock =
   transaction,
 ) => {
   const result = await transaction.query<{ authority_now: unknown } & Record<string, unknown>>(
-    'SELECT capture_founding_household_authority_now() AS authority_now',
+    `SELECT set_config(
+       'boomerbuddy.founding_household_authority_now',
+       date_trunc('milliseconds', capture_founding_household_authority_now())::text,
+       true
+     )::timestamptz AS authority_now`,
   );
   const value = result.rows[0]?.authority_now;
   return asDate(value, 'founding household authority clock');

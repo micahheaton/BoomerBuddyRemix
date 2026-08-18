@@ -903,11 +903,16 @@ try {
      WHERE replay.id = $1`,
     [replayEventId],
   );
+  const replayOccurredAt = replayLineage.rows[0]?.occurred_at;
+  const replayOccurredAtMs =
+    replayOccurredAt instanceof Date
+      ? replayOccurredAt.getTime()
+      : new Date(String(replayOccurredAt)).getTime();
   invariant(
     replayLineage.rows[0]?.replay_of_event_id === retryEventId &&
       replayLineage.rows[0]?.causal_order_position ===
         replayLineage.rows[0]?.original_causal_order_position &&
-      new Date(String(replayLineage.rows[0]?.occurred_at)).getTime() === at(80_000).getTime(),
+      replayOccurredAtMs === at(80_000).getTime(),
     'Outbox replay did not retain the original causal position and lineage',
   );
   const replayAudits = await database.query<{ readonly total: number } & Record<string, unknown>>(

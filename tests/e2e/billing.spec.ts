@@ -5,8 +5,12 @@ test('billing and success surfaces remain fail-closed without founder activation
   page,
 }) => {
   await signInCustomer(page, 'owner-alice');
-  await page.getByRole('link', { name: 'Open billing' }).click();
-  await expect(page).toHaveURL(/\/member\/billing$/u);
+  const billingLink = page.getByRole('link', { name: 'Open billing' });
+  await expect(billingLink).toHaveAttribute('href', '/member/billing');
+  await Promise.all([
+    page.waitForURL(/\/member\/billing$/u, { waitUntil: 'domcontentloaded' }),
+    billingLink.click(),
+  ]);
   await expect(page.getByRole('heading', { name: 'Manage billing' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'unavailable' })).toBeVisible();
   await expect(page.getByText(/not in the founder-approved billing cohort/iu)).toBeVisible();

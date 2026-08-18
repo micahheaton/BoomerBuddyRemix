@@ -103,6 +103,18 @@ try {
     base.toISOString(),
   ]);
   await database.query(
+    `INSERT INTO household_memberships(
+       household_id, id, person_id, membership_kind, status, created_at
+     ) VALUES ($1,$2,$3,'member','active',$4)`,
+    [stripeHouseholdId, `membership-postgres-stripe-${suffix}`, actorPersonId, base.toISOString()],
+  );
+  await database.query(
+    `INSERT INTO household_billing_authorities(
+       household_id, person_id, status, granted_by_person_id, granted_at
+     ) VALUES ($1,$2,'active',$2,$3)`,
+    [stripeHouseholdId, actorPersonId, base.toISOString()],
+  );
+  await database.query(
     `INSERT INTO organizations(id, name, kind, verification_state, created_at)
      VALUES ($1,$2,'internal','local_fixture',$3)
      ON CONFLICT (id) DO NOTHING`,

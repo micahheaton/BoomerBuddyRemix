@@ -157,14 +157,15 @@ describe('Run 3.1 Replit deployment controls', () => {
       encoding: 'utf8',
       shell: false,
     }).stdout.trim();
+    const missingCommit = '1'.repeat(40);
     const missingTag = spawnSync(process.execPath, ['scripts/replit-service.mjs', 'start'], {
       cwd: root,
       encoding: 'utf8',
       env: {
         ...process.env,
         BB_REPLIT_SERVICE: 'worker',
-        BB_RUN3_1_RELEASE_COMMIT: head,
-        BB_RUN3_1_RELEASE_TAG: `run3-1-replit-founding-household-${head.slice(0, 12)}`,
+        BB_RUN3_1_RELEASE_COMMIT: missingCommit,
+        BB_RUN3_1_RELEASE_TAG: `run3-1-replit-founding-household-${missingCommit.slice(0, 12)}`,
         NODE_ENV: 'production',
         REPLIT_DEPLOYMENT: '1',
       },

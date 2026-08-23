@@ -3,6 +3,10 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   allowedDevOrigins: ['127.0.0.1'],
+  env: {
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '',
+  },
   transpilePackages: ['@boomerbuddy/contracts', '@boomerbuddy/design'],
   async headers() {
     return [

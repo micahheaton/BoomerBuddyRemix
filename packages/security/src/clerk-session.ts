@@ -34,7 +34,7 @@ export interface IdentityTokenVerifier {
 }
 
 interface ClerkVerificationOptions {
-  readonly audience: string;
+  readonly audience?: string;
   readonly authorizedParties: string[];
   readonly clockSkewInMs: number;
   readonly jwtKey: string;
@@ -133,7 +133,7 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
     let rawClaims: unknown;
     try {
       rawClaims = await this.verifyClerkToken(input.token, {
-        audience: input.realm.audience,
+        ...(input.audience === 'hq' ? { audience: input.realm.audience } : {}),
         authorizedParties: [...input.realm.authorizedParties],
         clockSkewInMs: clockSkewSeconds * 1_000,
         jwtKey: input.realm.jwtKey,
@@ -150,12 +150,16 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
     const notBeforeSeconds = numericDate(claims.nbf);
     const expiresAtSeconds = numericDate(claims.exp);
     const nowSeconds = Math.floor(input.now.getTime() / 1_000);
+    const audienceMatches =
+      claims.aud === undefined
+        ? input.audience === 'customer'
+        : matchesAudience(claims.aud, input.realm.audience);
     if (
       Number.isNaN(input.now.getTime()) ||
       issuer !== input.realm.issuer ||
       authorizedParty !== input.origin ||
       !input.realm.authorizedParties.includes(authorizedParty) ||
-      !matchesAudience(claims.aud, input.realm.audience) ||
+      !audienceMatches ||
       claims.act !== undefined ||
       claims.sts === 'pending' ||
       (claims.sts !== undefined && claims.sts !== 'active') ||

@@ -67,7 +67,6 @@ describe('ClerkSessionTokenVerifier', () => {
         iss: realm.issuer,
         sub: 'user_signed_fixture',
         sid: 'sess_signed_fixture',
-        aud: realm.audience,
         azp: realm.authorizedParties[0],
         iat: liveNowSeconds - 5,
         nbf: liveNowSeconds - 5,
@@ -111,11 +110,10 @@ describe('ClerkSessionTokenVerifier', () => {
     ).rejects.toBeInstanceOf(IdentityTokenVerificationError);
   });
 
-  it('delegates cryptographic verification with exact audience, key, and authorized party', async () => {
+  it('binds customer verification to its exact key and authorized party without requiring aud', async () => {
     const dependency = vi.fn(async () => claims({ admin: true, roles: ['hq_owner'] }));
     const verified = await new ClerkSessionTokenVerifier(dependency).verify(input());
     expect(dependency).toHaveBeenCalledWith('synthetic.jwt.signature', {
-      audience: customerRealm.audience,
       authorizedParties: ['https://customer.test'],
       clockSkewInMs: 5_000,
       jwtKey: customerRealm.jwtKey,
@@ -131,6 +129,29 @@ describe('ClerkSessionTokenVerifier', () => {
     });
     expect(verified).not.toHaveProperty('roles');
     expect(verified).not.toHaveProperty('admin');
+  });
+
+  it('accepts an absent customer audience but rejects an absent HQ audience', async () => {
+    await expect(
+      new ClerkSessionTokenVerifier(async () => claims({ aud: undefined })).verify(input()),
+    ).resolves.toMatchObject({ audience: 'customer' });
+
+    const hqClaims = claims({
+      iss: hqRealm.issuer,
+      aud: undefined,
+      azp: hqRealm.authorizedParties[0],
+      fva: [0, 0],
+    });
+    const dependency = vi.fn(async () => hqClaims);
+    await expect(
+      new ClerkSessionTokenVerifier(dependency).verify(input(hqRealm, 'hq')),
+    ).rejects.toBeInstanceOf(IdentityTokenVerificationError);
+    expect(dependency).toHaveBeenCalledWith('synthetic.jwt.signature', {
+      audience: hqRealm.audience,
+      authorizedParties: ['https://hq.test'],
+      clockSkewInMs: 5_000,
+      jwtKey: hqRealm.jwtKey,
+    });
   });
 
   it.each([

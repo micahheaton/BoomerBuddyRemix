@@ -10,19 +10,27 @@ async function source(path: string): Promise<string> {
 
 describe('production identity UI boundary', () => {
   it('pins Clerk independently in customer and HQ and never exposes the secret key as public', async () => {
-    const [webPackage, hqPackage, lock, webProvider, hqProvider] = await Promise.all([
-      source('apps/web/package.json'),
-      source('apps/hq/package.json'),
-      source('package-lock.json'),
-      source('apps/web/src/components/identity-provider.tsx'),
-      source('apps/hq/src/components/identity-provider.tsx'),
-    ]);
+    const [webPackage, hqPackage, lock, webProvider, hqProvider, webConfig, hqConfig] =
+      await Promise.all([
+        source('apps/web/package.json'),
+        source('apps/hq/package.json'),
+        source('package-lock.json'),
+        source('apps/web/src/components/identity-provider.tsx'),
+        source('apps/hq/src/components/identity-provider.tsx'),
+        source('apps/web/next.config.ts'),
+        source('apps/hq/next.config.ts'),
+      ]);
 
     expect(JSON.parse(webPackage).dependencies['@clerk/nextjs']).toBe('7.7.7');
     expect(JSON.parse(hqPackage).dependencies['@clerk/nextjs']).toBe('7.7.7');
     expect(lock).toContain('node_modules/@clerk/nextjs');
     expect(`${webProvider}\n${hqProvider}`).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
     expect(`${webProvider}\n${hqProvider}`).not.toContain('NEXT_PUBLIC_CLERK_SECRET_KEY');
+    for (const configuration of [webConfig, hqConfig]) {
+      expect(configuration).toContain('process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+      expect(configuration).toContain('process.env.CLERK_PUBLISHABLE_KEY');
+      expect(configuration).not.toContain('CLERK_SECRET_KEY');
+    }
   });
 
   it('keeps development personas out of the production sign-in branch', async () => {

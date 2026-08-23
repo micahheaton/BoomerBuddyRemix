@@ -31,5 +31,6 @@ These decisions govern BoomerBuddy 2.0 together with the [master spec](../BOOMER
 27. [Local editorial intelligence evidence boundary](./0027-local-editorial-intelligence-evidence-boundary.md)
 28. [Disabled referral-credit core](./0028-disabled-referral-credit-core.md)
 29. [Production identity-bound Founding Household activation](./0029-production-identity-bound-founding-household.md)
+30. [Replit-managed customer Clerk token binding without a required audience claim](./0030-replit-managed-clerk-customer-token-binding.md)
 
 Superseding a decision requires a new dated ADR, affected contract/test changes, migration and rollback plans, and updates to source evidence.

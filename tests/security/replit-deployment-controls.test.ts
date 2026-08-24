@@ -604,16 +604,8 @@ describe('Run 3.1 Replit deployment controls', () => {
   });
 
   it.each([
-    [
-      'clean inventory with a failing npm status',
-      () => ({ dependencies: {} }),
-      1 as const,
-    ],
-    [
-      'npm error object',
-      () => ({ error: { summary: 'private npm error details' } }),
-      1 as const,
-    ],
+    ['clean inventory with a failing npm status', () => ({ dependencies: {} }), 1 as const],
+    ['npm error object', () => ({ error: { summary: 'private npm error details' } }), 1 as const],
   ])('rejects %s', async (_name, inventory, inventoryExitCode) => {
     const fixture = await createProvenanceFixture({ inventory, inventoryExitCode });
     try {

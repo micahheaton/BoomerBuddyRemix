@@ -15,13 +15,24 @@ trusted founder backup/restore machine.
 | -------------------------- | ---------------------------------------- | ------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV`                 | Select production guards and compiled UI | No      | founder: `production`                      | W/A/K/H/M | Required exactly `production`; any other value makes `replit-service` refuse build/start.                                       |
 | `BB_REPLIT_SERVICE`        | Select one workspace                     | No      | founder: `web`, `api`, `worker`, or `hq`   | W/A/K/H   | Required and unique per project; missing/other value refuses build/start.                                                       |
-| `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal HEAD and the resolved tag commit.                                                                          |
-| `BB_RUN3_1_RELEASE_TAG`    | Bind runtime to immutable tag            | No      | `run3-1-replit-founding-household-<12hex>` | W/A/K/H   | Required; suffix must equal the commit's first 12 characters.                                                                   |
+| `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal the configured annotated tag's dereferenced commit. A provider snapshot HEAD may differ only when its tree is identical. |
+| `BB_RUN3_1_RELEASE_TAG`    | Bind runtime to immutable tag            | No      | `run3-1-replit-founding-household-<12hex>` | W/A/K/H   | Required; the ref itself must be an annotated tag object, and its suffix must equal the candidate commit's first 12 characters. |
 | `REPLIT_DEPLOYMENT`        | Prove a published runtime                | No      | Replit automatic: `1`                      | W/A/K/H   | Required at start and must be `1`; never set manually in local evidence.                                                        |
 | `PORT`                     | Provider-selected listener port          | No      | Replit automatic integer                   | W/A/K/H   | Required for web-facing services. Next consumes it directly; the wrapper derives the API child's `BB_API_PORT`. The worker uses it only for a static private liveness listener and falls back to `3000` when Replit omits it. |
 
-Every Replit build/start additionally requires a clean checkout where HEAD and the immutable tag both
-resolve to the configured commit. Dirty or tag-shaped branch-only checkouts fail.
+Every Replit provenance check additionally requires all of the following:
+
+- `git cat-file -t refs/tags/<tag>` returns exactly `tag`; a lightweight tag is not accepted.
+- `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`.
+- `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}` exactly.
+- `git status --porcelain=v1 --untracked-files=all` emits no entries. Staged, unstaged, and
+  nonignored untracked content all fail closed.
+
+Replit may package the reviewed source tree beneath a different provider-generated snapshot commit.
+That representation is accepted only when the configured annotated tag still dereferences to the
+recorded candidate commit, the two trees are identical, and the full porcelain status is empty. This
+does not permit a moved or lightweight tag, a different tagged commit, a changed tree, or arbitrary
+dirty content.
 
 ## Customer web and HQ proxy boundary
 

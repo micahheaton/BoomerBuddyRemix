@@ -83,12 +83,20 @@ function assertReleaseProvenance({ verifyCheckout }) {
     throw new TypeError('The Run 3.1 release tag suffix must match the exact release commit');
   }
   if (!verifyCheckout) return;
-  const taggedCommit = captureGit(['rev-parse', '--verify', `refs/tags/${expectedTag}^{commit}`]);
-  const head = captureGit(['rev-parse', 'HEAD']);
-  if (taggedCommit !== expectedCommit || head !== expectedCommit) {
-    throw new TypeError('The Replit checkout does not match the exact tagged Run 3.1 candidate');
+  const tagReference = `refs/tags/${expectedTag}`;
+  if (captureGit(['cat-file', '-t', tagReference]) !== 'tag') {
+    throw new TypeError('The Run 3.1 release tag must be an annotated tag object');
   }
-  if (captureGit(['status', '--porcelain']) !== '') {
+  const taggedCommit = captureGit(['rev-parse', '--verify', `${tagReference}^{commit}`]);
+  if (taggedCommit !== expectedCommit) {
+    throw new TypeError('The Run 3.1 release tag does not resolve to the configured release commit');
+  }
+  const headTree = captureGit(['rev-parse', '--verify', 'HEAD^{tree}']);
+  const taggedTree = captureGit(['rev-parse', '--verify', `${tagReference}^{tree}`]);
+  if (headTree !== taggedTree) {
+    throw new TypeError('The Replit checkout tree does not match the tagged Run 3.1 candidate');
+  }
+  if (captureGit(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
     throw new TypeError('The Replit checkout contains changes outside the tagged candidate');
   }
 }

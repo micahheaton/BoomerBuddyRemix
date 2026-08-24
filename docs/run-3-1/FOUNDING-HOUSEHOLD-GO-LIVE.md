@@ -39,13 +39,20 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 8. Open Replit and import the same private GitHub repository into four founder-owned projects named
    conceptually `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq`.
    Do not ask Replit Agent to rewrite authentication or application code.
-9. In each Replit project Shell, fetch tags, check out the exact candidate tag in detached mode, and
-   verify `git rev-parse HEAD`, `git rev-parse refs/tags/<tag>^{commit}`, and `git status --porcelain`.
-   The two SHAs must equal the recorded full candidate and status must be empty. Before relying on
-   startup, prove that the **published runtime**, not only the project shell/build context, preserves
-   `.git`, the annotated tag, and a clean status: the start wrapper checks all three. If Replit strips
-   them, startup is expected to fail and the release control needs a reviewed code change/new tag;
-   do not bypass it with an environment value.
+9. In each Replit project Shell, explicitly fetch the exact tag ref with
+   `git fetch origin refs/tags/<tag>:refs/tags/<tag>` because Replit's Pull action does not fetch tags,
+   then check out the candidate tag in detached mode. Verify that
+   `git cat-file -t refs/tags/<tag>` returns exactly `tag`,
+   `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`,
+   `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}`, and
+   `git status --porcelain=v1 --untracked-files=all` is empty. Before relying on publication, prove
+   that the **published build/runtime context**, not only the project shell, preserves `.git`, the
+   annotated tag, exact tree equality, and the empty full-porcelain status: the provenance wrapper
+   checks all four. Replit may package the same tree under a different snapshot commit, but a
+   lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
+   unstaged, or nonignored untracked content must fail. If the published context cannot provide that
+   evidence, publication is expected to fail and the release control needs a reviewed code change/new
+   tag; do not bypass it with an environment value.
 10. In one founder-controlled Replit project, open **Database** and provision Production PostgreSQL.
     Record the provider database/project identifier, region, connection hostname, database name, and
     the TLS-capable `DATABASE_URL`. The URL must include exactly one `sslmode=require`,
@@ -265,9 +272,11 @@ The complete service-by-service inventory and failure behavior is in
 - Customer Clerk is public rather than Restricted.
 - HQ MFA cannot be required and freshly proven.
 - Customer/HQ token and maximum-session bounds cannot be configured and retained as provider proof.
-- Any deployment is not the exact clean tag/commit.
-- Published runtime does not preserve the exact `.git` metadata, annotated tag, and clean-status
-  evidence required by the startup wrapper.
+- The configured release ref is not an annotated tag that dereferences to
+  `BB_RUN3_1_RELEASE_COMMIT`, or the runtime HEAD tree does not exactly match the tag tree. A
+  different Replit snapshot commit is permitted only with exact tree equality.
+- Published runtime does not preserve the required `.git` metadata, annotated tag, exact-tree
+  equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.
 - API/worker can start without founder binding or with runtime migrations/demo identities.
 - The destructive PostgreSQL verifier is pointed at live, a nonempty DB, or a DB without a delimited
   `ci`/`test` name, or `BB_ALLOW_POSTGRES_VERIFICATION` is present in a runtime service.

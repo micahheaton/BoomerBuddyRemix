@@ -46,11 +46,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`,
    `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}`, and
    `git status --porcelain=v1 --untracked-files=all` is empty. Before relying on publication, prove
-   that the **published build/runtime context**, not only the project shell, preserves `.git`, the
+   that the **published build context**, not only the project shell, preserves `.git`, the
    annotated tag, exact tree equality, and the empty full-porcelain status: the provenance wrapper
    checks all four. Replit may package the same tree under a different snapshot commit, but a
    lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
-   unstaged, or nonignored untracked content must fail. If the published context cannot provide that
+   unstaged, or nonignored untracked content must fail. If the published build context cannot provide
    evidence, publication is expected to fail and the release control needs a reviewed code change/new
    tag; do not bypass it with an environment value.
 10. In one founder-controlled Replit project, open **Database** and provision Production PostgreSQL.
@@ -275,7 +275,7 @@ The complete service-by-service inventory and failure behavior is in
 - The configured release ref is not an annotated tag that dereferences to
   `BB_RUN3_1_RELEASE_COMMIT`, or the runtime HEAD tree does not exactly match the tag tree. A
   different Replit snapshot commit is permitted only with exact tree equality.
-- Published runtime does not preserve the required `.git` metadata, annotated tag, exact-tree
+- Published build context does not preserve the required `.git` metadata, annotated tag, exact-tree
   equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.
 - API/worker can start without founder binding or with runtime migrations/demo identities.
 - The destructive PostgreSQL verifier is pointed at live, a nonempty DB, or a DB without a delimited

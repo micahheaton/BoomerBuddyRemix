@@ -121,6 +121,10 @@ describe('Run 3.1 Replit deployment controls', () => {
     const source = await readFile(join(root, 'scripts/replit-service.mjs'), 'utf8');
     const replit = await readFile(join(root, '.replit'), 'utf8');
     const worker = await readFile(join(root, 'apps/worker/src/server.ts'), 'utf8');
+    const workerHealth = await readFile(
+      join(root, 'apps/worker/src/health-server.ts'),
+      'utf8',
+    );
     const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
@@ -149,20 +153,30 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain("captureGit(['rev-parse', '--verify', 'HEAD^{tree}'])");
     expect(source).toContain('`${tagReference}^{tree}`');
     expect(source).toContain("captureGit(['status', '--porcelain=v1', '--untracked-files=all'])");
+    expect(source).toContain('const provenanceDiagnosticMaxBuffer = 1024 * 1024');
+    expect(source).toContain('const provenanceDiagnosticMaxEntries = 50');
+    expect(source).toContain('const provenanceDiagnosticMaxPathBytes = 256');
+    expect(source).toContain("'--no-renames'");
+    expect(source).toContain('hashes and filenames only');
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
     expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
     expect(source).toContain('A configured BB_API_PORT must equal the provider PORT');
     expect(worker).toContain('new ProductionIdentityRepository(database).assertFounderBinding');
-    expect(worker).toContain('startWorkerHealthServer(process.env)');
-    expect(worker.indexOf('assertFounderBinding')).toBeLessThan(worker.indexOf('const jobs ='));
-    expect(worker.indexOf('const jobs =')).toBeLessThan(
-      worker.indexOf('startWorkerHealthServer(process.env)'),
+    expect(worker).toContain('await runReplitWorkerLifecycle(');
+    expect(worker).toContain('registerDatabaseClose(() => database.close())');
+    expect(worker).toContain('registerWorkerStop(stopWorker)');
+    expect(worker.indexOf('await runReplitWorkerLifecycle(')).toBeLessThan(
+      worker.indexOf('loadConfig()'),
     );
-    expect(worker.indexOf('startWorkerHealthServer(process.env)')).toBeLessThan(
+    expect(worker.indexOf('assertFounderBinding')).toBeLessThan(worker.indexOf('const jobs ='));
+    expect(worker.indexOf('assertFounderBinding')).toBeLessThan(
       worker.indexOf('await worker.start()'),
     );
-    expect(worker.indexOf('await closeWorkerHealthServer(healthServer)')).toBeLessThan(
-      worker.indexOf('await database.close()'),
+    expect(workerHealth.indexOf('if (stopWorker !== undefined) await stopWorker()')).toBeLessThan(
+      workerHealth.indexOf('await closeWorkerHealthServer(server)'),
+    );
+    expect(workerHealth.indexOf('await closeWorkerHealthServer(server)')).toBeLessThan(
+      workerHealth.indexOf('if (closeDatabase !== undefined) await closeDatabase()'),
     );
   });
 
@@ -335,16 +349,109 @@ describe('Run 3.1 Replit deployment controls', () => {
     }
   });
 
-  it('rejects a clean snapshot commit whose tracked tree differs from the candidate', async () => {
+  it('reports bounded hashes and filenames, never changed file content, for a tree mismatch', async () => {
     const fixture = await createProvenanceFixture();
     try {
-      await writeFile(join(fixture.directory, 'tracked.txt'), 'changed tree\n', 'utf8');
+      const contentSentinel = 'private-snapshot-content-must-not-be-logged';
+      await writeFile(join(fixture.directory, 'tracked.txt'), `${contentSentinel}\n`, 'utf8');
       runGit(fixture.directory, ['add', 'tracked.txt']);
-      commitFixture(fixture.directory, 'Changed snapshot tree');
+      const headCommit = commitFixture(fixture.directory, 'Changed snapshot tree');
+      const headTree = runGit(fixture.directory, ['rev-parse', 'HEAD^{tree}']);
+      const taggedTree = runGit(fixture.directory, [
+        'rev-parse',
+        `refs/tags/${fixture.tag}^{tree}`,
+      ]);
 
       const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
       expect(result.status).not.toBe(0);
-      expect(commandOutput(result)).toContain(
+      expect(output).toContain(
+        'The Replit checkout tree does not match the tagged Run 3.1 candidate',
+      );
+      expect(output).toContain('Replit provenance mismatch diagnostics (hashes and filenames only):');
+      expect(output).toContain(`HEAD commit: ${headCommit}`);
+      expect(output).toContain(`HEAD tree: ${headTree}`);
+      expect(output).toContain(`annotated tag commit: ${fixture.releaseCommit}`);
+      expect(output).toContain(`annotated tag tree: ${taggedTree}`);
+      expect(output).toContain('tag -> HEAD name-status paths: 1');
+      expect(output).toContain('    M "tracked.txt"');
+      expect(output).not.toContain(contentSentinel);
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('reports renames as bounded add/delete filenames without similarity scanning', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      runGit(fixture.directory, ['mv', 'tracked.txt', 'renamed.txt']);
+      commitFixture(fixture.directory, 'Renamed snapshot path');
+
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('tag -> HEAD name-status paths: 2');
+      expect(output).toContain('    A "renamed.txt"');
+      expect(output).toContain('    D "tracked.txt"');
+      expect(output).not.toContain('    R ');
+      expect(output).toContain(
+        'The Replit checkout tree does not match the tagged Run 3.1 candidate',
+      );
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('ASCII-escapes control and non-ASCII path bytes in mismatch diagnostics', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const diagnosticPath = 'control-\t-café.txt';
+      const blob = runGit(fixture.directory, ['rev-parse', 'HEAD:tracked.txt']);
+      runGit(fixture.directory, [
+        'update-index',
+        '--add',
+        '--cacheinfo',
+        '100644',
+        blob,
+        diagnosticPath,
+      ]);
+      commitFixture(fixture.directory, 'Added unusual snapshot path');
+
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('    A "control-\\x09-caf\\xc3\\xa9.txt"');
+      expect(output).not.toContain(diagnosticPath);
+      expect(output).toContain(
+        'The Replit checkout tree does not match the tagged Run 3.1 candidate',
+      );
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('caps mismatch diagnostics at fifty deterministically sorted paths', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const paths = Array.from(
+        { length: 53 },
+        (_value, index) => `diagnostic-${String(index).padStart(3, '0')}.txt`,
+      );
+      await Promise.all(
+        paths.map((path) => writeFile(join(fixture.directory, path), 'diagnostic\n', 'utf8')),
+      );
+      runGit(fixture.directory, ['add', '--all']);
+      commitFixture(fixture.directory, 'Many snapshot paths');
+
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('tag -> HEAD name-status paths: 53');
+      expect(output).toContain('    A "diagnostic-000.txt"');
+      expect(output).toContain('    A "diagnostic-049.txt"');
+      expect(output).not.toContain('    A "diagnostic-050.txt"');
+      expect(output).toContain('    ... 3 more paths omitted');
+      expect(output).toContain(
         'The Replit checkout tree does not match the tagged Run 3.1 candidate',
       );
     } finally {

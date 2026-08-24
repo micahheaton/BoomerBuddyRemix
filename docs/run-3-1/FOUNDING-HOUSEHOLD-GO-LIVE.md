@@ -98,8 +98,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     separately: the reviewed wrapper derives it from the provider's automatic `PORT`, and any explicit
     mismatch refuses startup. Do not set a trusted-proxy count above zero without a deployed
     header-spoofing test.
-16. For worker choose **Reserved VM** and **Background worker** (no public endpoint). Set
-    `BB_REPLIT_SERVICE=worker` and a stable content-free `BB_WORKER_ID`. Do not expose a port.
+16. For worker choose **Reserved VM** with **Only you** (or the narrowest private access) and
+    web-server mode so Replit supplies `PORT`; attach no custom domain. Set
+    `BB_REPLIT_SERVICE=worker` and a stable content-free `BB_WORKER_ID`. The worker listens on
+    `0.0.0.0` only for static `/` and `/health/live` liveness. This is not readiness, and the
+    listener must open before configuration, database, and founder-binding preflight.
 17. For HQ choose **Autoscale** with **Only you** or the narrowest Replit private-deployment access
     available, plus the separate HQ Clerk MFA boundary. Set `BB_REPLIT_SERVICE=hq`. Obscurity of the
     URL is not authentication.
@@ -125,9 +128,10 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 21. Publish API first. Record deployment ID, snapshot/build ID, region, immutable commit/tag, URL,
     start log, and `GET /health/live` plus `GET /health/ready` results. Missing founder binding,
     database TLS, Clerk, or cryptographic configuration must prevent startup.
-22. Publish worker. Confirm one running process, exact founder-binding startup success, no listening
-    port, one durable retention job after restart, and no Stripe, Twilio, media, classification,
-    transcription, or outbound handler.
+22. Publish worker. Confirm one running process, `GET /health/live` returns 200 on the private
+    deployment, exact founder-binding startup success occurs before any durable worker heartbeat or
+    job loop, one durable retention job remains after restart, and no Stripe, Twilio, media,
+    classification, transcription, or outbound handler is present.
 23. Publish customer web and HQ. Record deployment IDs, build IDs, origins, and response headers.
     Verify HTTPS, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, and
     `X-Content-Type-Options: nosniff`. Confirm missing Clerk configuration returns a no-store 503.

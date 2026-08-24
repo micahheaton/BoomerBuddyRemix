@@ -84,3 +84,43 @@ export const closeWorkerHealthServer = async (server: Server | undefined): Promi
     server.closeAllConnections();
   });
 };
+
+export type WorkerRuntimeCleanup = {
+  registerDatabaseClose(close: () => Promise<void>): void;
+  registerWorkerStop(stop: () => Promise<void>): void;
+};
+
+export const runReplitWorkerLifecycle = async <Result>(
+  environment: NodeJS.ProcessEnv,
+  startup: (cleanup: WorkerRuntimeCleanup) => Promise<Result>,
+): Promise<Result> => {
+  const server = await startWorkerHealthServer(environment);
+  let closeDatabase: (() => Promise<void>) | undefined;
+  let stopWorker: (() => Promise<void>) | undefined;
+  try {
+    return await startup({
+      registerDatabaseClose(close) {
+        if (closeDatabase !== undefined) {
+          throw new TypeError('Worker database cleanup is already registered');
+        }
+        closeDatabase = close;
+      },
+      registerWorkerStop(stop) {
+        if (stopWorker !== undefined) {
+          throw new TypeError('Worker stop cleanup is already registered');
+        }
+        stopWorker = stop;
+      },
+    });
+  } finally {
+    try {
+      if (stopWorker !== undefined) await stopWorker();
+    } finally {
+      try {
+        await closeWorkerHealthServer(server);
+      } finally {
+        if (closeDatabase !== undefined) await closeDatabase();
+      }
+    }
+  }
+};

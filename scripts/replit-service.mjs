@@ -70,6 +70,99 @@ function captureGit(args) {
   return result.stdout.trim();
 }
 
+const provenanceDiagnosticMaxBuffer = 1024 * 1024;
+const provenanceDiagnosticMaxEntries = 50;
+const provenanceDiagnosticMaxPathBytes = 256;
+
+function captureGitBytes(args) {
+  const result = spawnSync('git', args, {
+    cwd: process.cwd(),
+    env: process.env,
+    maxBuffer: provenanceDiagnosticMaxBuffer,
+    shell: false,
+  });
+  if (result.error !== undefined || result.status !== 0 || !Buffer.isBuffer(result.stdout)) {
+    throw new Error('git could not produce bounded provenance diagnostics');
+  }
+  return result.stdout;
+}
+
+function parseGitNameStatus(output) {
+  const fields = [];
+  let start = 0;
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== 0) continue;
+    fields.push(output.subarray(start, index));
+    start = index + 1;
+  }
+  if (start !== output.length || fields.length % 2 !== 0) {
+    throw new Error('git emitted malformed provenance diagnostics');
+  }
+
+  const changes = [];
+  for (let index = 0; index < fields.length; index += 2) {
+    const statusBytes = fields[index];
+    const pathBytes = fields[index + 1];
+    const status = statusBytes.toString('ascii');
+    if (!/^[ADMTUXB]$/u.test(status) || pathBytes.length === 0) {
+      throw new Error('git emitted malformed provenance diagnostics');
+    }
+    changes.push({ status, pathBytes });
+  }
+  return changes.sort((left, right) => Buffer.compare(left.pathBytes, right.pathBytes));
+}
+
+function renderDiagnosticGitPath(pathBytes) {
+  const visible = pathBytes.subarray(0, provenanceDiagnosticMaxPathBytes);
+  let rendered = '"';
+  for (const byte of visible) {
+    if (byte === 0x22) rendered += '\\"';
+    else if (byte === 0x5c) rendered += '\\\\';
+    else if (byte >= 0x20 && byte <= 0x7e) rendered += String.fromCharCode(byte);
+    else rendered += `\\x${byte.toString(16).padStart(2, '0')}`;
+  }
+  rendered += '"';
+  if (pathBytes.length > visible.length) {
+    rendered += `...(+${pathBytes.length - visible.length} bytes)`;
+  }
+  return rendered;
+}
+
+function reportTreeMismatch({ headCommit, headTree, taggedCommit, taggedTree }) {
+  const lines = [
+    'Replit provenance mismatch diagnostics (hashes and filenames only):',
+    `  HEAD commit: ${headCommit}`,
+    `  HEAD tree: ${headTree}`,
+    `  annotated tag commit: ${taggedCommit}`,
+    `  annotated tag tree: ${taggedTree}`,
+  ];
+  try {
+    const changes = parseGitNameStatus(
+      captureGitBytes([
+        'diff-tree',
+        '--no-commit-id',
+        '--name-status',
+        '-r',
+        '--no-renames',
+        '-z',
+        taggedTree,
+        headTree,
+        '--',
+      ]),
+    );
+    lines.push(`  tag -> HEAD name-status paths: ${changes.length}`);
+    for (const change of changes.slice(0, provenanceDiagnosticMaxEntries)) {
+      lines.push(`    ${change.status} ${renderDiagnosticGitPath(change.pathBytes)}`);
+    }
+    if (changes.length > provenanceDiagnosticMaxEntries) {
+      lines.push(`    ... ${changes.length - provenanceDiagnosticMaxEntries} more paths omitted`);
+    }
+  } catch {
+    lines.push('  tag -> HEAD name-status paths: unavailable within bounded diagnostics');
+  }
+  process.stderr.write(`${lines.join('\n')}\n`);
+}
+
 function assertReleaseProvenance({ verifyCheckout }) {
   const expectedCommit = process.env.BB_RUN3_1_RELEASE_COMMIT;
   const expectedTag = process.env.BB_RUN3_1_RELEASE_TAG;
@@ -93,9 +186,17 @@ function assertReleaseProvenance({ verifyCheckout }) {
       'The Run 3.1 release tag does not resolve to the configured release commit',
     );
   }
+  const headCommit = captureGit(['rev-parse', '--verify', 'HEAD^{commit}']);
   const headTree = captureGit(['rev-parse', '--verify', 'HEAD^{tree}']);
   const taggedTree = captureGit(['rev-parse', '--verify', `${tagReference}^{tree}`]);
   if (headTree !== taggedTree) {
+    try {
+      reportTreeMismatch({ headCommit, headTree, taggedCommit, taggedTree });
+    } catch {
+      process.stderr.write(
+        'Replit provenance mismatch diagnostics unavailable within bounded diagnostics.\n',
+      );
+    }
     throw new TypeError('The Replit checkout tree does not match the tagged Run 3.1 candidate');
   }
   if (captureGit(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {

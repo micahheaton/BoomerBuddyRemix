@@ -1,9 +1,11 @@
-import type { AddressInfo } from 'node:net';
+import { createServer, type AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
 import {
   closeWorkerHealthServer,
   createWorkerHealthServer,
   resolveReplitWorkerHealthPort,
+  runReplitWorkerLifecycle,
+  startWorkerHealthServer,
 } from '../../apps/worker/src/health-server';
 
 const listenOnLoopback = async () => {
@@ -14,6 +16,25 @@ const listenOnLoopback = async () => {
   });
   const address = server.address() as AddressInfo;
   return { origin: `http://127.0.0.1:${address.port}`, server };
+};
+
+const reserveLoopbackPort = async (): Promise<number> => {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') {
+    throw new TypeError('Expected an ephemeral TCP port');
+  }
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error === undefined) resolve();
+      else reject(error);
+    });
+  });
+  return address.port;
 };
 
 describe('Replit worker liveness listener', () => {
@@ -28,6 +49,63 @@ describe('Replit worker liveness listener', () => {
         'requires a valid PORT',
       );
     }
+  });
+
+  it('binds deployment liveness to 0.0.0.0', async () => {
+    const port = await reserveLoopbackPort();
+    const server = await startWorkerHealthServer({
+      REPLIT_DEPLOYMENT: '1',
+      PORT: String(port),
+    });
+    if (server === undefined) throw new TypeError('Expected the deployment liveness server');
+    try {
+      expect((server.address() as AddressInfo).address).toBe('0.0.0.0');
+      const response = await fetch(`http://127.0.0.1:${port}/health/live`);
+      expect(response.status).toBe(200);
+    } finally {
+      await closeWorkerHealthServer(server);
+    }
+  });
+
+  it('stays live during blocked preflight, propagates failure, and closes resources', async () => {
+    const port = await reserveLoopbackPort();
+    const origin = `http://127.0.0.1:${port}`;
+    const startupFailure = new Error('preflight failed');
+    const cleanupEvents: string[] = [];
+    let markPreflightEntered!: () => void;
+    let rejectPreflight!: (reason?: unknown) => void;
+    const preflightEntered = new Promise<void>((resolve) => {
+      markPreflightEntered = resolve;
+    });
+    const blockedPreflight = new Promise<never>((_resolve, reject) => {
+      rejectPreflight = reject;
+    });
+
+    const lifecycle = runReplitWorkerLifecycle(
+      { REPLIT_DEPLOYMENT: '1', PORT: String(port) },
+      async ({ registerDatabaseClose, registerWorkerStop }) => {
+        registerDatabaseClose(async () => {
+          cleanupEvents.push('database');
+          await expect(fetch(`${origin}/health/live`)).rejects.toThrow();
+        });
+        registerWorkerStop(async () => {
+          cleanupEvents.push('worker');
+          const response = await fetch(`${origin}/health/live`);
+          expect(response.status).toBe(200);
+        });
+        markPreflightEntered();
+        await blockedPreflight;
+      },
+    );
+
+    await preflightEntered;
+    const response = await fetch(`${origin}/health/live`);
+    expect(response.status).toBe(200);
+    rejectPreflight(startupFailure);
+
+    await expect(lifecycle).rejects.toBe(startupFailure);
+    expect(cleanupEvents).toEqual(['worker', 'database']);
+    await expect(fetch(`${origin}/health/live`)).rejects.toThrow();
   });
 
   it('serves only a static, non-sensitive liveness surface', async () => {

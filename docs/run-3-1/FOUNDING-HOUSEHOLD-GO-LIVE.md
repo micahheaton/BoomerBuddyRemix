@@ -50,9 +50,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    annotated tag, exact tree equality, and the empty full-porcelain status: the provenance wrapper
    checks all four. Replit may package the same tree under a different snapshot commit, but a
    lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
-   unstaged, or nonignored untracked content must fail. If the published build context cannot provide
-   evidence, publication is expected to fail and the release control needs a reviewed code change/new
-   tag; do not bypass it with an environment value.
+   unstaged, or nonignored untracked content must fail. A dirty-checkout failure may emit a bounded
+   status-and-filename diagnostic (at most 50 paths and 256 bytes per rendered path); it never emits
+   file contents and does not relax the empty-status requirement. If the published build context
+   cannot provide evidence, publication is expected to fail and the release control needs a reviewed
+   code change/new tag; do not bypass it with an environment value.
 10. In one founder-controlled Replit project, open **Database** and provision Production PostgreSQL.
     Record the provider database/project identifier, region, connection hostname, database name, and
     the TLS-capable `DATABASE_URL`. The URL must include exactly one `sslmode=require`,

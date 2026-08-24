@@ -463,14 +463,11 @@ describe('Run 3.1 Replit deployment controls', () => {
     async (contentState) => {
       const fixture = await createProvenanceFixture();
       try {
+        const contentSentinel = `do-not-print-${contentState}-checkout-content`;
         if (contentState === 'untracked') {
-          await writeFile(join(fixture.directory, 'untracked.txt'), 'not in candidate\n', 'utf8');
+          await writeFile(join(fixture.directory, 'untracked.txt'), contentSentinel, 'utf8');
         } else {
-          await writeFile(
-            join(fixture.directory, 'tracked.txt'),
-            `${contentState} change\n`,
-            'utf8',
-          );
+          await writeFile(join(fixture.directory, 'tracked.txt'), contentSentinel, 'utf8');
           if (contentState === 'staged') runGit(fixture.directory, ['add', 'tracked.txt']);
         }
         expect(
@@ -478,8 +475,21 @@ describe('Run 3.1 Replit deployment controls', () => {
         ).not.toBe('');
 
         const result = runFixtureBuild(fixture);
+        const output = commandOutput(result);
         expect(result.status).not.toBe(0);
-        expect(commandOutput(result)).toContain(
+        expect(output).toContain(
+          'Replit dirty checkout diagnostics (status and filenames only):',
+        );
+        expect(output).toContain('  index/worktree status paths: 1');
+        expect(output).toContain(
+          contentState === 'staged'
+            ? '    M  "tracked.txt"'
+            : contentState === 'unstaged'
+              ? '     M "tracked.txt"'
+              : '    ?? "untracked.txt"',
+        );
+        expect(output).not.toContain(contentSentinel);
+        expect(output).toContain(
           'The Replit checkout contains changes outside the tagged candidate',
         );
       } finally {
@@ -487,6 +497,36 @@ describe('Run 3.1 Replit deployment controls', () => {
       }
     },
   );
+
+  it('caps dirty-checkout diagnostics at fifty deterministically sorted paths', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const paths = Array.from(
+        { length: 53 },
+        (_value, index) => `dirty-${String(index).padStart(3, '0')}.txt`,
+      );
+      await Promise.all(
+        paths.map((path) =>
+          writeFile(join(fixture.directory, path), 'do-not-print-dirty-content', 'utf8'),
+        ),
+      );
+
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('  index/worktree status paths: 53');
+      expect(output).toContain('    ?? "dirty-000.txt"');
+      expect(output).toContain('    ?? "dirty-049.txt"');
+      expect(output).not.toContain('    ?? "dirty-050.txt"');
+      expect(output).toContain('    ... 3 more paths omitted');
+      expect(output).not.toContain('do-not-print-dirty-content');
+      expect(output).toContain(
+        'The Replit checkout contains changes outside the tagged candidate',
+      );
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
 
   it('rejects a lightweight release tag even when it resolves to the configured commit', async () => {
     const fixture = await createProvenanceFixture({ annotated: false });

@@ -112,6 +112,40 @@ function parseGitNameStatus(output) {
   return changes.sort((left, right) => Buffer.compare(left.pathBytes, right.pathBytes));
 }
 
+function parseGitPorcelainStatus(output) {
+  const changes = [];
+  let start = 0;
+
+  for (let index = 0; index < output.length; index += 1) {
+    if (output[index] !== 0) continue;
+
+    const record = output.subarray(start, index);
+    if (record.length <= 3 || record[2] !== 0x20) {
+      throw new Error('git emitted malformed dirty-checkout diagnostics');
+    }
+
+    const status = String.fromCharCode(record[0], record[1]);
+    if (
+      status === '  ' ||
+      (!/^[ ADMTU]{2}$/u.test(status) && status !== '??' && status !== '!!')
+    ) {
+      throw new Error('git emitted malformed dirty-checkout diagnostics');
+    }
+
+    changes.push({
+      status,
+      pathBytes: Buffer.from(record.subarray(3)),
+    });
+    start = index + 1;
+  }
+
+  if (start !== output.length) {
+    throw new Error('git emitted malformed dirty-checkout diagnostics');
+  }
+
+  return changes.sort((left, right) => Buffer.compare(left.pathBytes, right.pathBytes));
+}
+
 function renderDiagnosticGitPath(pathBytes) {
   const visible = pathBytes.subarray(0, provenanceDiagnosticMaxPathBytes);
   let rendered = '"';
@@ -163,6 +197,29 @@ function reportTreeMismatch({ headCommit, headTree, taggedCommit, taggedTree }) 
   process.stderr.write(`${lines.join('\n')}\n`);
 }
 
+function reportDirtyCheckout() {
+  const lines = ['Replit dirty checkout diagnostics (status and filenames only):'];
+  const changes = parseGitPorcelainStatus(
+    captureGitBytes([
+      'status',
+      '--porcelain=v1',
+      '-z',
+      '--untracked-files=all',
+      '--no-renames',
+    ]),
+  );
+
+  lines.push(`  index/worktree status paths: ${changes.length}`);
+  for (const change of changes.slice(0, provenanceDiagnosticMaxEntries)) {
+    lines.push(`    ${change.status} ${renderDiagnosticGitPath(change.pathBytes)}`);
+  }
+  if (changes.length > provenanceDiagnosticMaxEntries) {
+    lines.push(`    ... ${changes.length - provenanceDiagnosticMaxEntries} more paths omitted`);
+  }
+
+  process.stderr.write(`${lines.join('\n')}\n`);
+}
+
 function assertReleaseProvenance({ verifyCheckout }) {
   const expectedCommit = process.env.BB_RUN3_1_RELEASE_COMMIT;
   const expectedTag = process.env.BB_RUN3_1_RELEASE_TAG;
@@ -199,7 +256,15 @@ function assertReleaseProvenance({ verifyCheckout }) {
     }
     throw new TypeError('The Replit checkout tree does not match the tagged Run 3.1 candidate');
   }
-  if (captureGit(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
+  const checkoutStatus = captureGit(['status', '--porcelain=v1', '--untracked-files=all']);
+  if (checkoutStatus !== '') {
+    try {
+      reportDirtyCheckout();
+    } catch {
+      process.stderr.write(
+        'Replit dirty checkout diagnostics unavailable within bounded diagnostics.\n',
+      );
+    }
     throw new TypeError('The Replit checkout contains changes outside the tagged candidate');
   }
 }

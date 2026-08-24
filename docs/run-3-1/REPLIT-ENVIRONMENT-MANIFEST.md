@@ -32,7 +32,9 @@ Replit may package the reviewed source tree beneath a different provider-generat
 That representation is accepted only when the configured annotated tag still dereferences to the
 recorded candidate commit, the two trees are identical, and the full porcelain status is empty. This
 does not permit a moved or lightweight tag, a different tagged commit, a changed tree, or arbitrary
-dirty content.
+dirty content. On dirty-status failure, the wrapper may print only bounded index/worktree status and
+escaped filenames (at most 50 paths and 256 bytes per rendered path); it never prints file contents
+and still fails closed.
 
 ## Customer web and HQ proxy boundary
 

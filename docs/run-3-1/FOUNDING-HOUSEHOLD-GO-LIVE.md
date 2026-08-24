@@ -58,9 +58,16 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    command to prove the checkout is empty before building. The Reserved VM worker never receives
    this normalization. Any other byte, path, status, mode, or target fails closed. A dirty-checkout
    failure may emit a bounded status-and-filename diagnostic (at most 50 paths and 256 bytes per
-   rendered path); it never emits file contents. If the published build context cannot provide
-   evidence, publication is expected to fail and the release control needs a reviewed code change/new
-   tag; do not bypass it with an environment value.
+   rendered path); it never emits file contents. After the production-only npm install, web and HQ
+   may contain exactly the lockfile-pinned optional Sharp WASM artifacts
+   `@img/sharp-wasm32@0.35.3` and `@emnapi/runtime@1.11.3` as npm-reported extraneous entries.
+   The wrapper accepts only that exact two-entry set with reviewed versions, literal root
+   `node_modules` paths, resolved registry URLs, and complete npm dependency-node metadata. It also
+   requires lockfile version 3 and the exact optional flags, package paths, integrity hashes, and
+   dependency ranges from the tagged `package-lock.json`. API, worker, malformed or nested problems,
+   altered metadata, or any partial, duplicate, or additional npm problem fails closed. If the published build context cannot provide evidence, publication is
+   expected to fail and the release control needs a reviewed code change/new tag; do not bypass it
+   with an environment value.
 10. In one founder-controlled Replit project, open **Database** and provision Production PostgreSQL.
     Record the provider database/project identifier, region, connection hostname, database name, and
     the TLS-capable `DATABASE_URL`. The URL must include exactly one `sslmode=require`,

@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import process from 'node:process';
 
 const services = {
@@ -77,6 +79,22 @@ const replitCanonicalConfigBlob = '04697d2c8f4a23f4d89edff84930bbd25ede8be3';
 const replitAutoscaleOverlayBlob = '7d305e8966bf99376816ea5bfaf47621133c225c';
 const replitAutoscaleOverlayStatus = Buffer.from(' M .replit\0', 'utf8');
 const replitAutoscaleServices = new Set(['api', 'hq', 'web']);
+const reviewedWebOptionalArtifacts = {
+  '@emnapi/runtime': {
+    version: '1.11.3',
+    resolved: 'https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz',
+    integrity:
+      'sha512-Xz4Tpyki7XyrpbUK1jR1AhdAdaXyhhY4lZ3neLodmhpuWfy2PAQN5B46sAiU4liOXGLkHypn/qU+jvfWSCYYLA==',
+    lockDependencies: { tslib: '^2.4.0' },
+  },
+  '@img/sharp-wasm32': {
+    version: '0.35.3',
+    resolved: 'https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz',
+    integrity:
+      'sha512-cZ0XkcYGpHZkqW6iCkqTcmUC0CD9DhD5d/qeZlZkfRBn6GnHniZXLUo5+9xw8Iv76YE6LQFN9YNBlKREcCG76w==',
+    lockDependencies: { '@emnapi/runtime': '^1.11.1' },
+  },
+};
 
 function captureGitBytes(args) {
   const result = spawnSync('git', args, {
@@ -311,6 +329,148 @@ function dependencyNames(tree) {
   return names;
 }
 
+function exactJsonShape(value, expected) {
+  if (Array.isArray(expected)) {
+    return (
+      Array.isArray(value) &&
+      value.length === expected.length &&
+      expected.every((item, index) => exactJsonShape(value[index], item))
+    );
+  }
+  if (typeof expected === 'object' && expected !== null) {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const actualKeys = Object.keys(value).sort();
+    const expectedKeys = Object.keys(expected).sort();
+    return (
+      exactJsonShape(actualKeys, expectedKeys) &&
+      expectedKeys.every((key) => exactJsonShape(value[key], expected[key]))
+    );
+  }
+  return Object.is(value, expected);
+}
+
+function hasUnexpectedNpmProblemMetadata(dependencies, reviewedTopLevel = new Set()) {
+  if (dependencies === undefined) return false;
+  if (typeof dependencies !== 'object' || dependencies === null || Array.isArray(dependencies)) {
+    return true;
+  }
+  for (const [name, dependency] of Object.entries(dependencies)) {
+    if (typeof dependency !== 'object' || dependency === null || Array.isArray(dependency)) {
+      return true;
+    }
+    if (
+      !reviewedTopLevel.has(name) &&
+      dependency.problems !== undefined &&
+      (!Array.isArray(dependency.problems) || dependency.problems.length > 0)
+    ) {
+      return true;
+    }
+    if (hasUnexpectedNpmProblemMetadata(dependency.dependencies)) return true;
+  }
+  return false;
+}
+
+function reviewNpmProblems(inventory) {
+  const problems = inventory.problems;
+  if (problems === undefined || (Array.isArray(problems) && problems.length === 0)) {
+    return hasUnexpectedNpmProblemMetadata(inventory.dependencies) ? undefined : [];
+  }
+  if (
+    !Array.isArray(problems) ||
+    problems.some((problem) => typeof problem !== 'string') ||
+    (service !== 'web' && service !== 'hq')
+  ) {
+    return undefined;
+  }
+
+  const artifactNames = Object.keys(reviewedWebOptionalArtifacts).sort();
+  const expectedProblems = Object.fromEntries(
+    artifactNames.map((name) => {
+      const artifact = reviewedWebOptionalArtifacts[name];
+      const problem = `extraneous: ${name}@${artifact.version} ${join(
+        process.cwd(),
+        'node_modules',
+        ...name.split('/'),
+      )}`;
+      return [name, problem];
+    }),
+  );
+  if (!exactJsonShape([...problems].sort(), Object.values(expectedProblems).sort())) {
+    return undefined;
+  }
+
+  const dependencies = inventory.dependencies;
+  if (typeof dependencies !== 'object' || dependencies === null || Array.isArray(dependencies)) {
+    return undefined;
+  }
+  const expectedNodes = {
+    '@emnapi/runtime': {
+      version: '1.11.3',
+      resolved: 'https://registry.npmjs.org/@emnapi/runtime/-/runtime-1.11.3.tgz',
+      overridden: false,
+      extraneous: true,
+      problems: [expectedProblems['@emnapi/runtime']],
+      dependencies: {
+        tslib: {
+          version: '2.8.1',
+          resolved: 'https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz',
+          overridden: false,
+        },
+      },
+    },
+    '@img/sharp-wasm32': {
+      version: '0.35.3',
+      resolved: 'https://registry.npmjs.org/@img/sharp-wasm32/-/sharp-wasm32-0.35.3.tgz',
+      overridden: false,
+      extraneous: true,
+      problems: [expectedProblems['@img/sharp-wasm32']],
+      dependencies: {
+        '@emnapi/runtime': { version: '1.11.3' },
+      },
+    },
+  };
+  if (
+    artifactNames.some((name) => !exactJsonShape(dependencies[name], expectedNodes[name])) ||
+    hasUnexpectedNpmProblemMetadata(dependencies, new Set(artifactNames))
+  ) {
+    return undefined;
+  }
+
+  let lockfile;
+  try {
+    lockfile = JSON.parse(readFileSync('package-lock.json', 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (
+    lockfile.lockfileVersion !== 3 ||
+    typeof lockfile.packages !== 'object' ||
+    lockfile.packages === null ||
+    Array.isArray(lockfile.packages)
+  ) {
+    return undefined;
+  }
+  for (const name of artifactNames) {
+    const artifact = reviewedWebOptionalArtifacts[name];
+    const lockEntry = lockfile.packages[`node_modules/${name}`];
+    if (
+      typeof lockEntry !== 'object' ||
+      lockEntry === null ||
+      Array.isArray(lockEntry) ||
+      lockEntry.version !== artifact.version ||
+      lockEntry.resolved !== artifact.resolved ||
+      lockEntry.integrity !== artifact.integrity ||
+      lockEntry.optional !== true ||
+      lockEntry.dev === true ||
+      lockEntry.link === true ||
+      !exactJsonShape(lockEntry.dependencies, artifact.lockDependencies)
+    ) {
+      return undefined;
+    }
+  }
+  return artifactNames;
+}
+
 let providerApiPort;
 if (mode === 'start') {
   if (process.env.REPLIT_DEPLOYMENT !== '1') {
@@ -355,8 +515,14 @@ if (mode === 'build') {
   ]);
 
   const inventory = captureJson(['ls', '--all', '--omit=dev', '--workspace', workspace, '--json']);
-  if (Array.isArray(inventory.problems) && inventory.problems.length > 0) {
+  const reviewedProblems = reviewNpmProblems(inventory);
+  if (reviewedProblems === undefined) {
     throw new Error(`The ${service} production dependency graph contains npm problems`);
+  }
+  if (reviewedProblems.length > 0) {
+    process.stdout.write(
+      `Reviewed optional npm artifacts: ${reviewedProblems.join(', ')}.\n`,
+    );
   }
   const installed = dependencyNames(inventory);
   for (const forbidden of ['@expo/metro', 'expo', 'image-size', 'metro', 'react-native']) {

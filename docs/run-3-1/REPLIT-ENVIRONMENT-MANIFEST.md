@@ -40,6 +40,14 @@ permit a moved or lightweight tag, a different tagged commit, a changed tree, or
 content. On dirty-status failure, the wrapper may print only bounded index/worktree status and escaped
 filenames (at most 50 paths and 256 bytes per rendered path); it never prints file contents.
 
+For web and HQ only, npm may report the lockfile-pinned optional Sharp WASM artifacts
+`@img/sharp-wasm32@0.35.3` and `@emnapi/runtime@1.11.3` as extraneous after the
+production-only workspace install. The runtime inventory accepts only that exact pair when the
+literal root `node_modules` paths, resolved registry URLs, complete per-package problem and dependency
+nodes, and the tagged lockfile's version-3 package paths, optional flags, integrity hashes, and
+dependency ranges all match. API, worker, malformed or nested problems, a partial, duplicate, or
+additional set, or any altered inventory or lock metadata remains a hard failure.
+
 ## Customer web and HQ proxy boundary
 
 | Variable                            | Purpose                                                    | Secret? | Source / example                                              | Services                 | Requirement, default, and failure behavior                                                                                                                     |

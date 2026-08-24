@@ -129,7 +129,14 @@ if (mode === 'start') {
 assertReleaseProvenance();
 
 if (mode === 'build') {
-  run(['ci', '--ignore-scripts', '--include-workspace-root', '--workspace', workspace]);
+  run([
+    'ci',
+    '--include=dev',
+    '--ignore-scripts',
+    '--include-workspace-root',
+    '--workspace',
+    workspace,
+  ]);
   run(['run', 'build', '--workspace', workspace]);
   run([
     'ci',

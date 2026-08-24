@@ -26,6 +26,18 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     expect(isExactReplitHqHealthCheck({ ...exactRequest, method })).toBe(true);
   });
 
+  it('accepts the direct Replit probe when x-forwarded headers are absent', () => {
+    expect(
+      isExactReplitHqHealthCheck({
+        ...exactRequest,
+        forwardedFor: null,
+        forwardedHost: null,
+        forwardedPort: null,
+        forwardedProto: null,
+      }),
+    ).toBe(true);
+  });
+
   it.each(['1104', '2208', '3000'])(
     'accepts canonical mapped loopback port %s independently of the listener',
     (mappedPort) => {
@@ -74,14 +86,10 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['credentials', { url: 'http://probe@localhost:3000/' }],
     ['malformed URL', { url: 'not a URL' }],
     ['Forwarded header', { forwarded: 'for=127.0.0.1' }],
-    ['missing forwarded client', { forwardedFor: null }],
     ['non-loopback forwarded client', { forwardedFor: '192.0.2.10' }],
-    ['missing forwarded host', { forwardedHost: null }],
     ['different forwarded host', { forwardedHost: 'boomerbuddy-hq.replit.app' }],
-    ['missing forwarded port', { forwardedPort: null }],
     ['mapped forwarded port', { forwardedPort: '1104' }],
     ['different forwarded port', { forwardedPort: '443' }],
-    ['missing forwarded protocol', { forwardedProto: null }],
     ['different forwarded protocol', { forwardedProto: 'https' }],
   ];
 

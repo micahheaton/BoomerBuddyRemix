@@ -120,10 +120,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     listener must open before configuration, database, and founder-binding preflight.
 17. For HQ choose **Autoscale** with **Only you** or the narrowest Replit private-deployment access
     available, plus the separate HQ Clerk MFA boundary. Set `BB_REPLIT_SERVICE=hq`. Obscurity of the
-    URL is not authentication. Replit promotes Autoscale by probing `GET /` directly on
-    `127.0.0.1:$PORT`. After proving the two Clerk keys are present, HQ returns fixed content-free
-    liveness only when the published-runtime marker, canonical provider port, raw Host, Next-normalized loopback
-    HTTP URL, GET/HEAD method, empty query, exact Next-derived loopback forwarding metadata, and absence
+    URL is not authentication. Replit promotes Autoscale by probing `GET /` through a
+    provider-selected loopback mapping while Next listens on the separate automatic `PORT`. After
+    proving the two Clerk keys are present, HQ returns fixed content-free liveness only when the
+    published-runtime marker, canonical listener port, canonical mapped raw Host, Next-normalized
+    listener URL, GET/HEAD method, empty query, exact Next-derived loopback forwarding metadata, and absence
     of a raw `Forwarded` header all match that exact direct probe. Every external `/`, API path, and operator route still crosses the HQ Clerk boundary. A
     changed provider probe must fail promotion until this exact predicate is reviewed; do not widen
     the anonymous HQ surface.

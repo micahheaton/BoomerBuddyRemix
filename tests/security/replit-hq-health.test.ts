@@ -13,18 +13,32 @@ const exactRequest: ReplitHqHealthCheckInput = {
   forwarded: null,
   forwardedFor: '127.0.0.1',
   forwardedHost: '127.0.0.1:1104',
-  forwardedPort: '1104',
+  forwardedPort: '3000',
   forwardedProto: 'http',
   host: '127.0.0.1:1104',
   method: 'GET',
-  port: '1104',
-  url: 'http://localhost:1104/',
+  port: '3000',
+  url: 'http://localhost:3000/',
 };
 
 describe('Replit HQ Autoscale liveness boundary', () => {
   it.each(['GET', 'HEAD'])('accepts only the exact direct loopback %s probe', (method) => {
     expect(isExactReplitHqHealthCheck({ ...exactRequest, method })).toBe(true);
   });
+
+  it.each(['1104', '2208', '3000'])(
+    'accepts canonical mapped loopback port %s independently of the listener',
+    (mappedPort) => {
+      const mappedAuthority = `127.0.0.1:${mappedPort}`;
+      expect(
+        isExactReplitHqHealthCheck({
+          ...exactRequest,
+          host: mappedAuthority,
+          forwardedHost: mappedAuthority,
+        }),
+      ).toBe(true);
+    },
+  );
 
   it.each(['127.0.0.1', '::1', '::ffff:127.0.0.1'])(
     'accepts the Next-derived %s loopback peer',
@@ -37,23 +51,27 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['missing deployment marker', { deployment: undefined }],
     ['different deployment marker', { deployment: '0' }],
     ['missing port', { port: undefined }],
-    ['zero port', { port: '0' }],
-    ['leading-zero port', { port: '01104' }],
+    ['zero listener port', { port: '0' }],
+    ['leading-zero listener port', { port: '03000' }],
     ['out-of-range port', { port: '65536' }],
-    ['mismatched configured port', { port: '1105' }],
+    ['mismatched configured port', { port: '3001' }],
     ['missing host', { host: null }],
     ['hostname-only host', { host: '127.0.0.1' }],
+    ['zero mapped host port', { host: '127.0.0.1:0' }],
+    ['leading-zero mapped host port', { host: '127.0.0.1:01104' }],
+    ['out-of-range mapped host port', { host: '127.0.0.1:65536' }],
     ['localhost host', { host: 'localhost:1104' }],
     ['different host port', { host: '127.0.0.1:1105' }],
     ['mutation method', { method: 'POST' }],
     ['preflight method', { method: 'OPTIONS' }],
-    ['HTTPS URL', { url: 'https://127.0.0.1:1104/' }],
-    ['un-normalized URL hostname', { url: 'http://127.0.0.1:1104/' }],
-    ['different URL hostname', { url: 'http://127.0.0.2:1104/' }],
-    ['different URL port', { url: 'http://127.0.0.1:1105/' }],
-    ['operator path', { url: 'http://127.0.0.1:1104/system' }],
-    ['query string', { url: 'http://127.0.0.1:1104/?probe=1' }],
-    ['credentials', { url: 'http://probe@127.0.0.1:1104/' }],
+    ['HTTPS URL', { url: 'https://localhost:3000/' }],
+    ['un-normalized URL hostname', { url: 'http://127.0.0.1:3000/' }],
+    ['different URL hostname', { url: 'http://localhost.example:3000/' }],
+    ['mapped port used as URL port', { url: 'http://localhost:1104/' }],
+    ['different URL port', { url: 'http://localhost:3001/' }],
+    ['operator path', { url: 'http://localhost:3000/system' }],
+    ['query string', { url: 'http://localhost:3000/?probe=1' }],
+    ['credentials', { url: 'http://probe@localhost:3000/' }],
     ['malformed URL', { url: 'not a URL' }],
     ['Forwarded header', { forwarded: 'for=127.0.0.1' }],
     ['missing forwarded client', { forwardedFor: null }],
@@ -61,6 +79,7 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['missing forwarded host', { forwardedHost: null }],
     ['different forwarded host', { forwardedHost: 'boomerbuddy-hq.replit.app' }],
     ['missing forwarded port', { forwardedPort: null }],
+    ['mapped forwarded port', { forwardedPort: '1104' }],
     ['different forwarded port', { forwardedPort: '443' }],
     ['missing forwarded protocol', { forwardedProto: null }],
     ['different forwarded protocol', { forwardedProto: 'https' }],

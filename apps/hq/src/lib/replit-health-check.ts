@@ -17,6 +17,12 @@ function canonicalPort(value: string | undefined): value is string {
   return Number.isInteger(port) && port <= 65_535 && String(port) === value;
 }
 
+function exactIpv4LoopbackAuthorityPort(value: string | null): string | null {
+  if (value === null) return null;
+  const port = /^127\.0\.0\.1:([1-9]\d{0,4})$/u.exec(value)?.[1];
+  return canonicalPort(port) ? port : null;
+}
+
 export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boolean {
   if (
     input.deployment !== '1' ||
@@ -34,15 +40,18 @@ export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boo
     return false;
   }
 
-  const authority = `127.0.0.1:${input.port}`;
+  const mappedPort = exactIpv4LoopbackAuthorityPort(input.host);
+  if (mappedPort === null) return false;
+
+  const mappedAuthority = `127.0.0.1:${mappedPort}`;
   const normalizedLoopbackHostname = url.hostname === 'localhost';
   const forwardedLoopback =
     input.forwardedFor === '127.0.0.1' ||
     input.forwardedFor === '::1' ||
     input.forwardedFor === '::ffff:127.0.0.1';
   return (
-    input.host === authority &&
-    input.forwardedHost === authority &&
+    input.host === mappedAuthority &&
+    input.forwardedHost === mappedAuthority &&
     input.forwardedPort === input.port &&
     input.forwardedProto === 'http' &&
     forwardedLoopback &&

@@ -84,6 +84,7 @@ async function createProvenanceFixture(
   options: {
     annotated?: boolean;
     inventory?: (directory: string) => Record<string, unknown>;
+    inventoryExitCode?: 0 | 1;
     lockfile?: () => Record<string, unknown>;
   } = {},
 ): Promise<ProvenanceFixture> {
@@ -91,7 +92,11 @@ async function createProvenanceFixture(
   const directory = await mkdtemp(join(provenanceFixtureRoot, 'replit-provenance-'));
   const binDirectory = join(directory, 'bin');
   await mkdir(binDirectory);
-  const inventoryJson = JSON.stringify(options.inventory?.(directory) ?? { dependencies: {} });
+  const inventory = options.inventory?.(directory) ?? { dependencies: {} };
+  const inventoryJson = JSON.stringify(inventory);
+  const inventoryExitCode =
+    options.inventoryExitCode ??
+    (Array.isArray(inventory.problems) && inventory.problems.length > 0 ? 1 : 0);
   const lockfileJson = `${JSON.stringify(
     options.lockfile?.() ?? { lockfileVersion: 3, packages: {} },
     null,
@@ -106,12 +111,12 @@ async function createProvenanceFixture(
     writeFile(join(directory, 'tracked.txt'), 'candidate tree\n', 'utf8'),
     writeFile(
       join(binDirectory, 'npm'),
-      `#!/bin/sh\nif [ "$1" = "ls" ]; then\n  printf '%s\\n' '${inventoryJson}'\nfi\nexit 0\n`,
+      `#!/bin/sh\nif [ "$1" = "ls" ]; then\n  printf '%s\\n' '${inventoryJson}'\n  exit ${inventoryExitCode}\nfi\nexit 0\n`,
       'utf8',
     ),
     writeFile(
       join(binDirectory, 'npm.cmd'),
-      `@echo off\r\nif "%~1"=="ls" echo ${inventoryJson}\r\nexit /b 0\r\n`,
+      `@echo off\r\nif not "%~1"=="ls" exit /b 0\r\necho ${inventoryJson}\r\nexit /b ${inventoryExitCode}\r\n`,
       'utf8',
     ),
   ]);
@@ -159,8 +164,7 @@ function reviewedOptionalInventory(
 ): Record<string, unknown> {
   const runtimeVersion = options.runtimeVersion ?? '1.11.3';
   const runtimePath = join(directory, 'node_modules', '@emnapi', 'runtime');
-  const sharpPath =
-    options.sharpPath ?? join(directory, 'node_modules', '@img', 'sharp-wasm32');
+  const sharpPath = options.sharpPath ?? join(directory, 'node_modules', '@img', 'sharp-wasm32');
   const runtimeProblem = `extraneous: @emnapi/runtime@${runtimeVersion} ${runtimePath}`;
   const sharpProblem = `extraneous: @img/sharp-wasm32@0.35.3 ${sharpPath}`;
   return {
@@ -581,6 +585,48 @@ describe('Run 3.1 Replit deployment controls', () => {
     },
   );
 
+  it('accepts the exact reviewed optional inventory when npm ls exits zero', async () => {
+    const fixture = await createProvenanceFixture({
+      inventory: reviewedOptionalInventory,
+      inventoryExitCode: 0,
+      lockfile: reviewedOptionalLockfile,
+    });
+    try {
+      const result = runFixtureBuild(fixture, 'web');
+      const output = commandOutput(result);
+      expect(result.status, output).toBe(0);
+      expect(output).toContain(
+        'Reviewed optional npm artifacts: @emnapi/runtime, @img/sharp-wasm32.',
+      );
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    [
+      'clean inventory with a failing npm status',
+      () => ({ dependencies: {} }),
+      1 as const,
+    ],
+    [
+      'npm error object',
+      () => ({ error: { summary: 'private npm error details' } }),
+      1 as const,
+    ],
+  ])('rejects %s', async (_name, inventory, inventoryExitCode) => {
+    const fixture = await createProvenanceFixture({ inventory, inventoryExitCode });
+    try {
+      const result = runFixtureBuild(fixture, 'web');
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain('The web production dependency graph contains npm problems');
+      expect(output).not.toContain('private npm error details');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
   it.each(['api', 'worker'] as const)(
     'rejects the reviewed web optional artifacts for the %s graph',
     async (service) => {
@@ -593,7 +639,9 @@ describe('Run 3.1 Replit deployment controls', () => {
         const output = commandOutput(result);
         expect(result.status).not.toBe(0);
         expect(output).not.toContain('Reviewed optional npm artifacts');
-        expect(output).toContain(`The ${service} production dependency graph contains npm problems`);
+        expect(output).toContain(
+          `The ${service} production dependency graph contains npm problems`,
+        );
       } finally {
         await rm(fixture.directory, { force: true, recursive: true });
       }
@@ -625,21 +673,24 @@ describe('Run 3.1 Replit deployment controls', () => {
         return inventory;
       },
     ],
-  ])('rejects reviewed optional npm artifacts with altered %s metadata', async (_name, inventory) => {
-    const fixture = await createProvenanceFixture({
-      inventory,
-      lockfile: reviewedOptionalLockfile,
-    });
-    try {
-      const result = runFixtureBuild(fixture, 'web');
-      const output = commandOutput(result);
-      expect(result.status).not.toBe(0);
-      expect(output).not.toContain('Reviewed optional npm artifacts');
-      expect(output).toContain('The web production dependency graph contains npm problems');
-    } finally {
-      await rm(fixture.directory, { force: true, recursive: true });
-    }
-  });
+  ])(
+    'rejects reviewed optional npm artifacts with altered %s metadata',
+    async (_name, inventory) => {
+      const fixture = await createProvenanceFixture({
+        inventory,
+        lockfile: reviewedOptionalLockfile,
+      });
+      try {
+        const result = runFixtureBuild(fixture, 'web');
+        const output = commandOutput(result);
+        expect(result.status).not.toBe(0);
+        expect(output).not.toContain('Reviewed optional npm artifacts');
+        expect(output).toContain('The web production dependency graph contains npm problems');
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    },
+  );
 
   it.each([
     [
@@ -654,7 +705,7 @@ describe('Run 3.1 Replit deployment controls', () => {
       'duplicate problem',
       (directory: string) => {
         const inventory = reviewedOptionalInventory(directory) as { problems: string[] };
-        inventory.problems[1] = inventory.problems[0];
+        inventory.problems[1] = inventory.problems[0]!;
         return inventory;
       },
     ],
@@ -672,7 +723,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const inventory = reviewedOptionalInventory(directory) as {
           dependencies: Record<string, Record<string, unknown>>;
         };
-        inventory.dependencies['@emnapi/runtime'].resolved = 'https://example.invalid/runtime.tgz';
+        inventory.dependencies['@emnapi/runtime']!.resolved = 'https://example.invalid/runtime.tgz';
         return inventory;
       },
     ],
@@ -682,7 +733,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const inventory = reviewedOptionalInventory(directory) as {
           dependencies: Record<string, { dependencies: Record<string, unknown> }>;
         };
-        inventory.dependencies['@emnapi/runtime'].dependencies.extra = { version: '1.0.0' };
+        inventory.dependencies['@emnapi/runtime']!.dependencies.extra = { version: '1.0.0' };
         return inventory;
       },
     ],
@@ -730,7 +781,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const lockfile = reviewedOptionalLockfile() as {
           packages: Record<string, Record<string, unknown>>;
         };
-        lockfile.packages['node_modules/@emnapi/runtime'].optional = false;
+        lockfile.packages['node_modules/@emnapi/runtime']!.optional = false;
         return lockfile;
       },
     ],
@@ -740,7 +791,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const lockfile = reviewedOptionalLockfile() as {
           packages: Record<string, Record<string, unknown>>;
         };
-        lockfile.packages['node_modules/@img/sharp-wasm32'].integrity = 'sha512-invalid';
+        lockfile.packages['node_modules/@img/sharp-wasm32']!.integrity = 'sha512-invalid';
         return lockfile;
       },
     ],
@@ -750,9 +801,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const lockfile = reviewedOptionalLockfile() as {
           packages: Record<string, { dependencies: Record<string, string> }>;
         };
-        lockfile.packages['node_modules/@img/sharp-wasm32'].dependencies[
-          '@emnapi/runtime'
-        ] = '*';
+        lockfile.packages['node_modules/@img/sharp-wasm32']!.dependencies['@emnapi/runtime'] = '*';
         return lockfile;
       },
     ],
@@ -762,25 +811,28 @@ describe('Run 3.1 Replit deployment controls', () => {
         const lockfile = reviewedOptionalLockfile() as {
           packages: Record<string, { dependencies: Record<string, string> }>;
         };
-        lockfile.packages['node_modules/@emnapi/runtime'].dependencies.extra = '1.0.0';
+        lockfile.packages['node_modules/@emnapi/runtime']!.dependencies.extra = '1.0.0';
         return lockfile;
       },
     ],
-  ])('rejects reviewed optional npm artifacts with altered %s metadata', async (_name, lockfile) => {
-    const fixture = await createProvenanceFixture({
-      inventory: reviewedOptionalInventory,
-      lockfile,
-    });
-    try {
-      const result = runFixtureBuild(fixture, 'hq');
-      const output = commandOutput(result);
-      expect(result.status).not.toBe(0);
-      expect(output).not.toContain('Reviewed optional npm artifacts');
-      expect(output).toContain('The hq production dependency graph contains npm problems');
-    } finally {
-      await rm(fixture.directory, { force: true, recursive: true });
-    }
-  });
+  ])(
+    'rejects reviewed optional npm artifacts with altered %s metadata',
+    async (_name, lockfile) => {
+      const fixture = await createProvenanceFixture({
+        inventory: reviewedOptionalInventory,
+        lockfile,
+      });
+      try {
+        const result = runFixtureBuild(fixture, 'hq');
+        const output = commandOutput(result);
+        expect(result.status).not.toBe(0);
+        expect(output).not.toContain('Reviewed optional npm artifacts');
+        expect(output).toContain('The hq production dependency graph contains npm problems');
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    },
+  );
 
   it('still rejects forbidden mobile packages alongside the reviewed optional artifacts', async () => {
     const fixture = await createProvenanceFixture({

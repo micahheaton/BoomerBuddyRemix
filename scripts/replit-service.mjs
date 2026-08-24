@@ -51,11 +51,13 @@ function captureJson(args) {
   if (result.status !== 0 && result.status !== 1) {
     throw new Error(`npm ${args.join(' ')} exited with status ${result.status ?? 'unknown'}`);
   }
+  let value;
   try {
-    return JSON.parse(result.stdout);
+    value = JSON.parse(result.stdout);
   } catch {
     throw new Error(`npm ${args.join(' ')} did not emit valid JSON`);
   }
+  return { status: result.status, value };
 }
 
 function captureGit(args) {
@@ -371,6 +373,14 @@ function hasUnexpectedNpmProblemMetadata(dependencies, reviewedTopLevel = new Se
 }
 
 function reviewNpmProblems(inventory) {
+  if (
+    typeof inventory !== 'object' ||
+    inventory === null ||
+    Array.isArray(inventory) ||
+    inventory.error !== undefined
+  ) {
+    return undefined;
+  }
   const problems = inventory.problems;
   if (problems === undefined || (Array.isArray(problems) && problems.length === 0)) {
     return hasUnexpectedNpmProblemMetadata(inventory.dependencies) ? undefined : [];
@@ -514,15 +524,24 @@ if (mode === 'build') {
     workspace,
   ]);
 
-  const inventory = captureJson(['ls', '--all', '--omit=dev', '--workspace', workspace, '--json']);
+  const inventoryResult = captureJson([
+    'ls',
+    '--all',
+    '--omit=dev',
+    '--workspace',
+    workspace,
+    '--json',
+  ]);
+  const inventory = inventoryResult.value;
   const reviewedProblems = reviewNpmProblems(inventory);
-  if (reviewedProblems === undefined) {
+  if (
+    reviewedProblems === undefined ||
+    (inventoryResult.status !== 0 && reviewedProblems.length === 0)
+  ) {
     throw new Error(`The ${service} production dependency graph contains npm problems`);
   }
   if (reviewedProblems.length > 0) {
-    process.stdout.write(
-      `Reviewed optional npm artifacts: ${reviewedProblems.join(', ')}.\n`,
-    );
+    process.stdout.write(`Reviewed optional npm artifacts: ${reviewedProblems.join(', ')}.\n`);
   }
   const installed = dependencyNames(inventory);
   for (const forbidden of ['@expo/metro', 'expo', 'image-size', 'metro', 'react-native']) {

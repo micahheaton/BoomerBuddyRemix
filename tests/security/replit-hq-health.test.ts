@@ -11,10 +11,10 @@ const root = process.cwd();
 const exactRequest: ReplitHqHealthCheckInput = {
   deployment: '1',
   forwarded: null,
-  forwardedFor: null,
-  forwardedHost: null,
-  forwardedPort: null,
-  forwardedProto: null,
+  forwardedFor: '127.0.0.1',
+  forwardedHost: '127.0.0.1:1104',
+  forwardedPort: '1104',
+  forwardedProto: 'http',
   host: '127.0.0.1:1104',
   method: 'GET',
   port: '1104',
@@ -25,6 +25,13 @@ describe('Replit HQ Autoscale liveness boundary', () => {
   it.each(['GET', 'HEAD'])('accepts only the exact direct loopback %s probe', (method) => {
     expect(isExactReplitHqHealthCheck({ ...exactRequest, method })).toBe(true);
   });
+
+  it.each(['127.0.0.1', '::1', '::ffff:127.0.0.1'])(
+    'accepts the Next-derived %s loopback peer',
+    (forwardedFor) => {
+      expect(isExactReplitHqHealthCheck({ ...exactRequest, forwardedFor })).toBe(true);
+    },
+  );
 
   const rejected: Array<[string, Partial<ReplitHqHealthCheckInput>]> = [
     ['missing deployment marker', { deployment: undefined }],
@@ -48,10 +55,14 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['credentials', { url: 'http://probe@127.0.0.1:1104/' }],
     ['malformed URL', { url: 'not a URL' }],
     ['Forwarded header', { forwarded: 'for=127.0.0.1' }],
-    ['forwarded client', { forwardedFor: '127.0.0.1' }],
-    ['forwarded host', { forwardedHost: 'boomerbuddy-hq.replit.app' }],
-    ['forwarded port', { forwardedPort: '443' }],
-    ['forwarded protocol', { forwardedProto: 'https' }],
+    ['missing forwarded client', { forwardedFor: null }],
+    ['non-loopback forwarded client', { forwardedFor: '192.0.2.10' }],
+    ['missing forwarded host', { forwardedHost: null }],
+    ['different forwarded host', { forwardedHost: 'boomerbuddy-hq.replit.app' }],
+    ['missing forwarded port', { forwardedPort: null }],
+    ['different forwarded port', { forwardedPort: '443' }],
+    ['missing forwarded protocol', { forwardedProto: null }],
+    ['different forwarded protocol', { forwardedProto: 'https' }],
   ];
 
   it.each(rejected)('rejects %s', (_name, override) => {

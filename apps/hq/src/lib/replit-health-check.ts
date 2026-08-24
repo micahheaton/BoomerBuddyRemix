@@ -22,11 +22,7 @@ export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boo
     input.deployment !== '1' ||
     !canonicalPort(input.port) ||
     (input.method !== 'GET' && input.method !== 'HEAD') ||
-    input.forwarded !== null ||
-    input.forwardedFor !== null ||
-    input.forwardedHost !== null ||
-    input.forwardedPort !== null ||
-    input.forwardedProto !== null
+    input.forwarded !== null
   ) {
     return false;
   }
@@ -39,8 +35,16 @@ export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boo
   }
 
   const authority = `127.0.0.1:${input.port}`;
+  const forwardedLoopback =
+    input.forwardedFor === '127.0.0.1' ||
+    input.forwardedFor === '::1' ||
+    input.forwardedFor === '::ffff:127.0.0.1';
   return (
     input.host === authority &&
+    input.forwardedHost === authority &&
+    input.forwardedPort === input.port &&
+    input.forwardedProto === 'http' &&
+    forwardedLoopback &&
     url.protocol === 'http:' &&
     url.username === '' &&
     url.password === '' &&

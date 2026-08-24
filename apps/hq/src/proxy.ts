@@ -1,9 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
-import {
-  isExactReplitHqHealthCheck,
-  replitHqLivenessResponse,
-} from './lib/replit-health-check';
+import { isExactReplitHqHealthCheck, replitHqLivenessResponse } from './lib/replit-health-check';
 
 const isPublicRoute = createRouteMatcher(['/sign-in(.*)']);
 const productionClerkMiddleware = clerkMiddleware(async (auth, request) => {

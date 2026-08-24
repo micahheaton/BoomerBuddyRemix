@@ -10,6 +10,3 @@ build = "npm run replit:build"
 run = "npm run replit:start"
 ignorePorts = true
 
-[[ports]]
-localPort = 3000
-externalPort = 80

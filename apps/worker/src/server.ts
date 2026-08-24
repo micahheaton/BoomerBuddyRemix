@@ -85,7 +85,7 @@ await runReplitWorkerLifecycle(
     }
     const entitlementRuntimeEnvironment =
       appConfig.environment === 'production' ? ('production' as const) : ('local' as const);
-    
+
     const jobs = new DurableJobRepository(database);
     const automationBudget = new AutomationBudgetRepository(
       database,
@@ -139,7 +139,7 @@ await runReplitWorkerLifecycle(
     const growth = new GrowthRuntimeRepository(database);
     const operations = new OperationalWorkRepository(database);
     const retentionIntervalMs = 5 * 60_000;
-    
+
     const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
       const requestedBatch = job.payload.batch;
       const batch =
@@ -171,7 +171,7 @@ await runReplitWorkerLifecycle(
         correlationId: next.idempotencyKey,
       });
     };
-    
+
     const now = new Date();
     const feedbackComposition = await composeFeedbackWorker({
       environment: appConfig.environment,
@@ -194,7 +194,7 @@ await runReplitWorkerLifecycle(
     await enqueueAutomationBudgetMaintenance({ jobs, now, batch: 25 });
     await enqueueGrowthRuntimeJobs({ jobs, now, batch: 100 });
     await seedOperationalSchedules({ environment: appConfig.environment, jobs, now });
-    
+
     const handlers: Record<string, JobHandler> = {
       'retention.sweep': retentionHandler,
       ...feedbackComposition.handlers,
@@ -259,7 +259,7 @@ await runReplitWorkerLifecycle(
         scheduledAt: now,
       });
     }
-    
+
     const worker = new PortableWorker(
       jobs,
       outbox,
@@ -298,3 +298,4 @@ await runReplitWorkerLifecycle(
     }
   },
 );
+

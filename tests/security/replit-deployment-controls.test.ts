@@ -121,10 +121,7 @@ describe('Run 3.1 Replit deployment controls', () => {
     const source = await readFile(join(root, 'scripts/replit-service.mjs'), 'utf8');
     const replit = await readFile(join(root, '.replit'), 'utf8');
     const worker = await readFile(join(root, 'apps/worker/src/server.ts'), 'utf8');
-    const workerHealth = await readFile(
-      join(root, 'apps/worker/src/health-server.ts'),
-      'utf8',
-    );
+    const workerHealth = await readFile(join(root, 'apps/worker/src/health-server.ts'), 'utf8');
     const packageJson = JSON.parse(await readFile(join(root, 'package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
@@ -368,7 +365,9 @@ describe('Run 3.1 Replit deployment controls', () => {
       expect(output).toContain(
         'The Replit checkout tree does not match the tagged Run 3.1 candidate',
       );
-      expect(output).toContain('Replit provenance mismatch diagnostics (hashes and filenames only):');
+      expect(output).toContain(
+        'Replit provenance mismatch diagnostics (hashes and filenames only):',
+      );
       expect(output).toContain(`HEAD commit: ${headCommit}`);
       expect(output).toContain(`HEAD tree: ${headTree}`);
       expect(output).toContain(`annotated tag commit: ${fixture.releaseCommit}`);
@@ -405,7 +404,7 @@ describe('Run 3.1 Replit deployment controls', () => {
   it('ASCII-escapes control and non-ASCII path bytes in mismatch diagnostics', async () => {
     const fixture = await createProvenanceFixture();
     try {
-      const diagnosticPath = 'control-\t-café.txt';
+      const diagnosticPath = 'control-\x7f-café.txt';
       const blob = runGit(fixture.directory, ['rev-parse', 'HEAD:tracked.txt']);
       runGit(fixture.directory, [
         'update-index',
@@ -420,7 +419,7 @@ describe('Run 3.1 Replit deployment controls', () => {
       const result = runFixtureBuild(fixture);
       const output = commandOutput(result);
       expect(result.status).not.toBe(0);
-      expect(output).toContain('    A "control-\\x09-caf\\xc3\\xa9.txt"');
+      expect(output).toContain('    A "control-\\x7f-caf\\xc3\\xa9.txt"');
       expect(output).not.toContain(diagnosticPath);
       expect(output).toContain(
         'The Replit checkout tree does not match the tagged Run 3.1 candidate',
@@ -520,3 +519,4 @@ describe('Run 3.1 Replit deployment controls', () => {
     }
   });
 });
+

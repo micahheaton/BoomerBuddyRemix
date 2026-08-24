@@ -70,7 +70,7 @@ function captureGit(args) {
   return result.stdout.trim();
 }
 
-function assertReleaseProvenance() {
+function assertReleaseProvenance({ verifyCheckout }) {
   const expectedCommit = process.env.BB_RUN3_1_RELEASE_COMMIT;
   const expectedTag = process.env.BB_RUN3_1_RELEASE_TAG;
   if (!/^[0-9a-f]{40}$/u.test(expectedCommit ?? '')) {
@@ -82,6 +82,7 @@ function assertReleaseProvenance() {
   if (!expectedTag.endsWith(expectedCommit.slice(0, 12))) {
     throw new TypeError('The Run 3.1 release tag suffix must match the exact release commit');
   }
+  if (!verifyCheckout) return;
   const taggedCommit = captureGit(['rev-parse', '--verify', `refs/tags/${expectedTag}^{commit}`]);
   const head = captureGit(['rev-parse', 'HEAD']);
   if (taggedCommit !== expectedCommit || head !== expectedCommit) {
@@ -126,7 +127,7 @@ if (mode === 'start') {
   }
 }
 
-assertReleaseProvenance();
+assertReleaseProvenance({ verifyCheckout: mode === 'build' });
 
 if (mode === 'build') {
   run([

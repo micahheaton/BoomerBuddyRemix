@@ -273,7 +273,7 @@ The complete service-by-service inventory and failure behavior is in
 - HQ MFA cannot be required and freshly proven.
 - Customer/HQ token and maximum-session bounds cannot be configured and retained as provider proof.
 - The configured release ref is not an annotated tag that dereferences to
-  `BB_RUN3_1_RELEASE_COMMIT`, or the runtime HEAD tree does not exactly match the tag tree. A
+  `BB_RUN3_1_RELEASE_COMMIT`, or the published build-context HEAD tree does not exactly match the tag tree. A
   different Replit snapshot commit is permitted only with exact tree equality.
 - Published build context does not preserve the required `.git` metadata, annotated tag, exact-tree
   equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.

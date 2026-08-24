@@ -89,7 +89,9 @@ function assertReleaseProvenance({ verifyCheckout }) {
   }
   const taggedCommit = captureGit(['rev-parse', '--verify', `${tagReference}^{commit}`]);
   if (taggedCommit !== expectedCommit) {
-    throw new TypeError('The Run 3.1 release tag does not resolve to the configured release commit');
+    throw new TypeError(
+      'The Run 3.1 release tag does not resolve to the configured release commit',
+    );
   }
   const headTree = captureGit(['rev-parse', '--verify', 'HEAD^{tree}']);
   const taggedTree = captureGit(['rev-parse', '--verify', `${tagReference}^{tree}`]);

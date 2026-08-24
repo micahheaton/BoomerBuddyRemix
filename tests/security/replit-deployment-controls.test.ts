@@ -93,7 +93,7 @@ async function createProvenanceFixture(
 }
 
 function runFixtureBuild(fixture: ProvenanceFixture) {
-  const environment = {
+  const environment: NodeJS.ProcessEnv = {
     ...process.env,
     BB_REPLIT_SERVICE: 'worker',
     BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
@@ -147,10 +147,8 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('const tagReference = `refs/tags/${expectedTag}`');
     expect(source).toContain("captureGit(['cat-file', '-t', tagReference])");
     expect(source).toContain("captureGit(['rev-parse', '--verify', 'HEAD^{tree}'])");
-    expect(source).toContain("`${tagReference}^{tree}`");
-    expect(source).toContain(
-      "captureGit(['status', '--porcelain=v1', '--untracked-files=all'])",
-    );
+    expect(source).toContain('`${tagReference}^{tree}`');
+    expect(source).toContain("captureGit(['status', '--porcelain=v1', '--untracked-files=all'])");
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
     expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
     expect(source).toContain('A configured BB_API_PORT must equal the provider PORT');
@@ -299,9 +297,7 @@ describe('Run 3.1 Replit deployment controls', () => {
       shell: false,
     });
     expect(missingTag.status).not.toBe(0);
-    expect(`${missingTag.stdout}${missingTag.stderr}`).toContain(
-      'git cat-file -t refs/tags/',
-    );
+    expect(`${missingTag.stdout}${missingTag.stderr}`).toContain('git cat-file -t refs/tags/');
 
     const wrongSuffix = spawnSync(process.execPath, ['scripts/replit-service.mjs', 'start'], {
       cwd: root,
@@ -364,7 +360,11 @@ describe('Run 3.1 Replit deployment controls', () => {
         if (contentState === 'untracked') {
           await writeFile(join(fixture.directory, 'untracked.txt'), 'not in candidate\n', 'utf8');
         } else {
-          await writeFile(join(fixture.directory, 'tracked.txt'), `${contentState} change\n`, 'utf8');
+          await writeFile(
+            join(fixture.directory, 'tracked.txt'),
+            `${contentState} change\n`,
+            'utf8',
+          );
           if (contentState === 'staged') runGit(fixture.directory, ['add', 'tracked.txt']);
         }
         expect(

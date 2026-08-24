@@ -1,5 +1,9 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
+import {
+  isExactReplitHqHealthCheck,
+  replitHqLivenessResponse,
+} from './lib/replit-health-check';
 
 const isPublicRoute = createRouteMatcher(['/sign-in(.*)']);
 const productionClerkMiddleware = clerkMiddleware(async (auth, request) => {
@@ -13,6 +17,23 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
       status: 503,
       headers: { 'cache-control': 'no-store' },
     });
+  }
+
+  if (
+    isExactReplitHqHealthCheck({
+      deployment: process.env.REPLIT_DEPLOYMENT,
+      forwarded: request.headers.get('forwarded'),
+      forwardedFor: request.headers.get('x-forwarded-for'),
+      forwardedHost: request.headers.get('x-forwarded-host'),
+      forwardedPort: request.headers.get('x-forwarded-port'),
+      forwardedProto: request.headers.get('x-forwarded-proto'),
+      host: request.headers.get('host'),
+      method: request.method,
+      port: process.env.PORT,
+      url: request.url,
+    })
+  ) {
+    return replitHqLivenessResponse(request.method);
   }
 
   return productionClerkMiddleware(request, event);

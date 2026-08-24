@@ -65,6 +65,14 @@ authorized party, signature, time, subject, provider session, and state. Custome
 `aud` only under ADR 0030; an explicit customer `aud` must match. HQ always requires its exact
 audience and bounded factor age.
 
+HQ's only application-level liveness exception is the observed direct Replit Autoscale GET/HEAD
+homepage probe. It requires `REPLIT_DEPLOYMENT=1`, the canonical automatic `PORT`, exact
+`127.0.0.1:$PORT` Host and HTTP URL, no query, and no `Forwarded` or `X-Forwarded-*` headers,
+and it runs only after the matching Clerk publishable and secret keys are present. The response is
+fixed content-free, no-store text with restrictive browser headers. External `/`, every operator
+route, and all `/api` paths remain behind the separate HQ Clerk middleware; near-match probes fail
+closed.
+
 ## API and worker application configuration
 
 | Variable                                    | Purpose                                                             | Secret?                              | Source / example                                      | Services                      | Requirement, default, and failure behavior                                                                                                             |

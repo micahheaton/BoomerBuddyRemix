@@ -25,16 +25,20 @@ Every Replit provenance check additionally requires all of the following:
 - `git cat-file -t refs/tags/<tag>` returns exactly `tag`; a lightweight tag is not accepted.
 - `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`.
 - `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}` exactly.
-- `git status --porcelain=v1 --untracked-files=all` emits no entries. Staged, unstaged, and
-  nonignored untracked content all fail closed.
+- `git status --porcelain=v1 --untracked-files=all` emits no entries before the service build.
+  Staged, unstaged, and nonignored untracked content all fail closed.
 
 Replit may package the reviewed source tree beneath a different provider-generated snapshot commit.
 That representation is accepted only when the configured annotated tag still dereferences to the
-recorded candidate commit, the two trees are identical, and the full porcelain status is empty. This
-does not permit a moved or lightweight tag, a different tagged commit, a changed tree, or arbitrary
-dirty content. On dirty-status failure, the wrapper may print only bounded index/worktree status and
-escaped filenames (at most 50 paths and 256 bytes per rendered path); it never prints file contents
-and still fails closed.
+recorded candidate commit, the two trees are identical, and the full porcelain status is empty. For
+API, web, and HQ Autoscale builds only, the wrapper recognizes Replit's exact reviewed
+`deploymentTarget = "cloudrun"` append by requiring the sole raw status record, canonical and
+rewritten blob hashes, and unchanged mode. It restores the canonical indexed `.replit`, reruns the
+same status command, and proceeds only after the result is empty. The Reserved VM worker never
+receives this normalization. Any other byte, target, path, status, or mode fails closed; this does not
+permit a moved or lightweight tag, a different tagged commit, a changed tree, or arbitrary dirty
+content. On dirty-status failure, the wrapper may print only bounded index/worktree status and escaped
+filenames (at most 50 paths and 256 bytes per rendered path); it never prints file contents.
 
 ## Customer web and HQ proxy boundary
 

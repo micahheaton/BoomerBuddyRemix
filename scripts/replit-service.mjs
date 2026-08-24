@@ -73,6 +73,10 @@ function captureGit(args) {
 const provenanceDiagnosticMaxBuffer = 1024 * 1024;
 const provenanceDiagnosticMaxEntries = 50;
 const provenanceDiagnosticMaxPathBytes = 256;
+const replitCanonicalConfigBlob = '04697d2c8f4a23f4d89edff84930bbd25ede8be3';
+const replitAutoscaleOverlayBlob = '7d305e8966bf99376816ea5bfaf47621133c225c';
+const replitAutoscaleOverlayStatus = Buffer.from(' M .replit\0', 'utf8');
+const replitAutoscaleServices = new Set(['api', 'hq', 'web']);
 
 function captureGitBytes(args) {
   const result = spawnSync('git', args, {
@@ -211,6 +215,27 @@ function reportDirtyCheckout() {
   process.stderr.write(`${lines.join('\n')}\n`);
 }
 
+function normalizeExactReplitAutoscaleOverlay() {
+  if (!replitAutoscaleServices.has(service)) return false;
+  const status = captureGitBytes([
+    'status',
+    '--porcelain=v1',
+    '-z',
+    '--untracked-files=all',
+    '--no-renames',
+  ]);
+  if (!status.equals(replitAutoscaleOverlayStatus)) return false;
+  if (
+    captureGit(['rev-parse', '--verify', 'HEAD:.replit']) !== replitCanonicalConfigBlob ||
+    captureGit(['hash-object', '--', '.replit']) !== replitAutoscaleOverlayBlob ||
+    captureGit(['diff', '--summary', '--', '.replit']) !== ''
+  ) {
+    return false;
+  }
+  captureGit(['checkout-index', '--force', '--', '.replit']);
+  return true;
+}
+
 function assertReleaseProvenance({ verifyCheckout }) {
   const expectedCommit = process.env.BB_RUN3_1_RELEASE_COMMIT;
   const expectedTag = process.env.BB_RUN3_1_RELEASE_TAG;
@@ -247,7 +272,21 @@ function assertReleaseProvenance({ verifyCheckout }) {
     }
     throw new TypeError('The Replit checkout tree does not match the tagged Run 3.1 candidate');
   }
-  const checkoutStatus = captureGit(['status', '--porcelain=v1', '--untracked-files=all']);
+  let checkoutStatus = captureGit(['status', '--porcelain=v1', '--untracked-files=all']);
+  if (checkoutStatus !== '') {
+    try {
+      if (normalizeExactReplitAutoscaleOverlay()) {
+        checkoutStatus = captureGit(['status', '--porcelain=v1', '--untracked-files=all']);
+        if (checkoutStatus === '') {
+          process.stderr.write(
+            'Normalized exact Replit Autoscale metadata before clean-checkout verification.\n',
+          );
+        }
+      }
+    } catch {
+      // Fail closed through the unchanged dirty-checkout rejection below.
+    }
+  }
   if (checkoutStatus !== '') {
     try {
       reportDirtyCheckout();

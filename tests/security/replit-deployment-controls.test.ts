@@ -7,6 +7,24 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const replitServiceScript = join(root, 'scripts/replit-service.mjs');
 const provenanceFixtureRoot = join(root, 'tmp');
+const canonicalReplitConfig = [
+  'entrypoint = "scripts/replit-service.mjs"',
+  'modules = ["nodejs-22"]',
+  'run = "npm run replit:start"',
+  '',
+  '[packager.features]',
+  'enabledForHosting = false',
+  '',
+  '[deployment]',
+  'build = "npm run replit:build"',
+  'run = "npm run replit:start"',
+  '',
+].join('\n');
+const autoscaleReplitConfig = canonicalReplitConfig.replace(
+  '[deployment]\nbuild = "npm run replit:build"\nrun = "npm run replit:start"\n',
+  '[deployment]\nbuild = "npm run replit:build"\nrun = "npm run replit:start"\ndeploymentTarget = "cloudrun"\n',
+);
+
 const gitIdentity = [
   '-c',
   'user.name=BoomerBuddy tests',
@@ -69,6 +87,7 @@ async function createProvenanceFixture(
   const binDirectory = join(directory, 'bin');
   await mkdir(binDirectory);
   await Promise.all([
+    writeFile(join(directory, '.replit'), canonicalReplitConfig, 'utf8'),
     writeFile(join(directory, 'tracked.txt'), 'candidate tree\n', 'utf8'),
     writeFile(
       join(binDirectory, 'npm'),
@@ -92,10 +111,13 @@ async function createProvenanceFixture(
   return { directory, releaseCommit, tag };
 }
 
-function runFixtureBuild(fixture: ProvenanceFixture) {
+function runFixtureBuild(
+  fixture: ProvenanceFixture,
+  service: 'api' | 'hq' | 'web' | 'worker' = 'worker',
+) {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
-    BB_REPLIT_SERVICE: 'worker',
+    BB_REPLIT_SERVICE: service,
     BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
     BB_RUN3_1_RELEASE_TAG: fixture.tag,
     NODE_ENV: 'production',
@@ -154,6 +176,10 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('const provenanceDiagnosticMaxEntries = 50');
     expect(source).toContain('const provenanceDiagnosticMaxPathBytes = 256');
     expect(source).toContain("'--no-renames'");
+    expect(source).toContain("Buffer.from(' M .replit\\0', 'utf8')");
+    expect(source).toContain("'04697d2c8f4a23f4d89edff84930bbd25ede8be3'");
+    expect(source).toContain("'7d305e8966bf99376816ea5bfaf47621133c225c'");
+    expect(source).toContain("captureGit(['checkout-index', '--force', '--', '.replit'])");
     expect(source).toContain('hashes and filenames only');
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
     expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
@@ -345,6 +371,102 @@ describe('Run 3.1 Replit deployment controls', () => {
       await rm(fixture.directory, { force: true, recursive: true });
     }
   });
+
+  it('normalizes only the exact Replit Autoscale overlay before requiring a clean checkout', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const snapshotCommit = commitFixture(fixture.directory, 'Replit Autoscale snapshot', [
+        '--allow-empty',
+      ]);
+      expect(snapshotCommit).not.toBe(fixture.releaseCommit);
+      await writeFile(join(fixture.directory, '.replit'), autoscaleReplitConfig, 'utf8');
+
+      const result = runFixtureBuild(fixture, 'web');
+      const output = commandOutput(result);
+      expect(result.status, output).toBe(0);
+      expect(output).toContain(
+        'Normalized exact Replit Autoscale metadata before clean-checkout verification.',
+      );
+      expect(output).toContain(
+        'Replit web build passed with an isolated production dependency graph.',
+      );
+      expect(await readFile(join(fixture.directory, '.replit'), 'utf8')).toBe(
+        canonicalReplitConfig,
+      );
+      expect(
+        runGit(fixture.directory, ['status', '--porcelain=v1', '--untracked-files=all']),
+      ).toBe('');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('rejects the exact Autoscale overlay for the Reserved VM worker', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      await writeFile(join(fixture.directory, '.replit'), autoscaleReplitConfig, 'utf8');
+
+      const result = runFixtureBuild(fixture, 'worker');
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).not.toContain('Normalized exact Replit Autoscale metadata');
+      expect(output).toContain('The Replit checkout contains changes outside the tagged candidate');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    ['wrong target', autoscaleReplitConfig.replace('"cloudrun"', '"cloud-run"')],
+    ['wrong placement', canonicalReplitConfig.replace('[deployment]\n', '[deployment]\ndeploymentTarget = "cloudrun"\n')],
+    ['extra content', `${autoscaleReplitConfig}# extra setting\n`],
+    ['changed modules', autoscaleReplitConfig.replace('["nodejs-22"]', '["nodejs-22", "python-base-3.13"]')],
+    ['CRLF endings', autoscaleReplitConfig.replaceAll('\n', '\r\n')],
+    ['missing final newline', autoscaleReplitConfig.slice(0, -1)],
+    ['extra final newline', `${autoscaleReplitConfig}\n`],
+  ])('rejects an Autoscale .replit overlay with %s', async (_name, invalidConfig) => {
+    const fixture = await createProvenanceFixture();
+    try {
+      await writeFile(join(fixture.directory, '.replit'), invalidConfig, 'utf8');
+
+      const result = runFixtureBuild(fixture, 'web');
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).not.toContain('Normalized exact Replit Autoscale metadata');
+      expect(output).toContain('The Replit checkout contains changes outside the tagged candidate');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each(['staged-overlay', 'extra-staged', 'extra-unstaged', 'extra-untracked'] as const)(
+    'rejects the exact Autoscale overlay with %s checkout state',
+    async (state) => {
+      const fixture = await createProvenanceFixture();
+      try {
+        await writeFile(join(fixture.directory, '.replit'), autoscaleReplitConfig, 'utf8');
+        if (state === 'staged-overlay') {
+          runGit(fixture.directory, ['add', '.replit']);
+        } else if (state === 'extra-untracked') {
+          await writeFile(join(fixture.directory, 'extra.txt'), 'do-not-print-content', 'utf8');
+        } else {
+          await writeFile(join(fixture.directory, 'tracked.txt'), 'do-not-print-content', 'utf8');
+          if (state === 'extra-staged') runGit(fixture.directory, ['add', 'tracked.txt']);
+        }
+
+        const result = runFixtureBuild(fixture, 'web');
+        const output = commandOutput(result);
+        expect(result.status).not.toBe(0);
+        expect(output).not.toContain('Normalized exact Replit Autoscale metadata');
+        expect(output).not.toContain('do-not-print-content');
+        expect(output).toContain(
+          'The Replit checkout contains changes outside the tagged candidate',
+        );
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    },
+  );
 
   it('reports bounded hashes and filenames, never changed file content, for a tree mismatch', async () => {
     const fixture = await createProvenanceFixture();

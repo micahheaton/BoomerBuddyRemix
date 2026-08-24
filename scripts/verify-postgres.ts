@@ -42,7 +42,7 @@ if (!/(?:^|[_-])(?:ci|test)(?:$|[_-])/iu.test(databaseName)) {
   );
 }
 
-const database = await createPostgresDatabase(connectionString);
+const database = await createPostgresDatabase(connectionString, { poolMax: 2 });
 try {
   const first = await runMigrations(database);
   const second = await runMigrations(database);
@@ -1389,7 +1389,7 @@ try {
     'Run 3.1 enrollment lost its exact identity, session, or sponsored entitlement lineage',
   );
 
-  const run31QuotaSafetyWindowSeconds = 60;
+  const run31QuotaSafetyWindowSeconds = 180;
   const run31SecondsUntilNextHour = async (): Promise<number> => {
     const result = await database.query<
       { readonly seconds_remaining: number } & Record<string, unknown>
@@ -1432,18 +1432,97 @@ try {
     } satisfies FeedbackIntakeRequest,
     correlationId: `correlation:run31-feedback-${index + 1}-${suffix}`,
   }));
+  const run31FeedbackDurationsMs = new Array<number>(run31FeedbackRequests.length);
   const run31FeedbackAttempts = await Promise.allSettled(
-    run31FeedbackRequests.map(({ request, correlationId }) =>
-      run31Feedback.createAuthenticated({
-        householdId: run31Customer.householdId,
-        actorPersonId: run31Customer.personId,
-        request,
-        correlationId,
-        evidenceTier: 'live_production',
-        now: base,
-      }),
-    ),
+    run31FeedbackRequests.map(({ request, correlationId }, index) => {
+      const startedAt = Date.now();
+      return run31Feedback
+        .createAuthenticated({
+          householdId: run31Customer.householdId,
+          actorPersonId: run31Customer.personId,
+          request,
+          correlationId,
+          evidenceTier: 'live_production',
+          now: base,
+        })
+        .finally(() => {
+          run31FeedbackDurationsMs[index] = Date.now() - startedAt;
+        });
+    }),
   );
+  const run31FeedbackRaceEvidence = await database.query<
+    {
+      readonly charge_buckets: number;
+      readonly charges: number;
+      readonly household_quota: number;
+      readonly operations: number;
+      readonly person_quota: number;
+      readonly records: number;
+    } & Record<string, unknown>
+  >(
+    `SELECT
+       (SELECT count(*)::integer FROM feedback_records
+        WHERE household_id = $1 AND actor_person_id = $2
+          AND evidence_tier = 'live_production') AS records,
+       (SELECT count(*)::integer FROM feedback_intake_operations operation
+        JOIN feedback_authenticated_quota_charges charge
+          ON charge.operation_key = operation.operation_key
+        WHERE charge.household_id = $1 AND charge.person_id = $2
+          AND operation.feedback_id IS NOT NULL AND operation.completed_at IS NOT NULL)
+         AS operations,
+       (SELECT count(*)::integer FROM feedback_authenticated_quota_charges
+        WHERE household_id = $1 AND person_id = $2) AS charges,
+       (SELECT count(DISTINCT bucket_starts_at)::integer
+        FROM feedback_authenticated_quota_charges
+        WHERE household_id = $1 AND person_id = $2) AS charge_buckets,
+       (SELECT coalesce(sum(accepted_count),0)::integer
+        FROM feedback_authenticated_quota_buckets
+        WHERE scope_kind = 'person' AND scope_id = $2) AS person_quota,
+       (SELECT coalesce(sum(accepted_count),0)::integer
+        FROM feedback_authenticated_quota_buckets
+        WHERE scope_kind = 'household' AND scope_id = $1) AS household_quota`,
+    [run31Customer.householdId, run31Customer.personId],
+  );
+  const run31FeedbackAttemptDiagnostic = {
+    fulfilled: run31FeedbackAttempts.filter(({ status }) => status === 'fulfilled').length,
+    rejected: run31FeedbackAttempts.filter(({ status }) => status === 'rejected').length,
+    durationMs: Math.max(...run31FeedbackDurationsMs),
+    evidence: run31FeedbackRaceEvidence.rows[0],
+    rejections: run31FeedbackAttempts.flatMap((attempt, index) => {
+      if (attempt.status !== 'rejected') return [];
+      const reason =
+        typeof attempt.reason === 'object' && attempt.reason !== null
+          ? (attempt.reason as Record<string, unknown>)
+          : undefined;
+      const errorCode = reason?.code;
+      const sqlstate =
+        typeof errorCode === 'string' && /^[0-9A-Z]{5}$/u.test(errorCode) ? errorCode : undefined;
+      return [
+        {
+          attempt: index + 1,
+          durationMs: run31FeedbackDurationsMs[index],
+          reasonClass:
+            attempt.reason instanceof DomainError
+              ? 'domain_error'
+              : sqlstate === undefined
+                ? 'runtime_error'
+                : 'postgres_error',
+          errorName: attempt.reason instanceof Error ? attempt.reason.name : typeof attempt.reason,
+          ...(attempt.reason instanceof DomainError ? { domainCode: attempt.reason.code } : {}),
+          ...(attempt.reason instanceof DomainError &&
+          attempt.reason.code === 'conflict' &&
+          attempt.reason.message === 'Live feedback hourly intake quota is exhausted'
+            ? { domainReason: 'quota_exhausted' }
+            : {}),
+          ...(sqlstate === undefined ? {} : { sqlstate }),
+          ...(typeof reason?.severity === 'string' ? { severity: reason.severity } : {}),
+          ...(typeof reason?.table === 'string' ? { table: reason.table } : {}),
+          ...(typeof reason?.constraint === 'string' ? { constraint: reason.constraint } : {}),
+          ...(typeof reason?.routine === 'string' ? { routine: reason.routine } : {}),
+        },
+      ];
+    }),
+  };
   const run31RejectedFeedback = run31FeedbackAttempts.find(({ status }) => status === 'rejected');
   invariant(
     run31FeedbackAttempts.filter(({ status }) => status === 'fulfilled').length === 20 &&
@@ -1452,7 +1531,7 @@ try {
       run31RejectedFeedback.reason instanceof DomainError &&
       run31RejectedFeedback.reason.code === 'conflict' &&
       run31RejectedFeedback.reason.message === 'Live feedback hourly intake quota is exhausted',
-    'Concurrent Run 3.1 authenticated feedback did not enforce the exact person quota',
+    `Concurrent Run 3.1 authenticated feedback did not enforce the exact person quota: ${JSON.stringify(run31FeedbackAttemptDiagnostic)}`,
   );
   const run31ReplayIndex = run31FeedbackAttempts.findIndex(({ status }) => status === 'fulfilled');
   const run31ReplayInput = run31FeedbackRequests[run31ReplayIndex];
@@ -1522,7 +1601,9 @@ try {
       run31FeedbackEvidence.rows[0]?.household_quota === 20 &&
       run31FeedbackEvidence.rows[0]?.state_tier_mismatches === 0 &&
       run31FeedbackEvidence.rows[0]?.processing_tier_mismatches === 0,
-    'Run 3.1 feedback quota race left partial, duplicate, or over-limit durable evidence',
+    `Run 3.1 feedback quota race left partial, duplicate, or over-limit durable evidence: ${JSON.stringify(
+      { attempts: run31FeedbackAttemptDiagnostic, evidence: run31FeedbackEvidence.rows[0] },
+    )}`,
   );
 
   process.stdout.write(

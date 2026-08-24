@@ -34,7 +34,9 @@ if (audience === 'hq' && subject === config.identity.clerk.founderSubject) {
   throw new TypeError('The founder identity requires the reviewed recovery procedure');
 }
 
-const database = await createPostgresDatabase(config.database.url);
+const database = await createPostgresDatabase(config.database.url, {
+  poolMax: config.database.poolMax,
+});
 try {
   const result = await new ProductionIdentityRepository(database).disableIdentity({
     issuer:

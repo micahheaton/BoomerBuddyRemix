@@ -71,6 +71,7 @@ The authoritative current inventory is [`.env.example`](../../.env.example). Rep
 - `NODE_ENV`
 - `BB_DATABASE_DRIVER`
 - `DATABASE_URL`
+- `BB_POSTGRES_POOL_MAX`
 - `BB_RUN_MIGRATIONS`
 - `BB_SEED_DEMO`
 - `BB_ALLOW_DEV_IDENTITY`
@@ -133,6 +134,10 @@ accepts its exact managed-secret contract.
 - `BB_WORKER_RETRY_MAX_MS`
 
 Every worker instance needs a distinct stable `BB_WORKER_ID`.
+For the initial 0.25-CU beta, configure API `BB_POSTGRES_POOL_MAX=2`, worker
+`BB_POSTGRES_POOL_MAX=1`, and `BB_WORKER_BATCH_SIZE=1`; use pool max 1 for the controlled migration
+process. These values are capacity backpressure, not credentials. Any PostgreSQL SQLSTATE `53200`
+stops launch verification and requires lower concurrency or a larger compute before retry.
 
 ### Customer web, HQ, and mobile build names
 

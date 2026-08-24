@@ -21,6 +21,8 @@ describe('Run 3.1 founder evidence documents', () => {
     expect(runbook).toContain('RESTORE-DISPOSABLE:<exact-database-name>');
     expect(runbook).toContain('The current verdict is `REMEDIATE_BEFORE_EXTERNAL_USER`');
     expect(runbook).toContain('BB_ALLOW_POSTGRES_VERIFICATION=true');
+    expect(runbook).toContain('BB_POSTGRES_POOL_MAX=1');
+    expect(runbook).toContain('SQLSTATE `53200`');
     expect(runbook).toMatch(/Never run this\s+command against the live database/u);
   });
 
@@ -42,6 +44,7 @@ describe('Run 3.1 founder evidence documents', () => {
       'BB_TRUSTED_PROXY_HOPS',
       'BB_DATABASE_DRIVER',
       'DATABASE_URL',
+      'BB_POSTGRES_POOL_MAX',
       'BB_RUN_MIGRATIONS',
       'BB_SEED_DEMO',
       'BB_ALLOW_DEV_IDENTITY',
@@ -81,5 +84,6 @@ describe('Run 3.1 founder evidence documents', () => {
     expect(manifest).toContain('Stripe is out of scope');
     expect(manifest).toContain('Provider adapter is absent');
     expect(manifest).toContain('disposable provider-test PostgreSQL verification shell');
+    expect(manifest).toContain('API pool 2 plus worker pool 1/batch 1');
   });
 });

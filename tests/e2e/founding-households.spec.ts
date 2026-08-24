@@ -67,7 +67,9 @@ test('founder issues one local no-card credential and a household admin accepts 
     await route.fulfill({ response });
   });
   await page.getByRole('button', { name: 'Revoke and zeroize' }).click();
-  await expect(page.locator('.error[role="alert"]')).toBeVisible();
+  await expect(
+    page.locator('.error[role="alert"]').filter({ hasText: 'Failed to fetch' }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Revoke and zeroize' }).click();
   await expect(page.getByRole('status')).toContainText('revoked');
   expect(revokeKeys).toHaveLength(2);

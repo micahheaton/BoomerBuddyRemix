@@ -11,7 +11,7 @@ async function connect(): Promise<Database> {
   const config = loadConfig();
   return config.database.driver === 'pglite'
     ? createPGliteDatabase(config.database.path)
-    : createPostgresDatabase(config.database.url);
+    : createPostgresDatabase(config.database.url, { poolMax: config.database.poolMax });
 }
 
 async function main(): Promise<void> {

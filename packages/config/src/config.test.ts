@@ -29,6 +29,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     BB_TRUSTED_PROXY_HOPS: '0',
     BB_DATABASE_DRIVER: 'postgres',
     DATABASE_URL: 'postgresql://test.invalid/database?sslmode=require',
+    BB_POSTGRES_POOL_MAX: '2',
     BB_RUN_MIGRATIONS: 'false',
     BB_SEED_DEMO: 'false',
     BB_ALLOW_DEV_IDENTITY: 'false',
@@ -91,6 +92,36 @@ describe('typed configuration', () => {
     ).toThrow('DATABASE_URL');
   });
 
+  it('keeps the existing PostgreSQL pool default outside production and accepts a bounded override', () => {
+    const postgresEnvironment = {
+      ...developmentEnvironment(),
+      BB_DATABASE_DRIVER: 'postgres',
+      DATABASE_URL: 'postgresql://test.invalid/database',
+    };
+    expect(loadConfig(postgresEnvironment).database).toMatchObject({
+      driver: 'postgres',
+      poolMax: 10,
+    });
+    expect(
+      loadConfig({ ...postgresEnvironment, BB_POSTGRES_POOL_MAX: '3' }).database,
+    ).toMatchObject({ driver: 'postgres', poolMax: 3 });
+  });
+
+  it.each(['0', '1.5', '11', 'not-a-number'])(
+    'refuses invalid PostgreSQL pool max %s',
+    (poolMax) => {
+      expect(() =>
+        loadConfig({ ...developmentEnvironment(), BB_POSTGRES_POOL_MAX: poolMax }),
+      ).toThrow();
+    },
+  );
+
+  it('requires an explicit PostgreSQL pool max in production', () => {
+    const environment = productionEnvironment();
+    delete environment.BB_POSTGRES_POOL_MAX;
+    expect(() => loadConfig(environment)).toThrow('explicit BB_POSTGRES_POOL_MAX');
+  });
+
   it.each([
     'https://test.invalid/database?sslmode=require',
     'postgresql://test.invalid/database',
@@ -141,6 +172,7 @@ describe('typed configuration', () => {
     expect(config.secrets.session.byteLength).toBe(0);
     expect(config.database).toMatchObject({
       driver: 'postgres',
+      poolMax: 2,
       runMigrations: false,
       seedDemo: false,
     });

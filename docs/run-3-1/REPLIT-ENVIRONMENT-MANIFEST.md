@@ -48,7 +48,8 @@ audience and bounded factor age.
 | `BB_API_PORT`                               | API internal port                                                   | No                                   | derived automatically from provider `PORT` by wrapper | A                             | Do not configure separately. The wrapper supplies it to the API child; an explicitly configured mismatch refuses before startup.                       |
 | `BB_TRUSTED_PROXY_HOPS`                     | Fastify proxy trust count                                           | No                                   | founder: `0`                                          | A/K/M                         | Production requires exactly `0` until deployed spoof-resistance evidence establishes another value; any nonzero value refuses config.                  |
 | `BB_DATABASE_DRIVER`                        | Customer truth database                                             | No                                   | founder: `postgres`                                   | A/K/M                         | Production requires `postgres`; PGlite refuses startup.                                                                                                |
-| `DATABASE_URL`                              | PostgreSQL connection                                               | Yes                                  | Replit DB; `postgresql://.../db?sslmode=verify-full`  | A/K/M; B uses separate target | Required, PostgreSQL scheme, one database, and exactly one `sslmode=require`, `verify-ca`, or `verify-full`. Missing or downgrade modes refuse config. |
+| `DATABASE_URL`                              | PostgreSQL connection                                               | Yes                                  | Replit DB; `postgresql://.../db?sslmode=verify-full`  | A/K/M; B uses separate target | Required, PostgreSQL scheme, one database, and exactly one `sslmode=require`, `verify-ca`, or `verify-full`. Use pooled runtime URLs for A/K and the direct migration URL for M; missing or downgrade modes refuse config. |
+| `BB_POSTGRES_POOL_MAX`                      | Per-process PostgreSQL connection cap                               | No                                   | A: `2`; K: `1`; M: `1`                               | A/K/M                         | Required explicitly in production; integer 1–10. Development/test default 10 when omitted. The initial 0.25-CU beta must use the listed caps so pressure queues in Node instead of consuming PostgreSQL backend memory. |
 | `BB_RUN_MIGRATIONS`                         | Runtime migration switch                                            | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; API/worker startup refuses `true`. The controlled `db:migrate` command still explicitly runs migrations.                  |
 | `BB_SEED_DEMO`                              | Demo seed switch                                                    | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; `true` refuses config.                                                                                                    |
 | `BB_ALLOW_DEV_IDENTITY`                     | Development issuer switch                                           | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; `true` refuses config.                                                                                                    |
@@ -73,6 +74,12 @@ audience and bounded factor age.
 `BB_SESSION_SECRET` is intentionally **absent** in production. Supplying it refuses startup because
 production accepts only Clerk's exact `__session`; the secret exists only for local development.
 
+The initial 0.25-CU database capacity profile is API pool 2 plus worker pool 1/batch 1. A pooled Neon
+URL controls connection churn but does not replace these application-side active-work caps. SQLSTATE
+`53200` is a failed capacity gate and must not be hidden by immediate retry. Raise compute to at least
+0.5 CU (prefer bounded 0.5–1 CU autoscaling where available) if three fresh-database mixed-load runs
+cannot pass with these caps.
+
 ## Worker-only configuration
 
 | Variable                  | Purpose                            | Secret? | Source / example   | Services | Requirement, default, and failure behavior                                  |
@@ -82,13 +89,14 @@ production accepts only Clerk's exact `__session`; the secret exists only for lo
 | `BB_WORKER_LEASE_MS`      | Lease duration                     | No      | `30000`            | K        | Optional default 30000; range 5000–900000.                                  |
 | `BB_WORKER_HEARTBEAT_MS`  | Lease heartbeat                    | No      | `10000`            | K        | Optional default 10000; must be less than half the lease duration.          |
 | `BB_WORKER_SHUTDOWN_MS`   | Graceful shutdown bound            | No      | `20000`            | K        | Optional default 20000; range 1000–120000.                                  |
-| `BB_WORKER_BATCH_SIZE`    | Per-cycle batch bound              | No      | `10`               | K        | Optional default 10; range 1–100.                                           |
+| `BB_WORKER_BATCH_SIZE`    | Per-cycle batch bound              | No      | production: `1`    | K        | Optional schema default 10; range 1–100. Set 1 for the initial 0.25-CU beta so claimed work matches the worker pool cap. |
 | `BB_WORKER_RETRY_BASE_MS` | Retry backoff base                 | No      | `1000`             | K        | Optional default 1000; range 100–60000.                                     |
 | `BB_WORKER_RETRY_MAX_MS`  | Retry backoff cap                  | No      | `300000`           | K        | Optional default 300000; range 1000–3600000.                                |
 
 Production worker composition contains only reviewed internal jobs, including feedback retention. It
 must contain no feedback classification/model/media/outbound handler and no Stripe/Twilio network
-adapter.
+adapter. Do not increase the worker pool or batch until repeated mixed API/worker provider tests show
+memory and latency headroom without SQLSTATE `53200`.
 
 ## Disposable provider-test PostgreSQL verifier
 

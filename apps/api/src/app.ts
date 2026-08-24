@@ -56,7 +56,7 @@ const retentionMaxBatchesPerSweep = 10;
 export async function connectDatabase(config: AppConfig): Promise<Database> {
   return config.database.driver === 'pglite'
     ? createPGliteDatabase(config.database.path)
-    : createPostgresDatabase(config.database.url);
+    : createPostgresDatabase(config.database.url, { poolMax: config.database.poolMax });
 }
 
 function statusFor(error: DomainError): number {

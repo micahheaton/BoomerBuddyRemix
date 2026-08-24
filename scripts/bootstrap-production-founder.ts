@@ -14,7 +14,9 @@ if (
   throw new TypeError('Founder bootstrap requires complete production configuration');
 }
 
-const database = await createPostgresDatabase(config.database.url);
+const database = await createPostgresDatabase(config.database.url, {
+  poolMax: config.database.poolMax,
+});
 try {
   const repository = new ProductionIdentityRepository(database);
   const result = await repository.bootstrapFounder({

@@ -41,6 +41,7 @@ const environmentSchema = z.object({
   BB_DATABASE_DRIVER: z.enum(['pglite', 'postgres']).default('pglite'),
   BB_PGLITE_PATH: nonEmpty.optional(),
   DATABASE_URL: z.string().url().optional(),
+  BB_POSTGRES_POOL_MAX: z.coerce.number().int().min(1).max(10).optional(),
   BB_RUN_MIGRATIONS: booleanText.default(true),
   BB_SEED_DEMO: booleanText.default(false),
   BB_ALLOW_DEV_IDENTITY: booleanText.default(true),
@@ -105,6 +106,7 @@ export interface AppConfig {
     | {
         readonly driver: 'postgres';
         readonly url: string;
+        readonly poolMax: number;
         readonly runMigrations: boolean;
         readonly seedDemo: boolean;
       };
@@ -270,6 +272,9 @@ function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void
   }
   if (parsed.BB_TRUSTED_PROXY_HOPS !== 0) {
     throw new TypeError('Production trusted proxy hops remain zero until deployed proof exists');
+  }
+  if (parsed.BB_POSTGRES_POOL_MAX === undefined) {
+    throw new TypeError('Production requires an explicit BB_POSTGRES_POOL_MAX');
   }
   if (parsed.BB_STRIPE_MODE !== 'disabled' || parsed.BB_TWILIO_MODE !== 'disabled') {
     throw new TypeError('Production beta requires Stripe and Twilio to remain disabled');
@@ -508,6 +513,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
               })(),
             parsed.NODE_ENV === 'production',
           ),
+          poolMax: parsed.BB_POSTGRES_POOL_MAX ?? 10,
           runMigrations: parsed.BB_RUN_MIGRATIONS,
           seedDemo: parsed.BB_SEED_DEMO,
         }

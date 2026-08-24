@@ -64,9 +64,18 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     command against the live database:** it writes destructive fixtures, requires a new empty
     database, and refuses a name without a delimited `ci` or `test` segment.
 
+    The verifier pins its own PostgreSQL pool to 2 and requires at least 180 database-clock seconds
+    in one quota bucket. Any SQLSTATE `53200` is a capacity failure, not an allowed quota rejection:
+    retain the content-free diagnostic, stop retrying, lower concurrent database work, and repeat on
+    a new empty disposable database. Before customer traffic, either prove three consecutive exact
+    20-accepted/1-quota-rejected runs with the production caps or raise the production compute to at
+    least 0.5 CU (prefer bounded 0.5–1 CU autoscaling where available) and repeat the same gate.
+
 12. Create a migration credential and runtime credential with the narrowest provider-supported
-    separation. Runtime API/worker configuration must use `BB_RUN_MIGRATIONS=false`. Until Replit
-    proves separate roles and least privilege, this is an external gate, not a completed control.
+    separation. Use the direct database URL and `BB_POSTGRES_POOL_MAX=1` only for the controlled
+    migration step. Runtime API/worker configuration must use pooled URLs and
+    `BB_RUN_MIGRATIONS=false`. Until Replit proves separate roles and least privilege, this is an
+    external gate, not a completed control.
 13. In every Replit project, open **Publish** (or **Publishing**) and then **Edit commands and
     secrets**. Add only the variables for that service from
     `REPLIT-ENVIRONMENT-MANIFEST.md`. Replit project-editor secrets are not assumed to be available
@@ -216,6 +225,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 | Trusted proxy count           | Published app secrets                   | `BB_TRUSTED_PROXY_HOPS`                     | No                            | `0`                                        | API, worker, controlled CLI                                     |
 | Database driver               | Published app secrets                   | `BB_DATABASE_DRIVER`                        | No                            | `postgres`                                 | API, worker, controlled CLI                                     |
 | PostgreSQL                    | Database / Published app secrets        | `DATABASE_URL`                              | Yes                           | `postgresql://...?...sslmode=verify-full`  | API, worker, controlled CLI; separate disposable/backup targets |
+| PostgreSQL pool cap           | Published app secrets                   | `BB_POSTGRES_POOL_MAX`                      | No                            | API `2`; worker `1`; migration `1`         | API, worker, controlled CLI                                     |
 | Runtime migrations            | Published app secrets                   | `BB_RUN_MIGRATIONS`                         | No                            | `false`                                    | API, worker, controlled CLI                                     |
 | Demo seed                     | Published app secrets                   | `BB_SEED_DEMO`                              | No                            | `false`                                    | API, worker, controlled CLI                                     |
 | Development identity          | Published app secrets                   | `BB_ALLOW_DEV_IDENTITY`                     | No                            | `false`                                    | API, worker, controlled CLI                                     |
@@ -241,7 +251,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 | Worker lease                  | Published app secrets                   | `BB_WORKER_LEASE_MS`                        | No                            | `30000`                                    | worker                                                          |
 | Worker heartbeat              | Published app secrets                   | `BB_WORKER_HEARTBEAT_MS`                    | No                            | `10000`                                    | worker                                                          |
 | Worker shutdown               | Published app secrets                   | `BB_WORKER_SHUTDOWN_MS`                     | No                            | `20000`                                    | worker                                                          |
-| Worker batch                  | Published app secrets                   | `BB_WORKER_BATCH_SIZE`                      | No                            | `10`                                       | worker                                                          |
+| Worker batch                  | Published app secrets                   | `BB_WORKER_BATCH_SIZE`                      | No                            | `1`                                        | worker; initial 0.25-CU beta                                    |
 | Worker retry base             | Published app secrets                   | `BB_WORKER_RETRY_BASE_MS`                   | No                            | `1000`                                     | worker                                                          |
 | Worker retry maximum          | Published app secrets                   | `BB_WORKER_RETRY_MAX_MS`                    | No                            | `300000`                                   | worker                                                          |
 | Destructive real-PG verifier  | Disposable provider-test shell only     | `BB_ALLOW_POSTGRES_VERIFICATION`            | No                            | `true` only during command                 | `verify:postgres`; never runtime/live DB                        |

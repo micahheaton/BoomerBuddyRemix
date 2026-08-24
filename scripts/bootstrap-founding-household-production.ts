@@ -92,7 +92,9 @@ if (
   throw new TypeError('Founding Household bootstrap requires complete production configuration');
 }
 
-const database = await createPostgresDatabase(config.database.url);
+const database = await createPostgresDatabase(config.database.url, {
+  poolMax: config.database.poolMax,
+});
 try {
   const repository = new FoundingHouseholdRepository(
     database,

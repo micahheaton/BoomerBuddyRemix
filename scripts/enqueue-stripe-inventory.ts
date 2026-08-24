@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const database =
     config.database.driver === 'pglite'
       ? await createPGliteDatabase(config.database.path)
-      : await createPostgresDatabase(config.database.url);
+      : await createPostgresDatabase(config.database.url, { poolMax: config.database.poolMax });
   const operationKey = `stripe-inventory-manual:test:${randomUUID()}`;
   try {
     await enqueueStripeInventory({

@@ -61,7 +61,9 @@ const logger = createLogger({
 });
 const database =
   appConfig.database.driver === 'postgres'
-    ? await createPostgresDatabase(appConfig.database.url)
+    ? await createPostgresDatabase(appConfig.database.url, {
+        poolMax: appConfig.database.poolMax,
+      })
     : await createPGliteDatabase(appConfig.database.path);
 if (appConfig.database.runMigrations) await runMigrations(database);
 if (appConfig.environment === 'production') {

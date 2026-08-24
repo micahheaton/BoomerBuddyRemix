@@ -20,6 +20,23 @@ export interface Database extends SqlExecutor {
   close(): Promise<void>;
 }
 
+export interface PostgresDatabaseOptions {
+  readonly poolMax?: number;
+}
+
+const defaultPostgresPoolMax = 10;
+const maximumPostgresPoolMax = 10;
+
+function postgresPoolMax(value: number | undefined): number {
+  const poolMax = value ?? defaultPostgresPoolMax;
+  if (!Number.isSafeInteger(poolMax) || poolMax < 1 || poolMax > maximumPostgresPoolMax) {
+    throw new TypeError(
+      `PostgreSQL pool max must be an integer between 1 and ${maximumPostgresPoolMax}`,
+    );
+  }
+  return poolMax;
+}
+
 function parameterArray(parameters: readonly unknown[] | undefined): unknown[] | undefined {
   return parameters === undefined ? undefined : [...parameters];
 }
@@ -130,8 +147,11 @@ export async function createPGliteDatabase(dataDir = ':memory:'): Promise<Databa
   return new PGliteDatabase(client);
 }
 
-export async function createPostgresDatabase(connectionString: string): Promise<Database> {
-  const pool = new pg.Pool({ connectionString, max: 10 });
+export async function createPostgresDatabase(
+  connectionString: string,
+  options: PostgresDatabaseOptions = {},
+): Promise<Database> {
+  const pool = new pg.Pool({ connectionString, max: postgresPoolMax(options.poolMax) });
   await pool.query('SELECT 1');
   return new PostgresDatabase(pool);
 }

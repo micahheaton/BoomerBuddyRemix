@@ -10,7 +10,7 @@ if (existsSync('.env')) loadEnvironmentFile();
 const config = loadConfig();
 const database =
   config.database.driver === 'postgres'
-    ? await createPostgresDatabase(config.database.url)
+    ? await createPostgresDatabase(config.database.url, { poolMax: config.database.poolMax })
     : await createPGliteDatabase(config.database.path);
 try {
   const applied = await runMigrations(database);

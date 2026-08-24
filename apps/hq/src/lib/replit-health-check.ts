@@ -35,8 +35,7 @@ export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boo
   }
 
   const authority = `127.0.0.1:${input.port}`;
-  const normalizedLoopbackHostname =
-    url.hostname === '127.0.0.1' || url.hostname === 'localhost';
+  const normalizedLoopbackHostname = url.hostname === 'localhost';
   const forwardedLoopback =
     input.forwardedFor === '127.0.0.1' ||
     input.forwardedFor === '::1' ||

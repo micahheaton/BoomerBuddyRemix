@@ -48,6 +48,7 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['mutation method', { method: 'POST' }],
     ['preflight method', { method: 'OPTIONS' }],
     ['HTTPS URL', { url: 'https://127.0.0.1:1104/' }],
+    ['un-normalized URL hostname', { url: 'http://127.0.0.1:1104/' }],
     ['different URL hostname', { url: 'http://127.0.0.2:1104/' }],
     ['different URL port', { url: 'http://127.0.0.1:1105/' }],
     ['operator path', { url: 'http://127.0.0.1:1104/system' }],

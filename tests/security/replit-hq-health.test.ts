@@ -18,7 +18,7 @@ const exactRequest: ReplitHqHealthCheckInput = {
   host: '127.0.0.1:1104',
   method: 'GET',
   port: '1104',
-  url: 'http://127.0.0.1:1104/',
+  url: 'http://localhost:1104/',
 };
 
 describe('Replit HQ Autoscale liveness boundary', () => {
@@ -48,7 +48,7 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ['mutation method', { method: 'POST' }],
     ['preflight method', { method: 'OPTIONS' }],
     ['HTTPS URL', { url: 'https://127.0.0.1:1104/' }],
-    ['localhost URL', { url: 'http://localhost:1104/' }],
+    ['different URL hostname', { url: 'http://127.0.0.2:1104/' }],
     ['different URL port', { url: 'http://127.0.0.1:1105/' }],
     ['operator path', { url: 'http://127.0.0.1:1104/system' }],
     ['query string', { url: 'http://127.0.0.1:1104/?probe=1' }],

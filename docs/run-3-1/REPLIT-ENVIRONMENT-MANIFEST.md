@@ -67,7 +67,7 @@ audience and bounded factor age.
 
 HQ's only application-level liveness exception is the observed direct Replit Autoscale GET/HEAD
 homepage probe. It requires `REPLIT_DEPLOYMENT=1`, the canonical automatic `PORT`, exact
-`127.0.0.1:$PORT` Host and HTTP URL, no query, exact Next-derived loopback
+`127.0.0.1:$PORT` Host and Next-normalized loopback HTTP URL, no query, exact Next-derived loopback
 `X-Forwarded-For/Host/Port/Proto` values, and no raw `Forwarded` header, and it runs only after the matching Clerk publishable and secret keys are present. The response is
 fixed content-free, no-store text with restrictive browser headers. External `/`, every operator
 route, and all `/api` paths remain behind the separate HQ Clerk middleware; near-match probes fail

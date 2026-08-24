@@ -19,6 +19,7 @@ const canonicalReplitConfig = [
   'build = "npm run replit:build"',
   'run = "npm run replit:start"',
   '',
+  '',
 ].join('\n');
 const autoscaleReplitConfig = canonicalReplitConfig.replace(
   '[deployment]\nbuild = "npm run replit:build"\nrun = "npm run replit:start"\n',
@@ -686,3 +687,4 @@ describe('Run 3.1 Replit deployment controls', () => {
     }
   });
 });
+

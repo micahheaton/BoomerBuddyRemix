@@ -393,9 +393,9 @@ describe('Run 3.1 Replit deployment controls', () => {
       expect(await readFile(join(fixture.directory, '.replit'), 'utf8')).toBe(
         canonicalReplitConfig,
       );
-      expect(
-        runGit(fixture.directory, ['status', '--porcelain=v1', '--untracked-files=all']),
-      ).toBe('');
+      expect(runGit(fixture.directory, ['status', '--porcelain=v1', '--untracked-files=all'])).toBe(
+        '',
+      );
     } finally {
       await rm(fixture.directory, { force: true, recursive: true });
     }
@@ -418,9 +418,18 @@ describe('Run 3.1 Replit deployment controls', () => {
 
   it.each([
     ['wrong target', autoscaleReplitConfig.replace('"cloudrun"', '"cloud-run"')],
-    ['wrong placement', canonicalReplitConfig.replace('[deployment]\n', '[deployment]\ndeploymentTarget = "cloudrun"\n')],
+    [
+      'wrong placement',
+      canonicalReplitConfig.replace(
+        '[deployment]\n',
+        '[deployment]\ndeploymentTarget = "cloudrun"\n',
+      ),
+    ],
     ['extra content', `${autoscaleReplitConfig}# extra setting\n`],
-    ['changed modules', autoscaleReplitConfig.replace('["nodejs-22"]', '["nodejs-22", "python-base-3.13"]')],
+    [
+      'changed modules',
+      autoscaleReplitConfig.replace('["nodejs-22"]', '["nodejs-22", "python-base-3.13"]'),
+    ],
     ['CRLF endings', autoscaleReplitConfig.replaceAll('\n', '\r\n')],
     ['missing final newline', autoscaleReplitConfig.slice(0, -1)],
     ['extra final newline', `${autoscaleReplitConfig}\n`],

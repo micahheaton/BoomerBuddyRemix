@@ -125,10 +125,7 @@ function parseGitPorcelainStatus(output) {
     }
 
     const status = String.fromCharCode(record[0], record[1]);
-    if (
-      status === '  ' ||
-      (!/^[ ADMTU]{2}$/u.test(status) && status !== '??' && status !== '!!')
-    ) {
+    if (status === '  ' || (!/^[ ADMTU]{2}$/u.test(status) && status !== '??' && status !== '!!')) {
       throw new Error('git emitted malformed dirty-checkout diagnostics');
     }
 
@@ -200,13 +197,7 @@ function reportTreeMismatch({ headCommit, headTree, taggedCommit, taggedTree }) 
 function reportDirtyCheckout() {
   const lines = ['Replit dirty checkout diagnostics (status and filenames only):'];
   const changes = parseGitPorcelainStatus(
-    captureGitBytes([
-      'status',
-      '--porcelain=v1',
-      '-z',
-      '--untracked-files=all',
-      '--no-renames',
-    ]),
+    captureGitBytes(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
   );
 
   lines.push(`  index/worktree status paths: ${changes.length}`);

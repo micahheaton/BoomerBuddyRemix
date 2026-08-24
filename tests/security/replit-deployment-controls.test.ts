@@ -477,9 +477,7 @@ describe('Run 3.1 Replit deployment controls', () => {
         const result = runFixtureBuild(fixture);
         const output = commandOutput(result);
         expect(result.status).not.toBe(0);
-        expect(output).toContain(
-          'Replit dirty checkout diagnostics (status and filenames only):',
-        );
+        expect(output).toContain('Replit dirty checkout diagnostics (status and filenames only):');
         expect(output).toContain('  index/worktree status paths: 1');
         expect(output).toContain(
           contentState === 'staged'
@@ -520,9 +518,7 @@ describe('Run 3.1 Replit deployment controls', () => {
       expect(output).not.toContain('    ?? "dirty-050.txt"');
       expect(output).toContain('    ... 3 more paths omitted');
       expect(output).not.toContain('do-not-print-dirty-content');
-      expect(output).toContain(
-        'The Replit checkout contains changes outside the tagged candidate',
-      );
+      expect(output).toContain('The Replit checkout contains changes outside the tagged candidate');
     } finally {
       await rm(fixture.directory, { force: true, recursive: true });
     }

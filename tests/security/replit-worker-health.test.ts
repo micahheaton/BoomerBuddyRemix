@@ -24,9 +24,9 @@ describe('Replit worker liveness listener', () => {
     expect(resolveReplitWorkerHealthPort({ REPLIT_DEPLOYMENT: '1', PORT: '4173' })).toBe(4173);
 
     for (const port of ['', '0', '1.5', '65536', 'not-a-port']) {
-      expect(() =>
-        resolveReplitWorkerHealthPort({ REPLIT_DEPLOYMENT: '1', PORT: port }),
-      ).toThrow('requires a valid PORT');
+      expect(() => resolveReplitWorkerHealthPort({ REPLIT_DEPLOYMENT: '1', PORT: port })).toThrow(
+        'requires a valid PORT',
+      );
     }
   });
 

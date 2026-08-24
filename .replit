@@ -8,5 +8,4 @@ enabledForHosting = false
 [deployment]
 build = "npm run replit:build"
 run = "npm run replit:start"
-ignorePorts = true
 

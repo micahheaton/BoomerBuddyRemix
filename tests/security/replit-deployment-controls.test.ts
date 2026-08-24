@@ -24,6 +24,8 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(replit).toContain('build = "npm run replit:build"');
     expect(replit).toContain('run = "npm run replit:start"');
     expect(replit).toContain('enabledForHosting = false');
+    expect(replit).not.toContain('ignorePorts');
+    expect(replit).not.toContain('[[ports]]');
     expect(replit).not.toContain('npm run dev');
     expect(packageJson.scripts['replit:build']).toBe('node scripts/replit-service.mjs build');
     expect(packageJson.scripts['replit:start']).toBe('node scripts/replit-service.mjs start');
@@ -38,7 +40,17 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
     expect(source).toContain('A configured BB_API_PORT must equal the provider PORT');
     expect(worker).toContain('new ProductionIdentityRepository(database).assertFounderBinding');
+    expect(worker).toContain('startWorkerHealthServer(process.env)');
     expect(worker.indexOf('assertFounderBinding')).toBeLessThan(worker.indexOf('const jobs ='));
+    expect(worker.indexOf('const jobs =')).toBeLessThan(
+      worker.indexOf('startWorkerHealthServer(process.env)'),
+    );
+    expect(worker.indexOf('startWorkerHealthServer(process.env)')).toBeLessThan(
+      worker.indexOf('await worker.start()'),
+    );
+    expect(worker.indexOf('await closeWorkerHealthServer(healthServer)')).toBeLessThan(
+      worker.indexOf('await database.close()'),
+    );
   });
 
   it('fails closed for missing, invalid, or nonproduction service selection', () => {
@@ -158,7 +170,7 @@ describe('Run 3.1 Replit deployment controls', () => {
       shell: false,
     }).stdout.trim();
     const missingCommit = '1'.repeat(40);
-    const missingTag = spawnSync(process.execPath, ['scripts/replit-service.mjs', 'start'], {
+    const missingTag = spawnSync(process.execPath, ['scripts/replit-service.mjs', 'build'], {
       cwd: root,
       encoding: 'utf8',
       env: {

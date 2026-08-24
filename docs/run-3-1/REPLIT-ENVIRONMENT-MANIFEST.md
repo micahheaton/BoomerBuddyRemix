@@ -18,7 +18,7 @@ trusted founder backup/restore machine.
 | `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal HEAD and the resolved tag commit.                                                                          |
 | `BB_RUN3_1_RELEASE_TAG`    | Bind runtime to immutable tag            | No      | `run3-1-replit-founding-household-<12hex>` | W/A/K/H   | Required; suffix must equal the commit's first 12 characters.                                                                   |
 | `REPLIT_DEPLOYMENT`        | Prove a published runtime                | No      | Replit automatic: `1`                      | W/A/K/H   | Required at start and must be `1`; never set manually in local evidence.                                                        |
-| `PORT`                     | Provider-selected listener port          | No      | Replit automatic integer                   | W/A/H     | Required at start. Next consumes it directly; the wrapper derives the API child's `BB_API_PORT`. Worker must not expose a port. |
+| `PORT`                     | Provider-selected listener port          | No      | Replit automatic integer                   | W/A/K/H   | Required for web-facing services. Next consumes it directly; the wrapper derives the API child's `BB_API_PORT`. The worker uses it only for a static private liveness listener and falls back to `3000` when Replit omits it. |
 
 Every Replit build/start additionally requires a clean checkout where HEAD and the immutable tag both
 resolve to the configured commit. Dirty or tag-shaped branch-only checkouts fail.

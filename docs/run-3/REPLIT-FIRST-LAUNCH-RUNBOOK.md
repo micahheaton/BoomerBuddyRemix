@@ -55,7 +55,7 @@ Use separate deployable processes from the same frozen commit. Final provider ty
 | Surface | Initial Replit hypothesis | Build command | Start command | Public exposure |
 | --- | --- | --- | --- | --- |
 | API | Reserved VM for predictable health/webhooks; compare Autoscale in staging | `npm run build -w @boomerbuddy/api` | `npm run start -w @boomerbuddy/api` | HTTPS API only |
-| Worker | Reserved VM because leases, schedules, and reconciliation are continuous | `npm run build -w @boomerbuddy/worker` | `npm run start -w @boomerbuddy/worker` | None |
+| Worker | Reserved VM because leases, schedules, and reconciliation are continuous | `npm run build -w @boomerbuddy/worker` | `npm run start -w @boomerbuddy/worker` | Private provider liveness only; no custom domain |
 | Customer web | Autoscale | `npm run build -w @boomerbuddy/web` | `npm run start -w @boomerbuddy/web` | Customer HTTPS origin |
 | HQ | Private Autoscale or Reserved VM plus application auth; never rely only on Replit visibility | `npm run build -w @boomerbuddy/hq` | `npm run start -w @boomerbuddy/hq` | Separate restricted HTTPS origin |
 | Migration | One founder-controlled release step before API/worker rollout | `npm run build -w @boomerbuddy/worker` | `node apps/worker/dist/migrate.js` | None; run once |
@@ -183,8 +183,8 @@ Run the dependency/SBOM, real-PostgreSQL, restore, and browser evidence gates se
 Before DNS or customer invitation:
 
 1. Run migrations against a disposable/empty staging database and verify the schema version.
-2. Start one API and one worker. Confirm `GET /health/live` and `GET /health/ready` return success through the deployment URL.
-3. Confirm the worker heartbeat becomes current and a synthetic local-only job is claimed, completed, and reconciled.
+2. Start one API and one worker. Confirm the API's `GET /health/live` and `GET /health/ready` return success through its deployment URL. Confirm the private worker liveness listener returns only static success at `/` and `/health/live`.
+3. Confirm the worker database heartbeat becomes current and a synthetic local-only job is claimed, completed, and reconciled; the static HTTP listener is liveness, not worker readiness.
 4. Verify customer and HQ origins are disjoint and cross-audience requests fail.
 5. Run the full Edge suite against staging with synthetic personas only.
 6. Exercise Public Check behind the actual proxy path and validate `BB_TRUSTED_PROXY_HOPS` against observed addresses; forged forwarding headers must not bypass quotas.

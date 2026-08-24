@@ -49,6 +49,7 @@ import {
 import { createStripeSessionRetryHandler, stripeSessionRetryJobType } from './stripe-session-retry';
 import { createWorkerStripeAdapter } from './stripe-adapter';
 import { createGrowthRuntimeHandlers, enqueueGrowthRuntimeJobs } from './growth-runtime';
+import { closeWorkerHealthServer, startWorkerHealthServer } from './health-server';
 import { createOperationalHandlers, seedOperationalSchedules } from './operational-handlers';
 
 if (existsSync('.env')) loadEnvironmentFile();
@@ -278,9 +279,18 @@ const stopWorker = (): Promise<void> => {
 process.once('SIGINT', () => void stopWorker());
 process.once('SIGTERM', () => void stopWorker());
 
+let healthServer: Awaited<ReturnType<typeof startWorkerHealthServer>>;
 try {
+  healthServer = await startWorkerHealthServer(process.env);
   await worker.start();
 } finally {
-  await stopWorker();
-  await database.close();
+  try {
+    await stopWorker();
+  } finally {
+    try {
+      await closeWorkerHealthServer(healthServer);
+    } finally {
+      await database.close();
+    }
+  }
 }

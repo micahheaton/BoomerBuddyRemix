@@ -24,11 +24,7 @@ function exactIpv4LoopbackAuthorityPort(value: string | null): string | null {
 }
 
 function isLoopbackForwardedFor(value: string | null): boolean {
-  return (
-    value === '127.0.0.1' ||
-    value === '::1' ||
-    value === '::ffff:127.0.0.1'
-  );
+  return value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1';
 }
 
 export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boolean {

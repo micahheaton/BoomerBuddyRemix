@@ -5,7 +5,7 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await signInCustomer(page);
   const localAccess = page.getByTestId('local-access-summary');
   await expect(localAccess).toContainText('Local access hypothesis');
-  await expect(localAccess).toContainText('Billing initiation is a separate, founder-gated flow');
+  await expect(localAccess).toContainText('This record describes your current household access');
   await expect(localAccess).toContainText('Protected adults');
   await expect(localAccess).toContainText('Trusted Circle participants');
   await page.getByRole('link', { name: 'Check', exact: true }).click();
@@ -16,7 +16,8 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await page.getByRole('button', { name: 'Check it' }).click();
   const textResult = page.getByTestId('check-result');
   await expect(textResult).toBeVisible();
-  await expect(textResult).toContainText('Not calibrated');
+  await expect(textResult).toContainText('Important limit');
+  await expect(textResult).toContainText('This result can be wrong');
   await expect(textResult).toContainText('decision support, not proof');
   await expect(textResult.getByRole('heading', { name: 'Check result' })).toBeFocused();
   await expect(textResult).toContainText('No active relationship currently has permission');
@@ -26,7 +27,7 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await page.getByLabel('Website address (URL)').fill('https://account-alert.example.test/verify');
   await page.getByRole('button', { name: 'Check it' }).click();
   await expect(page.getByTestId('check-result')).toContainText(
-    /Provider: unknown|LocalUnknownProvider/,
+    'No live reputation provider is configured; no URL or external resource was contacted.',
   );
 
   await page.getByRole('link', { name: 'History', exact: true }).click();
@@ -121,5 +122,5 @@ test('sharing state is scoped to one result and resets for the next check', asyn
   await expect(
     secondResult.getByRole('button', { name: 'Share with Terry Trusted' }),
   ).toBeEnabled();
-  await expect(secondResult).not.toContainText('Redacted result shared locally');
+  await expect(secondResult).not.toContainText('Redacted result shared with');
 });

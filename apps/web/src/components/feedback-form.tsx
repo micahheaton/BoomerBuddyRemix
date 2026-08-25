@@ -203,8 +203,8 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
           </label>
         ) : (
           <p className="help">
-            Anonymous feedback cannot authorize follow-up and is not attached to an account,
-            household, campaign, or product object.
+            Anonymous feedback cannot authorize follow-up and is not linked to an account or
+            household.
           </p>
         )}
         <label className="choice">
@@ -213,8 +213,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
             checked={researchRetention}
             onChange={(event) => setResearchRetention(event.target.checked)}
           />
-          Allow the minimized text to be retained for product-feedback research for up to 23 hours
-          in this candidate.
+          Allow the minimized text to be retained for product-feedback research for up to 23 hours.
         </label>
         <p className="help">
           Without research retention, minimized text is scheduled for erasure after one hour.
@@ -231,37 +230,44 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
         </button>
       </form>
       <aside className="notice notice-warning">
-        <h2>Privacy and action boundary</h2>
+        <h2>What happens when you submit</h2>
         <ul className="plain-list">
-          <li>Supported OTP, card, and explicit credential spans are removed before encryption.</li>
-          <li>Unsafe or ambiguous secret material is discarded with metadata-only quarantine.</li>
-          <li>No media, provider, message, issue, experiment, or customer action runs.</li>
-          <li>Queued processing is not a completed classification or duplicate decision.</li>
+          <li>
+            Common one-time codes, payment-card numbers, and passwords are removed before storage.
+          </li>
+          <li>Text that may contain unsafe secret information is discarded.</li>
+          <li>
+            Submitting feedback does not send a message, open a support case, or take action on your
+            account.
+          </li>
+          <li>
+            A recorded submission does not mean it has been reviewed or grouped with another report.
+          </li>
           {mode === 'anonymous' ? (
             <li>
-              This form provides no post-submission anonymous management credential; bounded
-              automatic expiry is the deletion path.
+              Anonymous feedback cannot be managed after submission and is deleted automatically on
+              the schedule described above.
             </li>
           ) : (
-            <li>Authenticated optional consent can be withdrawn through the account API.</li>
+            <li>Optional follow-up or research permission can be withdrawn after submission.</li>
           )}
         </ul>
       </aside>
       {result ? (
         <section className="card full-span" aria-live="polite" data-testid="feedback-receipt">
-          <span className="dev-pill">{result.feedback.evidenceTier}</span>
+          <span className="dev-pill">Private beta</span>
           <h2>Feedback recorded</h2>
-          <p>
-            Receipt {result.feedback.id} · {result.feedback.status.replaceAll('_', ' ')} ·{' '}
-            {result.feedback.redactionStatus.replaceAll('_', ' ')}
-          </p>
-          <p>Media accepted: no · Provider processed: no · External action executed: no</p>
+          <p>Reference: {result.feedback.id}</p>
+          <p>No media was accepted and no outside action was taken.</p>
           {result.feedback.retainedUntil ? (
             <p className="help">
-              Ciphertext deadline: {new Date(result.feedback.retainedUntil).toLocaleString()}
+              Feedback text is scheduled for deletion by{' '}
+              {new Date(result.feedback.retainedUntil).toLocaleString()}.
             </p>
           ) : (
-            <p className="help">Unsafe text was not retained as ciphertext.</p>
+            <p className="help">
+              Text that may contain unsafe secret information was not retained.
+            </p>
           )}
           {mode === 'authenticated' && grantedPurposes.length > 0 ? (
             <div className="button-row" aria-label="Feedback consent controls">

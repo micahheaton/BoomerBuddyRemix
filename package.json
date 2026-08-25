@@ -14,12 +14,18 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "metro": "0.84.5",
+    "metro-config": "0.84.5",
+    "metro-transform-worker": "0.84.5"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web,hq -c blue,green,magenta \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:hq\"",
     "dev:api": "tsx watch apps/api/src/server.ts",
     "dev:web": "npm run dev -w @boomerbuddy/web",
     "dev:hq": "npm run dev -w @boomerbuddy/hq",
     "dev:mobile": "npm run dev -w @boomerbuddy/mobile",
+    "mobile:assets": "node scripts/generate-mobile-assets.mjs",
     "dev:worker": "npm run dev -w @boomerbuddy/worker",
     "build": "npm run typecheck && npm run build -w @boomerbuddy/api && npm run build -w @boomerbuddy/worker && npm run build -w @boomerbuddy/web && npm run build -w @boomerbuddy/hq && npm run build -w @boomerbuddy/mobile",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tsconfig.json --noEmit",
@@ -67,6 +73,7 @@
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "7.1.1",
     "prettier": "3.9.6",
+    "sharp": "0.35.3",
     "tsup": "8.5.1",
     "tsx": "4.23.12",
     "typescript": "6.0.3",

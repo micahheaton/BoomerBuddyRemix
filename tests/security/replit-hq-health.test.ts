@@ -121,13 +121,14 @@ describe('Replit HQ Autoscale liveness boundary', () => {
 
   it('keeps identity configuration and every non-probe HQ request behind Clerk', async () => {
     const source = await readFile(join(root, 'apps/hq/src/proxy.ts'), 'utf8');
-    const missingIdentityCheck = source.indexOf(
-      '!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || !process.env.CLERK_SECRET_KEY',
-    );
+    const missingIdentityCheck = source.indexOf('!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
     const livenessCheck = source.indexOf('isExactReplitHqHealthCheck({');
     const clerkBoundary = source.indexOf('return productionClerkMiddleware(request, event)');
 
     expect(missingIdentityCheck).toBeGreaterThan(-1);
+    expect(source).toContain('!process.env.CLERK_SECRET_KEY');
+    expect(source).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
+    expect(source).toContain('{ signInUrl: productionClerkSignInUrl }');
     expect(livenessCheck).toBeGreaterThan(missingIdentityCheck);
     expect(clerkBoundary).toBeGreaterThan(livenessCheck);
     expect(source).toContain("const isPublicRoute = createRouteMatcher(['/sign-in(.*)'])");

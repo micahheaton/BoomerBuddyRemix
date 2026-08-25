@@ -247,7 +247,6 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
     family: [
       { interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' },
       { interval: 'year', amountMinor: 14_900, currency: 'USD', kind: 'list' },
-      { interval: 'year', amountMinor: 11_900, currency: 'USD', kind: 'founding_experiment' },
     ],
   } as const;
   const planEffectiveAt = '2026-08-15T00:00:00.000Z';

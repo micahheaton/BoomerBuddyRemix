@@ -65,4 +65,9 @@ export const apiPaths = {
   hqRevenue: '/v1/hq/revenue',
   hqProvisioning: '/v1/hq/provisioning',
   hqFoundingHouseholds: '/v1/hq/founding-households',
+  hqBillingAuthorities: '/v1/hq/billing-authorities',
+  hqStripeInitiationControl: '/v1/hq/commerce/stripe/initiation-control',
+  hqStripeCohortControl: '/v1/hq/commerce/stripe/cohort-control',
+  hqStripeEligibleHousehold: '/v1/hq/commerce/stripe/eligible-household',
+  hqStripeStatus: '/v1/hq/commerce/stripe/status',
 } as const;

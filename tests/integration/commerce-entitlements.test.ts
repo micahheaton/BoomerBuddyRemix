@@ -72,16 +72,18 @@ describe('provider-neutral commerce and household allowances', () => {
 
     const publicConfig = await harness.app.inject({ method: 'GET', url: '/v1/public/config' });
     expect(publicConfig.statusCode).toBe(200);
-    expect(publicConfig.json().pricing).toEqual([
-      expect.objectContaining({ key: 'free', monthlyUsd: 0, annualUsd: 0, hypothesis: true }),
-      expect.objectContaining({ key: 'plus', monthlyUsd: 8.99, annualUsd: 89 }),
-      expect.objectContaining({
-        key: 'family',
-        monthlyUsd: 14.99,
-        annualUsd: 149,
-        foundingAnnualUsd: 119,
-      }),
-    ]);
+    expect(publicConfig.json()).toMatchObject({
+      liveProvidersEnabled: false,
+      pricing: [
+        {
+          key: 'family',
+          name: 'Family',
+          monthlyUsd: 14.99,
+          annualUsd: null,
+          hypothesis: false,
+        },
+      ],
+    });
 
     const aliceEntitlements = await harness.app.inject({
       method: 'GET',

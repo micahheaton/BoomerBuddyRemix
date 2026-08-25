@@ -41,6 +41,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     BB_CLERK_CUSTOMER_AUDIENCE: 'boomerbuddy-customer',
     BB_CLERK_CUSTOMER_JWT_KEY:
       '-----BEGIN PUBLIC KEY-----\ncustomer-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'none',
     BB_CLERK_HQ_ISSUER: 'https://hq.clerk.test',
     BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-hq',
     BB_CLERK_HQ_JWT_KEY:
@@ -159,6 +160,7 @@ describe('typed configuration', () => {
         issuer: 'https://customer.clerk.test',
         audience: 'boomerbuddy-customer',
         authorizedParties: ['https://customer.test'],
+        mobileAuthorizedParties: [],
       },
       hq: {
         issuer: 'https://hq.clerk.test',
@@ -183,6 +185,7 @@ describe('typed configuration', () => {
       'BB_CLERK_CUSTOMER_ISSUER',
       'BB_CLERK_CUSTOMER_AUDIENCE',
       'BB_CLERK_CUSTOMER_JWT_KEY',
+      'BB_CLERK_MOBILE_AUTHORIZED_PARTIES',
       'BB_CLERK_HQ_ISSUER',
       'BB_CLERK_HQ_AUDIENCE',
       'BB_CLERK_HQ_JWT_KEY',
@@ -227,6 +230,24 @@ describe('typed configuration', () => {
         BB_CLERK_HQ_JWT_KEY: 'not-a-pem-key',
       }),
     ).toThrow('bounded PEM public key');
+    expect(
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'https://native-auth.test',
+      }).identity.clerk?.customer.mobileAuthorizedParties,
+    ).toEqual(['https://native-auth.test']);
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'https://customer.test',
+      }),
+    ).toThrow('disjoint from customer and HQ browser origins');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'http://native-auth.test',
+      }),
+    ).toThrow('exact HTTPS origins');
   });
 
   it('refuses shared encryption/fingerprint keys and malformed origins', () => {
@@ -277,7 +298,7 @@ describe('typed configuration', () => {
     expect(config.commerce.stripe).toMatchObject({
       mode: 'test',
       environment: 'test',
-      apiVersion: '2026-02-25.clover',
+      apiVersion: '2026-07-29.dahlia',
       runtimeInitiationPermitted: true,
       offer: {
         offerId: 'founding_family_monthly_v1',
@@ -307,15 +328,13 @@ describe('typed configuration', () => {
     ).toThrow('test mode refuses live Stripe configuration values');
   });
 
-  it('refuses raw live secrets and inactive Stripe environment families in every mode', () => {
-    for (const [name, value] of [
-      ['BB_STRIPE_LIVE_API_KEY', 'sk_live_fixture_12345678'],
-      ['BB_STRIPE_LIVE_WEBHOOK_SECRET', 'whsec_live_fixture_12345678'],
-    ] as const) {
-      expect(() => loadConfig({ ...developmentEnvironment(), [name]: value })).toThrow(
-        'Live Stripe secrets cannot be loaded from raw environment keys',
-      );
-    }
+  it('refuses legacy shared live keys and inactive Stripe environment families', () => {
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_STRIPE_LIVE_API_KEY: 'sk_live_fixture_12345678',
+      }),
+    ).toThrow('legacy shared API key');
     expect(() =>
       loadConfig({
         ...developmentEnvironment(),
@@ -340,9 +359,9 @@ describe('typed configuration', () => {
     }
   });
 
-  it('accepts reviewed test keys and keeps live configuration offline without raw secrets', () => {
+  it('accepts separate least-privilege live API and worker custody while defaulting initiation off', () => {
     const commonLive = {
-      ...developmentEnvironment(),
+      ...productionEnvironment(),
       BB_STRIPE_MODE: 'live',
       BB_STRIPE_LIVE_ACCOUNT_ID: 'acct_livefixture1',
       BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_live_cancel_fixture',
@@ -350,32 +369,60 @@ describe('typed configuration', () => {
       BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: 'price_live_family_fixture',
     };
     expect(() =>
-      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'sk_live_fixture_12345678' }),
-    ).toThrow('raw environment keys');
-    expect(() =>
-      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'rk_test_fixture_12345678' }),
-    ).toThrow('raw environment keys');
-    const liveConfig = loadConfig(commonLive);
-    expect(liveConfig.commerce.stripe).toMatchObject({
-      mode: 'live',
-      environment: 'production',
-      runtimeInitiationPermitted: false,
-      runtimeNetworkPermitted: false,
-      credentialCustody: 'managed_identity_kms_unavailable',
-      requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
-    });
-    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'api')).toThrow(
-      'offline-only; api startup is refused',
-    );
-    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'worker')).toThrow(
-      'offline-only; worker startup is refused',
-    );
+      loadConfig({
+        ...commonLive,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'sk_live_fixture_12345678',
+        BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+      }),
+    ).toThrow('restricted key custody');
     expect(() =>
       loadConfig({
         ...commonLive,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+        BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
         BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
       }),
-    ).toThrow('raw environment keys');
+    ).toThrow('restricted key custody');
+    const apiConfig = loadConfig({
+      ...commonLive,
+      BB_STRIPE_RUNTIME_SURFACE: 'api',
+      BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+      BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+    });
+    expect(apiConfig.commerce.stripe).toMatchObject({
+      mode: 'live',
+      environment: 'production',
+      runtimeSurface: 'api',
+      runtimeInitiationPermitted: false,
+      runtimeNetworkPermitted: true,
+      credentialCustody: 'separate_replit_runtime_restricted_keys',
+    });
+    expect(() => assertStripeOnlineRuntimePermitted(apiConfig, 'api')).not.toThrow();
+    expect(() => assertStripeOnlineRuntimePermitted(apiConfig, 'worker')).toThrow(
+      'worker startup refuses api credential custody',
+    );
+    const workerConfig = loadConfig({
+      ...commonLive,
+      BB_STRIPE_RUNTIME_SURFACE: 'worker',
+      BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
+    });
+    expect(workerConfig.commerce.stripe).toMatchObject({
+      mode: 'live',
+      runtimeSurface: 'worker',
+      runtimeInitiationPermitted: false,
+      runtimeNetworkPermitted: true,
+    });
+    expect(() => assertStripeOnlineRuntimePermitted(workerConfig, 'worker')).not.toThrow();
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        BB_STRIPE_RUNTIME_SURFACE: 'worker',
+        BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
+        BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+      }),
+    ).toThrow('restricted key custody');
     expect(() =>
       loadConfig({
         ...commonLive,

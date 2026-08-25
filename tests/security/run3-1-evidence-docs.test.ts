@@ -39,6 +39,7 @@ describe('Run 3.1 founder evidence documents', () => {
       'BB_API_INTERNAL_ORIGIN',
       'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
       'CLERK_SECRET_KEY',
+      'NEXT_PUBLIC_CLERK_SIGN_IN_URL',
       'BB_API_HOST',
       'BB_API_PORT',
       'BB_TRUSTED_PROXY_HOPS',
@@ -55,6 +56,7 @@ describe('Run 3.1 founder evidence documents', () => {
       'BB_CLERK_CUSTOMER_ISSUER',
       'BB_CLERK_CUSTOMER_AUDIENCE',
       'BB_CLERK_CUSTOMER_JWT_KEY',
+      'BB_CLERK_MOBILE_AUTHORIZED_PARTIES',
       'BB_CLERK_HQ_ISSUER',
       'BB_CLERK_HQ_AUDIENCE',
       'BB_CLERK_HQ_JWT_KEY',
@@ -64,6 +66,15 @@ describe('Run 3.1 founder evidence documents', () => {
       'BB_SAFE_WORD_PEPPER',
       'BB_LOG_LEVEL',
       'BB_STRIPE_MODE',
+      'BB_STRIPE_RUNTIME_SURFACE',
+      'BB_STRIPE_LIVE_INITIATION_ENABLED',
+      'BB_STRIPE_LIVE_ACCOUNT_ID',
+      'BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID',
+      'BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID',
+      'BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID',
+      'BB_STRIPE_LIVE_API_RESTRICTED_KEY',
+      'BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY',
+      'BB_STRIPE_LIVE_WEBHOOK_SECRET',
       'BB_TWILIO_MODE',
       'BB_WORKER_ID',
       'BB_WORKER_POLL_MS',
@@ -81,8 +92,10 @@ describe('Run 3.1 founder evidence documents', () => {
     expect(manifest).toContain('`REPLIT_SECRET_SUFFICIENT_FOR_BETA`');
     expect(manifest).toContain('`NOT_USED_IN_FOUNDING_HOUSEHOLD_SCOPE`');
     expect(manifest).toContain('No enabled Run 3.1 runtime value is classified');
-    expect(manifest).toContain('Stripe is out of scope');
-    expect(manifest).toContain('Provider adapter is absent');
+    expect(manifest).toContain('Surface-separated live Stripe configuration');
+    expect(manifest).toContain('operator-approved, unexpired max-one cohort');
+    expect(manifest).toContain('The deprecated shared `BB_STRIPE_LIVE_API_KEY` is always absent');
+    expect(manifest).toContain('Twilio credential/URL fields are refused');
     expect(manifest).toContain('disposable provider-test PostgreSQL verification shell');
     expect(manifest).toContain('API pool 2 plus worker pool 1/batch 1');
   });

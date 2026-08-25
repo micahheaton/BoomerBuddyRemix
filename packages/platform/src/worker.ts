@@ -27,6 +27,17 @@ export interface SelectiveOutboxHandler {
   readonly handle: OutboxHandler;
 }
 
+function unrefTimer(timer: unknown): void {
+  if (
+    typeof timer === 'object' &&
+    timer !== null &&
+    'unref' in timer &&
+    typeof timer.unref === 'function'
+  ) {
+    timer.unref();
+  }
+}
+
 export class JobExecutionError extends Error {
   constructor(
     readonly code: string,
@@ -66,7 +77,7 @@ function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
       return;
     }
     const timeout = setTimeout(resolve, milliseconds);
-    timeout.unref();
+    unrefTimer(timeout);
     signal.addEventListener(
       'abort',
       () => {
@@ -173,7 +184,7 @@ export class PortableWorker {
       }),
     );
     const timer = setInterval(() => void lease.heartbeat(), this.config.heartbeatIntervalMs);
-    timer.unref();
+    unrefTimer(timer);
     try {
       await handler({
         job,
@@ -239,7 +250,7 @@ export class PortableWorker {
       }),
     );
     const timer = setInterval(() => void lease.heartbeat(), this.config.heartbeatIntervalMs);
-    timer.unref();
+    unrefTimer(timer);
     try {
       await this.outboxHandler.handle({
         event,
@@ -368,7 +379,7 @@ export class PortableWorker {
       completion,
       new Promise<void>((resolve) => {
         timeout = setTimeout(resolve, this.config.shutdownTimeoutMs);
-        timeout.unref();
+        unrefTimer(timeout);
       }),
     ]);
     if (timeout !== undefined) clearTimeout(timeout);

@@ -56,10 +56,12 @@ additional set, or any altered inventory or lock metadata remains a hard failure
 | `BB_API_INTERNAL_ORIGIN`            | Exact upstream API origin for server proxy                 | No      | API published URL, e.g. `https://api.example.replit.app`      | W/H                      | Required HTTPS origin with no path/query/credentials. Missing/invalid returns private no-store 503.                                                            |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Select the correct browser Clerk application               | No      | customer or HQ `pk_live_...`                                  | W/H                      | Required in production; customer and HQ values come from separate Clerk apps. At build, the reviewed Next config aliases Replit-managed `CLERK_PUBLISHABLE_KEY` when this name is absent. |
 | `CLERK_SECRET_KEY`                  | Clerk Next.js server/middleware credential                 | Yes     | matching Clerk production application                         | W/H                      | Required only in the matching project. Missing makes every matched production request return no-store 503. Never prefix with `NEXT_PUBLIC_`.                   |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL`     | Pin Clerk server and browser redirects to the local route  | No      | exactly `/sign-in`                                            | W/H                      | Required exactly as shown. Missing or any other value makes every matched production request return no-store 503 instead of falling back to the hosted Account Portal. |
 | `NEXT_PUBLIC_API_URL`               | Legacy local direct API target                             | No      | not set                                                       | none in production       | Production client uses same-origin `/api`; omit.                                                                                                               |
 | `EXPO_PUBLIC_API_URL`               | Mobile direct API target                                   | No      | not set                                                       | none                     | Mobile is outside Run 3.1 deployment.                                                                                                                          |
 
-The web and HQ proxies forward only the exact `__session` cookie plus a small header allowlist. They
+The web and HQ proxies pass the exact configured `/sign-in` path into Clerk's server middleware and
+forward only the exact `__session` cookie plus a small header allowlist. They
 discard legacy BoomerBuddy session cookies and Authorization. The API independently verifies issuer,
 authorized party, signature, time, subject, provider session, and state. Customer tokens may omit
 `aud` only under ADR 0030; an explicit customer `aud` must match. HQ always requires its exact
@@ -95,6 +97,7 @@ closed.
 | `BB_CLERK_CUSTOMER_ISSUER`                  | Exact customer token issuer                                         | No                                   | customer Clerk Frontend API HTTPS origin              | A/K/M                         | Required. Must differ from HQ issuer and contain no path/query/credentials.                                                                            |
 | `BB_CLERK_CUSTOMER_AUDIENCE`                | Customer realm audience binding                                     | No                                   | `boomerbuddy-customer`                                | A/K/M                         | Required, whitespace-free, distinct from HQ. An explicit token `aud` must match; provider-default customer tokens may omit it only under ADR 0030.       |
 | `BB_CLERK_CUSTOMER_JWT_KEY`                 | Offline customer JWT verification                                   | Public key, protect config integrity | customer Clerk PEM public key                         | A/K/M                         | Required bounded `BEGIN PUBLIC KEY` PEM and distinct from HQ. Invalid/missing refuses startup.                                                         |
+| `BB_CLERK_MOBILE_AUTHORIZED_PARTIES`        | Exact native JWT `azp` allowlist                                     | No                                   | `none` until physical-device proof                    | A/K/M                         | Required. `none` accepts only omitted `azp`; otherwise at most eight exact HTTPS origins, disjoint from customer/HQ browser origins.                    |
 | `BB_CLERK_HQ_ISSUER`                        | Exact HQ token issuer                                               | No                                   | HQ Clerk Frontend API HTTPS origin                    | A/K/M                         | Required and distinct from customer.                                                                                                                   |
 | `BB_CLERK_HQ_AUDIENCE`                      | Exact HQ token audience                                             | No                                   | `boomerbuddy-hq`                                      | A/K/M                         | Required and distinct from customer.                                                                                                                   |
 | `BB_CLERK_HQ_JWT_KEY`                       | Offline HQ JWT verification                                         | Public key, protect config integrity | HQ Clerk PEM public key                               | A/K/M                         | Required and distinct from customer.                                                                                                                   |
@@ -103,11 +106,35 @@ closed.
 | `BB_FINGERPRINT_KEY_BASE64`                 | Keyed fingerprints, evidence binding, and nonreversible identifiers | Yes                                  | separate canonical base64 of 32 random bytes          | A/K/M                         | Required; wrong length/noncanonical/equal to another secret refuses config.                                                                            |
 | `BB_SAFE_WORD_PEPPER`                       | Safe-word verifier hardening                                        | Yes                                  | separate high-entropy string, 16+ characters          | A/K/M                         | Required and distinct. Missing/short/equal secret refuses config.                                                                                      |
 | `BB_LOG_LEVEL`                              | Structured log threshold                                            | No                                   | `info`                                                | A/K/M                         | Optional default `info`; only `debug`, `info`, `warn`, `error`. Do not use debug with customer traffic.                                                |
-| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | `disabled`                                            | A/K/M                         | Production requires `disabled`. Any Stripe mode or any Stripe field refuses the beta runtime.                                                          |
+| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | default `disabled`; reviewed rollout `live`           | A/K                           | Live is production-capable only with the complete surface-specific manifest below. Disabled mode refuses every Stripe field.                           |
 | `BB_TWILIO_MODE`                            | Messaging network boundary                                          | No                                   | `disabled`                                            | A/K/M                         | Only `disabled` parses; all Twilio credential/URL fields are refused.                                                                                  |
 
 `BB_SESSION_SECRET` is intentionally **absent** in production. Supplying it refuses startup because
 production accepts only Clerk's exact `__session`; the secret exists only for local development.
+
+### Surface-separated live Stripe configuration
+
+Live Stripe remains default-off. The API and worker use the same exact live account, Family product,
+USD $14.99/month price, and bounded Portal configuration identifiers, but they must not receive the
+same credential manifest. Each project receives only its own restricted key. The API alone receives
+the webhook signing secret and is the only surface on which initiation may later become true. The
+worker must keep initiation false. The deprecated shared `BB_STRIPE_LIVE_API_KEY` is always absent
+and is rejected by configuration.
+
+| Variable | Purpose | Secret? | API project | Worker project | Failure behavior |
+| --- | --- | --- | --- | --- | --- |
+| `BB_STRIPE_RUNTIME_SURFACE` | Bind one credential to one runtime | No | exactly `api` | exactly `worker` | Missing, wrong, or mixed surface custody refuses startup. |
+| `BB_STRIPE_LIVE_INITIATION_ENABLED` | Runtime initiation kill switch | No | `false` by default; `true` only after the active operator-approved, unexpired max-one cohort and exact live preflight | exactly `false` | Worker true, or API true without reviewed database controls, remains fail-closed. |
+| `BB_STRIPE_LIVE_ACCOUNT_ID` | Exact live Stripe account | No, identifier | exact `acct_...` | same identifier | Missing or malformed refuses startup; preflight also requires charges and payouts enabled for a US company account. |
+| `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` | Family product | No, identifier | exact live `prod_...` | same identifier | Must resolve to the active Family product. |
+| `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` | Family monthly price | No, identifier | exact live `price_...` | same identifier | Must resolve to one active recurring USD 1,499-cent monthly price with quantity one. |
+| `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | Bounded customer Portal | No, identifier | exact live `bpc_...` | same identifier | Payment-method update and cancel-at-period-end are enabled; plan changes, promotions, and proration are disabled. |
+| `BB_STRIPE_LIVE_API_RESTRICTED_KEY` | API Checkout, Portal, preflight, and webhook-side reconciliation reads | Yes | required `rk_live_...` in API Secrets only | absent | Any unrestricted key, worker key, or cross-surface copy refuses startup. |
+| `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY` | Worker inventory and reconciliation reads | Yes | absent | required `rk_live_...` in worker Secrets only | Any API key, webhook secret, or cross-surface copy refuses startup. |
+| `BB_STRIPE_LIVE_WEBHOOK_SECRET` | Verify the exact live webhook endpoint | Yes | required `whsec_...` in API Secrets only | absent | Missing on API or present on worker refuses the live surface manifest. |
+
+Production projects must omit every `BB_STRIPE_TEST_*` value. Test mode remains limited to isolated
+nonproduction evidence and cannot be mixed with any live field.
 
 The initial 0.25-CU database capacity profile is API pool 2 plus worker pool 1/batch 1. A pooled Neon
 URL controls connection churn but does not replace these application-side active-work caps. SQLSTATE
@@ -128,8 +155,9 @@ cannot pass with these caps.
 | `BB_WORKER_RETRY_BASE_MS` | Retry backoff base                 | No      | `1000`             | K        | Optional default 1000; range 100–60000.                                     |
 | `BB_WORKER_RETRY_MAX_MS`  | Retry backoff cap                  | No      | `300000`           | K        | Optional default 300000; range 1000–3600000.                                |
 
-Production worker composition contains only reviewed internal jobs, including feedback retention. It
-must contain no feedback classification/model/media/outbound handler and no Stripe/Twilio network
+Production worker composition contains only reviewed internal jobs, including feedback retention and
+the bounded Stripe inventory/reconciliation handlers when the exact worker live manifest is present.
+It must contain no feedback classification/model/media/outbound handler and no Twilio network
 adapter. Do not increase the worker pool or batch until repeated mixed API/worker provider tests show
 memory and latency headroom without SQLSTATE `53200`.
 
@@ -149,7 +177,10 @@ verifier is not a runtime mode or a migration shortcut.
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `BB_SESSION_SECRET`                                                                                                                                                                              | A/K/M          | Development signing material; production explicitly rejects it.                                                    |
 | `BB_PGLITE_PATH`                                                                                                                                                                                 | all production | Deployment filesystem is not customer truth; PostgreSQL is required.                                               |
-| `BB_STRIPE_TEST_*`, `BB_STRIPE_LIVE_*`                                                                                                                                                           | A/K/M          | Stripe is out of scope. Disabled mode refuses every mapped value; raw live key/webhook material is always refused. |
+| `BB_STRIPE_TEST_*`                                                                                                                                                                               | A/K/M          | Production refuses sandbox resources and credentials.                                                             |
+| `BB_STRIPE_LIVE_API_KEY`                                                                                                                                                                        | A/K/M          | Deprecated shared or unrestricted live key; configuration always rejects it.                                      |
+| `BB_STRIPE_LIVE_API_RESTRICTED_KEY`, `BB_STRIPE_LIVE_WEBHOOK_SECRET`                                                                                                                            | K/M            | API-only custody; either value on worker or migration shell refuses the exact manifest.                            |
+| `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY`                                                                                                                                                           | A/M            | Worker-only custody; the value must never be copied to API or migration shell.                                     |
 | `BB_TWILIO_ACCOUNT_SID`, `BB_TWILIO_AUTH_TOKEN`, `BB_TWILIO_MESSAGING_SERVICE_SID`, `BB_TWILIO_TOLL_FREE_NUMBER_SID`, `BB_TWILIO_INBOUND_WEBHOOK_BASE_URL`, `BB_TWILIO_STATUS_CALLBACK_BASE_URL` | A/K/M          | Provider adapter is absent; any value refuses config.                                                              |
 | `NEXT_PUBLIC_API_URL`, `EXPO_PUBLIC_API_URL`                                                                                                                                                     | W/H            | Production browser traffic uses same-origin proxies; mobile is not deployed.                                       |
 | Any `.env` file                                                                                                                                                                                  | all            | Never commit or bake secrets into the deployment snapshot. Use Published app secrets.                              |
@@ -175,7 +206,8 @@ Output must be an absolute founder-controlled path outside the repository and mu
 | PostgreSQL `DATABASE_URL`      | Database authentication and endpoint                       | Yes                    | `REPLIT_SECRET_SUFFICIENT_FOR_BETA`                                       | Requires TLS URL and narrow role; provider backups/role separation remain external evidence.                                                                                                                                        |
 | `BB_RUN3_1_BACKUP_KEY_BASE64`  | External recovery artifact                                 | Yes, founder tool only | `FOUNDER_HELD_OUTSIDE_REPLIT` (portability-only; not a runtime KMS claim) | Founder-controlled external custody supplies independence from the runtime platform. A hardware/password-manager secret is acceptable for the drill; never inject into deployments.                                                 |
 | `BB_SESSION_SECRET`            | Development token signing                                  | No                     | `NOT_USED_IN_FOUNDING_HOUSEHOLD_SCOPE`                                    | Production rejects it.                                                                                                                                                                                                              |
-| Stripe/Twilio credentials      | Future payment/SMS providers                               | No                     | `NOT_USED_IN_FOUNDING_HOUSEHOLD_SCOPE`                                    | Runtime rejects them.                                                                                                                                                                                                               |
+| Stripe API restricted key and webhook secret | Family billing and signed payment truth                    | Yes, surface-specific  | `REPLIT_SECRET_SUFFICIENT_FOR_BETA`                                       | API and worker credentials are separate least-privilege restricted keys. The webhook secret exists only on API. Initiation remains default-off and database-gated to one approved household. Rotate in Stripe on suspected exposure. |
+| Twilio credentials             | Future SMS/voice provider                                  | No                     | `NOT_USED_IN_FOUNDING_HOUSEHOLD_SCOPE`                                    | Runtime rejects them while `BB_TWILIO_MODE=disabled`.                                                                                                                                                                                |
 
 This beta classification is an explicit risk decision, not a claim that Replit Secrets are KMS.
 Replit documents Secrets as encrypted environment variables; the application necessarily receives
@@ -189,4 +221,4 @@ requires a fresh custody and rotation review.
 
 No enabled Run 3.1 runtime value is classified `TRUE_KMS_REQUIRED_BEFORE_EXTERNAL_USER` under this
 one-household, sole-founder risk boundary. That conclusion expires if another operator, household,
-media path, provider credential, or broader production use is added.
+media path, additional provider credential, or broader production use is added.

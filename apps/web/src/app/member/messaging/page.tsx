@@ -87,20 +87,20 @@ export default function MessagingPage() {
 
   return (
     <main id="main-content" className="member-shell member-main">
-      <span className="eyebrow">Provider-free messaging laboratory</span>
-      <h1 className="member-heading">Review consent without sending a message.</h1>
+      <span className="eyebrow">Messaging</span>
+      <h1 className="member-heading">Messaging is not available yet.</h1>
       <p className="lede">
-        This local-only surface records a fictional U.S. test destination and separate purpose
-        choices. It cannot contact Twilio, deliver SMS, upload contacts, or prove production
-        consent.
+        BoomerBuddy does not currently send invitations, alerts, or other text messages. No contacts
+        are uploaded and no message is sent from this page.
       </p>
       {!localOnlyEnabled ? (
         <section className="notice notice-warning" role="status">
           <h2>Messaging is not activated</h2>
           <p>
-            Production messaging remains unavailable until provider, consent, professional, and
-            founder activation gates are independently satisfied.
+            Messaging remains unavailable during this private beta. Return to member home to use the
+            available account features.
           </p>
+          <Link href="/member">Return to member home</Link>
         </section>
       ) : (
         <>

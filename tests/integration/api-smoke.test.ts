@@ -10,23 +10,25 @@ describe('Run 1 API', () => {
     harness = undefined;
   });
 
-  it('serves health, pricing hypotheses, and an authenticated local Check without echoing content', async () => {
+  it('serves health, the Family launch offer, and an authenticated local Check without echoing content', async () => {
     harness = await createApiHarness();
     const live = await harness.app.inject({ method: 'GET', url: '/health/live' });
     const ready = await harness.app.inject({ method: 'GET', url: '/health/ready' });
     const publicConfig = await harness.app.inject({ method: 'GET', url: '/v1/public/config' });
     expect(live.statusCode).toBe(200);
     expect(ready.statusCode).toBe(200);
-    expect(publicConfig.json().pricing).toEqual([
-      expect.objectContaining({ key: 'free', monthlyUsd: 0, annualUsd: 0 }),
-      expect.objectContaining({ key: 'plus', monthlyUsd: 8.99, annualUsd: 89 }),
-      expect.objectContaining({
-        key: 'family',
-        monthlyUsd: 14.99,
-        annualUsd: 149,
-        foundingAnnualUsd: 119,
-      }),
-    ]);
+    expect(publicConfig.json()).toMatchObject({
+      liveProvidersEnabled: false,
+      pricing: [
+        {
+          key: 'family',
+          name: 'Family',
+          monthlyUsd: 14.99,
+          annualUsd: null,
+          hypothesis: false,
+        },
+      ],
+    });
 
     const session = await login(harness.app, 'owner-alice');
     const raw = 'Please act now, but I will verify through the official bank application.';

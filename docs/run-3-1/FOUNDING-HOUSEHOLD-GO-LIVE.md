@@ -38,7 +38,10 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    settings.
 8. Open Replit and import the same private GitHub repository into four founder-owned projects named
    conceptually `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq`.
-   Do not ask Replit Agent to rewrite authentication or application code.
+   Do not ask Replit Agent to rewrite authentication or application code. GitHub is the source of
+   truth: each service pulls the exact approved commit from `BoomerBuddyRemix`, and no Replit
+   project ever pushes code or editor checkpoints back to GitHub. The separate `BoomerBuddy`
+   project serving legacy `boomerbuddy.net` is outside this deployment set and stays untouched.
 9. In each Replit project Shell, explicitly fetch the exact tag ref with
    `git fetch origin refs/tags/<tag>:refs/tags/<tag>` because Replit's Pull action does not fetch tags,
    then check out the candidate tag in detached mode. Verify that
@@ -254,6 +257,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 | API proxy origin              | Published app secrets                   | `BB_API_INTERNAL_ORIGIN`                    | No                            | exact API HTTPS origin                     | web, HQ                                                         |
 | Clerk browser key             | Published app secrets                   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`         | No                            | matching `pk_live_...`                     | web or HQ, distinct tenants                                     |
 | Clerk server key              | Published app secrets                   | `CLERK_SECRET_KEY`                          | Yes                           | matching provider value                    | web or HQ, distinct tenants                                     |
+| Clerk sign-in route           | Published app secrets                   | `NEXT_PUBLIC_CLERK_SIGN_IN_URL`             | No                            | exactly `/sign-in`                         | web and HQ; any other value fails closed                        |
 | API bind                      | Published app secrets                   | `BB_API_HOST`                               | No                            | `0.0.0.0`                                  | API                                                             |
 | API port                      | Derived by start wrapper                | `BB_API_PORT`                               | No                            | provider `PORT`                            | API child; do not configure separately                          |
 | Trusted proxy count           | Published app secrets                   | `BB_TRUSTED_PROXY_HOPS`                     | No                            | `0`                                        | API, worker, controlled CLI                                     |

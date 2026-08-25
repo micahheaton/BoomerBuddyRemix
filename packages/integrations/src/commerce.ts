@@ -169,6 +169,10 @@ export interface ProviderFailedPaymentEvidence {
 export interface StripePreflightEvidence {
   readonly environment: 'test' | 'production';
   readonly accountId: string;
+  readonly accountChargesEnabled: boolean;
+  readonly accountPayoutsEnabled: boolean;
+  readonly accountCountry: string | null;
+  readonly accountBusinessType: string | null;
   readonly livemode: boolean;
   readonly apiVersion: string;
   readonly offer: StripeFoundingOffer;
@@ -180,6 +184,7 @@ export interface StripePreflightEvidence {
   readonly portalCancellationMode: 'at_period_end';
   readonly portalProrationBehavior: 'none';
   readonly portalSubscriptionUpdateDefaultsEmpty: true;
+  readonly portalPaymentMethodUpdateEnabled: true;
   readonly retentionCouponEvidence: 'manual_founder_browser_required';
   readonly promotionsEnabled: false;
   readonly automaticTaxEnabled: false;

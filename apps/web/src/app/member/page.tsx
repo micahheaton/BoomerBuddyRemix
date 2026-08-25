@@ -76,6 +76,7 @@ export default function MemberHomePage() {
     selectedScope?.isAdministrator === true ||
     selectedScope?.isProtectedMember === true ||
     (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
+  const canManageSponsoredAccess = selectedScope?.isAdministrator === true;
   const selectedEntitlements =
     entitlements?.householdId === selectedHouseholdId ? entitlements.value : undefined;
   const protectedAllowance = selectedEntitlements?.commerce.allowances.find(
@@ -86,11 +87,19 @@ export default function MemberHomePage() {
   );
 
   function allowanceSummary(label: string, allowance: typeof protectedAllowance): string {
-    if (!allowance) return `${label}: unavailable in the local access projection.`;
+    if (!allowance) return `${label}: unavailable in the current access record.`;
+    const status =
+      allowance.state === 'available'
+        ? 'Available.'
+        : allowance.state === 'exhausted'
+          ? 'The current plan limit has been reached.'
+          : allowance.state === 'usage_unknown'
+            ? 'Current use could not be confirmed.'
+            : 'This allowance is not currently active.';
     if (allowance.used === null) {
-      return `${label}: usage unavailable; local limit ${allowance.limit}. State: ${allowance.state.replaceAll('_', ' ')}.`;
+      return `${label}: current use unavailable; limit ${allowance.limit}. ${status}`;
     }
-    return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} remaining. State: ${allowance.state.replaceAll('_', ' ')}.`;
+    return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} remaining. ${status}`;
   }
 
   return (
@@ -99,7 +108,7 @@ export default function MemberHomePage() {
       <h1 className="member-heading">Hello, {me.principal.displayName}</h1>
       <p className="lede">
         {isUnassigned
-          ? 'You are not connected to a household yet. A valid local invitation and your explicit consent are required before any household access appears.'
+          ? 'You are not connected to a household yet. A valid invitation and your explicit consent are required before any household access appears.'
           : 'Take a breath. You can check something suspicious or ask a trusted person before you act.'}
       </p>
       {error && (
@@ -125,7 +134,7 @@ export default function MemberHomePage() {
             <span className="dev-pill">Recommended next step</span>
             <h2>Check a message or link</h2>
             <p>
-              Local rules-only analysis will show uncertainty and safer actions. Do not paste
+              The result will show warning signs, uncertainty, and safer actions. Do not paste
               passwords or access codes.
             </p>
             {canCheck ? (
@@ -184,7 +193,7 @@ export default function MemberHomePage() {
                 <Link href="/member/history">Open history</Link>
               </>
             ) : (
-              <p className="meta">History is unavailable in this household scope.</p>
+              <p className="meta">History is unavailable for your role in this household.</p>
             )}
           </section>
           {selectedHouseholdId ? (
@@ -223,37 +232,38 @@ export default function MemberHomePage() {
           {selectedScope?.isBillingManager ? (
             <section className="card">
               <h2>Billing</h2>
-              <p>
-                Review the founder-gated Founding Household offer and its payment-evidence state.
-              </p>
+              <p>Review your current plan, payment status, and available billing controls.</p>
               <Link href="/member/billing">Open billing</Link>
             </section>
           ) : null}
-          {selectedScope?.isAdministrator ? (
+          {process.env.NODE_ENV !== 'production' && selectedScope?.isAdministrator ? (
             <section className="card">
-              <span className="dev-pill">
-                {process.env.NODE_ENV === 'production'
-                  ? 'Founder-sponsored · no card'
-                  : 'Local no-card path'}
-              </span>
+              <span className="dev-pill">Local no-card path</span>
               <h2>Founding Household</h2>
               <p>
-                Review a founder-issued, one-time invitation and finite sponsored beta terms. No
-                payment or automatic message is sent.
+                Review a one-time invitation and finite sponsored beta terms. No payment or
+                automatic message is sent.
               </p>
               <Link href="/member/founding-household">Open Founding Household review</Link>
+            </section>
+          ) : null}
+          {process.env.NODE_ENV === 'production' && canManageSponsoredAccess ? (
+            <section className="card">
+              <h2>Sponsored access</h2>
+              <p>Review historical sponsored access or withdraw its service consent.</p>
+              <Link href="/member/founding-household">Manage sponsored access</Link>
             </section>
           ) : null}
           <section className="card" data-testid="local-access-summary">
             <span className="dev-pill">
               {process.env.NODE_ENV === 'production'
-                ? 'Current access record'
+                ? 'Current access and plan'
                 : 'Local access hypothesis'}
             </span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
             <p>
-              This access record is a product hypothesis. Billing initiation is a separate,
-              founder-gated flow and may be unavailable for this household.
+              This record describes your current household access. Billing controls may be
+              unavailable for this household or your current role.
             </p>
             {!selectedScope?.isBillingManager ? (
               <p className="meta">
@@ -263,10 +273,10 @@ export default function MemberHomePage() {
             ) : selectedEntitlements ? (
               <>
                 <p className="meta">
-                  Access state: {selectedEntitlements.commerce.accessState.replaceAll('_', ' ')}
-                  {selectedEntitlements.commerce.primary
-                    ? ` · Plan state: ${selectedEntitlements.commerce.primary.plan.state}`
-                    : ''}
+                  Membership access:{' '}
+                  {selectedEntitlements.commerce.accessState === 'effective'
+                    ? 'available'
+                    : 'not currently active'}
                 </p>
                 <ul className="plain-list">
                   <li>{allowanceSummary('Protected adults', protectedAllowance)}</li>

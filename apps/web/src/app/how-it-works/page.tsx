@@ -9,9 +9,9 @@ export default function HowItWorksPage() {
         <span className="eyebrow">How it works</span>
         <h1 className="page-title">A calmer way to handle something suspicious</h1>
         <p className="lede">
-          BoomerBuddy is decision support, not a guarantee. Anonymous Public Check uses a temporary
-          conversion record; a longer-lived member record is created only after an authenticated,
-          explicit save or member Check.
+          BoomerBuddy is decision support, not a guarantee. Public Check works without an account. A
+          temporary result is saved to a household only when an invited member signs in and
+          deliberately chooses Save.
         </p>
         <div className="card-grid" style={{ marginTop: '2rem' }}>
           <article className="card">
@@ -23,8 +23,8 @@ export default function HowItWorksPage() {
             <div className="step-number">2</div>
             <h2>Check</h2>
             <p>
-              Choose text or URL. The result names its risk level, evidence sufficiency, calibration
-              limit, and safer actions.
+              Choose message text or a website address. The result explains what it noticed, what it
+              could not determine, and safer actions.
             </p>
           </article>
           <article className="card">
@@ -37,19 +37,21 @@ export default function HowItWorksPage() {
           </article>
         </div>
         <section className="section">
-          <h2 className="section-heading">What this build does not do</h2>
+          <h2 className="section-heading">What BoomerBuddy does not do</h2>
           <ul className="plain-list">
-            <li>It does not visit URLs or contact live reputation services.</li>
+            <li>
+              It does not open the website address you enter or look it up with an outside service.
+            </li>
             <li>It does not prove a message is safe or identify every scam.</li>
             <li>It does not ingest native share-sheet content or send invitations or alerts.</li>
-            <li>Its result labels have not been empirically calibrated.</li>
+            <li>Its result can miss warning signs or flag something harmless.</li>
           </ul>
           <div className="button-row">
             <Link className="button button-primary" href="/check">
               Use anonymous Public Check
             </Link>
             <Link className="button button-secondary" href="/sign-in">
-              Development sign in
+              Member sign in
             </Link>
           </div>
         </section>

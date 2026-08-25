@@ -4,39 +4,39 @@ import { SignIn } from '@clerk/nextjs';
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contracts';
-import { PublicFooter, PublicHeader } from '../../components/public-shell';
-import { apiRequest, readableError, setSelectedHouseholdId } from '../../lib/api';
+import { PublicFooter, PublicHeader } from '../../../components/public-shell';
+import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
 
 const personas: Array<{ id: DevPersonaId; name: string; detail: string }> = [
   {
     id: 'owner-alice',
-    name: 'Alice — administrator and protected adult',
+    name: 'Alice - administrator and protected adult',
     detail:
       'Sunrise household; independent protected enrollment enables Checks and self-orientation.',
   },
   {
     id: 'protected-pat',
-    name: 'Pat — protected member',
+    name: 'Pat - protected member',
     detail: 'Sunrise household; can use core protection features.',
   },
   {
     id: 'trusted-terry',
-    name: 'Terry — Trusted Circle',
+    name: 'Terry - Trusted Circle',
     detail: 'Sunrise household; access is limited by granted permissions.',
   },
   {
     id: 'trusted-jordan',
-    name: 'Jordan — unassigned trusted person',
+    name: 'Jordan - unassigned trusted person',
     detail: 'No household until Jordan knowingly accepts a valid local invitation.',
   },
   {
     id: 'owner-bob',
-    name: 'Bob — administrator without protected enrollment',
+    name: 'Bob - administrator without protected enrollment',
     detail: 'Harbor household; safety administration remains separate from protected workflows.',
   },
   {
     id: 'protected-olivia',
-    name: 'Olivia — second protected member',
+    name: 'Olivia - second protected member',
     detail: 'Harbor household; useful for explicit multi-household scope testing.',
   },
 ];
@@ -116,10 +116,9 @@ function ProductionSignIn() {
         <PublicHeader />
         <main id="main-content" className="page-shell narrow">
           <span className="eyebrow">Member sign in</span>
-          <h1 className="page-title">Sign-in is not configured</h1>
+          <h1 className="page-title">Member sign in is temporarily unavailable</h1>
           <p className="error" role="alert">
-            Member access is closed. Ask the BoomerBuddy founder to complete the identity setup
-            before trying again.
+            Contact support for help accessing your account. Do not create another account.
           </p>
         </main>
         <PublicFooter />
@@ -131,11 +130,11 @@ function ProductionSignIn() {
     <>
       <PublicHeader />
       <main id="main-content" className="page-shell narrow">
-        <span className="eyebrow">Private Founding Household beta</span>
+        <span className="eyebrow">Private beta</span>
         <h1 className="page-title">Sign in to BoomerBuddy</h1>
         <p className="lede">
-          Use the identity the founder invited. Signing in does not grant household access; an
-          exact, unexpired invitation and your consent are still required.
+          Use your invited member account. Signing in does not grant household access; an exact,
+          unexpired invitation and your consent are still required.
         </p>
         <div className="card" style={{ marginTop: '2rem', display: 'grid', placeItems: 'center' }}>
           <SignIn

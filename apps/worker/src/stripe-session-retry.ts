@@ -36,12 +36,31 @@ export function createStripeSessionRetryHandler(input: {
     const environmentValue = text(job.payload, 'environment');
     const actionValue = text(job.payload, 'action');
     const serverOperationId = text(job.payload, 'serverOperationId');
-    if (environmentValue !== 'test' || (actionValue !== 'checkout' && actionValue !== 'portal')) {
+    if (
+      (environmentValue !== 'test' && environmentValue !== 'production') ||
+      (actionValue !== 'checkout' && actionValue !== 'portal')
+    ) {
       throw new JobExecutionError('stripe_session_retry_payload_invalid', false);
     }
     const environment = environmentValue;
     const action = actionValue;
     const now = clock();
+    if (environment === 'production') {
+      await input.businessOs.upsertOwnerAttention({
+        attentionKind: 'billing_reconciliation',
+        consequenceOfInaction:
+          'The live provider outcome remains unknown and replacement billing stays blocked.',
+        dedupeKey: `stripe_session_unknown_${environment}_${action}_${serverOperationId}`,
+        now,
+        recommendedAction:
+          'Resolve the original operation from an authentic signed Stripe event or a bounded reconciliation read. Do not issue another POST.',
+        sourceId: serverOperationId,
+        sourceType: 'commerce_session_operation',
+        whyFounderRequired:
+          'Live same-key retry is intentionally held until its provider-read proof contract is enabled.',
+      });
+      throw new JobExecutionError('stripe_session_retry_live_outcome_held', false);
+    }
     if (action === 'checkout' && !input.runtimeInitiationPermitted) {
       await input.businessOs.upsertOwnerAttention({
         attentionKind: 'billing_reconciliation',

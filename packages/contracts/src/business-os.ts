@@ -294,9 +294,28 @@ export const createPrivacyRequestSchema = z
     message: 'A person or household subject is required.',
   });
 
-export const createSelfPrivacyRequestSchema = z.object({
-  requestKind: z.enum(['access', 'export', 'delete', 'correct', 'restrict']),
-});
+export const createSelfPrivacyRequestSchema = z
+  .object({
+    requestKind: z.enum(['access', 'export', 'delete', 'correct', 'restrict']),
+    confirmation: z.literal('DELETE_MY_ACCOUNT').optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.requestKind === 'delete' && value.confirmation !== 'DELETE_MY_ACCOUNT') {
+      context.addIssue({
+        code: 'custom',
+        path: ['confirmation'],
+        message: 'Account deletion requests require explicit confirmation.',
+      });
+    }
+    if (value.requestKind !== 'delete' && value.confirmation !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['confirmation'],
+        message: 'Deletion confirmation is valid only for account deletion requests.',
+      });
+    }
+  });
 
 export const createPrivacyRequestResponseSchema = z.object({
   id: opaqueIdSchema,

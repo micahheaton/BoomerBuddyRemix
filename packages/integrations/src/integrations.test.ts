@@ -7,6 +7,7 @@ import {
   normalizeStripeEvent,
   signStripeFixture,
   StoreServerEventError,
+  StripeAdapter,
   StripeTestAdapter,
   StripeWebhookError,
   verifyStripeWebhook,
@@ -298,7 +299,7 @@ describe('Stripe test adapter', () => {
     }
   });
 
-  it('preflights the exact account, livemode, offer, and cancel-only Portal resources', async () => {
+  it('preflights the exact account, livemode, offer, and bounded Portal resources', async () => {
     const resource = async (path: string): Promise<Record<string, unknown>> => {
       if (path === '/v1/account') return { object: 'account', id: 'acct_fixture1234' };
       if (path === '/v1/products/prod_family_fixture') {
@@ -339,7 +340,7 @@ describe('Stripe test adapter', () => {
             proration_behavior: 'none',
           },
           subscription_update: { enabled: false, default_allowed_updates: [] },
-          payment_method_update: { enabled: false },
+          payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
         },
       };
@@ -355,6 +356,10 @@ describe('Stripe test adapter', () => {
     await expect(adapter.verifyConfiguredResources()).resolves.toMatchObject({
       environment: 'test',
       accountId: 'acct_fixture1234',
+      accountChargesEnabled: false,
+      accountPayoutsEnabled: false,
+      accountCountry: null,
+      accountBusinessType: null,
       livemode: false,
       apiVersion,
       portalCancelOnly: true,
@@ -469,6 +474,111 @@ describe('Stripe test adapter', () => {
         if (path === hostile.path) hostile.mutate(exact);
         return exact;
       });
+      await expect(adapter.verifyConfiguredResources()).rejects.toMatchObject({
+        code: 'stripe.preflight_resource_mismatch',
+      });
+    }
+  });
+
+  it('requires exact enabled US company account capabilities for live preflight', async () => {
+    const exactAccount = {
+      object: 'account',
+      id: 'acct_livefixture1',
+      charges_enabled: true,
+      payouts_enabled: true,
+      country: 'US',
+      business_type: 'company',
+    } as const;
+    let accountResponse: Record<string, unknown> = exactAccount;
+    const resource = async ({ path }: { readonly path: string }) => {
+      if (path === '/v1/account') return accountResponse;
+      if (path === '/v1/products/prod_live_family_fixture') {
+        return {
+          id: 'prod_live_family_fixture',
+          object: 'product',
+          livemode: true,
+          active: true,
+        };
+      }
+      if (path === '/v1/prices/price_live_family_fixture') {
+        return {
+          id: 'price_live_family_fixture',
+          object: 'price',
+          livemode: true,
+          active: true,
+          product: 'prod_live_family_fixture',
+          currency: 'usd',
+          unit_amount: 1499,
+          unit_amount_decimal: '1499',
+          type: 'recurring',
+          billing_scheme: 'per_unit',
+          custom_unit_amount: null,
+          tiers_mode: null,
+          transform_quantity: null,
+          recurring: {
+            interval: 'month',
+            interval_count: 1,
+            usage_type: 'licensed',
+            trial_period_days: null,
+          },
+        };
+      }
+      return {
+        id: 'bpc_live_cancel_fixture',
+        object: 'billing_portal.configuration',
+        livemode: true,
+        active: true,
+        features: {
+          subscription_cancel: {
+            enabled: true,
+            mode: 'at_period_end',
+            proration_behavior: 'none',
+          },
+          subscription_update: { enabled: false, default_allowed_updates: [] },
+          payment_method_update: { enabled: true },
+          customer_update: { enabled: false, allowed_updates: [] },
+        },
+      };
+    };
+    const get = vi.fn(resource);
+    const adapter = new StripeAdapter(
+      { postForm: vi.fn(async () => ({})), get },
+      { authorize: vi.fn(async () => ({ allowed: false, reason: 'unused' })) },
+      new Set(),
+      {
+        environment: 'production',
+        accountId: 'acct_livefixture1',
+        apiVersion: '2026-07-29.dahlia',
+        portalConfigurationId: 'bpc_live_cancel_fixture',
+        offer: {
+          offerId: 'founding_family_monthly_v1',
+          planVersionId: 'family_v1',
+          billingInterval: 'month',
+          providerProductId: 'prod_live_family_fixture',
+          providerPriceId: 'price_live_family_fixture',
+          currency: 'usd',
+          unitAmountMinor: 1499,
+          quantity: 1,
+        },
+      },
+    );
+
+    await expect(adapter.verifyConfiguredResources()).resolves.toMatchObject({
+      environment: 'production',
+      accountId: 'acct_livefixture1',
+      accountChargesEnabled: true,
+      accountPayoutsEnabled: true,
+      accountCountry: 'US',
+      accountBusinessType: 'company',
+      livemode: true,
+    });
+    for (const hostileAccount of [
+      { ...exactAccount, charges_enabled: false },
+      { ...exactAccount, payouts_enabled: false },
+      { ...exactAccount, country: 'CA' },
+      { ...exactAccount, business_type: 'individual' },
+    ]) {
+      accountResponse = hostileAccount;
       await expect(adapter.verifyConfiguredResources()).rejects.toMatchObject({
         code: 'stripe.preflight_resource_mismatch',
       });
@@ -1293,11 +1403,14 @@ describe('Stripe test adapter', () => {
     expect(transport.postForm).toHaveBeenCalledWith(
       expect.objectContaining({
         form: expect.objectContaining({
+          integration_identifier: 'boomerbuddy_cqmfjzpt',
           'metadata[canonical_subscription_id]': 'subscription-canonical-one',
           'subscription_data[metadata][canonical_subscription_id]': 'subscription-canonical-one',
         }),
       }),
     );
+    const checkoutForm = vi.mocked(transport.postForm).mock.calls[0]?.[0].form;
+    expect(checkoutForm).not.toHaveProperty('payment_method_types[0]');
     expect(authorization.authorize).toHaveBeenCalledWith({
       actor,
       action: 'checkout:create',
@@ -1502,6 +1615,76 @@ describe('Stripe test adapter', () => {
         expect(normalized.checkoutExpiration).toBeUndefined();
       }
     }
+  });
+
+  it('normalizes asynchronous Checkout success and holds asynchronous failure for reconciliation', () => {
+    const checkoutObject = {
+      id: 'cs_test_async_fixture',
+      object: 'checkout.session',
+      livemode: false,
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      amount_total: 1499,
+      currency: 'usd',
+      expires_at: timestamp + 3600,
+      customer: 'cus_fixture_1',
+      subscription: 'sub_fixture_1',
+      payment_intent: 'pi_fixture_1',
+      metadata: {
+        household_id: 'household-one',
+        canonical_subscription_id: 'subscription-one',
+        plan_version_id: 'family_v1',
+      },
+    } as const;
+    const normalize = (
+      eventType:
+        'checkout.session.async_payment_succeeded' | 'checkout.session.async_payment_failed',
+      paymentStatus: 'paid' | 'unpaid',
+    ) => {
+      const rawBody = JSON.stringify({
+        id: `evt_${eventType}`,
+        type: eventType,
+        created: timestamp,
+        livemode: false,
+        api_version: apiVersion,
+        data: { object: { ...checkoutObject, payment_status: paymentStatus } },
+      });
+      return normalizeStripeEvent(
+        verifyStripeWebhook({
+          rawBody,
+          signatureHeader: signStripeFixture({
+            rawBody,
+            endpointSecret,
+            timestampSeconds: timestamp,
+          }),
+          endpointSecret,
+          environment: 'test',
+          now,
+          supportedApiVersions: new Set([apiVersion]),
+        }),
+      );
+    };
+
+    expect(normalize('checkout.session.async_payment_succeeded', 'paid')).toMatchObject({
+      eventType: 'checkout.session.async_payment_succeeded',
+      externalSubscriptionId: 'sub_fixture_1',
+      providerCustomerId: 'cus_fixture_1',
+      requiresReconciliation: false,
+      checkoutCompletion: {
+        sessionStatus: 'complete',
+        paymentStatus: 'paid',
+        amountTotal: 1499,
+        currency: 'usd',
+      },
+    });
+    expect(normalize('checkout.session.async_payment_failed', 'unpaid')).toMatchObject({
+      eventType: 'checkout.session.async_payment_failed',
+      externalSubscriptionId: 'sub_fixture_1',
+      providerCustomerId: 'cus_fixture_1',
+      requiresReconciliation: true,
+      acknowledgementRequired: false,
+    });
   });
 
   it('paginates the complete Stripe subscription inventory and rejects partial page truth', async () => {

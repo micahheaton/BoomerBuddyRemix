@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { assertStripeOnlineRuntimePermitted, type AppConfig } from '@boomerbuddy/config';
 import { publicConfigResponseSchema } from '@boomerbuddy/contracts';
-import { DomainError, seededCommercePlanVersions } from '@boomerbuddy/domain';
+import { DomainError } from '@boomerbuddy/domain';
 import { StripeHttpTransport, type StripeTransport } from '@boomerbuddy/integrations';
 import { createLogger, createRequestId, type Logger } from '@boomerbuddy/observability';
 import { ClerkSessionTokenVerifier, type IdentityTokenVerifier } from '@boomerbuddy/security';
@@ -18,6 +18,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { createRepositories, type ApiContext } from './context';
 import { registerCheckRoutes } from './routes/checks';
+import { registerBillingAuthorityRoutes } from './routes/billing-authority';
 import { registerBusinessOsRoutes } from './routes/business-os';
 import { registerCommerceRoutes } from './routes/commerce';
 import { registerEditorialIntelligenceRoutes } from './routes/editorial-intelligence';
@@ -52,6 +53,17 @@ export interface BuildAppOptions {
 
 const retentionBatchSize = 100;
 const retentionMaxBatchesPerSweep = 10;
+
+function unrefTimer(timer: unknown): void {
+  if (
+    typeof timer === 'object' &&
+    timer !== null &&
+    'unref' in timer &&
+    typeof timer.unref === 'function'
+  ) {
+    timer.unref();
+  }
+}
 
 export async function connectDatabase(config: AppConfig): Promise<Database> {
   return config.database.driver === 'pglite'
@@ -154,27 +166,18 @@ function registerBaseRoutes(app: FastifyInstance, context: ApiContext): void {
       environment: context.config.environment,
       checkKinds: ['text', 'url'],
       nativeSharingImplemented: false,
-      liveProvidersEnabled: false,
-      pricing: Object.values(seededCommercePlanVersions).map((plan) => {
-        const monthly = plan.prices.find(
-          (price) => price.kind === 'list' && price.interval === 'month',
-        );
-        const annual = plan.prices.find(
-          (price) => price.kind === 'list' && price.interval === 'year',
-        );
-        const founding = plan.prices.find((price) => price.kind === 'founding_experiment');
-        if (monthly === undefined || annual === undefined) {
-          throw new TypeError('Public pricing hypothesis is incomplete');
-        }
-        return {
-          key: plan.key,
-          name: plan.displayName,
-          monthlyUsd: monthly.amountMinor / 100,
-          annualUsd: annual.amountMinor / 100,
-          ...(founding === undefined ? {} : { foundingAnnualUsd: founding.amountMinor / 100 }),
-          hypothesis: true,
-        };
-      }),
+      liveProvidersEnabled:
+        context.config.commerce.stripe.mode === 'live' &&
+        context.config.commerce.stripe.runtimeNetworkPermitted,
+      pricing: [
+        {
+          key: 'family',
+          name: 'Family',
+          monthlyUsd: 14.99,
+          annualUsd: null,
+          hypothesis: false,
+        },
+      ],
     }),
   );
 }
@@ -187,13 +190,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? 'local_fixture'
       : options.config.commerce.stripe.mode === 'test'
         ? 'stripe_test'
-        : 'local_fixture');
+        : options.config.commerce.stripe.mode === 'live'
+          ? 'live_production'
+          : 'local_fixture');
   if (
     (options.stripeTransport !== undefined && stripeEvidenceLevel !== 'local_fixture') ||
     (options.stripeTransport === undefined &&
       options.config.commerce.stripe.mode === 'test' &&
-      stripeEvidenceLevel === 'local_fixture') ||
-    stripeEvidenceLevel === 'live_production'
+      stripeEvidenceLevel !== 'stripe_test') ||
+    (options.stripeTransport === undefined &&
+      options.config.commerce.stripe.mode === 'live' &&
+      stripeEvidenceLevel !== 'live_production') ||
+    (options.config.commerce.stripe.mode === 'disabled' && stripeEvidenceLevel !== 'local_fixture')
   ) {
     throw new TypeError('Stripe evidence tier does not match the runtime transport boundary');
   }
@@ -279,7 +287,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       retentionContinuation = undefined;
       runRetentionSweep();
     }, 0);
-    retentionContinuation.unref();
+    unrefTimer(retentionContinuation);
   };
   const runRetentionSweep = (): void => {
     if (closing || retentionSweep !== undefined) return;
@@ -299,7 +307,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? undefined
       : setInterval(runRetentionSweep, options.retentionSweepIntervalMs);
   if (retentionNeedsContinuation) scheduleRetentionContinuation();
-  retentionInterval?.unref();
+  unrefTimer(retentionInterval);
   await app.register(cookie);
   await app.register(cors, {
     credentials: true,
@@ -361,10 +369,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
             context.config.commerce.stripe.apiKey,
             context.config.commerce.stripe.apiVersion,
           )
-        : undefined),
+        : context.config.commerce.stripe.mode === 'live' &&
+            context.config.commerce.stripe.runtimeSurface === 'api'
+          ? new StripeHttpTransport(
+              context.config.commerce.stripe.apiRestrictedKey,
+              context.config.commerce.stripe.apiVersion,
+            )
+          : undefined),
     stripeEvidenceLevel,
   );
   registerHqRoutes(app, context);
+  registerBillingAuthorityRoutes(app, context);
   registerMessagingRoutes(app, context);
   registerReferralRoutes(app, context);
   registerFounderProvisioningRoutes(app, context);

@@ -43,6 +43,8 @@ export type AllowanceKind = (typeof allowanceKinds)[number];
 export const billingIntervals = ['month', 'year'] as const;
 export type BillingInterval = (typeof billingIntervals)[number];
 
+// Keep the legacy kind readable for historical catalog and migration evidence. Active offer
+// hypotheses live in revenue-hypotheses.ts and never emit the retired founding experiment.
 export const priceHypothesisKinds = ['list', 'founding_experiment'] as const;
 export type PriceHypothesisKind = (typeof priceHypothesisKinds)[number];
 
@@ -743,12 +745,6 @@ export const seededCommercePlanVersions = Object.freeze({
     prices: [
       { interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' },
       { interval: 'year', amountMinor: 14_900, currency: 'USD', kind: 'list' },
-      {
-        interval: 'year',
-        amountMinor: 11_900,
-        currency: 'USD',
-        kind: 'founding_experiment',
-      },
     ],
   }),
 });

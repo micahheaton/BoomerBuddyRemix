@@ -181,7 +181,7 @@ describe('verified provider commerce inbox', () => {
     expect(canonical.rows[0]).toEqual({ lifecycle: 'pending', source_verified: false });
   });
 
-  it('requires the exact founder for audited test gates and refuses live initiation', async () => {
+  it('requires the exact operator for audited gates and defaults live initiation off', async () => {
     const runtime = new CommerceRuntimeRepository(database, sequentialIds());
     await expect(
       runtime.changeStripeInitiationControl({
@@ -264,11 +264,13 @@ describe('verified provider commerce inbox', () => {
          live_approved, revision, changed_by_person_id, changed_at
        ) VALUES ('test','founding_household_v1','family_v1_monthly_1499','active',1,$1,
                  false,1,'person-hq-heidi',$2)`,
-      [
-        new Date(fixedTestNow.getTime() + 30 * 86_400_000).toISOString(),
-        fixedTestNow.toISOString(),
-      ],
+      [new Date('2099-01-01T00:00:00.000Z').toISOString(), fixedTestNow.toISOString()],
     );
+    const databaseClock = await database.query<{ readonly database_now: unknown }>(
+      'SELECT CURRENT_TIMESTAMP AS database_now',
+    );
+    const databaseNow = new Date(String(databaseClock.rows[0]?.database_now));
+    const eligibilityExpiresAt = new Date(databaseNow.getTime() + 60 * 60_000);
     const invitations = await Promise.allSettled(
       (['household-sunrise', 'household-harbor'] as const).map((householdId) =>
         runtime.changeStripeHouseholdEligibility({
@@ -278,7 +280,7 @@ describe('verified provider commerce inbox', () => {
           actorPersonId: 'person-hq-heidi',
           configuredFounderPersonId: 'person-hq-heidi',
           correlationId: `stripe-capacity-${householdId}`,
-          eligibilityExpiresAt: new Date(fixedTestNow.getTime() + 60 * 60_000),
+          eligibilityExpiresAt,
           now: fixedTestNow,
         }),
       ),
@@ -297,7 +299,14 @@ describe('verified provider commerce inbox', () => {
       'household-sunrise' | 'household-harbor';
     const waitingHousehold =
       originallyEligible === 'household-sunrise' ? 'household-harbor' : 'household-sunrise';
-    const afterExpiry = new Date(fixedTestNow.getTime() + 2 * 60 * 60_000);
+    await database.query(
+      `UPDATE commerce_stripe_eligible_households
+       SET invited_at = CURRENT_TIMESTAMP - interval '2 hours',
+           eligibility_expires_at = CURRENT_TIMESTAMP - interval '1 hour'
+       WHERE environment = 'test' AND household_id = $1`,
+      [originallyEligible],
+    );
+    const afterExpiry = new Date();
     await expect(
       runtime.changeStripeHouseholdEligibility({
         householdId: waitingHousehold,
@@ -323,7 +332,7 @@ describe('verified provider commerce inbox', () => {
     await expect(
       runtime.changeStripeLiveCohortApproval({
         nextApproved: true,
-        expectedRevision: 1,
+        expectedRevision: 0,
         actorPersonId: 'person-owner-alice',
         configuredFounderPersonId: 'person-hq-heidi',
         correlationId: 'stripe-live-approval-wrong-founder',
@@ -333,13 +342,13 @@ describe('verified provider commerce inbox', () => {
     await expect(
       runtime.changeStripeLiveCohortApproval({
         nextApproved: true,
-        expectedRevision: 1,
+        expectedRevision: 0,
         actorPersonId: 'person-hq-heidi',
         configuredFounderPersonId: 'person-hq-heidi',
         correlationId: 'stripe-live-approval-explicit',
         now: fixedTestNow,
       }),
-    ).resolves.toEqual({ approved: true, revision: 2 });
+    ).resolves.toEqual({ approved: true, revision: 1 });
     await expect(
       runtime.changeStripeHouseholdEligibility({
         householdId: rows.rows[0]?.household_id as 'household-sunrise' | 'household-harbor',
@@ -347,10 +356,23 @@ describe('verified provider commerce inbox', () => {
         nextState: 'eligible',
         actorPersonId: 'person-hq-heidi',
         configuredFounderPersonId: 'person-hq-heidi',
-        correlationId: 'stripe-production-eligibility-refused',
+        correlationId: 'stripe-production-eligibility-enabled',
         now: fixedTestNow,
       }),
-    ).rejects.toMatchObject({ code: 'not_authorized' });
+    ).resolves.toBe('eligible');
+    await expect(
+      runtime.changeStripeInitiationControl({
+        environment: 'production',
+        nextState: 'enabled',
+        reasonCode: 'founder_live_activation',
+        expectedRevision: 0,
+        actorPersonId: 'person-hq-heidi',
+        configuredFounderPersonId: 'person-hq-heidi',
+        correlationId: 'stripe-live-initiation-enabled',
+        runtimeInitiationPermitted: true,
+        now: fixedTestNow,
+      }),
+    ).resolves.toEqual({ state: 'enabled', revision: 1 });
     await expect(
       runtime.assertStripeInitiationAllowed({
         householdId: rows.rows[0]?.household_id as string,
@@ -358,7 +380,7 @@ describe('verified provider commerce inbox', () => {
         runtimeInitiationPermitted: true,
         now: fixedTestNow,
       }),
-    ).rejects.toMatchObject({ code: 'not_authorized' });
+    ).resolves.toBeUndefined();
     const liveApprovalAudit = await database.query<
       { readonly next_live_approved: boolean; readonly correlation_id: string } & Record<
         string,
@@ -366,7 +388,7 @@ describe('verified provider commerce inbox', () => {
       >
     >(
       `SELECT next_live_approved, correlation_id
-       FROM commerce_stripe_cohort_policy_events
+       FROM commerce_stripe_cohort_policy_events_v2
        WHERE environment = 'production'`,
     );
     expect(liveApprovalAudit.rows).toEqual([
@@ -408,6 +430,7 @@ describe('verified provider commerce inbox', () => {
         actor,
         environment: 'test',
         runtimeInitiationPermitted: false,
+        runtimePortalPermitted: true,
         now: fixedTestNow,
       }),
     ).resolves.toMatchObject({
@@ -415,6 +438,25 @@ describe('verified provider commerce inbox', () => {
       canonicalAccessActive: false,
       runtimeInitiationEnabled: false,
       portalAvailable: false,
+    });
+    await database.query(
+      `INSERT INTO commerce_provider_customers(
+         provider, environment, provider_customer_id, household_id, verified_at
+       ) VALUES ('stripe','test','cus_portal_independent','household-sunrise',$1)`,
+      [fixedTestNow.toISOString()],
+    );
+    await expect(
+      runtime.stripeBillingStatus({
+        actor,
+        environment: 'test',
+        runtimeInitiationPermitted: false,
+        runtimePortalPermitted: true,
+        now: fixedTestNow,
+      }),
+    ).resolves.toMatchObject({
+      checkoutState: 'eligible_disabled',
+      runtimeInitiationEnabled: false,
+      portalAvailable: true,
     });
     await expect(
       runtime.stripeBillingStatus({

@@ -14,20 +14,18 @@ import {
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import { useHostedAuth } from '@clerk/expo/hosted-auth';
 import type {
   CheckKind,
   CheckListResponse,
   CheckResult,
   CreateCheckResponse,
   CreateInvitationResponse,
-  DevPersonaId,
   EntitlementResponse,
   FamilyResponse,
   InvitationPreviewResponse,
   MeResponse,
-  MobileSessionResponse,
   OrientationStateDto,
-  PrincipalDto,
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
 import { buildUserInitiatedInvitationShareDraft } from '@boomerbuddy/contracts';
@@ -38,13 +36,9 @@ import {
   useOptionalMobileHousehold,
 } from './household';
 import type { NativeEntrySignal, RootStackParamList } from './navigation';
-import {
-  clearSessionToken,
-  sessionStorageDisclosure,
-  setSelectedHouseholdId as persistSelectedHouseholdId,
-  writeSessionToken,
-} from './session';
 import { appStyles as s } from './theme';
+
+const customerWebSignInUrl = 'https://app.boomerbuddy.net/sign-in';
 
 type ButtonProps = {
   title: string;
@@ -122,74 +116,86 @@ function ErrorText({ message }: { message: string }) {
 }
 
 export function SignInScreen({
-  onSignedIn,
-}: NativeStackScreenProps<RootStackParamList, 'SignIn'> & {
-  onSignedIn: (principal: PrincipalDto) => void;
-}) {
-  const [personaId, setPersonaId] = useState<DevPersonaId>('owner-alice');
-  const [busy, setBusy] = useState(false);
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'SignIn'>): React.ReactElement {
+  const { startHostedAuth } = useHostedAuth();
+  const [busy, setBusy] = useState<'sign-in' | 'sign-up' | ''>('');
   const [error, setError] = useState('');
-  const personas: Array<{ id: DevPersonaId; label: string }> = [
-    { id: 'owner-alice', label: 'Alice — Sunrise administrator and protected adult' },
-    { id: 'protected-pat', label: 'Pat — Sunrise protected member' },
-    { id: 'trusted-terry', label: 'Terry — seeded trusted person' },
-    { id: 'trusted-jordan', label: 'Jordan — unassigned trusted person' },
-    { id: 'owner-bob', label: 'Bob — Harbor administrator without protected enrollment' },
-    { id: 'protected-olivia', label: 'Olivia — Harbor protected member' },
-  ];
-  async function signIn() {
-    setBusy(true);
+
+  async function authenticate(mode: 'sign-in' | 'sign-up') {
+    setBusy(mode);
     setError('');
     try {
-      const response = await mobileRequest<MobileSessionResponse>(
-        '/v1/dev/sessions/mobile',
-        { method: 'POST', body: JSON.stringify({ personaId }) },
-        false,
-      );
-      await writeSessionToken(response.token);
-      await persistSelectedHouseholdId(response.principal.households[0]?.id ?? null);
-      onSignedIn(response.principal);
+      if (Platform.OS === 'web') {
+        await Linking.openURL(customerWebSignInUrl);
+        return;
+      }
+      const result = await startHostedAuth({ mode });
+      if (!result.createdSessionId) {
+        setError('Sign-in was not completed. You can try again when you are ready.');
+      }
     } catch (caught) {
-      await clearSessionToken().catch(() => undefined);
       setError(readableError(caught));
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   }
   return (
     <Screen>
       <Text accessibilityRole="header" style={s.title}>
-        Choose a seeded person
+        Welcome to BoomerBuddy
       </Text>
       <Text style={s.body}>
-        This is a local development build. There is no production account or password.
+        Sign in with the customer account you use for your household. A secure sign-in window opens
+        and returns to this app when complete.
       </Text>
       <View style={s.banner}>
-        <Text style={s.label}>Device state is not verified</Text>
-        <Text style={s.muted}>{sessionStorageDisclosure}</Text>
+        <Text style={s.label}>Your password stays in secure sign-in</Text>
+        <Text style={s.muted}>
+          BoomerBuddy does not store your password. The sign-in service keeps you signed in securely
+          on supported devices.
+        </Text>
       </View>
-      <Text style={s.label}>Development persona</Text>
-      {personas.map((persona) => (
-        <Pressable
-          accessibilityRole="radio"
-          accessibilityState={{ checked: persona.id === personaId }}
-          key={persona.id}
-          onPress={() => setPersonaId(persona.id)}
-          style={[s.choice, persona.id === personaId && s.choiceSelected]}
-        >
-          <View style={[s.radio, persona.id === personaId && s.radioSelected]} />
-          <Text style={s.body}>{persona.label}</Text>
-        </Pressable>
-      ))}
       {error ? <ErrorText message={error} /> : null}
       <ActionButton
-        title={busy ? 'Signing in…' : 'Enter local mobile build'}
-        disabled={busy}
-        onPress={() => void signIn()}
+        title={busy === 'sign-in' ? 'Opening member sign in…' : 'Member sign in'}
+        disabled={Boolean(busy)}
+        onPress={() => void authenticate('sign-in')}
+      />
+      <ActionButton
+        kind="secondary"
+        title="Help and policies"
+        disabled={Boolean(busy)}
+        onPress={() => navigation.navigate('HelpPolicies')}
       />
       <Text style={s.muted}>
-        Development bearer sessions are refused when the service runs in production mode.
+        BoomerBuddy is invite-only. Use the email address that received your invitation.
       </Text>
+    </Screen>
+  );
+}
+
+export function SessionRecoveryScreen({
+  message,
+  onRetry,
+  onSignOut,
+}: {
+  message: string;
+  onRetry: () => void;
+  onSignOut: () => void;
+}): React.ReactElement {
+  return (
+    <Screen>
+      <Text accessibilityRole="header" style={s.title}>
+        We could not open your account
+      </Text>
+      <ErrorText message={message} />
+      <Text style={s.body}>
+        Check your connection and try again. If the problem continues, sign out and restart the
+        secure sign-in flow.
+      </Text>
+      <ActionButton title="Try again" onPress={onRetry} />
+      <ActionButton kind="secondary" title="Sign out" onPress={onSignOut} />
     </Screen>
   );
 }
@@ -253,21 +259,27 @@ export function HomeScreen({
     (allowance) => allowance.kind === 'trusted_circle_participants',
   );
   const allowanceSummary = (label: string, allowance: typeof protectedAllowance): string => {
-    if (!allowance) return `${label}: unavailable in the local access projection.`;
+    if (!allowance) return `${label}: details are not available right now.`;
     if (allowance.used === null) {
-      return `${label}: usage unavailable; local limit ${allowance.limit}. State: ${allowance.state.replaceAll('_', ' ')}.`;
+      return `${label}: up to ${allowance.limit} included; current use is not available.`;
     }
-    return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} remaining. State: ${allowance.state.replaceAll('_', ' ')}.`;
+    return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} available.`;
   };
+  const accessSummary = !selectedEntitlements
+    ? 'Household access'
+    : selectedEntitlements.commerce.accessState === 'effective'
+      ? 'Household access is active'
+      : 'Household access is not active';
+
   return (
     <Screen>
-      <Text style={s.pill}>Local rules-only analysis</Text>
+      <Text style={s.pill}>Rules-only analysis</Text>
       <Text accessibilityRole="header" style={s.title}>
         Hello, {principal.displayName}
       </Text>
       <Text style={s.body}>
         {isUnassigned
-          ? 'You are not connected to a household. A valid local invitation and explicit consent are required before protection features become available.'
+          ? 'You are not connected to a household. A valid invitation and explicit consent are required before protection features become available.'
           : 'Pause before you click, reply, pay, or share a code. BoomerBuddy can help you choose a safer next step, but it can be wrong.'}
       </Text>
       {principal.households.length > 1 ? (
@@ -284,7 +296,7 @@ export function HomeScreen({
             >
               <View style={[s.radio, selectedHouseholdId === scope.id && s.radioSelected]} />
               <Text style={s.body}>
-                {householdName(scope.id, index)} — {mobileHouseholdScopeSummary(scope)}
+                {householdName(scope.id, index)} - {mobileHouseholdScopeSummary(scope)}
               </Text>
             </Pressable>
           ))}
@@ -369,31 +381,34 @@ export function HomeScreen({
             Orientation requires an active protected-adult enrollment in this household.
           </Text>
         ) : null}
+        <ActionButton
+          kind="secondary"
+          title="Help and policies"
+          onPress={() => navigation.navigate('HelpPolicies')}
+        />
         <ActionButton kind="secondary" title="Sign out" onPress={onSignOut} />
       </View>
       {!isUnassigned ? (
-        <View style={s.card} testID="local-access-summary">
-          <Text style={s.pill}>Local access hypothesis</Text>
-          <Text style={s.heading}>
-            {selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}
-          </Text>
+        <View style={s.card} testID="account-access-summary">
+          <Text style={s.pill}>Current access and plan</Text>
+          <Text style={s.heading}>{accessSummary}</Text>
           <Text style={s.body}>
-            This development-only access record is a product hypothesis. There is no billing,
-            purchase, upgrade, or charge in this build.
+            Your available features follow the selected household, your role, and each person&apos;s
+            consent. This screen shows access information only.
           </Text>
           {!selectedScope?.isBillingManager ? (
             <Text style={s.muted}>
-              Household plan totals are billing-manager-only in this local build. Your available
-              actions still follow the permissions for this selected household.
+              Detailed household limits are visible only to the person authorized to manage the
+              plan. Your actions still follow the permissions for this selected household.
             </Text>
           ) : selectedEntitlements ? (
             <>
-              <Text style={s.muted}>
-                Access state: {selectedEntitlements.commerce.accessState.replaceAll('_', ' ')}
-                {selectedEntitlements.commerce.primary
-                  ? ` · Plan state: ${selectedEntitlements.commerce.primary.plan.state}`
-                  : ''}
-              </Text>
+              {selectedEntitlements.commerce.primary?.accessEndsAt ? (
+                <Text style={s.muted}>
+                  Current access is scheduled through{' '}
+                  {new Date(selectedEntitlements.commerce.primary.accessEndsAt).toLocaleString()}.
+                </Text>
+              ) : null}
               <Text style={s.body}>{allowanceSummary('Protected adults', protectedAllowance)}</Text>
               <Text style={s.body}>
                 {allowanceSummary('Trusted Circle participants', trustedAllowance)}
@@ -401,8 +416,8 @@ export function HomeScreen({
             </>
           ) : entitlementsUnavailableFor === selectedHouseholdId ? (
             <Text style={s.muted}>
-              Local plan and allowance details are unavailable. The selected household permissions
-              shown in the actions above still apply.
+              Plan and allowance details are unavailable. The selected household permissions shown
+              in the actions above still apply.
             </Text>
           ) : (
             <Text style={s.muted}>Loading selected-household access details…</Text>
@@ -427,7 +442,7 @@ export function NativeProofScreen(): React.ReactElement {
 
   async function checkRouteRegistration() {
     try {
-      const supported = await Linking.canOpenURL('boomerbuddy-local://check');
+      const supported = await Linking.canOpenURL('boomerbuddy://check');
       setRouteStatus(
         supported
           ? 'This runtime reports a handler for the route-only scheme. End-to-end device intake is still not verified.'
@@ -468,10 +483,9 @@ export function NativeProofScreen(): React.ReactElement {
       <View style={s.card}>
         <Text style={s.heading}>Route-only deep link</Text>
         <Text style={s.body}>
-          The app manifest registers <Text style={s.label}>boomerbuddy-local://check</Text>. The
-          listener accepts only that empty route signal; query strings and fragments are rejected so
-          the app does not ingest artifacts that may already be exposed in operating-system link
-          history.
+          The app manifest registers <Text style={s.label}>boomerbuddy://check</Text>. The listener
+          accepts only that empty route signal; query strings and fragments are rejected so the app
+          does not ingest artifacts that may already be exposed in operating-system link history.
         </Text>
         <ActionButton
           kind="secondary"
@@ -572,7 +586,8 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         Check something suspicious
       </Text>
       <Text style={s.body}>
-        Remove names, account numbers, passwords, and access codes before pasting.
+        Remove names, account numbers, passwords, access codes, payment details, and safe words
+        before pasting.
       </Text>
       <Text style={s.label}>What are you checking?</Text>
       <View style={s.row}>
@@ -614,7 +629,9 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         value={content}
       />
       <Text style={s.muted}>
-        Local rules do not visit URLs or consult a live reputation provider. Do not paste secrets.
+        Rules-only analysis does not visit a submitted website or check it against live online
+        services. It can miss warning signs, so do not treat a result as proof that something is
+        safe.
       </Text>
       {!canCheckText && !canCheckUrl ? (
         <View style={s.banner}>
@@ -623,7 +640,7 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         </View>
       ) : null}
       <View style={s.banner}>
-        <Text style={s.label}>Local retention</Text>
+        <Text style={s.label}>Retention and deletion</Text>
         <Text style={s.muted}>
           The service minimizes and encrypts submitted input, retains it for up to 30 days, and
           deletes it sooner when you delete the check. History never displays it.
@@ -643,6 +660,11 @@ const riskLabels: Record<CheckResult['risk'], string> = {
   caution: 'Use caution',
   high_concern: 'High concern',
   unknown: 'Unknown risk',
+};
+const supportingInformationLabels: Record<CheckResult['evidenceSufficiency'], string> = {
+  limited: 'The check found only a small amount of supporting information.',
+  moderate: 'The check found some supporting information.',
+  strong: 'The check found multiple supporting details.',
 };
 function riskStyle(risk: CheckResult['risk']): ViewStyle {
   return risk === 'caution' ? s.riskCaution : risk === 'high_concern' ? s.riskHigh : s.riskUnknown;
@@ -695,7 +717,7 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
       });
       setSharedWith((current) => [...new Set([...current, personId])]);
       setShareStatus(
-        `Redacted result shared locally with ${displayName}. No notification was sent and submitted content was not included.`,
+        `Redacted result shared with ${displayName} in BoomerBuddy. No notification was sent and submitted content was not included.`,
       );
     } catch (caught) {
       setShareStatus(readableError(caught));
@@ -706,41 +728,32 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
   return (
     <Screen>
       <View accessibilityLiveRegion="polite" style={[s.card, s.risk, riskStyle(check.risk)]}>
-        <Text style={s.pill}>
-          {check.provider.state === 'mock' ? 'Mock analysis' : `Provider ${check.provider.state}`}
-        </Text>
+        <Text style={s.pill}>Rules-only analysis</Text>
         <Text style={s.pill}>{check.access.kind === 'owned' ? 'Yours' : 'Shared with you'}</Text>
         <Text accessibilityRole="header" style={s.title}>
           Check result
         </Text>
         <Text style={s.heading}>Risk: {riskLabels[check.risk]}</Text>
         <Text style={s.body}>{check.summary}</Text>
-        <Text style={s.label}>Evidence sufficiency: {check.evidenceSufficiency}</Text>
+        <Text style={s.label}>How much the check found</Text>
+        <Text style={s.body}>{supportingInformationLabels[check.evidenceSufficiency]}</Text>
         <Text style={s.muted}>
-          This describes how much supporting information local rules found, not a probability.
+          This is not a probability and does not show that a message or website is safe.
         </Text>
-        <Text style={s.label}>Calibration: Not calibrated</Text>
-        <Text style={s.muted}>
-          The result has not been empirically calibrated and must not be read as certainty.
-        </Text>
-        <Text style={s.label}>Provider provenance</Text>
+        <Text style={s.label}>Important limit</Text>
         <Text style={s.body}>
-          {check.provider.name} · {check.provider.state} · version {check.provider.version}
+          BoomerBuddy can miss warning signs and can be wrong. Pause and verify independently before
+          acting when money, accounts, credentials, or safety are involved.
         </Text>
-        <Text style={s.label}>Ruleset version</Text>
-        <Text style={s.body}>{check.rulesetVersion}</Text>
-        <Text style={s.label}>Retention and deletion</Text>
+        <Text style={s.label}>Saved result</Text>
         <Text style={s.body}>
-          State: {check.retention.state}. Scheduled deletion:{' '}
-          {new Date(check.retention.deleteAfter).toLocaleString()} unless you delete sooner.
-        </Text>
-        <Text style={s.muted}>
-          Reference: {check.id}. The same analysis ID is searchable in local HQ audit metadata; it
-          is not an external incident number.
+          This result is scheduled for deletion on{' '}
+          {new Date(check.retention.deleteAfter).toLocaleString()}. You can delete it sooner from
+          History.
         </Text>
       </View>
       <View style={s.card}>
-        <Text style={s.heading}>What was observed</Text>
+        <Text style={s.heading}>What the check noticed</Text>
         {check.evidence.length ? (
           check.evidence.map((item, index) => (
             <View key={`${item.label}-${index}`}>
@@ -781,8 +794,8 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
         <View style={s.card}>
           <Text style={s.heading}>Share this redacted result</Text>
           <Text style={s.body}>
-            Eligible Trusted Circle people receive result metadata, evidence, and safe actions only.
-            Submitted text or URLs are excluded, and no notification is sent.
+            Eligible Trusted Circle people receive the summary, warning signs, and safer actions
+            only. Submitted text or URLs are excluded, and no notification is sent.
           </Text>
           {shareTargets.length ? (
             shareTargets.map((target) => (
@@ -814,7 +827,8 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
             </Text>
           ) : null}
           <Text style={s.muted}>
-            Receive-escalation notifications are scaffolded and not implemented.
+            Notifications for newly shared Checks are not available in this beta. The person you
+            share with can review it in their BoomerBuddy account.
           </Text>
         </View>
       ) : check.access.kind === 'shared' ? (
@@ -947,9 +961,8 @@ export function HistoryScreen({
         History
       </Text>
       <Text style={s.body}>
-        This response never displays submitted content. Minimized input is encrypted locally until
-        scheduled or earlier user deletion; only content-free operational proof and structured
-        deletion state remain afterward.
+        Submitted content is never shown here. Saved results remain encrypted until their scheduled
+        deletion or until you delete them sooner. Limited security records may remain afterward.
       </Text>
       {announcement ? (
         <Text accessibilityLiveRegion="polite" style={s.muted}>
@@ -974,10 +987,10 @@ export function HistoryScreen({
                 {check.access.kind === 'owned' ? 'Yours' : 'Shared with you'}
               </Text>
               <Text style={s.body}>
-                {riskLabels[check.risk]} · Evidence {check.evidenceSufficiency} · Not calibrated
+                {riskLabels[check.risk]} · {supportingInformationLabels[check.evidenceSufficiency]}
               </Text>
               <Text style={s.muted}>
-                {new Date(check.createdAt).toLocaleString()} · {check.provider.state} provider
+                {new Date(check.createdAt).toLocaleString()} · Rules-only analysis
               </Text>
               <ActionButton
                 kind="secondary"
@@ -1034,8 +1047,8 @@ export function HistoryScreen({
 
 const trustedPermissionLabels: Record<TrustedCirclePermissionDto, string> = {
   view_shared_checks: 'View only redacted check results deliberately shared with you',
-  receive_escalations: 'Future escalation notifications (not implemented)',
-  help_with_orientation: 'Future guided orientation help (not implemented)',
+  receive_escalations: 'Escalation notifications are unavailable',
+  help_with_orientation: 'Guided orientation help is unavailable',
 };
 type AcceptedInvitation = { relationship: { id: string }; householdId: string };
 
@@ -1230,9 +1243,7 @@ export function FamilyScreen({
       <Text accessibilityRole="header" style={s.title}>
         Family and Trusted Circle
       </Text>
-      <Text style={s.body}>
-        Permissions are explicit. Local invitations are not emailed or texted.
-      </Text>
+      <Text style={s.body}>Permissions are explicit. Invitations are not emailed or texted.</Text>
       {error ? <ErrorText message={error} /> : null}
       {status ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>
@@ -1240,9 +1251,9 @@ export function FamilyScreen({
         </Text>
       ) : null}
       <View style={s.card}>
-        <Text style={s.heading}>Accept a local invitation</Text>
+        <Text style={s.heading}>Accept an invitation</Text>
         <Text style={s.muted}>
-          Sign in as the invited seeded person and enter both one-time values given by the protected
+          Sign in with the invited account and enter both one-time values given by the protected
           member who initiated the invitation. Review the household, protected person, permission,
           and expiry before deciding.
         </Text>
@@ -1260,7 +1271,7 @@ export function FamilyScreen({
         />
         <Text style={s.label}>One-time code</Text>
         <TextInput
-          accessibilityLabel="One-time local invite code"
+          accessibilityLabel="One-time invitation code"
           autoCapitalize="none"
           onChangeText={(value) => {
             setInviteCode(value);
@@ -1377,7 +1388,8 @@ export function FamilyScreen({
                   <View key={invitation.id}>
                     <Text style={s.label}>{invitation.inviteeDisplayName}</Text>
                     <Text style={s.muted}>
-                      Expires {new Date(invitation.expiresAt).toLocaleString()} · Local only
+                      Expires {new Date(invitation.expiresAt).toLocaleString()} · Not sent
+                      automatically
                     </Text>
                     {isHouseholdAdministrator ||
                     invitation.protectedPersonId === principal.personId ? (
@@ -1486,7 +1498,7 @@ const orientationSteps = [
   [
     'trusted_circle',
     'Consent and Trusted Circle',
-    'Review the exact person, sharing permission, and withdrawal path. Pairwise permission requires acceptance and can end independently. Notifications are unavailable in this build, so agree on a manual contact method.',
+    'Review the exact person, sharing permission, and withdrawal path. Pairwise permission requires acceptance and can end independently. Notifications for newly shared Checks are not available in this beta, so agree on a direct contact method.',
   ],
   [
     'safe_word',
@@ -1496,12 +1508,12 @@ const orientationSteps = [
   [
     'practice_check',
     'Practice the Check and sharing workflow',
-    'Use a synthetic bank-message scenario to practice pausing, entering suspicious material in Check, reading evidence and limits, taking a safe action, and deliberately sharing only a redacted result.',
+    'Use a fictional bank-message scenario to practice pausing, entering suspicious material in Check, reading what it noticed and its limits, taking a safe action, and deliberately sharing only a redacted result.',
   ],
   [
     'capabilities_and_limits',
     'Understand limits and recovery',
-    'Local rules-only analysis does not fetch URLs, use a live reputation provider, monitor messages, or guarantee safety. If money, access, or credentials were exposed, stop contact, use independently found official channels, secure the account, and seek qualified help.',
+    'Rules-only analysis does not visit submitted websites, check live online services, monitor messages, or guarantee safety. If money, access, or credentials were exposed, stop contact, use independently found official channels, secure the account, and seek qualified help.',
   ],
   [
     'review',
@@ -1510,6 +1522,16 @@ const orientationSteps = [
   ],
 ] as const;
 type OrientationKey = (typeof orientationSteps)[number][0];
+const orientationStatusLabels: Record<OrientationStateDto['status'], string> = {
+  not_started: 'Not started',
+  in_progress: 'In progress',
+  ready: 'Ready',
+};
+const safeWordStatusLabels: Record<OrientationStateDto['safeWordDisposition'], string> = {
+  unanswered: 'Not chosen',
+  configured: 'Set up',
+  informed_deferral: 'Deferred after review',
+};
 
 export function OrientationScreen(): React.ReactElement {
   const { selectedHouseholdId, selectedScope } = useMobileHousehold();
@@ -1624,12 +1646,10 @@ export function OrientationScreen(): React.ReactElement {
         <>
           <View style={s.card}>
             <Text style={s.heading}>{visibleState.completedSteps.length} of 6 complete</Text>
-            <Text style={s.body}>Status: {visibleState.status.replaceAll('_', ' ')}</Text>
+            <Text style={s.body}>Status: {orientationStatusLabels[visibleState.status]}</Text>
             <Text style={s.muted}>
-              Safe-word choice: {visibleState.safeWordDisposition.replaceAll('_', ' ')} · Attention:{' '}
-              {visibleState.needsAttention
-                ? 'setup still needs review'
-                : 'no incomplete stage flagged'}
+              Safe-word choice: {safeWordStatusLabels[visibleState.safeWordDisposition]}.{' '}
+              {visibleState.needsAttention ? 'Setup still needs review.' : 'No setup issue found.'}
             </Text>
             {visibleState.status === 'not_started' ? (
               <ActionButton

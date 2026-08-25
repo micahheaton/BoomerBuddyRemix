@@ -164,17 +164,18 @@ export const publicConfigResponseSchema = z.object({
   environment: z.enum(['development', 'test', 'production']),
   checkKinds: z.array(z.enum(['text', 'url'])),
   nativeSharingImplemented: z.literal(false),
-  liveProvidersEnabled: z.literal(false),
-  pricing: z.array(
-    z.object({
-      key: z.string(),
-      name: z.string(),
-      monthlyUsd: z.number().nullable(),
-      annualUsd: z.number().nullable(),
-      foundingAnnualUsd: z.number().optional(),
-      hypothesis: z.literal(true),
-    }),
-  ),
+  liveProvidersEnabled: z.boolean(),
+  pricing: z
+    .array(
+      z.object({
+        key: z.literal('family'),
+        name: z.literal('Family'),
+        monthlyUsd: z.literal(14.99),
+        annualUsd: z.null(),
+        hypothesis: z.literal(false),
+      }),
+    )
+    .length(1),
 });
 
 export type HqOverviewResponse = z.infer<typeof hqOverviewResponseSchema>;

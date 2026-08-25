@@ -2,25 +2,45 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type {
-  StripeBillingStatusResponse,
-  StripeCheckoutResponse,
-  StripePortalResponse,
+import { useReverification } from '@clerk/nextjs';
+import {
+  stripeCheckoutResponseSchema,
+  stripePortalResponseSchema,
+  type ErrorEnvelope,
+  type StripeBillingStatusResponse,
 } from '@boomerbuddy/contracts';
 import { useHousehold } from '../../../components/household-context';
-import { apiRequest, readableError } from '../../../lib/api';
+import { ApiError, apiBaseUrl, apiRequest, readableError } from '../../../lib/api';
 
 type Billing = StripeBillingStatusResponse['billing'];
+type BillingMutationRequest = (path: string, init: RequestInit) => Promise<unknown>;
+
+interface ClerkReverificationHint {
+  readonly clerk_error: {
+    readonly type: 'forbidden';
+    readonly reason: 'reverification-error';
+  };
+}
 
 const stateCopy: Readonly<Record<Billing['checkoutState'], string>> = {
-  unavailable: 'This household is not in the founder-approved billing cohort.',
-  eligible_disabled: 'The household is eligible, but payment initiation is disabled.',
-  ready: 'The founder-approved test checkout is ready for this billing manager.',
-  pending_provider: 'A checkout is pending provider reconciliation. Do not start another one.',
+  unavailable: 'Online billing is not available for this household yet.',
+  eligible_disabled: 'Online payment is temporarily unavailable. No charge has been started.',
+  ready: 'Family billing is ready for this household.',
+  pending_provider: 'We are confirming the billing request. Please wait before trying again.',
   awaiting_payment_evidence:
-    'Checkout returned, but exact paid-invoice evidence has not activated access.',
-  active: 'Canonical paid access is active from verified payment evidence.',
-  restricted: 'Paid access is restricted while refund or dispute evidence is reconciled.',
+    'We are confirming payment before activating the household membership.',
+  active: 'The household membership is active from a verified payment.',
+  restricted: 'Membership access is temporarily restricted while billing is reviewed.',
+};
+
+const stateTitle: Readonly<Record<Billing['checkoutState'], string>> = {
+  unavailable: 'Billing is not available',
+  eligible_disabled: 'Payment is temporarily unavailable',
+  ready: 'Ready for secure checkout',
+  pending_provider: 'Confirming your billing request',
+  awaiting_payment_evidence: 'Confirming your payment',
+  active: 'Membership is active',
+  restricted: 'Billing review needed',
 };
 
 function operationId(prefix: 'checkout' | 'portal'): string {
@@ -31,7 +51,88 @@ function checkoutStorageKey(householdId: string): string {
   return `bb:billing:checkout-operation:${householdId}`;
 }
 
-export default function BillingPage() {
+function isClerkReverificationHint(value: unknown): value is ClerkReverificationHint {
+  if (typeof value !== 'object' || value === null || !('clerk_error' in value)) return false;
+  const clerkError = (value as { clerk_error?: unknown }).clerk_error;
+  return (
+    typeof clerkError === 'object' &&
+    clerkError !== null &&
+    (clerkError as { type?: unknown }).type === 'forbidden' &&
+    (clerkError as { reason?: unknown }).reason === 'reverification-error'
+  );
+}
+
+async function productionBillingMutation(path: string, init: RequestInit): Promise<unknown> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...init,
+      credentials: 'include',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init.headers,
+      },
+    });
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      throw new ApiError(
+        'The billing service returned an invalid response.',
+        'request_failed',
+        502,
+      );
+    }
+    if (!response.ok && !isClerkReverificationHint(body)) {
+      const envelope = body as Partial<ErrorEnvelope>;
+      throw new ApiError(
+        envelope.error?.message ?? 'The billing service could not complete that request.',
+        envelope.error?.code ?? 'request_failed',
+        response.status,
+      );
+    }
+    return body;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ApiError('The billing service did not respond in time.', 'request_timeout', 408);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function ProductionBillingPage() {
+  const reverifiedMutation = useReverification(productionBillingMutation);
+  const mutationRequest = useCallback<BillingMutationRequest>(
+    async (path, init) => {
+      const result = await reverifiedMutation(path, init);
+      if (isClerkReverificationHint(result)) {
+        throw new ApiError(
+          'A recent enrolled MFA second factor is required for billing. Google or email sign-in and Device Trust alone do not qualify. Set up MFA through secure sign-in, then try again.',
+          'billing_mfa_required',
+          403,
+        );
+      }
+      return result;
+    },
+    [reverifiedMutation],
+  );
+  return <BillingPageContent mutationRequest={mutationRequest} />;
+}
+
+function DevelopmentBillingPage() {
+  const mutationRequest = useCallback<BillingMutationRequest>(
+    (path, init) => apiRequest<unknown>(path, init),
+    [],
+  );
+  return <BillingPageContent mutationRequest={mutationRequest} />;
+}
+
+function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutationRequest }) {
   const { selectedHouseholdId, selectedScope } = useHousehold();
   const [billing, setBilling] = useState<Billing>();
   const [notice, setNotice] = useState('');
@@ -112,14 +213,16 @@ export default function BillingPage() {
     setSubmitting('checkout');
     setError('');
     try {
-      const response = await apiRequest<StripeCheckoutResponse>('/v1/commerce/stripe/checkout', {
-        method: 'POST',
-        headers: {
-          'Idempotency-Key': checkoutOperation.current,
-          'X-BB-Household-Id': selectedHouseholdId,
-        },
-        body: JSON.stringify({ offerId: 'founding_family_monthly_v1' }),
-      });
+      const response = stripeCheckoutResponseSchema.parse(
+        await mutationRequest('/v1/commerce/stripe/checkout', {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': checkoutOperation.current,
+            'X-BB-Household-Id': selectedHouseholdId,
+          },
+          body: JSON.stringify({ offerId: 'founding_family_monthly_v1' }),
+        }),
+      );
       window.location.assign(response.checkout.url);
     } catch (caught) {
       setError(readableError(caught));
@@ -135,13 +238,15 @@ export default function BillingPage() {
     setSubmitting('portal');
     setError('');
     try {
-      const response = await apiRequest<StripePortalResponse>('/v1/commerce/stripe/portal', {
-        method: 'POST',
-        headers: {
-          'Idempotency-Key': portalOperation.current,
-          'X-BB-Household-Id': selectedHouseholdId,
-        },
-      });
+      const response = stripePortalResponseSchema.parse(
+        await mutationRequest('/v1/commerce/stripe/portal', {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': portalOperation.current,
+            'X-BB-Household-Id': selectedHouseholdId,
+          },
+        }),
+      );
       window.location.assign(response.portal.url);
     } catch (caught) {
       setError(readableError(caught));
@@ -159,18 +264,27 @@ export default function BillingPage() {
         <p className="lede">
           Only the selected household&apos;s active billing manager can view or initiate billing.
         </p>
-        <Link href="/member">Return to member home</Link>
+        <p>
+          <Link href="/member">Return to member home</Link> or{' '}
+          <Link href="/support">contact support</Link> for billing help.
+        </p>
       </main>
     );
   }
 
   return (
     <main id="main-content" className="member-shell member-main">
-      <span className="eyebrow">Founding Household billing</span>
+      <span className="eyebrow">Family billing</span>
       <h1 className="member-heading">Manage billing</h1>
       <p className="lede">
-        Founding Family monthly is an unvalidated $14.99 USD offer for one household. Promotions,
-        automatic tax, adaptive pricing, and non-card payment methods are disabled in this path.
+        Family is $14.99 USD per month for one household, charged automatically each month until
+        canceled. Any applicable taxes and available payment methods are shown in secure checkout.
+      </p>
+      <p className="meta">
+        Before Checkout or billing management opens, BoomerBuddy asks you to confirm your identity
+        with an MFA method already enrolled on your account. Google or email sign-in and a trusted
+        device do not replace that step. If no MFA method is available, use{' '}
+        <Link href="/sign-in">secure sign-in</Link> to complete setup.
       </p>
       {error ? (
         <p className="error" role="alert">
@@ -178,32 +292,50 @@ export default function BillingPage() {
         </p>
       ) : null}
       <section className="card" aria-live="polite">
-        <span className="dev-pill">Evidence-backed state</span>
-        <h2>{billing ? billing.checkoutState.replaceAll('_', ' ') : 'Loading billing state…'}</h2>
+        <span className="dev-pill">Subscription status</span>
+        <h2>{billing ? stateTitle[billing.checkoutState] : 'Loading billing status…'}</h2>
         <p>{billing ? stateCopy[billing.checkoutState] : 'Checking the selected household.'}</p>
         <p className="meta">
           {notice ||
-            'A provider redirect, success page, or subscription status does not grant access.'}
+            'Your membership becomes active only after BoomerBuddy confirms a successful payment.'}
         </p>
         {billing?.pendingOperation ? (
           <p className="meta" data-testid="billing-pending-operation">
-            Same-key reconciliation: {billing.pendingOperation.state.replaceAll('_', ' ')} · attempt{' '}
-            {billing.pendingOperation.attemptCount} · reference{' '}
-            {billing.pendingOperation.serverOperationId}
+            Your billing request is being confirmed. Please wait before starting another request.
             {billing.pendingOperation.nextRetryAt
-              ? ` · next check ${new Date(billing.pendingOperation.nextRetryAt).toLocaleString()}`
+              ? ` The next automatic check is expected after ${new Date(
+                  billing.pendingOperation.nextRetryAt,
+                ).toLocaleString()}.`
               : ''}
           </p>
         ) : null}
         {billing?.checkoutState === 'ready' && billing.runtimeInitiationEnabled ? (
-          <button
-            className="button button-primary"
-            type="button"
-            disabled={submitting !== undefined}
-            onClick={() => void startCheckout()}
-          >
-            {submitting === 'checkout' ? 'Preparing checkout…' : 'Continue to test checkout'}
-          </button>
+          <>
+            <div className="notice" data-testid="billing-customer-terms">
+              <p>
+                <strong>Before you continue:</strong> Family costs $14.99 USD and renews every month
+                until you cancel.
+              </p>
+              <p>
+                Cancel future renewals through billing management when available or by contacting{' '}
+                <Link href="/support">support</Link>. Access ordinarily continues through the paid
+                period. Monthly charges are generally not refundable after billing, with exceptions
+                explained in the <Link href="/billing-terms">billing terms</Link>.
+              </p>
+            </div>
+            <p className="meta" data-testid="billing-recurring-disclosure">
+              By continuing, you authorize a recurring charge of $14.99 USD each month until you
+              cancel.
+            </p>
+            <button
+              className="button button-primary"
+              type="button"
+              disabled={submitting !== undefined}
+              onClick={() => void startCheckout()}
+            >
+              {submitting === 'checkout' ? 'Preparing checkout…' : 'Continue to secure checkout'}
+            </button>
+          </>
         ) : null}
         {billing?.portalAvailable ? (
           <button
@@ -212,7 +344,7 @@ export default function BillingPage() {
             disabled={submitting !== undefined}
             onClick={() => void openPortal()}
           >
-            {submitting === 'portal' ? 'Opening portal…' : 'Open cancel-only billing portal'}
+            {submitting === 'portal' ? 'Opening portal…' : 'Manage payment method or cancellation'}
           </button>
         ) : null}
         <button
@@ -221,12 +353,22 @@ export default function BillingPage() {
           disabled={submitting !== undefined}
           onClick={() => void refresh()}
         >
-          Refresh evidence state
+          Refresh billing status
         </button>
       </section>
-      <p className="meta" style={{ marginTop: '1rem' }}>
-        <Link href="/member">Return to member home</Link>
-      </p>
+      <nav className="public-nav" aria-label="Billing help" style={{ marginTop: '1rem' }}>
+        <Link href="/member">Member home</Link>
+        <Link href="/billing-terms">Billing terms</Link>
+        <Link href="/support">Support</Link>
+      </nav>
     </main>
+  );
+}
+
+export default function BillingPage() {
+  return process.env.NODE_ENV === 'production' ? (
+    <ProductionBillingPage />
+  ) : (
+    <DevelopmentBillingPage />
   );
 }

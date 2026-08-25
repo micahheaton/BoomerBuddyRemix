@@ -8,38 +8,39 @@ export default function TrustPage() {
         <span className="eyebrow">Trust and safety</span>
         <h1 className="page-title">Designed to show its limits</h1>
         <p className="lede">
-          A reassuring answer can still be wrong. BoomerBuddy pairs results with evidence
-          sufficiency, an explicit calibration limit, and safer next actions. Authenticated results
-          also expose provider and ruleset provenance.
+          A reassuring answer can still be wrong. BoomerBuddy explains what a check noticed, what it
+          could not determine, and safer next actions. Signed-in results also show when they were
+          created and when they are scheduled for deletion.
         </p>
         <div className="card-grid two" style={{ marginTop: '2rem' }}>
           <article className="card">
             <h2>Minimal records</h2>
             <p>
-              Check responses do not echo submitted content. Anonymous conversion payloads expire
-              after 15 minutes; authenticated records show their deletion time and can be deleted
-              sooner by the check owner.
+              Check responses do not repeat submitted content. Public Check keeps a protected
+              temporary copy for up to 15 minutes only when needed to let you save after signing in.
+              Signed-in records show their deletion time and can be deleted sooner by the owner.
             </p>
           </article>
           <article className="card">
             <h2>Household boundaries</h2>
             <p>
-              Customer access is scoped to a household. HQ sees operational summaries and
-              identifiers—not the submitted artifact content.
+              Each member sees only the household information their role and permissions allow.
+              Operations staff can see limited service records needed to support an account, but not
+              the message text or website address submitted to Check.
             </p>
           </article>
           <article className="card">
             <h2>Consent you can see</h2>
             <p>
-              Trusted Circle permissions are explicit. Invites in this build are local only and are
-              not sent to another person.
+              Trusted Circle permissions are explicit. Invitations are handed directly to the
+              intended person and are not sent automatically.
             </p>
           </article>
           <article className="card">
-            <h2>No hidden live claims</h2>
+            <h2>No hidden lookups</h2>
             <p>
-              Analysis uses deterministic local rules. URLs are not fetched, no live reputation
-              provider is consulted, and results have not been empirically calibrated.
+              The check follows a fixed set of rules. It never opens a website address or checks it
+              with an outside service, and its result can be wrong.
             </p>
           </article>
         </div>

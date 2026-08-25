@@ -6,7 +6,7 @@ export default function MemberLayout({ children }: Readonly<{ children: React.Re
     <MemberGate>
       <p className="dev-banner">
         {production
-          ? 'Private Founding Household beta · Rules-only analysis is not calibrated efficacy evidence · Do not enter secrets'
+          ? 'Private beta · Results can be wrong · Never enter passwords, access codes, or payment information'
           : 'Local development build · Local rules-only analysis · No live reputation provider · Do not enter secrets'}
       </p>
       {children}

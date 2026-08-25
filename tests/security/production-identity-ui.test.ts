@@ -34,14 +34,18 @@ describe('production identity UI boundary', () => {
   });
 
   it('keeps development personas out of the production sign-in branch', async () => {
-    const customerSignIn = await source('apps/web/src/app/sign-in/page.tsx');
+    const customerSignIn = await source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx');
+    const hqSignInRoute = await source('apps/hq/src/app/sign-in/[[...sign-in]]/page.tsx');
     const hqScreen = await source('apps/hq/src/components/hq-screen.tsx');
     const hqSignIn = await source('apps/hq/src/components/production-identity.tsx');
 
     expect(customerSignIn).toContain("process.env.NODE_ENV === 'production'");
     expect(customerSignIn).toContain('<ProductionSignIn />');
+    expect(customerSignIn).toContain('path="/sign-in"');
+    expect(customerSignIn).toContain('routing="path"');
     expect(customerSignIn).toContain('withSignUp={false}');
     expect(customerSignIn).toContain('/v1/dev/sessions/customer');
+    expect(hqSignInRoute).toContain('<ProductionHqSignIn />');
     expect(hqScreen).toContain("process.env.NODE_ENV !== 'production'");
     expect(hqScreen).toContain('<DevelopmentSignIn onSuccess={setMe} />');
     expect(hqSignIn).toContain('withSignUp={false}');
@@ -74,6 +78,9 @@ describe('production identity UI boundary', () => {
       expect(proxy).toContain("process.env.NODE_ENV !== 'production'");
       expect(proxy).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(proxy).toContain('CLERK_SECRET_KEY');
+      expect(proxy).toContain('NEXT_PUBLIC_CLERK_SIGN_IN_URL');
+      expect(proxy).toContain('{ signInUrl: productionClerkSignInUrl }');
+      expect(proxy).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
       expect(proxy).toContain('return NextResponse.next()');
       expect(proxy).toContain('status: 503');
       expect(proxy).toContain("'cache-control': 'no-store'");
@@ -85,9 +92,15 @@ describe('production identity UI boundary', () => {
       expect(provider).not.toContain("process.env.NODE_ENV !== 'production' || !publishableKey");
     }
     for (const route of [
+      "'/accessibility'",
+      "'/account-deletion'",
+      "'/billing-terms'",
       "'/check(.*)'",
       "'/how-it-works'",
       "'/pricing'",
+      "'/privacy'",
+      "'/support'",
+      "'/terms'",
       "'/trust'",
       "'/api(.*)'",
     ]) {

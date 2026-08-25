@@ -113,10 +113,7 @@ const workspaceAudits = Object.fromEntries(
   ]),
 );
 
-const allowedMobileHighAdvisories = new Set([
-  'https://github.com/advisories/GHSA-5p2g-fcmc-qvqq',
-  'https://github.com/advisories/GHSA-w3rx-r6r6-pgpr',
-]);
+const allowedMobileHighAdvisories = new Set();
 const fullDirect = directAdvisories(fullAudit.parsed);
 const mobileDirect = directAdvisories(mobileAudit.parsed);
 const fullHighOrCritical = fullDirect.filter((item) =>

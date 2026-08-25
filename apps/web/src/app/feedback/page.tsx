@@ -11,20 +11,20 @@ export default async function AnonymousFeedbackPage() {
     <>
       <PublicHeader />
       <main id="main-content" className="page-shell">
-        <span className="eyebrow">Anonymous local feedback</span>
+        <span className="eyebrow">Anonymous feedback</span>
         <h1 className="page-title">Tell us what could work better.</h1>
         <p className="lede">
           Share a product observation without attaching an account or household. For account or
-          billing help, sign in and use the assigned support path instead.
+          billing help, use the Support page.
         </p>
         {localOnlyEnabled ? (
           form
         ) : (
           <section className="notice notice-warning" role="status">
-            <h2>Feedback intake is not activated</h2>
+            <h2>Feedback is temporarily unavailable</h2>
             <p>
-              The local candidate is unavailable in production until its founder and privacy gates
-              are reviewed. Do not send feedback or sensitive information through this page.
+              Please use the Support page if you need help. Do not send sensitive information
+              through this page.
             </p>
           </section>
         )}

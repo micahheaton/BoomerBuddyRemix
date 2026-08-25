@@ -12,6 +12,12 @@ const riskText: Record<CheckResult['risk'], string> = {
   unknown: 'Unknown risk',
 };
 
+const sufficiencyText: Record<CheckResult['evidenceSufficiency'], string> = {
+  limited: 'Limited information',
+  moderate: 'Some information',
+  strong: 'More information',
+};
+
 export default function HistoryPage() {
   const { selectedHouseholdId, selectedHouseholdName, selectedScope } = useHousehold();
   const [checks, setChecks] = useState<CheckResult[]>([]);
@@ -107,8 +113,8 @@ export default function HistoryPage() {
         <section className="notice notice-warning">
           <h2>No protected or explicitly shared history access</h2>
           <p>
-            Owned history requires an active protected-adult enrollment. A Trusted Circle member can
-            read only results deliberately shared under an active permission.
+            Your own history requires an active protected-adult enrollment. A Trusted Circle member
+            can read only results deliberately shared under an active permission.
           </p>
         </section>
       </main>
@@ -120,9 +126,9 @@ export default function HistoryPage() {
       <span className="eyebrow">History</span>
       <h1 className="member-heading">Your check records</h1>
       <p className="lede">
-        This history response never displays submitted text or URLs. The local service stores
-        minimized input encrypted until scheduled deletion (up to 30 days) or your earlier deletion;
-        only content-free operational proof and structured deletion state remain afterward.
+        History never displays the message text or website address you submitted. BoomerBuddy keeps
+        a protected, minimized copy for up to 30 days unless you delete it sooner. After deletion,
+        only limited records needed for security and service operation remain.
       </p>
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
@@ -159,12 +165,9 @@ export default function HistoryPage() {
                     {check.access.kind === 'owned' ? 'Yours' : 'Shared with you'}
                   </span>
                   <p>
-                    {riskText[check.risk]} · Evidence: {check.evidenceSufficiency} · Not calibrated
+                    {riskText[check.risk]} · {sufficiencyText[check.evidenceSufficiency]}
                   </p>
-                  <p className="meta">
-                    Checked {new Date(check.createdAt).toLocaleString()} · {check.provider.state}{' '}
-                    provider
-                  </p>
+                  <p className="meta">Checked {new Date(check.createdAt).toLocaleString()}</p>
                 </div>
                 <div className="history-actions">
                   <button
@@ -226,34 +229,21 @@ export default function HistoryPage() {
                     <dl className="definition-grid">
                       <dt>Household</dt>
                       <dd>{selectedHouseholdName}</dd>
-                      <dt>Evidence sufficiency</dt>
+                      <dt>How much information was available</dt>
                       <dd>
-                        {check.evidenceSufficiency}. This describes available supporting
-                        information, not a probability.
+                        {sufficiencyText[check.evidenceSufficiency]}. This describes what the check
+                        could examine, not the chance that something is safe or harmful.
                       </dd>
-                      <dt>Calibration</dt>
-                      <dd>
-                        Not calibrated. This local result has not been empirically calibrated and is
-                        not proof.
-                      </dd>
-                      <dt>Provider provenance</dt>
-                      <dd>
-                        {check.provider.name} · {check.provider.state} · version{' '}
-                        {check.provider.version} · rules {check.rulesetVersion}
-                      </dd>
+                      <dt>Important limit</dt>
+                      <dd>This result can be wrong and is not proof or certainty.</dd>
                       <dt>Retention</dt>
                       <dd>
-                        {check.retention.state}; scheduled deletion{' '}
-                        {new Date(check.retention.deleteAfter).toLocaleString()} unless the owner
-                        deletes it sooner.
-                      </dd>
-                      <dt>Reference</dt>
-                      <dd>
-                        {check.id} — searchable in local HQ audit metadata, not an external incident
-                        number.
+                        Scheduled for deletion{' '}
+                        {new Date(check.retention.deleteAfter).toLocaleString()} unless you delete
+                        it sooner.
                       </dd>
                     </dl>
-                    <h3>Evidence and limitations</h3>
+                    <h3>What the check noticed and its limits</h3>
                     {check.evidence.length ? (
                       <ul className="plain-list">
                         {check.evidence.map((item, index) => (
@@ -272,7 +262,7 @@ export default function HistoryPage() {
                         .sort((a, b) => a.priority - b.priority)
                         .map((action) => (
                           <li key={action.key}>
-                            <strong>{action.title}</strong> — {action.detail}
+                            <strong>{action.title}</strong> - {action.detail}
                             {action.officialChannelOnly
                               ? ' Use an independently verified official channel.'
                               : ''}

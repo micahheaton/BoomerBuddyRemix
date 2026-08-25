@@ -27,7 +27,8 @@ import { createMutableClock, testConfig } from './support';
 const customerOrigin = 'https://customer.boomerbuddy.test';
 const hqOrigin = 'https://hq.boomerbuddy.test';
 const endpointSecret = 'whsec_fixture_12345678';
-const apiVersion = '2026-02-25.clover';
+const liveEndpointSecret = ['whsec', 'live', 'fixture_12345678'].join('_');
+const apiVersion = '2026-07-29.dahlia';
 
 function stripeConfig(): AppConfig {
   const base = testConfig();
@@ -64,52 +65,308 @@ function stripeConfig(): AppConfig {
   };
 }
 
-describe('Stripe live runtime boundary', () => {
-  it('refuses API startup from an offline live manifest even with an injected transport', async () => {
-    const base = stripeConfig();
-    const liveConfig: AppConfig = {
-      ...base,
-      commerce: {
-        stripe: {
-          mode: 'live',
-          environment: 'production',
-          accountId: 'acct_livefixture1',
-          apiVersion,
-          runtimeInitiationPermitted: false,
-          runtimeNetworkPermitted: false,
-          credentialCustody: 'managed_identity_kms_unavailable',
-          requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
-          cancelOnlyPortalConfigurationId: 'bpc_live_cancel_fixture',
-          offer: {
-            offerId: 'founding_family_monthly_v1',
-            planVersionId: 'family_v1',
-            billingInterval: 'month',
-            providerProductId: 'prod_live_family_fixture',
-            providerPriceId: 'price_live_family_fixture',
-            currency: 'usd',
-            unitAmountMinor: 1499,
-            quantity: 1,
-          },
+function liveApiConfig(runtimeInitiationPermitted: boolean): AppConfig {
+  const base = stripeConfig();
+  return {
+    ...base,
+    commerce: {
+      stripe: {
+        mode: 'live',
+        environment: 'production',
+        runtimeSurface: 'api',
+        accountId: 'acct_livefixture1',
+        apiRestrictedKey: ['rk', 'live', 'fixture_12345678'].join('_'),
+        webhookSecret: liveEndpointSecret,
+        apiVersion,
+        runtimeInitiationPermitted,
+        runtimeNetworkPermitted: true,
+        credentialCustody: 'separate_replit_runtime_restricted_keys',
+        cancelOnlyPortalConfigurationId: 'bpc_live_cancel_fixture',
+        offer: {
+          offerId: 'founding_family_monthly_v1',
+          planVersionId: 'family_v1',
+          billingInterval: 'month',
+          providerProductId: 'prod_live_family_fixture',
+          providerPriceId: 'price_live_family_fixture',
+          currency: 'usd',
+          unitAmountMinor: 1499,
+          quantity: 1,
         },
       },
-    };
+    },
+  };
+}
+
+describe('Stripe live runtime boundary', () => {
+  it('accepts the API-scoped live boundary while keeping injected evidence local-only', async () => {
+    const liveConfig = liveApiConfig(false);
     const injectedTransport: StripeTransport = {
       get: vi.fn(async () => ({})),
       postForm: vi.fn(async () => ({})),
     };
-    await expect(
-      buildApp({ config: liveConfig, stripeTransport: injectedTransport, initialize: false }),
-    ).rejects.toThrow('offline-only; api startup is refused');
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveConfig,
+      database,
+      closeDatabase: false,
+      stripeTransport: injectedTransport,
+    });
+    const publicConfiguration = await app.inject({ method: 'GET', url: '/v1/public/config' });
+    expect(publicConfiguration.statusCode, publicConfiguration.body).toBe(200);
+    expect(publicConfiguration.json()).toMatchObject({
+      liveProvidersEnabled: true,
+      pricing: [
+        {
+          key: 'family',
+          monthlyUsd: 14.99,
+          annualUsd: null,
+          hypothesis: false,
+        },
+      ],
+    });
     expect(injectedTransport.get).not.toHaveBeenCalled();
     expect(injectedTransport.postForm).not.toHaveBeenCalled();
+    await app.close();
+    await database.close();
     await expect(
       buildApp({
-        config: stripeConfig(),
+        config: liveConfig,
         stripeTransport: injectedTransport,
-        stripeEvidenceLevel: 'stripe_test',
+        stripeEvidenceLevel: 'live_production',
         initialize: false,
       }),
     ).rejects.toThrow('evidence tier does not match the runtime transport boundary');
+  });
+
+  it('fails Portal closed when its runtime configuration and adapter are absent', async () => {
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: testConfig(),
+      database,
+      closeDatabase: false,
+    });
+    const portal = await app.inject({ method: 'POST', url: '/v1/commerce/stripe/portal' });
+    expect(portal.statusCode, portal.body).toBe(503);
+    expect(portal.json()).toMatchObject({
+      error: { code: 'integration_unavailable' },
+    });
+    await app.close();
+    await database.close();
+  });
+
+  it('keeps verified-customer Portal available while live Checkout initiation is off', async () => {
+    const liveConfig = liveApiConfig(false);
+    const liveNow = new Date();
+    const postForm = vi.fn(async ({ path, form }) => {
+      if (path !== '/v1/billing_portal/sessions') throw new Error('Unexpected Stripe mutation');
+      return {
+        id: 'bps_live_portal_independent',
+        object: 'billing_portal.session',
+        livemode: true,
+        url: 'https://billing.stripe.com/p/session/live-portal-independent',
+        customer: form.customer,
+        configuration: form.configuration,
+        return_url: form.return_url,
+      };
+    });
+    const transport: StripeTransport = {
+      postForm,
+      get: vi.fn(async ({ path }) => {
+        if (path === '/v1/account') {
+          return {
+            id: 'acct_livefixture1',
+            object: 'account',
+            charges_enabled: true,
+            payouts_enabled: true,
+            country: 'US',
+            business_type: 'company',
+          };
+        }
+        if (path === '/v1/products/prod_live_family_fixture') {
+          return {
+            id: 'prod_live_family_fixture',
+            object: 'product',
+            livemode: true,
+            active: true,
+          };
+        }
+        if (path === '/v1/prices/price_live_family_fixture') {
+          return {
+            id: 'price_live_family_fixture',
+            object: 'price',
+            livemode: true,
+            active: true,
+            product: 'prod_live_family_fixture',
+            currency: 'usd',
+            unit_amount: 1499,
+            unit_amount_decimal: '1499',
+            type: 'recurring',
+            billing_scheme: 'per_unit',
+            custom_unit_amount: null,
+            tiers_mode: null,
+            transform_quantity: null,
+            recurring: {
+              interval: 'month',
+              interval_count: 1,
+              usage_type: 'licensed',
+              trial_period_days: null,
+            },
+          };
+        }
+        if (path === '/v1/billing_portal/configurations/bpc_live_cancel_fixture') {
+          return {
+            id: 'bpc_live_cancel_fixture',
+            object: 'billing_portal.configuration',
+            livemode: true,
+            active: true,
+            features: {
+              subscription_cancel: {
+                enabled: true,
+                mode: 'at_period_end',
+                proration_behavior: 'none',
+              },
+              subscription_update: { enabled: false, default_allowed_updates: [] },
+              payment_method_update: { enabled: true },
+              customer_update: { enabled: false, allowed_updates: [] },
+            },
+          };
+        }
+        return {};
+      }),
+    };
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveConfig,
+      database,
+      closeDatabase: false,
+      stripeTransport: transport,
+      now: () => liveNow,
+    });
+    await database.query(
+      `INSERT INTO commerce_provider_customers(
+         provider, environment, provider_customer_id, household_id, verified_at
+       ) VALUES ('stripe','production','cus_live_portal_independent','household-sunrise',CURRENT_TIMESTAMP)`,
+    );
+    const cookie = await login(app, 'owner-alice');
+    const customerHeaders = {
+      cookie,
+      origin: customerOrigin,
+      'x-bb-household-id': 'household-sunrise',
+    };
+    const billing = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: customerHeaders,
+    });
+    expect(billing.statusCode, billing.body).toBe(200);
+    expect(billing.json()).toMatchObject({
+      billing: { runtimeInitiationEnabled: false, portalAvailable: true },
+    });
+    const checkout = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: { ...customerHeaders, 'idempotency-key': 'live-disabled-checkout-request-0001' },
+      payload: { offerId: 'founding_family_monthly_v1' },
+    });
+    expect(checkout.statusCode, checkout.body).toBe(403);
+    const portal = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/portal',
+      headers: { ...customerHeaders, 'idempotency-key': 'live-independent-portal-request-0001' },
+    });
+    expect(portal.statusCode, portal.body).toBe(200);
+    expect(portal.json()).toMatchObject({
+      portal: { environment: 'production', sessionId: 'bps_live_portal_independent' },
+    });
+    expect(postForm).toHaveBeenCalledTimes(1);
+    expect(postForm).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/v1/billing_portal/sessions' }),
+    );
+    const webhookCreated = Math.floor(liveNow.getTime() / 1_000);
+    const rawWebhook = JSON.stringify({
+      id: 'evt_live_async_payment_failed_initiation_off',
+      type: 'checkout.session.async_payment_failed',
+      created: webhookCreated,
+      livemode: true,
+      account: 'acct_livefixture1',
+      api_version: apiVersion,
+      data: {
+        object: {
+          id: 'cs_live_async_payment_failed_initiation_off',
+          object: 'checkout.session',
+          livemode: true,
+          mode: 'subscription',
+          status: 'complete',
+          payment_status: 'unpaid',
+          amount_total: 1499,
+          currency: 'usd',
+          expires_at: webhookCreated + 3600,
+          customer: 'cus_live_async_payment_failed_initiation_off',
+          subscription: 'sub_live_async_payment_failed_initiation_off',
+          metadata: {
+            household_id: 'household-sunrise',
+            canonical_subscription_id: 'subscription-live-async-payment-failed-initial-off',
+            plan_version_id: 'family_v1',
+          },
+        },
+      },
+    });
+    const webhook = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': signStripeFixture({
+          rawBody: rawWebhook,
+          endpointSecret: liveEndpointSecret,
+          timestampSeconds: webhookCreated,
+        }),
+      },
+      payload: rawWebhook,
+    });
+    expect(webhook.statusCode, webhook.body).toBe(202);
+    expect(webhook.json()).toMatchObject({
+      received: true,
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const queuedWebhook = await database.query<
+      { readonly job_type: string; readonly payload: unknown } & Record<string, unknown>
+    >(
+      `SELECT job_type, payload FROM durable_jobs
+       WHERE job_type = 'commerce.reconcile'
+       ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(queuedWebhook.rows[0]).toMatchObject({
+      job_type: 'commerce.reconcile',
+      payload: expect.objectContaining({
+        environment: 'production',
+        eventType: 'checkout.session.async_payment_failed',
+        externalSubscriptionId: 'sub_live_async_payment_failed_initiation_off',
+      }),
+    });
+    const hqCookie = await loginHq(app);
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/status?environment=production',
+      headers: { cookie: hqCookie, origin: hqOrigin },
+    });
+    expect(status.statusCode, status.body).toBe(200);
+    expect(status.json()).toMatchObject({
+      environment: 'production',
+      preflight: {
+        state: 'configured',
+        checks: {
+          accountReady: true,
+          offerReady: true,
+          portalReady: true,
+          checkoutPolicyReady: true,
+        },
+      },
+    });
+    expect(JSON.stringify(status.json())).not.toMatch(/apiRestrictedKey|provider_product_id|raw/u);
+    await app.close();
+    await database.close();
   });
 
   it('composes worker Checkout and Portal retries with the configured customer origin and exact keys', async () => {
@@ -338,6 +595,8 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
   readonly fixtureKey: string;
   readonly periodStart: number;
   readonly periodEnd: number;
+  readonly checkoutEventType?:
+    'checkout.session.completed' | 'checkout.session.async_payment_succeeded';
 }): Promise<void> {
   const checkoutExpiry = await input.database.query<
     { readonly provider_returned_expires_at: unknown } & Record<string, unknown>
@@ -371,7 +630,7 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
   };
   const checkout = await send({
     id: `evt_${input.fixtureKey}_checkout_completed`,
-    type: 'checkout.session.completed',
+    type: input.checkoutEventType ?? 'checkout.session.completed',
     created: input.periodStart,
     livemode: false,
     api_version: apiVersion,
@@ -622,7 +881,7 @@ describe('Stripe test-mode transaction path', () => {
                 proration_behavior: 'none',
               },
               subscription_update: { enabled: false, default_allowed_updates: [] },
-              payment_method_update: { enabled: false },
+              payment_method_update: { enabled: true },
               customer_update: { enabled: false, allowed_updates: [] },
             },
           };
@@ -662,6 +921,74 @@ describe('Stripe test-mode transaction path', () => {
   afterEach(async () => {
     await app.close();
     await database.close();
+  });
+
+  it('queues signed asynchronous Checkout payment failure for provider reconciliation', async () => {
+    const created = Math.floor(clock.now().getTime() / 1_000);
+    const rawBody = JSON.stringify({
+      id: 'evt_async_payment_failed_fixture',
+      type: 'checkout.session.async_payment_failed',
+      created,
+      livemode: false,
+      api_version: apiVersion,
+      data: {
+        object: {
+          id: 'cs_test_async_payment_failed',
+          object: 'checkout.session',
+          livemode: false,
+          mode: 'subscription',
+          status: 'complete',
+          payment_status: 'unpaid',
+          amount_total: 1499,
+          currency: 'usd',
+          expires_at: created + 3600,
+          customer: 'cus_async_payment_failed',
+          subscription: 'sub_async_payment_failed',
+          metadata: {
+            household_id: 'household-sunrise',
+            canonical_subscription_id: 'subscription-async-payment-failed',
+            plan_version_id: 'family_v1',
+          },
+        },
+      },
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': signStripeFixture({
+          rawBody,
+          endpointSecret,
+          timestampSeconds: created,
+        }),
+      },
+      payload: rawBody,
+    });
+
+    expect(response.statusCode, response.body).toBe(202);
+    expect(response.json()).toMatchObject({
+      received: true,
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const queued = await database.query<
+      { readonly job_type: string; readonly payload: unknown } & Record<string, unknown>
+    >(
+      `SELECT job_type, payload
+         FROM durable_jobs
+        WHERE job_type = 'commerce.reconcile'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+    );
+    expect(queued.rows[0]).toMatchObject({
+      job_type: 'commerce.reconcile',
+      payload: expect.objectContaining({
+        environment: 'test',
+        eventType: 'checkout.session.async_payment_failed',
+        externalSubscriptionId: 'sub_async_payment_failed',
+      }),
+    });
   });
 
   it('binds checkout, signed webhook, canonical grant, portal, and duplicate delivery', async () => {
@@ -807,7 +1134,7 @@ describe('Stripe test-mode transaction path', () => {
               proration_behavior: 'none',
             },
             subscription_update: { enabled: false, default_allowed_updates: [] },
-            payment_method_update: { enabled: false },
+            payment_method_update: { enabled: true },
             customer_update: { enabled: false, allowed_updates: [] },
           },
         };
@@ -1100,7 +1427,7 @@ describe('Stripe test-mode transaction path', () => {
             proration_behavior: 'none',
           },
           subscription_update: { enabled: false, default_allowed_updates: [] },
-          payment_method_update: { enabled: false },
+          payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
         },
       };
@@ -1121,6 +1448,10 @@ describe('Stripe test-mode transaction path', () => {
     const preflightReceipts = await database.query<
       {
         readonly authenticity_kind: string;
+        readonly account_business_type: string | null;
+        readonly account_charges_enabled: boolean;
+        readonly account_country: string | null;
+        readonly account_payouts_enabled: boolean;
         readonly evidence_digest: string;
         readonly evidence_level: string;
         readonly portal_mutation_controls_exact: boolean;
@@ -1130,7 +1461,9 @@ describe('Stripe test-mode transaction path', () => {
       } & Record<string, unknown>
     >(
       `SELECT evidence_level, evidence_digest, transport_kind, runtime_run_id,
-              authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence
+              authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
+              account_charges_enabled, account_payouts_enabled, account_country,
+              account_business_type
        FROM commerce_stripe_preflight_records
        WHERE environment = 'test'
        ORDER BY id`,
@@ -1142,6 +1475,10 @@ describe('Stripe test-mode transaction path', () => {
         evidence_level: 'local_fixture',
         transport_kind: 'injected_fixture',
         authenticity_kind: 'fixture_assertion',
+        account_charges_enabled: false,
+        account_payouts_enabled: false,
+        account_country: null,
+        account_business_type: null,
         portal_mutation_controls_exact: true,
         retention_coupon_evidence: 'manual_founder_browser_required',
       });
@@ -3196,6 +3533,7 @@ describe('Stripe test-mode transaction path', () => {
       fixtureKey: 'invoice_policy',
       periodStart: created,
       periodEnd: created + 30 * 86_400,
+      checkoutEventType: 'checkout.session.async_payment_succeeded',
     });
     vi.mocked(transport.get).mockClear();
 

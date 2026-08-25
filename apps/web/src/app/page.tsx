@@ -9,11 +9,12 @@ export default function HomePage() {
         <section className="page-shell hero">
           <div>
             <span className="eyebrow">Pause · Check · Connect</span>
-            <h1>From suspicious to a safer next step—together.</h1>
+            <h1>From suspicious to a safer next step, together.</h1>
             <p className="lede">
               BoomerBuddy helps you slow down, check a suspicious text or link, and involve someone
-              you trust. Public Check works without an account. Its rules-only result can be wrong
-              and is not calibrated real-world fraud-detection evidence.
+              you trust. Public Check works without an account. It can miss warning signs or flag
+              something harmless, so verify independently when money, accounts, or safety are at
+              risk.
             </p>
             <div className="button-row">
               <Link className="button button-primary" href="/check">
@@ -48,10 +49,9 @@ export default function HomePage() {
               </article>
               <article className="card">
                 <div className="step-number">2</div>
-                <h3>Read the limits</h3>
+                <h3>Understand the result</h3>
                 <p>
-                  See a risk level, evidence sufficiency, explicit limitations, and the available
-                  provider state.
+                  See what the check noticed, what it could not determine, and clear next steps.
                 </p>
               </article>
               <article className="card">

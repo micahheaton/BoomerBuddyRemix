@@ -44,6 +44,11 @@ describe('founder provisioning names-only environment catalogue', () => {
     expect(document.split(founderProvisioningCatalogueEndMarker)).toHaveLength(2);
     expect(renderedCatalogue).not.toContain('.env.example');
     expect(renderedCatalogue).not.toContain('BB_STRIPE_LIVE_*');
+    expect(renderedCatalogue).not.toContain('BB_STRIPE_LIVE_API_KEY');
+    expect(renderedCatalogue).toContain('BB_STRIPE_RUNTIME_SURFACE');
+    expect(renderedCatalogue).toContain('BB_STRIPE_LIVE_INITIATION_ENABLED');
+    expect(renderedCatalogue).toContain('BB_STRIPE_LIVE_API_RESTRICTED_KEY');
+    expect(renderedCatalogue).toContain('BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY');
 
     for (const entry of founderProvisioningCatalogue) {
       expect(document.match(new RegExp(`catalogue-entry:${entry.key}:v1`, 'gu'))).toHaveLength(1);

@@ -10,5 +10,11 @@ export type RootStackParamList = {
   History: undefined;
   Family: undefined;
   Orientation: undefined;
+  HelpPolicies: undefined;
+  Support: undefined;
+  Privacy: undefined;
+  Terms: undefined;
+  Accessibility: undefined;
+  AccountDeletion: undefined;
   NativeProof: undefined;
 };

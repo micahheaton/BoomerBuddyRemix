@@ -259,6 +259,40 @@ describe('deny-by-default authorization', () => {
     ).toBe(true);
   });
 
+  it('limits HQ billing-authority provisioning to the exact configured founder owner', () => {
+    const founder = hqPrincipal('hq_owner');
+    const resource: Resource = {
+      kind: 'billing_authority_workflow',
+      configuredFounderPersonId: founder.personId,
+    };
+    expect(
+      authorize({ principal: founder, action: 'hq:billing_authority:read', resource }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({ principal: founder, action: 'hq:billing_authority:manage', resource }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: founder,
+        action: 'hq:billing_authority:manage',
+        resource: {
+          kind: 'billing_authority_workflow',
+          configuredFounderPersonId: ids.person('person-other-founder'),
+        },
+      }).reason,
+    ).toBe('insufficient_role');
+    expect(
+      authorize({
+        principal: hqPrincipal('hq_reviewer'),
+        action: 'hq:billing_authority:manage',
+        resource,
+      }).allowed,
+    ).toBe(false);
+    expect(
+      authorize({ principal: principal(), action: 'hq:billing_authority:manage', resource }).reason,
+    ).toBe('wrong_audience');
+  });
+
   it('models development invitations as unbound and production invitations as identity-bound', () => {
     const invitee = principal({ households: [] });
     expect(

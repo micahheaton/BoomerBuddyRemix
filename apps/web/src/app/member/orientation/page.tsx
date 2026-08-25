@@ -16,7 +16,7 @@ const steps = [
     key: 'trusted_circle',
     title: 'Consent and Trusted Circle',
     detail:
-      'Invite only people you know. Review the exact person, sharing permission, and withdrawal path. Each pairwise permission requires acceptance and can be ended independently. Notifications are unavailable in this build, so agree on a manual contact method instead.',
+      'Invite only people you know. Review the exact person, sharing permission, and withdrawal path. Each pairwise permission requires acceptance and can be ended independently. Notifications for newly shared Checks are not available in this beta, so agree on a direct contact method instead.',
   },
   {
     key: 'safe_word',
@@ -28,21 +28,33 @@ const steps = [
     key: 'practice_check',
     title: 'Practice the Check and sharing workflow',
     detail:
-      'Use a synthetic scenario to practice pausing, putting the suspicious text or URL into Check, reading evidence and limits, choosing a safe action, and sharing only the redacted result when you deliberately want help.',
+      'Use a fictional scenario to practice pausing, putting the suspicious message or website address into Check, reading warning signs and limits, choosing a safe action, and sharing only the redacted result when you deliberately want help.',
   },
   {
     key: 'capabilities_and_limits',
     title: 'Understand limits and the recovery path',
     detail:
-      'Local rules-only analysis can be wrong, does not fetch URLs or use a live reputation provider, and is not a monitoring or emergency service. If money, access, or credentials were already exposed, stop contact, use independently found official channels, secure the affected account, and seek qualified help; do not wait for another Check.',
+      'The result can be wrong, does not open website addresses or look them up with an outside service, and is not a monitoring or emergency service. If money, access, or passwords were already exposed, stop contact, use independently found official channels, secure the affected account, and seek qualified help; do not wait for another Check.',
   },
   {
     key: 'review',
     title: 'Review the plan',
     detail:
-      'Confirm identity and protected-person scope, consent choices, pairwise permissions, manual notification/contact plan, safe-word choice, Check and sharing workflow, recovery contacts, and independent verification steps.',
+      'Confirm whose safety plan this is, consent choices, each person’s permissions, the agreed contact plan, safe-word choice, Check and sharing workflow, recovery contacts, and independent verification steps.',
   },
 ] as const;
+
+const orientationStatusText: Readonly<Record<OrientationStateDto['status'], string>> = {
+  not_started: 'Not started',
+  in_progress: 'In progress',
+  ready: 'Complete',
+};
+
+const safeWordText: Readonly<Record<OrientationStateDto['safeWordDisposition'], string>> = {
+  unanswered: 'Not answered',
+  configured: 'Saved',
+  informed_deferral: 'Deferred after review',
+};
 
 type StepKey = (typeof steps)[number]['key'];
 
@@ -173,11 +185,11 @@ export default function OrientationPage() {
         </div>
         <p>
           <strong>{completed} of 6 complete</strong> · Status:{' '}
-          {orientation?.status?.replaceAll('_', ' ') ?? 'loading'}
+          {orientation ? orientationStatusText[orientation.status] : 'Loading'}
         </p>
         {orientation ? (
           <p className="meta">
-            Safe-word choice: {orientation.safeWordDisposition.replaceAll('_', ' ')} · Attention:{' '}
+            Safe-word choice: {safeWordText[orientation.safeWordDisposition]} · Attention:{' '}
             {orientation.needsAttention
               ? 'setup still needs review'
               : 'no incomplete stage flagged'}
@@ -203,7 +215,7 @@ export default function OrientationPage() {
             <li className="card" key={step.key} data-orientation-step={step.key}>
               <span className="step-number">{done ? '✓' : index + 1}</span>
               <h2>
-                {step.title} {done && <span className="checkmark">— complete</span>}
+                {step.title} {done && <span className="checkmark">- complete</span>}
               </h2>
               <p>{step.detail}</p>
               {step.key === 'trusted_circle' ? (
@@ -235,7 +247,7 @@ export default function OrientationPage() {
                   />
                   <p className="help">
                     The phrase is normalized only in memory. The service stores a salted,
-                    memory-hard verifier—not the phrase—and never displays it back here.
+                    memory-hard verifier, not the phrase, and never displays it back here.
                   </p>
                   <div className="button-row">
                     <button

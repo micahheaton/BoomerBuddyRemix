@@ -12,8 +12,8 @@ import { apiRequest, readableError } from '../../../lib/api';
 
 const permissionLabels: Record<TrustedCirclePermissionDto, string> = {
   view_shared_checks: 'View checks that are deliberately shared',
-  receive_escalations: 'Reserved for future escalation notifications (not implemented)',
-  help_with_orientation: 'Reserved for future guided orientation help (not implemented)',
+  receive_escalations: 'Escalation notifications are unavailable',
+  help_with_orientation: 'Guided orientation help is unavailable',
 };
 type AcceptedInvitation = { relationship: { id: string }; householdId: string };
 
@@ -21,7 +21,6 @@ export default function FamilyPage() {
   const { me, selectedHouseholdId, selectedScope, refreshPrincipal } = useHousehold();
   const [family, setFamily] = useState<FamilyResponse>();
   const [inviteeDisplayName, setInviteeDisplayName] = useState('');
-  const [intendedCustomerSubject, setIntendedCustomerSubject] = useState('');
   const [created, setCreated] = useState<CreateInvitationResponse>();
   const [invitationId, setInvitationId] = useState('');
   const [localInviteCode, setLocalInviteCode] = useState('');
@@ -49,11 +48,11 @@ export default function FamilyPage() {
     return () => window.clearTimeout(timer);
   }, [load, selectedHouseholdId]);
   const production = process.env.NODE_ENV === 'production';
-  const canInvite =
-    Boolean(inviteeDisplayName.trim()) && (!production || Boolean(intendedCustomerSubject.trim()));
+  const canInvite = Boolean(inviteeDisplayName.trim());
 
   async function createInvite(event: FormEvent) {
     event.preventDefault();
+    if (production) return;
     setBusy(true);
     setError('');
     setCreated(undefined);
@@ -64,12 +63,10 @@ export default function FamilyPage() {
         body: JSON.stringify({
           inviteeDisplayName,
           permissions: ['view_shared_checks'],
-          ...(production ? { intendedCustomerSubject } : {}),
         }),
       });
       setCreated(response);
       setInviteeDisplayName('');
-      setIntendedCustomerSubject('');
       await load(selectedHouseholdId);
     } catch (caught) {
       setError(readableError(caught));
@@ -123,7 +120,7 @@ export default function FamilyPage() {
       setConsentConfirmed(false);
       setInvitationId('');
       setLocalInviteCode('');
-      setAnnouncement('Invitation accepted. Scoped Trusted Circle access is now active.');
+      setAnnouncement('Invitation accepted. Trusted Circle access is now active.');
       const refreshed = await refreshPrincipal(acceptedHouseholdId);
       if (
         !refreshed.me.principal.households.some((scope) => scope.id === acceptedHouseholdId) ||
@@ -315,7 +312,7 @@ export default function FamilyPage() {
       ) : null}
       {accepted && (
         <p className="notice" role="status">
-          Invitation accepted. The scoped Trusted Circle relationship is now active.
+          Invitation accepted. The Trusted Circle relationship is now active.
         </p>
       )}
       {family && (
@@ -325,7 +322,7 @@ export default function FamilyPage() {
             <ul className="plain-list">
               {family.members.map((member) => (
                 <li key={member.membershipId}>
-                  <strong>{member.displayName}</strong> — member ({member.status})
+                  <strong>{member.displayName}</strong> - member ({member.status})
                   {member.isAdministrator ? ' · administrator' : ''}
                   {member.isProtectedMember ? ' · protected adult' : ''}
                 </li>
@@ -376,7 +373,8 @@ export default function FamilyPage() {
                       <li key={item.id}>
                         <strong>{item.inviteeDisplayName}</strong>
                         <div className="meta">
-                          Expires {new Date(item.expiresAt).toLocaleDateString()} · Local only
+                          Expires {new Date(item.expiresAt).toLocaleDateString()} · Not sent
+                          automatically
                         </div>
                         {isHouseholdAdministrator ||
                         item.protectedPersonId === me.principal.personId ? (
@@ -422,7 +420,15 @@ export default function FamilyPage() {
               <p className="help">Invite codes are deliberately not shown in this history.</p>
             </section>
           </div>
-          {isProtectedMember && (
+          {isProtectedMember && production ? (
+            <section className="card" style={{ marginTop: '1rem' }}>
+              <h2>Inviting a new trusted person is not available</h2>
+              <p>
+                New Trusted Circle invitations are not available in this private beta. You can still
+                review existing relationships, cancel pending invitations, or revoke access above.
+              </p>
+            </section>
+          ) : isProtectedMember ? (
             <form className="card form-stack" onSubmit={createInvite} style={{ marginTop: '1rem' }}>
               <h2>Invite a trusted person</h2>
               <p>
@@ -437,55 +443,31 @@ export default function FamilyPage() {
                 maxLength={120}
                 onChange={(event) => setInviteeDisplayName(event.target.value)}
               />
-              {production ? (
-                <>
-                  <label htmlFor="invitee-subject">Exact invited Clerk customer subject</label>
-                  <input
-                    id="invitee-subject"
-                    value={intendedCustomerSubject}
-                    required
-                    maxLength={200}
-                    autoComplete="off"
-                    onChange={(event) => setIntendedCustomerSubject(event.target.value)}
-                  />
-                  <p className="help">
-                    The server resolves this subject to one active customer identity and ignores
-                    client-supplied household, role, or entitlement claims.
-                  </p>
-                </>
-              ) : null}
               <fieldset>
-                <legend>Run 1 permission requested</legend>
+                <legend>Permission requested</legend>
                 <p>{permissionLabels.view_shared_checks}</p>
               </fieldset>
               <p className="help">
-                Orientation help and receive-escalation notification permissions are scaffolded but
-                unavailable in this build. A broader generic consent activate/defer workflow is also
-                deferred and is not represented as complete.
+                This invitation permits only deliberate sharing of redacted Check results. It does
+                not turn on notifications or broader account access.
               </p>
               <button
                 className="button-primary"
                 disabled={Boolean(busy) || !canInvite}
                 type="submit"
               >
-                {busy
-                  ? 'Creating invitation…'
-                  : production
-                    ? 'Create identity-bound invitation'
-                    : 'Create local invitation'}
+                {busy ? 'Creating invitation…' : 'Create local invitation'}
               </button>
             </form>
-          )}
-          {created && (
+          ) : null}
+          {!production && created ? (
             <section
               className="notice notice-warning"
               role="status"
               aria-live="polite"
               data-testid="invite-created"
             >
-              <h2>
-                {production ? 'Identity-bound invitation created' : 'Local invitation created'}
-              </h2>
+              <h2>Local invitation created</h2>
               <p>
                 Share these one-time values directly with the intended person. They are not sent
                 automatically and will not appear again in invitation history.
@@ -501,7 +483,7 @@ export default function FamilyPage() {
                 {new Date(created.invitation.expiresAt).toLocaleString()}
               </p>
             </section>
-          )}
+          ) : null}
         </>
       )}
     </main>

@@ -25,7 +25,7 @@ test('public landmark pages have zero serious or critical axe violations', async
   const pages = [
     ['/', /From suspicious to a safer next step/u],
     ['/how-it-works', 'A calmer way to handle something suspicious'],
-    ['/pricing', 'Pricing is still a hypothesis'],
+    ['/pricing', 'One plan for the private beta'],
     ['/trust', 'Designed to show its limits'],
     ['/sign-in', 'Choose a seeded person'],
   ] as const;
@@ -85,7 +85,7 @@ test('keyboard focus, live result announcement, 200% zoom, and 320px reflow rema
   await page.evaluate(() => {
     document.documentElement.style.zoom = '2';
   });
-  await expect(result.getByText('Calibration', { exact: true })).toBeVisible();
+  await expect(result.getByText('Important limit', { exact: true })).toBeVisible();
   await page.evaluate(() => {
     document.documentElement.style.zoom = '1';
   });

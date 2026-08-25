@@ -20,6 +20,7 @@ import {
   GrowthRuntimeRepository,
   growthProjectionEventTypes,
   MessagingRepository,
+  MobileJtiSessionRetentionRepository,
   OperationalWorkRepository,
   OutboxDeliveryRepository,
   PublicCheckRepository,
@@ -41,6 +42,7 @@ import {
 import { createStripeReconciliationHandler } from './commerce-reconciliation';
 import { composeFeedbackWorker } from './feedback-composition';
 import { composeProviderFreeMessagingWorker } from './messaging-composition';
+import { runMobileSessionRetentionSweep } from './mobile-session-retention';
 import {
   createStripeInventoryHandler,
   enqueueStripeInventory,
@@ -138,6 +140,7 @@ await runReplitWorkerLifecycle(
     const businessOs = new BusinessOsRepository(database);
     const growth = new GrowthRuntimeRepository(database);
     const operations = new OperationalWorkRepository(database);
+    const mobileSessionRetention = new MobileJtiSessionRetentionRepository(database);
     const retentionIntervalMs = 5 * 60_000;
 
     const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
@@ -151,6 +154,12 @@ await runReplitWorkerLifecycle(
         entitlementRuntimeEnvironment === 'local'
           ? await messaging.purgeExpiredSupportContent({ limit: batch, now })
           : [];
+      const mobileRetention = await runMobileSessionRetentionSweep({
+        retention: mobileSessionRetention,
+        logger,
+        now,
+        limit: batch,
+      });
       await heartbeat();
       const next = nextRetentionSchedule({
         currentJobId: job.id,
@@ -160,7 +169,8 @@ await runReplitWorkerLifecycle(
           deleted.length === batch ||
           publicDeleted.contexts > 0 ||
           publicDeleted.results > 0 ||
-          messagingDeleted.length === batch,
+          messagingDeleted.length === batch ||
+          mobileRetention.cleanupSaturated,
       });
       await jobs.enqueue({
         type: 'retention.sweep',
@@ -211,11 +221,17 @@ await runReplitWorkerLifecycle(
         fingerprintKey: appConfig.secrets.fingerprintKey,
       }),
     };
-    if (appConfig.commerce.stripe.mode === 'test') {
+    if (
+      appConfig.commerce.stripe.mode === 'test' ||
+      (appConfig.commerce.stripe.mode === 'live' &&
+        appConfig.commerce.stripe.runtimeSurface === 'worker')
+    ) {
       const stripe = appConfig.commerce.stripe;
+      const restrictedKey = stripe.mode === 'test' ? stripe.apiKey : stripe.workerRestrictedKey;
+      const evidenceLevel = stripe.mode === 'test' ? 'stripe_test' : 'live_production';
       const runtimeRunId = `worker-${randomUUID()}`;
       const stripeAdapter = createWorkerStripeAdapter({
-        transport: new StripeHttpTransport(stripe.apiKey, stripe.apiVersion),
+        transport: new StripeHttpTransport(restrictedKey, stripe.apiVersion),
         customerOrigins: appConfig.identity.customerOrigins,
         configuration: {
           environment: stripe.environment,
@@ -236,7 +252,7 @@ await runReplitWorkerLifecycle(
         businessOs,
         commerceRuntime,
         provider: stripeAdapter,
-        evidenceLevel: 'stripe_test',
+        evidenceLevel,
         transportKind: 'stripe_https',
         runtimeRunId,
         authenticityKind: 'provider_read',
@@ -254,7 +270,7 @@ await runReplitWorkerLifecycle(
         environment: stripe.environment,
         accountId: stripe.accountId,
         apiVersion: stripe.apiVersion,
-        evidenceTier: 'stripe_test',
+        evidenceTier: evidenceLevel,
         transportKind: 'stripe_https',
         scheduledAt: now,
       });

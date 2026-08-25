@@ -6,7 +6,8 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "channel": "run2-preview",
+      "channel": "preview",
+      "environment": "preview",
       "android": {
         "buildType": "apk"
       }
@@ -16,6 +17,17 @@
       "ios": {
         "simulator": true
       }
+    },
+    "production": {
+      "autoIncrement": true,
+      "channel": "production",
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.boomerbuddy.net"
+      }
     }
+  },
+  "submit": {
+    "production": {}
   }
 }

@@ -138,6 +138,8 @@ const step = (
 
 const stripeConfigurationNames = [
   'BB_STRIPE_MODE',
+  'BB_STRIPE_RUNTIME_SURFACE',
+  'BB_STRIPE_LIVE_INITIATION_ENABLED',
   'BB_STRIPE_TEST_ACCOUNT_ID',
   'BB_STRIPE_TEST_FOUNDING_PRODUCT_ID',
   'BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID',
@@ -151,7 +153,8 @@ const stripeConfigurationNames = [
 const stripeSecretNames = [
   'BB_STRIPE_TEST_API_KEY',
   'BB_STRIPE_TEST_WEBHOOK_SECRET',
-  'BB_STRIPE_LIVE_API_KEY',
+  'BB_STRIPE_LIVE_API_RESTRICTED_KEY',
+  'BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY',
   'BB_STRIPE_LIVE_WEBHOOK_SECRET',
 ] as const;
 
@@ -592,10 +595,11 @@ export const founderProvisioningCatalogue: readonly FounderProvisioningCatalogue
     definitionVersion: 1,
     displayOrder: 80,
     provider: 'Stripe',
-    purpose: 'Authentic test-mode payment truth and later founder-gated first-dollar activation.',
+    purpose:
+      'Default-off Stripe Checkout and Billing truth for an operator-approved, max-one Family $14.99/month rollout.',
     accountOwner: 'Founder/company',
     initialStatus: 'founder_in_progress',
-    adapterState: 'test_configurable',
+    adapterState: 'implemented_disabled',
     manualSteps: [
       step(
         'secure_stripe_account',
@@ -604,22 +608,22 @@ export const founderProvisioningCatalogue: readonly FounderProvisioningCatalogue
       ),
       step(
         'create_test_resources',
-        'In test mode create the Founding Household product, price, signed webhook, and cancel-only portal configuration.',
+        'Create separate test and live Family $14.99/month products, prices, signed webhooks, and bounded portal configurations; keep live initiation off.',
         'ready_for_test',
       ),
       step(
         'store_test_names',
-        'Store test values only in the approved secret manager under the listed TEST names.',
+        'Store test credentials and each live runtime surface restricted key only in its approved service secret store under the listed exact names.',
         'ready_for_test',
       ),
       step(
         'run_test_runbook',
-        'Run signed test Checkout, invoice, cancel, grace, recovery, refund, dispute, reorder, outage, and reconciliation evidence.',
+        'Run signed test Checkout, invoice, cancel, grace, recovery, refund, dispute, reorder, outage, and reconciliation evidence, then complete live read-only preflight.',
         'test_proven',
       ),
       step(
         'retain_live_gate',
-        'Keep all LIVE names unset until professional and explicit founder activation gates pass.',
+        'Keep BB_STRIPE_LIVE_INITIATION_ENABLED=false until the active operator-approved cohort is unexpired, capped at one household, and exact live account/resource preflight passes.',
         'ready_for_live_review',
       ),
     ],
@@ -628,6 +632,9 @@ export const founderProvisioningCatalogue: readonly FounderProvisioningCatalogue
       'test_product_id',
       'test_price_id',
       'test_webhook_endpoint_id',
+      'live_product_id',
+      'live_price_id',
+      'live_webhook_endpoint_id',
       'api_version',
       'cancel_only_portal_configuration_id',
       'tax_decision',
@@ -635,14 +642,14 @@ export const founderProvisioningCatalogue: readonly FounderProvisioningCatalogue
     configurationEnvironmentNames: stripeConfigurationNames,
     secretEnvironmentNames: stripeSecretNames,
     verificationTest:
-      'Authentic signed test Checkout/invoice/cancel/grace/recovery/refund/dispute/reorder/outage/reconciliation lineage.',
+      'Authentic signed test lineage plus exact live US-company account/resource preflight, surface-separated restricted-key custody, default-off initiation, and max-one cohort rehearsal.',
     allowedProofTiers: ['provider_test', 'deployed_staging'],
     monthlyCostCeiling: 'founder_decision_required',
     recoveryOwner: 'Founder plus billing/admin recovery owner',
     exportTermination:
       'Stripe exports, webhook/key rotation, Checkout/portal disable, and account closure steps.',
     nextFounderAction:
-      'Create the exact test resources and load values through the secret manager only.',
+      'Create and verify the exact Family monthly resources and service-specific restricted keys while live initiation remains false.',
   },
   {
     key: 'stripe_tax',

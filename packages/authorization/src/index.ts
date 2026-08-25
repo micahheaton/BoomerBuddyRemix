@@ -44,6 +44,8 @@ export const actions = [
   'hq:founder_provisioning:manage',
   'hq:founding_households:read',
   'hq:founding_households:manage',
+  'hq:billing_authority:read',
+  'hq:billing_authority:manage',
   'hq:support_case:view',
   'hq:restricted_resource:read',
 ] as const;
@@ -113,6 +115,10 @@ export type Resource =
     }
   | {
       readonly kind: 'founding_household_program';
+      readonly configuredFounderPersonId?: string;
+    }
+  | {
+      readonly kind: 'billing_authority_workflow';
       readonly configuredFounderPersonId?: string;
     }
   | {
@@ -269,11 +275,15 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       action === 'hq:founder_provisioning:read' ||
       action === 'hq:founder_provisioning:manage' ||
       action === 'hq:founding_households:read' ||
-      action === 'hq:founding_households:manage'
+      action === 'hq:founding_households:manage' ||
+      action === 'hq:billing_authority:read' ||
+      action === 'hq:billing_authority:manage'
     ) {
       const expectedResource = action.startsWith('hq:founder_provisioning:')
         ? 'founder_provisioning'
-        : 'founding_household_program';
+        : action.startsWith('hq:founding_households:')
+          ? 'founding_household_program'
+          : 'billing_authority_workflow';
       if (resource.kind !== expectedResource) {
         return deny('unsupported_action_resource');
       }
@@ -325,6 +335,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
     resource.kind === 'hq' ||
     resource.kind === 'founder_provisioning' ||
     resource.kind === 'founding_household_program' ||
+    resource.kind === 'billing_authority_workflow' ||
     resource.kind === 'support_case' ||
     resource.kind === 'restricted_customer_resource'
   ) {

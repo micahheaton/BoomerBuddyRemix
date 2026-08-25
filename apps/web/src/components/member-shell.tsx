@@ -49,6 +49,8 @@ export function MemberHeader() {
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}
+          <Link href="/support">Support</Link>
+          <Link href="/billing-terms">Billing terms</Link>
           {process.env.NODE_ENV === 'production' ? (
             <ProductionSignOut />
           ) : (
@@ -67,7 +69,7 @@ export function MemberHeader() {
             >
               {me.principal.households.map((scope, index) => (
                 <option key={scope.id} value={scope.id}>
-                  {householdName(scope.id, index)} — {householdScopeSummary(scope)}
+                  {householdName(scope.id, index)} - {householdScopeSummary(scope)}
                 </option>
               ))}
             </select>

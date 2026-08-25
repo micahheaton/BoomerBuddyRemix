@@ -7,16 +7,17 @@ const routes = [
     name: 'HQ Founding Household',
     directory: resolve('apps/hq/.next/server/app/founding-households'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
-    requiredText: ['Exact Clerk customer subject', 'Issue one manual-delivery credential'],
-    forbiddenText: ['Managed-identity activation is blocked', 'Issue one local credential'],
+    requiredText: ['New sponsored enrollment is disabled', 'New invitations are disabled'],
+    forbiddenText: ['Exact Clerk customer subject', 'Managed-identity activation is blocked'],
   },
   {
     name: 'member Founding Household',
     directory: resolve('apps/web/.next/server/app/member/founding-household'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
     requiredText: [
-      'Enter the one-time invitation credential',
-      'Accept finite sponsored beta — no card',
+      'Manage sponsored access',
+      'Historical access only.',
+      'This page cannot create, preview, or accept a new sponsored enrollment.',
     ],
     forbiddenText: ['Managed-identity activation is blocked'],
   },
@@ -24,14 +25,25 @@ const routes = [
     name: 'member home',
     directory: resolve('apps/web/.next/server/app/member'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
-    requiredText: ['Open Founding Household review', 'Open selected-household feedback'],
+    requiredText: ['Open selected-household feedback', 'Manage sponsored access'],
   },
   {
     name: 'customer sign in',
     directory: resolve('apps/web/.next/server/app/sign-in'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
-    requiredText: ['Private Founding Household beta', 'Sign in to BoomerBuddy'],
-    forbiddenText: ['Choose a seeded person', 'Enter local member area'],
+    dynamicRoute: {
+      appPathsManifest: resolve('apps/web/.next/server/app-paths-manifest.json'),
+      expectedEntry: 'app/sign-in/[[...sign-in]]/page.js',
+      routeKey: '/sign-in/[[...sign-in]]/page',
+      serverRoot: resolve('apps/web/.next/server'),
+    },
+    unconfiguredText: 'Member sign in is temporarily unavailable',
+    requiredText: ['Sign in to BoomerBuddy'],
+    forbiddenText: [
+      'Private Founding Household beta',
+      'Choose a seeded person',
+      'Enter local member area',
+    ],
   },
   {
     name: 'member messaging',
@@ -89,6 +101,9 @@ const forbiddenAcrossRoute = [
   'Read assigned minimized text',
   'Loading disabled referral evidence',
   'No local referral attribution has been issued',
+  'Open Founding Household review',
+  'Enter the one-time invitation credential',
+  'Accept finite sponsored beta - no card',
 ];
 const forbiddenInRenderedPayload = ['localInvitationCredential'];
 const productionUiExpectation = process.env.BB_PRODUCTION_UI_EXPECTATION ?? 'unconfigured_identity';
@@ -124,6 +139,30 @@ async function collectGeneratedBodies(directory, files) {
   }
 }
 
+async function collectGeneratedJavaScript(directory, files) {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (isMissing(error)) {
+      return;
+    }
+    throw error;
+  }
+
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const entryPath = resolve(directory, entry.name);
+    if (!entryPath.startsWith(`${directory}${sep}`)) {
+      throw new Error(`Generated route artifact escaped ${directory}`);
+    }
+    if (entry.isDirectory()) {
+      await collectGeneratedJavaScript(entryPath, files);
+    } else if (entry.isFile() && entry.name.endsWith('.js')) {
+      files.add(entryPath);
+    }
+  }
+}
+
 async function collectTextFiles(directory, files) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -139,8 +178,9 @@ async function collectTextFiles(directory, files) {
   }
 }
 
-async function generatedRouteText(directory, staticDirectory) {
+async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
   const files = new Set();
+  let dynamicArtifact = false;
   for (const extension of ['html', 'rsc', 'body']) {
     const sibling = `${directory}.${extension}`;
     try {
@@ -156,16 +196,41 @@ async function generatedRouteText(directory, staticDirectory) {
   await collectGeneratedBodies(directory, files);
   await collectGeneratedBodies(`${directory}.segments`, files);
 
+  let generatedBody;
   if (files.size === 0) {
-    throw new Error(`No generated HTML/RSC body was found under ${directory}`);
+    dynamicArtifact = true;
+    if (dynamicRoute === undefined) {
+      throw new Error(`No generated HTML/RSC body was found under ${directory}`);
+    }
+    const appPaths = JSON.parse(await readFile(dynamicRoute.appPathsManifest, 'utf8'));
+    if (appPaths[dynamicRoute.routeKey] !== dynamicRoute.expectedEntry) {
+      throw new Error(`Dynamic route ${dynamicRoute.routeKey} is absent from the app manifest`);
+    }
+    const compiledEntry = resolve(dynamicRoute.serverRoot, dynamicRoute.expectedEntry);
+    if (!compiledEntry.startsWith(`${dynamicRoute.serverRoot}${sep}`)) {
+      throw new Error(`Dynamic route ${dynamicRoute.routeKey} escaped the server build root`);
+    }
+    if (!(await stat(compiledEntry)).isFile()) {
+      throw new Error(`Dynamic route ${dynamicRoute.routeKey} has no compiled entry`);
+    }
+    const artifacts = new Set([compiledEntry]);
+    await collectGeneratedJavaScript(directory, artifacts);
+    generatedBody = (
+      await Promise.all(
+        [...artifacts]
+          .sort((left, right) => left.localeCompare(right))
+          .map((file) => readFile(file, 'utf8')),
+      )
+    ).join('\n');
+  } else {
+    generatedBody = (
+      await Promise.all(
+        [...files]
+          .sort((left, right) => left.localeCompare(right))
+          .map((file) => readFile(file, 'utf8')),
+      )
+    ).join('\n');
   }
-  const generatedBody = (
-    await Promise.all(
-      [...files]
-        .sort((left, right) => left.localeCompare(right))
-        .map((file) => readFile(file, 'utf8')),
-    )
-  ).join('\n');
   const chunkReferences = new Set(
     [...generatedBody.matchAll(/\/_next\/static\/chunks\/[^"'\\\s<>]+\.js/gu)].map((match) =>
       match[0].replace('/_next/static/chunks/', ''),
@@ -186,11 +251,16 @@ async function generatedRouteText(directory, staticDirectory) {
         return readFile(chunkPath, 'utf8');
       }),
   );
-  return { combined: [generatedBody, ...chunks].join('\n'), generatedBody };
+  const combined = [generatedBody, ...chunks].join('\n');
+  return { combined, generatedBody: dynamicArtifact ? combined : generatedBody };
 }
 
 for (const route of routes) {
-  const generated = await generatedRouteText(route.directory, route.staticDirectory);
+  const generated = await generatedRouteText(
+    route.directory,
+    route.staticDirectory,
+    route.dynamicRoute,
+  );
   const requiredText =
     route.requiredText === undefined
       ? []
@@ -198,7 +268,11 @@ for (const route of routes) {
         ? route.requiredText
         : [route.requiredText];
   if (productionUiExpectation === 'unconfigured_identity') {
-    if (!generated.generatedBody.includes(identityUnavailableText)) {
+    const hasDefaultIdentityBoundary = generated.generatedBody.includes(identityUnavailableText);
+    const hasRouteIdentityBoundary = generated.generatedBody.includes(
+      route.unconfiguredText ?? identityUnavailableText,
+    );
+    if (!hasDefaultIdentityBoundary && !hasRouteIdentityBoundary) {
       throw new Error(`${route.name} did not render the missing-identity fail-closed boundary`);
     }
   } else {
@@ -263,6 +337,6 @@ for (const value of [
 
 process.stdout.write(
   productionUiExpectation === 'unconfigured_identity'
-    ? 'Static production route bodies fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
-    : 'Configured static production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
+    ? 'Production route bodies and dynamic artifacts fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
+    : 'Configured production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
 );

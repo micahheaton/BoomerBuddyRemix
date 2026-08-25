@@ -4,7 +4,7 @@ import { IdentityProvider } from '../components/identity-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'BoomerBuddy — a calmer next step',
+  title: 'BoomerBuddy: a calmer next step',
   description: 'A calm way to check suspicious messages and involve people you trust.',
 };
 

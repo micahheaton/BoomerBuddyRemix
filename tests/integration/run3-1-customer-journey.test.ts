@@ -13,6 +13,8 @@ import {
   DurableJobRepository,
   FeedbackRepository,
   FoundingHouseholdRepository,
+  foundingHouseholdProtectedDocuments,
+  foundingHouseholdServiceConsentForEnvironment,
   ProductionIdentityRepository,
   runMigrations,
   type Database,
@@ -104,7 +106,10 @@ function token(
   };
 }
 
-function operation(kind: 'policy' | 'invite' | 'accept' | 'offboard', sequence: number): string {
+function operation(
+  kind: 'policy' | 'invite' | 'accept' | 'invite-revoke' | 'offboard',
+  sequence: number,
+): string {
   return `founding-${kind}:00000000-0000-4000-8000-${String(sequence).padStart(12, '0')}`;
 }
 
@@ -122,11 +127,11 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
     directory = undefined;
   });
 
-  it('persists one sponsored household across auth, API, and worker restarts with tenant isolation', async () => {
+  it('preserves one historical sponsored household while production refuses new enrollment', async () => {
     const now = new Date();
     directory = await mkdtemp(join(tmpdir(), 'boomerbuddy-run3-1-journey-'));
     database = await createPGliteDatabase(directory);
-    await expect(runMigrations(database)).resolves.toHaveLength(27);
+    await expect(runMigrations(database)).resolves.toHaveLength(31);
 
     const identities = new ProductionIdentityRepository(database);
     await identities.bootstrapFounder({
@@ -145,27 +150,26 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
     );
     const programEndsAt = new Date(now.getTime() + 45 * 86_400_000);
     const sponsorEndsAt = new Date(now.getTime() + 60 * 86_400_000);
-    await expect(
-      founding.bootstrapProductionProgram({
-        access: {
-          actorPersonId: founderPersonId,
-          correlationId: 'correlation:run3-1-program-bootstrap',
-        },
-        operationKey: operation('policy', 1),
-        benefitKey: 'family_beta_v1',
-        maxHouseholds: 1,
-        invitationTtlDays: 7,
-        accessDurationDays: 30,
-        programEndsAt,
-        sponsorshipPrivacyPolicyVersion: 'founding-household-production-v1',
-        sponsorshipStartsAt: new Date(now.getTime() - 60_000),
-        sponsorshipEndsAt: sponsorEndsAt,
-        now,
-      }),
-    ).resolves.toMatchObject({
+    const productionProgram = await founding.bootstrapProductionProgram({
+      access: {
+        actorPersonId: founderPersonId,
+        correlationId: 'correlation:run3-1-program-bootstrap',
+      },
+      operationKey: operation('policy', 1),
+      benefitKey: 'family_beta_v1',
+      maxHouseholds: 2,
+      invitationTtlDays: 7,
+      accessDurationDays: 30,
+      programEndsAt,
+      sponsorshipPrivacyPolicyVersion: 'founding-household-production-v1',
+      sponsorshipStartsAt: new Date(now.getTime() - 60_000),
+      sponsorshipEndsAt: sponsorEndsAt,
+      now,
+    });
+    expect(productionProgram).toMatchObject({
       reused: false,
       backingEvidenceTier: 'live_production',
-      policy: { environment: 'production', state: 'active', maxHouseholds: 1 },
+      policy: { environment: 'production', state: 'active', maxHouseholds: 2 },
     });
 
     const verifiedTokens = new Map<string, VerifiedIdentityToken>([
@@ -235,51 +239,86 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
     const customerTwoPersonId = String(customerTwoMe.json().principal.personId);
     const customerHeaders = { ...customerOneHeaders, 'x-bb-household-id': householdId };
 
-    const issued = await app.inject({
-      method: 'POST',
-      url: '/v1/hq/founding-households/invitations',
-      headers: { ...hqHeaders, 'idempotency-key': operation('invite', 2) },
-      payload: { intendedCustomerSubject: customerOneSubject },
+    const customerOneIdentity = await identities.findCustomerBootstrapBySubject({
+      issuer: customerIssuer,
+      subject: customerOneSubject,
     });
-    expect(issued.statusCode, issued.body).toBe(201);
-    expect(issued.json()).toMatchObject({
-      delivery: 'founder_manual_only',
-      credentialState: 'created_credential_returned',
-      externalActionExecuted: false,
-      invitation: {
+    const customerTwoIdentity = await identities.findCustomerBootstrapBySubject({
+      issuer: customerIssuer,
+      subject: customerTwoSubject,
+    });
+    if (customerOneIdentity === null || customerTwoIdentity === null) {
+      throw new Error('Production customer bootstrap is unavailable');
+    }
+    const customerSession = await database.query<{ id: string }>(
+      `SELECT id FROM sessions
+       WHERE issuer = $1 AND provider_session_id = $2 AND revoked_at IS NULL`,
+      [customerIssuer, 'provider-session-customer-one-1'],
+    );
+    const customerSessionId = customerSession.rows[0]?.id;
+    if (customerSessionId === undefined) throw new Error('Production customer session is missing');
+
+    const historicalInvitation = await founding.createInvitation({
+      access: {
+        actorPersonId: founderPersonId,
+        correlationId: 'correlation:run3-1-historical-invitation',
+      },
+      intendedIdentity: customerOneIdentity,
+      operationKey: operation('invite', 2),
+      now,
+    });
+    const invitationCredential = historicalInvitation.invitationCredential;
+    if (invitationCredential === undefined) {
+      throw new Error('Historical invitation credential was not created');
+    }
+    const revocableInvitation = await founding.createInvitation({
+      access: {
+        actorPersonId: founderPersonId,
+        correlationId: 'correlation:run3-1-revocable-invitation',
+      },
+      intendedIdentity: customerTwoIdentity,
+      operationKey: operation('invite', 5),
+      now,
+    });
+    const revocableInvitationCredential = revocableInvitation.invitationCredential;
+    if (revocableInvitationCredential === undefined) {
+      throw new Error('Revocable invitation credential was not created');
+    }
+    const historicalMemberAccess = {
+      actorPersonId: customerOneIdentity.personId,
+      actorIssuer: customerOneIdentity.issuer,
+      actorIdentityId: customerOneIdentity.identityId,
+      actorIdentitySubject: customerOneIdentity.subject,
+      sessionId: customerSessionId,
+      audience: 'customer' as const,
+      correlationId: 'correlation:run3-1-historical-acceptance',
+    };
+    const invitationId = historicalInvitation.invitation.id;
+    await expect(
+      founding.previewInvitation({
+        access: historicalMemberAccess,
         householdId,
-        identityBindingState: 'verified_identity',
-        intendedCustomerSubject: customerOneSubject,
-      },
-    });
-    const invitationId = String(issued.json().invitation.id);
-    const invitationCredential = String(issued.json().invitationCredential);
-    const preview = await app.inject({
-      method: 'POST',
-      url: `/v1/founding-households/invitations/${invitationId}/preview`,
-      headers: customerHeaders,
-      payload: { invitationCredential },
-    });
-    expect(preview.statusCode, preview.body).toBe(200);
-    const previewBody = preview.json();
-    const accepted = await app.inject({
-      method: 'POST',
-      url: `/v1/founding-households/invitations/${invitationId}/accept`,
-      headers: { ...customerHeaders, 'idempotency-key': operation('accept', 3) },
-      payload: {
+        invitationId,
         invitationCredential,
-        serviceConsentVersion: foundingHouseholdProductionServiceConsentVersion,
-        serviceDisclosureDigest: previewBody.serviceDisclosureDigest,
-        servicePolicyDigest: previewBody.servicePolicyDigest,
-        serviceConsentAccepted: true,
-        protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
-        protectedEnrollmentDisclosureDigest: previewBody.protectedEnrollmentDisclosureDigest,
-        protectedEnrollmentPolicyDigest: previewBody.protectedEnrollmentPolicyDigest,
-        protectedEnrollmentConsentAccepted: true,
-      },
+        now,
+      }),
+    ).resolves.toMatchObject({ householdId, invitation: { id: invitationId } });
+    const serviceConsent = foundingHouseholdServiceConsentForEnvironment('production');
+    const historicalAcceptance = await founding.acceptInvitation({
+      access: historicalMemberAccess,
+      householdId,
+      invitationId,
+      invitationCredential,
+      operationKey: operation('accept', 3),
+      serviceConsentVersion: foundingHouseholdProductionServiceConsentVersion,
+      serviceDisclosureDigest: serviceConsent.documents.disclosureDigest,
+      servicePolicyDigest: serviceConsent.documents.policyDigest,
+      protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
+      protectedEnrollmentDisclosureDigest: foundingHouseholdProtectedDocuments.disclosureDigest,
+      protectedEnrollmentPolicyDigest: foundingHouseholdProtectedDocuments.policyDigest,
+      now,
     });
-    expect(accepted.statusCode, accepted.body).toBe(201);
-    expect(accepted.json()).toMatchObject({
+    expect(historicalAcceptance).toMatchObject({
       paymentCollected: false,
       externalActionExecuted: false,
       enrollment: {
@@ -289,6 +328,81 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
         paymentState: 'not_paid_sponsored_beta',
       },
     });
+
+    const activePolicyBlocked = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/founding-households/policy',
+      headers: { ...hqHeaders, 'idempotency-key': operation('policy', 6) },
+      payload: {
+        state: 'active',
+        expectedRevision: productionProgram.policy.revision,
+        benefitKey: 'family_beta_v1',
+        maxHouseholds: 2,
+        invitationTtlDays: 7,
+        accessDurationDays: 30,
+        programEndsAt: programEndsAt.toISOString(),
+      },
+    });
+    const newInvitationBlocked = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/founding-households/invitations',
+      headers: { ...hqHeaders, 'idempotency-key': operation('invite', 6) },
+      payload: { intendedCustomerSubject: customerOneSubject },
+    });
+    const previewBlocked = await app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${revocableInvitation.invitation.id}/preview`,
+      headers: {
+        ...customerTwoHeaders,
+        'x-bb-household-id': customerTwoIdentity.householdId,
+      },
+      payload: { invitationCredential: revocableInvitationCredential },
+    });
+    const acceptanceBlocked = await app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${revocableInvitation.invitation.id}/accept`,
+      headers: {
+        ...customerTwoHeaders,
+        'x-bb-household-id': customerTwoIdentity.householdId,
+        'idempotency-key': operation('accept', 6),
+      },
+      payload: {
+        invitationCredential: revocableInvitationCredential,
+        serviceConsentVersion: foundingHouseholdProductionServiceConsentVersion,
+        serviceDisclosureDigest: serviceConsent.documents.disclosureDigest,
+        servicePolicyDigest: serviceConsent.documents.policyDigest,
+        serviceConsentAccepted: true,
+        protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
+        protectedEnrollmentDisclosureDigest: foundingHouseholdProtectedDocuments.disclosureDigest,
+        protectedEnrollmentPolicyDigest: foundingHouseholdProtectedDocuments.policyDigest,
+        protectedEnrollmentConsentAccepted: true,
+      },
+    });
+    for (const response of [
+      activePolicyBlocked,
+      newInvitationBlocked,
+      previewBlocked,
+      acceptanceBlocked,
+    ]) {
+      expect(response.statusCode, response.body).toBe(404);
+      expect(response.json()).toMatchObject({ error: { code: 'not_found' } });
+    }
+
+    const revokedInvitation = await app.inject({
+      method: 'POST',
+      url: `/v1/hq/founding-households/invitations/${revocableInvitation.invitation.id}/revoke`,
+      headers: { ...hqHeaders, 'idempotency-key': operation('invite-revoke', 7) },
+    });
+    expect(revokedInvitation.statusCode, revokedInvitation.body).toBe(200);
+    expect(revokedInvitation.json()).toMatchObject({ invitation: { state: 'revoked' } });
+
+    const historicalStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/founding-households',
+      headers: customerHeaders,
+    });
+    expect(historicalStatus.statusCode, historicalStatus.body).toBe(200);
+    expect(historicalStatus.json()).toMatchObject({ enrollment: { state: 'active' } });
 
     const enrolledMe = await app.inject({
       method: 'GET',
@@ -544,6 +658,18 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
       payload: { kind: 'text', content: 'A new check after revocation must be denied.' },
     });
     expect(deniedAfterRevocation.statusCode).toBe(403);
+
+    const disabledPolicy = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/founding-households/policy',
+      headers: { ...hqHeaders, 'idempotency-key': operation('policy', 8) },
+      payload: {
+        state: 'disabled',
+        expectedRevision: productionProgram.policy.revision,
+      },
+    });
+    expect(disabledPolicy.statusCode, disabledPolicy.body).toBe(200);
+    expect(disabledPolicy.json()).toMatchObject({ policy: { state: 'disabled' } });
 
     const truth = await database.query<
       {

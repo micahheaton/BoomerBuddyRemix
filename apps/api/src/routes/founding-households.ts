@@ -193,6 +193,12 @@ function setPrivateNoStore(reply: FastifyReply): void {
   reply.header('Expires', '0');
 }
 
+function refuseNewProductionSponsoredEnrollment(context: ApiContext): void {
+  if (context.config.environment === 'production') {
+    throw new DomainError('not_found', 'Resource not found');
+  }
+}
+
 export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: ApiContext): void {
   app.get('/v1/hq/founding-households', async (request, reply) => {
     setPrivateNoStore(reply);
@@ -222,6 +228,7 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
     setPrivateNoStore(reply);
     const auth = await authorizeFounder(request, context, 'hq:founding_households:manage');
     const body = configureFoundingHouseholdPolicyRequestSchema.parse(request.body);
+    if (body.state === 'active') refuseNewProductionSponsoredEnrollment(context);
     const current = context.now();
     const result = await context.repositories.foundingHouseholds.configurePolicy({
       access: {
@@ -251,6 +258,7 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
   app.post('/v1/hq/founding-households/invitations', async (request, reply) => {
     setPrivateNoStore(reply);
     const auth = await authorizeFounder(request, context, 'hq:founding_households:manage');
+    refuseNewProductionSponsoredEnrollment(context);
     const body = createFoundingHouseholdInvitationRequestSchema.parse(request.body ?? {});
     let intendedIdentity;
     if (context.config.environment === 'production') {
@@ -368,6 +376,7 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
       'invitation',
     );
     assertMutationOrigin(request, context.config, auth);
+    refuseNewProductionSponsoredEnrollment(context);
     const { invitationId } = foundingHouseholdInvitationParamsSchema.parse(request.params);
     const body = foundingHouseholdInvitationPreviewRequestSchema.parse(request.body);
     const result = await context.repositories.foundingHouseholds.previewInvitation({
@@ -418,6 +427,7 @@ export function registerFoundingHouseholdRoutes(app: FastifyInstance, context: A
       'invitation',
     );
     assertMutationOrigin(request, context.config, auth);
+    refuseNewProductionSponsoredEnrollment(context);
     const { invitationId } = foundingHouseholdInvitationParamsSchema.parse(request.params);
     const body = acceptFoundingHouseholdInvitationRequestSchema.parse(request.body);
     const result = await context.repositories.foundingHouseholds.acceptInvitation({

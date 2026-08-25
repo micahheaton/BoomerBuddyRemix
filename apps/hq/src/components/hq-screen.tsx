@@ -13,10 +13,12 @@ import type {
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
 import { BusinessOsContent, type BusinessOsView } from './business-os';
+import { BillingAuthority } from './billing-authority';
 import { FeedbackLearning } from './feedback-learning';
 import { FounderProvisioning } from './founder-provisioning';
 import { FoundingHouseholds } from './founding-households';
 import { ProductionHqSignOut } from './production-identity';
+import { StripeControl } from './stripe-control';
 import { hqRequest, readableError } from '../lib/api';
 
 export type HqView =
@@ -30,6 +32,8 @@ export type HqView =
   | 'feedback'
   | 'provisioning'
   | 'founding-households'
+  | 'billing-authority'
+  | 'stripe-control'
   | Exclude<BusinessOsView, 'owner'>;
 type HouseholdResponse = {
   households: Array<{
@@ -127,6 +131,16 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
     subtitle: productionRuntime
       ? 'Founder-gated, finite, identity-bound sponsor access—no card, automatic messaging, or public enrollment.'
       : 'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
+  },
+  'billing-authority': {
+    title: 'Billing authority',
+    subtitle:
+      'Exact-household authority provisioning and incident revocation with immutable audit evidence.',
+  },
+  'stripe-control': {
+    title: 'Stripe control plane',
+    subtitle:
+      'Owner-only, revision-safe Checkout, cohort, eligibility, and persisted preflight controls.',
   },
   targets: {
     title: 'Credit-union segmentation',
@@ -324,6 +338,22 @@ function Shell({
               href="/founding-households"
             >
               Founding Households
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'billing-authority' ? 'page' : undefined}
+              href="/billing-authority"
+            >
+              Billing authority
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'stripe-control' ? 'page' : undefined}
+              href="/stripe-control"
+            >
+              Stripe controls
             </Link>
           )}
           {isOwner && (
@@ -1017,6 +1047,10 @@ export function HqScreen({ view }: { view: HqView }) {
         <FounderProvisioning />
       ) : view === 'founding-households' ? (
         <FoundingHouseholds />
+      ) : view === 'billing-authority' ? (
+        <BillingAuthority />
+      ) : view === 'stripe-control' ? (
+        <StripeControl />
       ) : (
         <System />
       )}

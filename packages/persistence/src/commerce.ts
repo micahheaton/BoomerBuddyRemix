@@ -16,6 +16,7 @@ import {
 } from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import { enqueueDurableJobWithExecutor, type DurableJobPayload } from './jobs';
+import { assertStripeControlOperator } from './stripe-control-operator';
 import { randomIdFactory, type IdFactory } from './values';
 
 function jsonObject(value: unknown): Readonly<Record<string, unknown>> {
@@ -127,7 +128,7 @@ export type ProviderAccessEvidence =
 export interface StripeReconciliationRepairProjection {
   readonly reconciliationRunId: string;
   readonly inboxId: string;
-  readonly environment: 'test';
+  readonly environment: 'test' | 'production';
   readonly state: 'queued' | 'running' | 'completed' | 'attention' | 'failed';
   readonly failureCode?: string;
   readonly automaticAttemptCount: number;
@@ -139,7 +140,7 @@ export interface StripeReconciliationRepairProjection {
 export interface StripeReconciliationRepairResult {
   readonly reconciliationRunId: string;
   readonly inboxId: string;
-  readonly environment: 'test';
+  readonly environment: 'test' | 'production';
   readonly revision: 1;
   readonly authorizedAttemptLimit: 16;
   readonly repairJobId: string;
@@ -1275,12 +1276,13 @@ export class CommerceOperationsRepository {
     readonly actorPersonId: string;
     readonly configuredFounderPersonId?: string;
   }): Promise<StripeReconciliationRepairProjection> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
     const result = await this.database.query<
       {
         readonly id: string;
@@ -1299,17 +1301,18 @@ export class CommerceOperationsRepository {
               run.manual_repair_revision, inbox.application_state
        FROM commerce_reconciliation_runs run
        JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
-       WHERE run.id = $1 AND run.provider = 'stripe' AND run.environment = 'test'`,
+       WHERE run.id = $1 AND run.provider = 'stripe'
+         AND run.environment IN ('test','production')`,
       [input.reconciliationRunId],
     );
     const row = result.rows[0];
-    if (row === undefined || row.environment !== 'test') {
+    if (row === undefined || (row.environment !== 'test' && row.environment !== 'production')) {
       throw new DomainError('not_found', 'Stripe reconciliation run not found');
     }
     return {
       reconciliationRunId: row.id,
       inboxId: row.trigger_event_id,
-      environment: 'test',
+      environment: row.environment,
       state: row.state,
       ...(row.failure_code === null ? {} : { failureCode: row.failure_code }),
       automaticAttemptCount: row.automatic_attempt_count,
@@ -1334,12 +1337,6 @@ export class CommerceOperationsRepository {
     readonly now: Date;
   }): Promise<StripeReconciliationRepairResult> {
     if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
-    if (
       input.expectedRevision !== 0 ||
       input.reasonCode !== 'founder_bounded_provider_repair' ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/u.test(input.correlationId) ||
@@ -1348,10 +1345,18 @@ export class CommerceOperationsRepository {
       throw new DomainError('invalid_input', 'Invalid Stripe reconciliation repair request');
     }
     return this.database.transaction(async (transaction) => {
+      await assertStripeControlOperator({
+        executor: transaction,
+        actorPersonId: input.actorPersonId,
+        ...(input.configuredFounderPersonId === undefined
+          ? {}
+          : { configuredFounderPersonId: input.configuredFounderPersonId }),
+      });
       const runResult = await transaction.query<
         {
           readonly id: string;
           readonly trigger_event_id: string;
+          readonly environment: 'test' | 'production';
           readonly state: StripeReconciliationRepairProjection['state'];
           readonly failure_code: string | null;
           readonly repair_generation: number;
@@ -1361,13 +1366,14 @@ export class CommerceOperationsRepository {
           readonly application_state: string;
         } & Record<string, unknown>
       >(
-        `SELECT run.id, run.trigger_event_id, run.state, run.failure_code,
+        `SELECT run.id, run.trigger_event_id, run.environment, run.state, run.failure_code,
                 run.repair_generation, run.automatic_attempt_count,
                 run.authorized_attempt_limit, run.manual_repair_revision,
                 inbox.application_state
          FROM commerce_reconciliation_runs run
          JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
-         WHERE run.id = $1 AND run.provider = 'stripe' AND run.environment = 'test'
+         WHERE run.id = $1 AND run.provider = 'stripe'
+           AND run.environment IN ('test','production')
          FOR UPDATE OF run, inbox`,
         [input.reconciliationRunId],
       );
@@ -1405,7 +1411,7 @@ export class CommerceOperationsRepository {
         return {
           reconciliationRunId: run.id,
           inboxId: run.trigger_event_id,
-          environment: 'test',
+          environment: run.environment,
           revision: 1,
           authorizedAttemptLimit: 16,
           repairJobId: prior.repair_job_id,
@@ -1437,7 +1443,7 @@ export class CommerceOperationsRepository {
          FROM durable_jobs
          WHERE job_type = 'commerce.reconcile' AND idempotency_key = $1
          FOR UPDATE`,
-        [`stripe-reconcile:test:${run.trigger_event_id}`],
+        [`stripe-reconcile:${run.environment}:${run.trigger_event_id}`],
       );
       const originalJob = originalJobResult.rows[0];
       if (originalJob === undefined) {
@@ -1454,7 +1460,7 @@ export class CommerceOperationsRepository {
       if (
         requiredText('inboxId') !== run.trigger_event_id ||
         requiredText('reconciliationRunId') !== run.id ||
-        requiredText('environment') !== 'test' ||
+        requiredText('environment') !== run.environment ||
         originalPayload.repairGeneration !== 0
       ) {
         throw new DomainError('conflict', 'Initial Stripe reconciliation lineage is invalid');
@@ -1465,7 +1471,7 @@ export class CommerceOperationsRepository {
         eventType: requiredText('eventType'),
         providerObjectId: requiredText('providerObjectId'),
         providerEventCreatedAt: requiredText('providerEventCreatedAt'),
-        environment: 'test',
+        environment: run.environment,
         evidenceTier: requiredText('evidenceTier'),
         transportKind: requiredText('transportKind'),
         runtimeRunId: requiredText('runtimeRunId'),
@@ -1492,10 +1498,10 @@ export class CommerceOperationsRepository {
          SET state = 'queued', failure_code = NULL, completed_at = NULL,
              authorized_attempt_limit = 16, manual_repair_revision = 1,
              repair_generation = 2, last_attempted_at = $2
-         WHERE id = $1 AND provider = 'stripe' AND environment = 'test'
+         WHERE id = $1 AND provider = 'stripe' AND environment = $3
            AND state = 'attention' AND automatic_attempt_count = 12
            AND authorized_attempt_limit = 12 AND manual_repair_revision = 0`,
-        [run.id, input.now.toISOString()],
+        [run.id, input.now.toISOString(), run.environment],
       );
       if (advanced.rowCount !== 1) {
         throw new DomainError('conflict', 'Stripe reconciliation repair revision changed');
@@ -1506,7 +1512,7 @@ export class CommerceOperationsRepository {
         ...(originalJob.household_id === null ? {} : { householdId: originalJob.household_id }),
         classification: 'internal',
         payload: repairPayload as DurableJobPayload,
-        idempotencyKey: `stripe-reconcile-founder-repair:test:${run.id}:1`,
+        idempotencyKey: `stripe-reconcile-founder-repair:${run.environment}:${run.id}:1`,
         scheduledAt: input.now,
         maxAttempts: 4,
         correlationId: input.correlationId,
@@ -1517,11 +1523,12 @@ export class CommerceOperationsRepository {
            id, reconciliation_run_id, trigger_event_id, environment,
            expected_revision, next_revision, previous_attempt_limit, next_attempt_limit,
            actor_person_id, reason_code, correlation_id, repair_job_id, requested_at
-         ) VALUES ($1,$2,$3,'test',0,1,12,16,$4,$5,$6,$7,$8)`,
+         ) VALUES ($1,$2,$3,$4,0,1,12,16,$5,$6,$7,$8,$9)`,
         [
           this.idFactory.next('stripe-reconciliation-repair'),
           run.id,
           run.trigger_event_id,
+          run.environment,
           input.actorPersonId,
           input.reasonCode,
           input.correlationId,
@@ -1556,7 +1563,7 @@ export class CommerceOperationsRepository {
       return {
         reconciliationRunId: run.id,
         inboxId: run.trigger_event_id,
-        environment: 'test',
+        environment: run.environment,
         revision: 1,
         authorizedAttemptLimit: 16,
         repairJobId: queued.job.id,

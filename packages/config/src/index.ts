@@ -52,6 +52,7 @@ const environmentSchema = z.object({
   BB_CLERK_CUSTOMER_ISSUER: nonEmpty.optional(),
   BB_CLERK_CUSTOMER_AUDIENCE: nonEmpty.optional(),
   BB_CLERK_CUSTOMER_JWT_KEY: nonEmpty.optional(),
+  BB_CLERK_MOBILE_AUTHORIZED_PARTIES: z.string().trim().min(1).max(4_096).optional(),
   BB_CLERK_HQ_ISSUER: nonEmpty.optional(),
   BB_CLERK_HQ_AUDIENCE: nonEmpty.optional(),
   BB_CLERK_HQ_JWT_KEY: nonEmpty.optional(),
@@ -73,6 +74,11 @@ const environmentSchema = z.object({
   BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: z.string().optional(),
   BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
   BB_STRIPE_LIVE_ACCOUNT_ID: z.string().optional(),
+  BB_STRIPE_RUNTIME_SURFACE: z.enum(['api', 'worker']).optional(),
+  BB_STRIPE_LIVE_INITIATION_ENABLED: booleanText.default(false),
+  BB_STRIPE_LIVE_API_RESTRICTED_KEY: z.string().optional(),
+  BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: z.string().optional(),
+  // Legacy name is parsed only so startup can reject an unrestricted or shared live key clearly.
   BB_STRIPE_LIVE_API_KEY: z.string().optional(),
   BB_STRIPE_LIVE_WEBHOOK_SECRET: z.string().optional(),
   BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: z.string().optional(),
@@ -123,6 +129,8 @@ export interface AppConfig {
         readonly audience: string;
         readonly jwtKey: string;
         readonly authorizedParties: readonly string[];
+        /** Empty means native JWTs must omit azp; otherwise only these exact HTTPS origins pass. */
+        readonly mobileAuthorizedParties?: readonly string[];
       };
       readonly hq: {
         readonly issuer: string;
@@ -168,30 +176,34 @@ export interface AppConfig {
         };
       }
     | {
-        readonly stripe: {
-          readonly mode: 'live';
-          readonly environment: 'production';
-          readonly accountId: string;
-          readonly apiVersion: typeof stripeApiVersion;
-          readonly runtimeInitiationPermitted: false;
-          readonly runtimeNetworkPermitted: false;
-          readonly credentialCustody: 'managed_identity_kms_unavailable';
-          readonly requiredSecretNames: readonly [
-            'BB_STRIPE_LIVE_API_KEY',
-            'BB_STRIPE_LIVE_WEBHOOK_SECRET',
-          ];
-          readonly cancelOnlyPortalConfigurationId: string;
-          readonly offer: {
-            readonly offerId: 'founding_family_monthly_v1';
-            readonly planVersionId: 'family_v1';
-            readonly billingInterval: 'month';
-            readonly providerProductId: string;
-            readonly providerPriceId: string;
-            readonly currency: 'usd';
-            readonly unitAmountMinor: 1499;
-            readonly quantity: 1;
-          };
-        };
+        readonly stripe:
+          | {
+              readonly mode: 'live';
+              readonly environment: 'production';
+              readonly runtimeSurface: 'api';
+              readonly accountId: string;
+              readonly apiRestrictedKey: string;
+              readonly webhookSecret: string;
+              readonly apiVersion: typeof stripeApiVersion;
+              readonly runtimeInitiationPermitted: boolean;
+              readonly runtimeNetworkPermitted: true;
+              readonly credentialCustody: 'separate_replit_runtime_restricted_keys';
+              readonly cancelOnlyPortalConfigurationId: string;
+              readonly offer: StripeFoundingFamilyMonthlyOffer;
+            }
+          | {
+              readonly mode: 'live';
+              readonly environment: 'production';
+              readonly runtimeSurface: 'worker';
+              readonly accountId: string;
+              readonly workerRestrictedKey: string;
+              readonly apiVersion: typeof stripeApiVersion;
+              readonly runtimeInitiationPermitted: false;
+              readonly runtimeNetworkPermitted: true;
+              readonly credentialCustody: 'separate_replit_runtime_restricted_keys';
+              readonly cancelOnlyPortalConfigurationId: string;
+              readonly offer: StripeFoundingFamilyMonthlyOffer;
+            };
       };
   readonly messaging?: {
     readonly twilio: {
@@ -203,18 +215,25 @@ export interface AppConfig {
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
-/**
- * Live Stripe values are currently an offline custody manifest, not an online runtime mode.
- * Keep this guard at every process boundary so an injected transport or development startup
- * cannot accidentally turn resource names into provider access.
- */
+interface StripeFoundingFamilyMonthlyOffer {
+  readonly offerId: 'founding_family_monthly_v1';
+  readonly planVersionId: 'family_v1';
+  readonly billingInterval: 'month';
+  readonly providerProductId: string;
+  readonly providerPriceId: string;
+  readonly currency: 'usd';
+  readonly unitAmountMinor: 1499;
+  readonly quantity: 1;
+}
+
+/** Enforce that each live process receives only its own least-privilege credential family. */
 export function assertStripeOnlineRuntimePermitted(
   config: AppConfig,
   surface: 'api' | 'worker',
 ): void {
-  if (config.commerce.stripe.mode === 'live') {
+  if (config.commerce.stripe.mode === 'live' && config.commerce.stripe.runtimeSurface !== surface) {
     throw new TypeError(
-      `Live Stripe configuration is offline-only; ${surface} startup is refused until managed identity and KMS custody exist`,
+      `Live Stripe ${surface} startup refuses ${config.commerce.stripe.runtimeSurface} credential custody`,
     );
   }
 }
@@ -253,6 +272,20 @@ function origins(value: string, name: string): readonly string[] {
   return [...new Set(normalized)];
 }
 
+function mobileAuthorizedParties(value: string | undefined): readonly string[] {
+  if (value === undefined) {
+    throw new TypeError('BB_CLERK_MOBILE_AUTHORIZED_PARTIES is required in production');
+  }
+  if (value === 'none') return [];
+  const parsed = origins(value, 'BB_CLERK_MOBILE_AUTHORIZED_PARTIES');
+  if (parsed.length > 8 || parsed.some((origin) => !origin.startsWith('https://'))) {
+    throw new TypeError(
+      'BB_CLERK_MOBILE_AUTHORIZED_PARTIES must be none or at most eight exact HTTPS origins',
+    );
+  }
+  return parsed;
+}
+
 function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void {
   if (parsed.NODE_ENV !== 'production') return;
   if (parsed.BB_DATABASE_DRIVER !== 'postgres') {
@@ -276,8 +309,8 @@ function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void
   if (parsed.BB_POSTGRES_POOL_MAX === undefined) {
     throw new TypeError('Production requires an explicit BB_POSTGRES_POOL_MAX');
   }
-  if (parsed.BB_STRIPE_MODE !== 'disabled' || parsed.BB_TWILIO_MODE !== 'disabled') {
-    throw new TypeError('Production beta requires Stripe and Twilio to remain disabled');
+  if (parsed.BB_TWILIO_MODE !== 'disabled') {
+    throw new TypeError('Production requires Twilio to remain disabled');
   }
   const requiredIdentity = [
     parsed.BB_FOUNDER_PERSON_ID,
@@ -285,6 +318,7 @@ function refuseUnsafeProduction(parsed: z.infer<typeof environmentSchema>): void
     parsed.BB_CLERK_CUSTOMER_ISSUER,
     parsed.BB_CLERK_CUSTOMER_AUDIENCE,
     parsed.BB_CLERK_CUSTOMER_JWT_KEY,
+    parsed.BB_CLERK_MOBILE_AUTHORIZED_PARTIES,
     parsed.BB_CLERK_HQ_ISSUER,
     parsed.BB_CLERK_HQ_AUDIENCE,
     parsed.BB_CLERK_HQ_JWT_KEY,
@@ -343,7 +377,7 @@ function clerkJwtKey(value: string | undefined, name: string): string {
   return value;
 }
 
-export const stripeApiVersion = '2026-02-25.clover' as const;
+export const stripeApiVersion = '2026-07-29.dahlia' as const;
 
 function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConfig['commerce'] {
   const testFields = [
@@ -356,6 +390,9 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
   ];
   const liveFields = [
     parsed.BB_STRIPE_LIVE_ACCOUNT_ID,
+    parsed.BB_STRIPE_RUNTIME_SURFACE,
+    parsed.BB_STRIPE_LIVE_API_RESTRICTED_KEY,
+    parsed.BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY,
     parsed.BB_STRIPE_LIVE_API_KEY,
     parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET,
     parsed.BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID,
@@ -364,28 +401,31 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
   ];
   const hasConfiguredField = (fields: readonly (string | undefined)[]) =>
     fields.some((value) => value !== undefined);
-  if (
-    parsed.BB_STRIPE_LIVE_API_KEY !== undefined ||
-    parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET !== undefined
-  ) {
+  if (parsed.BB_STRIPE_LIVE_API_KEY !== undefined) {
     throw new TypeError(
-      'Live Stripe secrets cannot be loaded from raw environment keys until managed identity and KMS custody exist',
+      'Live Stripe refuses the legacy shared API key; use a separate restricted key for each runtime surface',
     );
   }
-  if (parsed.BB_STRIPE_MODE === 'disabled' && hasConfiguredField([...testFields, ...liveFields])) {
+  if (
+    parsed.BB_STRIPE_MODE === 'disabled' &&
+    (hasConfiguredField([...testFields, ...liveFields]) || parsed.BB_STRIPE_LIVE_INITIATION_ENABLED)
+  ) {
     throw new TypeError('Stripe disabled mode refuses all Stripe configuration values');
   }
   if (parsed.BB_STRIPE_MODE === 'disabled') return { stripe: { mode: 'disabled' } };
   const test = parsed.BB_STRIPE_MODE === 'test';
-  if (test && hasConfiguredField(liveFields)) {
+  if (test && (hasConfiguredField(liveFields) || parsed.BB_STRIPE_LIVE_INITIATION_ENABLED)) {
     throw new TypeError('Stripe test mode refuses live Stripe configuration values');
   }
   if (!test && hasConfiguredField(testFields)) {
     throw new TypeError('Stripe live mode refuses test Stripe configuration values');
   }
+  if (test && parsed.NODE_ENV === 'production') {
+    throw new TypeError('Production runtime refuses Stripe sandbox mode');
+  }
   const required = {
     accountId: test ? parsed.BB_STRIPE_TEST_ACCOUNT_ID : parsed.BB_STRIPE_LIVE_ACCOUNT_ID,
-    apiKey: test ? parsed.BB_STRIPE_TEST_API_KEY : parsed.BB_STRIPE_LIVE_API_KEY,
+    apiKey: test ? parsed.BB_STRIPE_TEST_API_KEY : undefined,
     webhookSecret: test
       ? parsed.BB_STRIPE_TEST_WEBHOOK_SECRET
       : parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET,
@@ -418,7 +458,7 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
       `Stripe ${parsed.BB_STRIPE_MODE} mode requires complete environment-specific credentials and the founding offer mapping`,
     );
   }
-  const offer = {
+  const offer: StripeFoundingFamilyMonthlyOffer = {
     offerId: 'founding_family_monthly_v1' as const,
     planVersionId: 'family_v1' as const,
     billingInterval: 'month' as const,
@@ -429,16 +469,57 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
     quantity: 1 as const,
   };
   if (!test) {
+    const runtimeSurface = parsed.BB_STRIPE_RUNTIME_SURFACE;
+    const apiRestrictedKey = parsed.BB_STRIPE_LIVE_API_RESTRICTED_KEY;
+    const workerRestrictedKey = parsed.BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY;
+    const apiCustodyExact =
+      runtimeSurface === 'api' &&
+      apiRestrictedKey !== undefined &&
+      /^rk_live_[A-Za-z0-9_]{8,}$/u.test(apiRestrictedKey) &&
+      required.webhookSecret !== undefined &&
+      /^whsec_[A-Za-z0-9_]{8,}$/u.test(required.webhookSecret) &&
+      workerRestrictedKey === undefined;
+    const workerCustodyExact =
+      runtimeSurface === 'worker' &&
+      workerRestrictedKey !== undefined &&
+      /^rk_live_[A-Za-z0-9_]{8,}$/u.test(workerRestrictedKey) &&
+      apiRestrictedKey === undefined &&
+      required.webhookSecret === undefined &&
+      !parsed.BB_STRIPE_LIVE_INITIATION_ENABLED;
+    if (!apiCustodyExact && !workerCustodyExact) {
+      throw new TypeError(
+        'Stripe live mode requires one exact runtime surface with its own restricted key custody',
+      );
+    }
+    if (runtimeSurface === 'api') {
+      return {
+        stripe: {
+          mode: 'live',
+          environment: 'production',
+          runtimeSurface,
+          accountId: required.accountId,
+          apiRestrictedKey: apiRestrictedKey as string,
+          webhookSecret: required.webhookSecret as string,
+          apiVersion: stripeApiVersion,
+          runtimeInitiationPermitted: parsed.BB_STRIPE_LIVE_INITIATION_ENABLED,
+          runtimeNetworkPermitted: true,
+          credentialCustody: 'separate_replit_runtime_restricted_keys',
+          cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+          offer,
+        },
+      };
+    }
     return {
       stripe: {
         mode: 'live',
         environment: 'production',
+        runtimeSurface: 'worker',
         accountId: required.accountId,
+        workerRestrictedKey: workerRestrictedKey as string,
         apiVersion: stripeApiVersion,
         runtimeInitiationPermitted: false,
-        runtimeNetworkPermitted: false,
-        credentialCustody: 'managed_identity_kms_unavailable',
-        requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
+        runtimeNetworkPermitted: true,
+        credentialCustody: 'separate_replit_runtime_restricted_keys',
         cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
         offer,
       },
@@ -501,6 +582,19 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       if (!origin.startsWith('https://')) throw new TypeError('Production origins must use HTTPS');
     }
   }
+  const clerkMobileAuthorizedParties =
+    parsed.NODE_ENV === 'production'
+      ? mobileAuthorizedParties(parsed.BB_CLERK_MOBILE_AUTHORIZED_PARTIES)
+      : [];
+  if (
+    clerkMobileAuthorizedParties.some(
+      (party) => customerOrigins.includes(party) || hqOrigins.includes(party),
+    )
+  ) {
+    throw new TypeError(
+      'Mobile Clerk authorized parties must be disjoint from customer and HQ browser origins',
+    );
+  }
 
   const database: AppConfig['database'] =
     parsed.BB_DATABASE_DRIVER === 'postgres'
@@ -550,6 +644,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
             audience: parsed.BB_CLERK_CUSTOMER_AUDIENCE as string,
             jwtKey: clerkJwtKey(parsed.BB_CLERK_CUSTOMER_JWT_KEY, 'BB_CLERK_CUSTOMER_JWT_KEY'),
             authorizedParties: customerOrigins,
+            mobileAuthorizedParties: clerkMobileAuthorizedParties,
           },
           hq: {
             issuer: clerkIssuer(parsed.BB_CLERK_HQ_ISSUER, 'BB_CLERK_HQ_ISSUER'),

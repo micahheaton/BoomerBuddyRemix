@@ -18,6 +18,8 @@ import type {
   StripePreflightPort,
 } from './commerce';
 
+export const stripeCheckoutIntegrationIdentifier = 'boomerbuddy_cqmfjzpt' as const;
+
 export interface StripeTransport {
   readonly postForm: (input: {
     readonly path: string;
@@ -729,7 +731,10 @@ export function normalizeStripeEvent(
   const customer = safeText(object.customer);
   const subscription = subscriptionReference(object);
   const binding = canonicalBinding(object);
-  if (envelope.type === 'checkout.session.completed') {
+  if (
+    envelope.type === 'checkout.session.completed' ||
+    envelope.type === 'checkout.session.async_payment_succeeded'
+  ) {
     const expiresAt = integerDate(object.expires_at);
     if (
       object.object !== 'checkout.session' ||
@@ -768,6 +773,29 @@ export function normalizeStripeEvent(
         providerExpiresAt: expiresAt,
       },
       requiresReconciliation: false,
+    };
+  }
+  if (envelope.type === 'checkout.session.async_payment_failed') {
+    const expiresAt = integerDate(object.expires_at);
+    const exactFailedSession =
+      object.object === 'checkout.session' &&
+      object.livemode === envelope.livemode &&
+      object.mode === 'subscription' &&
+      object.status === 'complete' &&
+      object.payment_status === 'unpaid' &&
+      object.amount_total === 1499 &&
+      object.currency === 'usd' &&
+      subscription !== undefined &&
+      customer !== undefined &&
+      expiresAt !== undefined &&
+      binding !== undefined;
+    return {
+      ...base,
+      ...(subscription === undefined ? {} : { externalSubscriptionId: subscription }),
+      ...(customer === undefined ? {} : { providerCustomerId: customer }),
+      ...(binding === undefined ? {} : { canonicalBinding: binding }),
+      requiresReconciliation: true,
+      ...(exactFailedSession ? {} : { acknowledgementRequired: true }),
     };
   }
   if (envelope.type === 'checkout.session.expired') {
@@ -986,15 +1014,26 @@ export class StripeAdapter
     const subscriptionUpdate = objectRecord(features?.subscription_update);
     const paymentMethodUpdate = objectRecord(features?.payment_method_update);
     const customerUpdate = objectRecord(features?.customer_update);
+    const observedLivemode = product.livemode;
+    const accountChargesEnabled = account.charges_enabled === true;
+    const accountPayoutsEnabled = account.payouts_enabled === true;
+    const accountCountry = safeText(account.country) ?? null;
+    const accountBusinessType = safeText(account.business_type) ?? null;
     if (
       account.object !== 'account' ||
       safeText(account.id) !== this.configuration.accountId ||
+      (expectedLivemode &&
+        (!accountChargesEnabled ||
+          !accountPayoutsEnabled ||
+          accountCountry !== 'US' ||
+          accountBusinessType !== 'company')) ||
       product.object !== 'product' ||
-      product.livemode !== expectedLivemode ||
+      typeof observedLivemode !== 'boolean' ||
+      observedLivemode !== expectedLivemode ||
       price.object !== 'price' ||
-      price.livemode !== expectedLivemode ||
+      price.livemode !== observedLivemode ||
       portal.object !== 'billing_portal.configuration' ||
-      portal.livemode !== expectedLivemode ||
+      portal.livemode !== observedLivemode ||
       safeText(product.id) !== this.configuration.offer.providerProductId ||
       product.active !== true ||
       safeText(price.id) !== this.configuration.offer.providerPriceId ||
@@ -1008,7 +1047,7 @@ export class StripeAdapter
       subscriptionUpdate?.enabled !== false ||
       !Array.isArray(subscriptionUpdate.default_allowed_updates) ||
       subscriptionUpdate.default_allowed_updates.length !== 0 ||
-      paymentMethodUpdate?.enabled !== false ||
+      paymentMethodUpdate?.enabled !== true ||
       customerUpdate?.enabled !== false ||
       !Array.isArray(customerUpdate.allowed_updates) ||
       customerUpdate.allowed_updates.length !== 0
@@ -1018,7 +1057,11 @@ export class StripeAdapter
     return {
       environment: this.configuration.environment,
       accountId: this.configuration.accountId,
-      livemode: expectedLivemode,
+      accountChargesEnabled,
+      accountPayoutsEnabled,
+      accountCountry,
+      accountBusinessType,
+      livemode: observedLivemode,
       apiVersion: this.configuration.apiVersion,
       offer: this.configuration.offer,
       portalConfigurationId: this.configuration.portalConfigurationId,
@@ -1029,6 +1072,7 @@ export class StripeAdapter
       portalCancellationMode: 'at_period_end',
       portalProrationBehavior: 'none',
       portalSubscriptionUpdateDefaultsEmpty: true,
+      portalPaymentMethodUpdateEnabled: true,
       retentionCouponEvidence: 'manual_founder_browser_required',
       promotionsEnabled: false,
       automaticTaxEnabled: false,
@@ -1072,11 +1116,11 @@ export class StripeAdapter
         idempotencyKey: input.idempotencyKey,
         form: {
           mode: 'subscription',
+          integration_identifier: stripeCheckoutIntegrationIdentifier,
           'automatic_tax[enabled]': 'false',
           allow_promotion_codes: 'false',
           'adaptive_pricing[enabled]': 'false',
           'after_expiration[recovery][enabled]': 'false',
-          'payment_method_types[0]': 'card',
           payment_method_collection: 'always',
           'line_items[0][price]': input.providerPriceId,
           'line_items[0][quantity]': '1',

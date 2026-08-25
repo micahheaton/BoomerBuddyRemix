@@ -3,6 +3,7 @@ import type { Logger } from '@boomerbuddy/observability';
 import type { IdentityTokenVerifier } from '@boomerbuddy/security';
 import {
   AutomationBudgetRepository,
+  BillingAuthorityRepository,
   BusinessOsRepository,
   CheckRepository,
   CommerceOperationsRepository,
@@ -27,6 +28,7 @@ import {
 
 export interface ApiRepositories {
   readonly automationBudget: AutomationBudgetRepository;
+  readonly billingAuthority: BillingAuthorityRepository;
   readonly checks: CheckRepository;
   readonly businessOs: BusinessOsRepository;
   readonly commerce: CommerceOperationsRepository;
@@ -72,6 +74,7 @@ export function createRepositories(
       undefined,
       config.identity.founderPersonId,
     ),
+    billingAuthority: new BillingAuthorityRepository(database, config.identity.founderPersonId),
     businessOs: new BusinessOsRepository(database, undefined, config.identity.founderPersonId),
     checks: new CheckRepository(
       database,

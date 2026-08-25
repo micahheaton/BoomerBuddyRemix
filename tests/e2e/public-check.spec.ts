@@ -8,6 +8,7 @@ test('anonymous Public Check uses bounded attribution and saves only after expli
     `${customerUrl}/check?source=partner&campaign=trusted_partner&utm_source=RAW-IGNORED-VALUE`,
   );
   await expect(page.getByRole('heading', { name: 'Pause before you act.' })).toBeVisible();
+  await expect(page).toHaveURL(`${customerUrl}/check`);
   await expect(page.getByText('No account or household is attached')).toBeVisible();
 
   const contextRequest = page.waitForRequest(
@@ -27,7 +28,7 @@ test('anonymous Public Check uses bounded attribution and saves only after expli
   });
   const result = page.getByTestId('public-check-result');
   await expect(result).toBeVisible();
-  await expect(result).toContainText('Not calibrated');
+  await expect(result).toContainText('This result can be wrong');
   await expect(result).toContainText('Sensitive patterns removed');
   await expect(result).toContainText('[PAYMENT_CARD]');
   await expect(result).toContainText('[ONE_TIME_CODE]');
@@ -47,8 +48,35 @@ test('anonymous Public Check uses bounded attribution and saves only after expli
   await page.getByRole('button', { name: 'Save with my consent' }).click();
   await expect(page.getByRole('button', { name: 'Saved to active household' })).toBeDisabled();
   await expect(result).toContainText(
-    'Retrying the same save for the same owner and consent returns this one saved Check.',
+    'trying again returns this same saved Check instead of creating another.',
   );
+});
+
+test('Public Check defaults unrecognized attribution labels and clears them from history', async ({
+  page,
+}) => {
+  const sourceMarker = 'RAW-SOURCE-MUST-NOT-PERSIST';
+  const campaignMarker = 'RAW-CAMPAIGN-MUST-NOT-PERSIST';
+  await page.goto(
+    `${customerUrl}/check?source=${sourceMarker}&campaign=${campaignMarker}&ignored=RAW-IGNORED`,
+  );
+  await expect(page).toHaveURL(`${customerUrl}/check`);
+
+  const contextRequest = page.waitForRequest(
+    (request) =>
+      request.url() === `${apiUrl}/v1/public/check-contexts` && request.method() === 'POST',
+  );
+  await page.getByLabel('Suspicious message').fill('Synthetic bounded attribution check');
+  await page.getByRole('button', { name: 'Check it' }).click();
+
+  const request = await contextRequest;
+  expect(request.postDataJSON()).toEqual({
+    attribution: { source: 'direct', campaign: 'none' },
+  });
+  expect(request.postData()).not.toContain(sourceMarker);
+  expect(request.postData()).not.toContain(campaignMarker);
+  await expect(page.locator('body')).not.toContainText(sourceMarker);
+  await expect(page.locator('body')).not.toContainText(campaignMarker);
 });
 
 test('Public Check strips an existing session and household scope from anonymous requests', async ({

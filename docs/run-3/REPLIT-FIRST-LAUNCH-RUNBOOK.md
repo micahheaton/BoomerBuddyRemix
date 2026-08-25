@@ -1,6 +1,6 @@
 # Replit-First Launch Runbook
 
-Status: **prepared locally; founder account, canonical remote, production identity/KMS, managed PostgreSQL, and deployed evidence remain blocked**
+Status: **prepared locally; provider resources, managed PostgreSQL, exact deployment configuration, and deployed evidence remain open**
 
 Recorded: 2026-08-16
 
@@ -8,7 +8,9 @@ Recorded: 2026-08-16
 
 This is the shortest intended Replit-first path for the frozen BoomerBuddy launch candidate. Replit is a replaceable development and initial hosting surface. It is not the canonical source, DNS registrar, payment system of record, only backup, only secret-recovery location, or only operating runbook.
 
-Do not publish a public customer surface until the frozen candidate's executive verdict and founder activation checklist allow it. The current code deliberately rejects `NODE_ENV=production` until managed identity and KMS adapters are real. Do not change that refusal to make this runbook appear complete.
+Do not publish a public customer surface until the frozen candidate's release checks pass. Production
+configuration is structurally supported for the bounded one-household rollout, but it remains
+default-off and must fail closed when identity, secret custody, database, or provider evidence drifts.
 
 Replit's current official documentation supports importing public or private GitHub repositories, while secrets and database contents are not imported. It also distinguishes Autoscale, Reserved VM, Scheduled, and Static deployment types. Recheck the live provider UI and documentation before spending or publishing:
 
@@ -26,7 +28,9 @@ The founder must complete these without placing credentials in git, prompts, scr
 1. Create or confirm a company-controlled private Git remote with MFA, recovery owners, protected `main`, and immutable release tags.
 2. Confirm founder-controlled `boomerbuddy.net` registrar/DNS custody and recovery.
 3. Provision an external standard PostgreSQL staging database with backup/export capability. Replit-native PostgreSQL is acceptable only if the independent restore drill passes before activation.
-4. Provision managed identity and KMS/secret custody. Until adapters and evidence exist, production startup must keep refusing.
+4. Provision the production identity integration and surface-separated secret custody. For the
+   bounded beta, the matching Replit project's encrypted Secrets store is accepted with the documented
+   residual risk; do not share API and worker provider credentials or store any secret in source.
 5. Set a Replit monthly spending ceiling and billing-alert owner. Do not assume plan credits are a hard cap.
 6. Record Replit account owner, MFA owner, recovery owner, workspace/project identifiers, plan, region where selectable, and termination/export procedure in [FOUNDER-PROVISIONING.md](./FOUNDER-PROVISIONING.md).
 
@@ -44,7 +48,7 @@ The founder must complete these without placing credentials in git, prompts, scr
 4. Compare the hash to the dossier. A mismatch stops the deployment.
 5. Run `npm ci`. Do not use an uncommitted Replit checkpoint as the release source.
 6. Run `npm run verify`, `node scripts/verify-portability.mjs`, and the candidate-specific evidence checks. Record outputs and the Replit project/deployment IDs without secret values.
-7. Configure Replit Git to push only to the company canonical remote. Any emergency Replit edit must become a reviewed commit in that remote before redeployment.
+7. Treat every Replit project as a pull-only deployment consumer. Do not make emergency source edits in Replit and never push code or editor checkpoints from Replit. Make and review every change in the canonical GitHub repository, then have each service pull the exact approved commit before redeployment.
 
 The existing [`.replit`](../../.replit) file is a local development convenience (`npm run dev`); it is not a production deployment definition.
 
@@ -85,27 +89,40 @@ The authoritative current inventory is [`.env.example`](../../.env.example). Rep
 - `BB_SAFE_WORD_PEPPER`
 - `BB_LOG_LEVEL`
 
-The raw secret names above are development/test inputs today, not an approved production KMS design. `BB_FOUNDER_PERSON_ID` must come from the provisioned identity and match the exact founder; leaving it unset keeps founder-only controls closed. Production must use the final managed references and key-version contract once implemented. Never invent an identity or paste values into this file.
+Secret values stay only in the matching Replit project Secrets or an approved stronger vault; this is a bounded one-household custody decision, not a KMS claim. `BB_FOUNDER_PERSON_ID` must come from the provisioned identity and match the exact founder; leaving it unset keeps operator controls closed. Never invent an identity or paste values into this file.
 
 ### API-only names
 
 - `BB_API_HOST`
 - `BB_API_PORT`
+- `BB_STRIPE_LIVE_API_RESTRICTED_KEY`
+- `BB_STRIPE_LIVE_WEBHOOK_SECRET`
 
-### Stripe names consumed by the API and worker
+### Stripe surface-separated names
 
 - `BB_STRIPE_MODE`
+- `BB_STRIPE_RUNTIME_SURFACE`
+- `BB_STRIPE_LIVE_INITIATION_ENABLED`
 
-| Resource | Test name | Live manifest name |
+| Resource/control | API project | Worker project |
 | --- | --- | --- |
-| Account | `BB_STRIPE_TEST_ACCOUNT_ID` | `BB_STRIPE_LIVE_ACCOUNT_ID` |
-| API credential | `BB_STRIPE_TEST_API_KEY` | `BB_STRIPE_LIVE_API_KEY` |
-| Webhook endpoint secret | `BB_STRIPE_TEST_WEBHOOK_SECRET` | `BB_STRIPE_LIVE_WEBHOOK_SECRET` |
-| Founding product | `BB_STRIPE_TEST_FOUNDING_PRODUCT_ID` | `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` |
-| Founding monthly price | `BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID` | `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` |
-| Cancel-only portal configuration | `BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` |
+| Runtime surface | `BB_STRIPE_RUNTIME_SURFACE=api` | `BB_STRIPE_RUNTIME_SURFACE=worker` |
+| Initiation | `BB_STRIPE_LIVE_INITIATION_ENABLED=false` by default; true only after exact preflight and an active, unexpired, operator-approved max-one cohort | exactly `false` |
+| Account | `BB_STRIPE_LIVE_ACCOUNT_ID` | same identifier |
+| API credential | `BB_STRIPE_LIVE_API_RESTRICTED_KEY` only | absent |
+| Worker credential | absent | `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY` only |
+| Webhook endpoint secret | `BB_STRIPE_LIVE_WEBHOOK_SECRET` only | absent |
+| Family product | `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` | same identifier |
+| Family monthly price | `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` | same identifier |
+| Bounded Portal configuration | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | same identifier |
 
-The API and worker must receive the same complete manifest for the selected environment; do not mix test and live resources. The Stripe API version is code-owned and is not an environment variable. Run 3 permits test configuration only after the applicable founder gate, and `BB_STRIPE_MODE=test` is not evidence that Stripe was actually exercised. Live resource names remain an offline custody manifest: raw `BB_STRIPE_LIVE_API_KEY` and `BB_STRIPE_LIVE_WEBHOOK_SECRET` values are refused, and API and worker startup in live mode remains refused until managed identity/KMS custody and its adapter exist. Do not set or invent live values to bypass those controls.
+The API and worker must use the same exact live account and Family $14.99/month resource identifiers,
+but must never receive the same credential manifest. Both keys are restricted `rk_live_` credentials
+with least privilege for their surface. The deprecated shared `BB_STRIPE_LIVE_API_KEY` is always
+absent and rejected. The Stripe API version is code-owned. Production refuses every
+`BB_STRIPE_TEST_*` value. Live mode is structurally supported but default-off: configuration,
+database initiation control, household eligibility, the active approved max-one cohort, recent HQ
+MFA, and exact live US-company account/resource preflight must all agree before Checkout can start.
 
 ### Messaging disabled sentinel and reserved names
 
@@ -125,6 +142,7 @@ accepts its exact managed-secret contract.
 ### Worker-only names
 
 - `BB_WORKER_ID`
+- `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY`
 - `BB_WORKER_POLL_MS`
 - `BB_WORKER_LEASE_MS`
 - `BB_WORKER_HEARTBEAT_MS`
@@ -246,6 +264,6 @@ To disable Replit production quickly, the founder stops/pauses the customer web,
 
 ## Current evidence and blocker decision
 
-Local Run 2/Run 3 gates prove standard Node builds and portability checks, not Replit deployment. No Replit project import, provider build, managed database connection, custom domain, TLS, staging proxy, alert, rollback, or cost-control evidence has been produced in this run. Production startup remains deliberately blocked on managed identity/KMS.
+Local Run 2/Run 3 gates prove standard Node builds and portability checks, not Replit deployment. No Replit project import, provider build, managed database connection, custom domain, TLS, staging proxy, alert, rollback, or cost-control evidence has been produced in this run. Stripe is production-capable but remains default-off until the exact surface manifests, live read preflight, and max-one cohort rehearsal are retained. Twilio remains disabled.
 
 Therefore this runbook is `prepared`, not `test_proven` or `ready_for_live_review`.

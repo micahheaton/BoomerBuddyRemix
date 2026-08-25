@@ -11,6 +11,7 @@ import type { Database, SqlExecutor } from './database';
 import { resolveActiveBillingAuthority } from './entitlements';
 import { writeAuditAndOutbox } from './events';
 import { enqueueDurableJobWithExecutor, type DurableJobPayload } from './jobs';
+import { assertStripeControlOperator } from './stripe-control-operator';
 import { jsonValue, randomIdFactory, type IdFactory } from './values';
 
 interface CheckoutIntentRow extends Record<string, unknown> {
@@ -93,7 +94,7 @@ export interface StripeSessionRetryRepairProjection {
   readonly operationId: string;
   readonly householdId: string;
   readonly serverOperationId: string;
-  readonly environment: 'test';
+  readonly environment: 'test' | 'production';
   readonly action: 'checkout';
   readonly state: 'prepared' | 'outcome_unknown' | 'dispatching' | 'succeeded' | 'failed_no_effect';
   readonly attemptCount: number;
@@ -108,12 +109,62 @@ export interface StripeSessionRetryRepairResult {
   readonly operationId: string;
   readonly householdId: string;
   readonly serverOperationId: string;
-  readonly environment: 'test';
+  readonly environment: 'test' | 'production';
   readonly action: 'checkout';
   readonly revision: 1;
   readonly authorizedAttemptLimit: 7;
   readonly repairJobId: string;
   readonly duplicate: boolean;
+}
+
+export interface StripeCohortControlProjection {
+  readonly environment: 'test' | 'production';
+  readonly state: 'absent' | 'disabled' | 'active' | 'expired';
+  readonly maxActive: number;
+  readonly policyExpiresAt?: Date;
+  readonly liveApproved: boolean;
+  readonly revision: number;
+  readonly changedAt?: Date;
+}
+
+export interface StripeControlStatusProjection {
+  readonly environment: 'test' | 'production';
+  readonly preflight:
+    | { readonly state: 'unknown' }
+    | {
+        readonly state: 'configured' | 'verified' | 'unavailable';
+        readonly checkedAt: Date;
+        readonly evidenceLevel:
+          'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production';
+        readonly authenticityKind: 'fixture_assertion' | 'provider_read';
+        readonly transportKind: 'injected_fixture' | 'stripe_https';
+        readonly evidenceDigest: string;
+        readonly checks: {
+          readonly accountReady: boolean;
+          readonly offerReady: boolean;
+          readonly portalReady: boolean;
+          readonly checkoutPolicyReady: boolean;
+        };
+      };
+  readonly eligibleHouseholds: readonly {
+    readonly householdId: string;
+    readonly state: 'eligible';
+    readonly eligibilityExpiresAt: Date;
+    readonly occurredAt: Date;
+  }[];
+  readonly evidence: readonly {
+    readonly kind: 'preflight' | 'initiation_control' | 'cohort_control' | 'eligibility';
+    readonly state: string;
+    readonly occurredAt: Date;
+    readonly subjectId?: string;
+    readonly revision?: number;
+    readonly reasonCode?: string;
+    readonly evidenceLevel?:
+      'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production';
+    readonly authenticityKind?: 'fixture_assertion' | 'provider_read';
+    readonly transportKind?: 'injected_fixture' | 'stripe_https';
+    readonly evidenceDigest?: string;
+  }[];
 }
 
 export interface PreparedStripeCheckout {
@@ -145,6 +196,76 @@ export interface StripeRuntimeResources {
   readonly apiVersion: string;
   readonly cancelOnlyPortalConfigurationId: string;
   readonly offer: StripeFoundingOffer;
+}
+
+export interface BillingReverificationBindingIntent {
+  readonly personId: string;
+  readonly householdId: string;
+  readonly action: 'checkout' | 'portal';
+  readonly environment: 'test' | 'production';
+  readonly serverOperationId: string;
+  readonly offerId: 'founding_family_monthly_v1' | 'cancel_only_portal_v1';
+  readonly amountMinor: 0 | 1499;
+  readonly currency: 'usd';
+  readonly factorLevel: 'multi_factor';
+}
+
+export interface DerivedBillingReverificationBinding {
+  readonly reverificationFingerprint: string;
+  readonly bindingFingerprint: string;
+  readonly fingerprintKeyVersion: 1;
+}
+
+export type BillingReverificationBindingDecision =
+  | { readonly kind: 'bound'; readonly duplicate: boolean }
+  | { readonly kind: 'reverification_reused' };
+
+export function deriveBillingReverificationBinding(
+  input: BillingReverificationBindingIntent & {
+    readonly reverificationId: string;
+    readonly key: Uint8Array;
+  },
+): DerivedBillingReverificationBinding {
+  if (input.key.byteLength < 32) {
+    throw new TypeError('Billing reverification HMAC key must contain at least 32 bytes');
+  }
+  if (!validIdempotencyKey(input.serverOperationId)) {
+    throw new DomainError('invalid_input', 'A valid server operation identifier is required');
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/u.test(input.reverificationId)) {
+    throw new DomainError('not_authorized', 'Billing reverification evidence is invalid');
+  }
+  const actionMatchesOffer =
+    (input.action === 'checkout' &&
+      input.offerId === 'founding_family_monthly_v1' &&
+      input.amountMinor === 1499) ||
+    (input.action === 'portal' &&
+      input.offerId === 'cancel_only_portal_v1' &&
+      input.amountMinor === 0);
+  if (!actionMatchesOffer) {
+    throw new DomainError('invalid_input', 'Billing reverification intent is invalid');
+  }
+  const digest = (purpose: string, components: readonly string[]) => {
+    const hmac = createHmac('sha256', input.key).update(purpose).update('\0');
+    for (const component of components) hmac.update(component).update('\0');
+    return hmac.digest('base64url');
+  };
+  const reverificationFingerprint = digest('billing-reverification-id-v1', [
+    input.reverificationId,
+  ]);
+  const bindingFingerprint = digest('billing-reverification-binding-v1', [
+    input.reverificationId,
+    input.personId,
+    input.householdId,
+    input.action,
+    input.environment,
+    input.serverOperationId,
+    input.offerId,
+    String(input.amountMinor),
+    input.currency,
+    input.factorLevel,
+  ]);
+  return { reverificationFingerprint, bindingFingerprint, fingerprintKeyVersion: 1 };
 }
 
 export function deriveStripeProviderIdempotencyKey(input: {
@@ -254,6 +375,115 @@ export class CommerceRuntimeRepository {
     };
   }
 
+  async bindBillingReverification(
+    input: BillingReverificationBindingIntent &
+      DerivedBillingReverificationBinding & {
+        readonly effectiveFactorAgeSeconds: number;
+        readonly now: Date;
+      },
+  ): Promise<BillingReverificationBindingDecision> {
+    if (
+      !/^[A-Za-z0-9_-]{43}$/u.test(input.reverificationFingerprint) ||
+      !/^[A-Za-z0-9_-]{43}$/u.test(input.bindingFingerprint) ||
+      input.fingerprintKeyVersion !== 1 ||
+      !Number.isSafeInteger(input.effectiveFactorAgeSeconds) ||
+      input.effectiveFactorAgeSeconds < 0 ||
+      input.effectiveFactorAgeSeconds >= 600 ||
+      Number.isNaN(input.now.getTime())
+    ) {
+      throw new DomainError('not_authorized', 'Billing reverification evidence is invalid');
+    }
+    return this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `SELECT mutex_key FROM commerce_billing_reverification_mutex
+         WHERE mutex_key = 'global' FOR UPDATE`,
+      );
+      const byReverification = await transaction.query<
+        {
+          readonly person_id: string;
+          readonly household_id: string;
+          readonly action: 'checkout' | 'portal';
+          readonly environment: 'test' | 'production';
+          readonly server_operation_id: string;
+          readonly offer_id: BillingReverificationBindingIntent['offerId'];
+          readonly amount_minor: number;
+          readonly currency: 'usd';
+          readonly factor_level: 'multi_factor';
+          readonly binding_fingerprint: string;
+          readonly fingerprint_key_version: number;
+        } & Record<string, unknown>
+      >(
+        `SELECT person_id, household_id, action, environment, server_operation_id,
+                offer_id, amount_minor, currency, factor_level, binding_fingerprint,
+                fingerprint_key_version
+         FROM commerce_billing_reverification_bindings
+         WHERE reverification_fingerprint = $1`,
+        [input.reverificationFingerprint],
+      );
+      const priorReverification = byReverification.rows[0];
+      if (priorReverification !== undefined) {
+        const sameOperation =
+          priorReverification.environment === input.environment &&
+          priorReverification.action === input.action &&
+          priorReverification.household_id === input.householdId &&
+          priorReverification.server_operation_id === input.serverOperationId;
+        if (!sameOperation) return { kind: 'reverification_reused' };
+        if (
+          priorReverification.person_id !== input.personId ||
+          priorReverification.offer_id !== input.offerId ||
+          priorReverification.amount_minor !== input.amountMinor ||
+          priorReverification.currency !== input.currency ||
+          priorReverification.factor_level !== input.factorLevel ||
+          priorReverification.binding_fingerprint !== input.bindingFingerprint ||
+          priorReverification.fingerprint_key_version !== input.fingerprintKeyVersion
+        ) {
+          throw new DomainError(
+            'conflict',
+            'Billing operation has conflicting reverification evidence',
+          );
+        }
+        return { kind: 'bound', duplicate: true };
+      }
+      const byOperation = await transaction.query(
+        `SELECT 1 FROM commerce_billing_reverification_bindings
+         WHERE environment = $1 AND action = $2 AND household_id = $3
+           AND server_operation_id = $4`,
+        [input.environment, input.action, input.householdId, input.serverOperationId],
+      );
+      if (byOperation.rowCount !== 0) {
+        throw new DomainError(
+          'conflict',
+          'Billing operation has conflicting reverification evidence',
+        );
+      }
+      await transaction.query(
+        `INSERT INTO commerce_billing_reverification_bindings(
+           id, reverification_fingerprint, binding_fingerprint, fingerprint_key_version,
+           person_id, household_id, action, environment, server_operation_id, offer_id,
+           amount_minor, currency, factor_level, effective_factor_age_seconds, created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [
+          this.idFactory.next('billing-reverification'),
+          input.reverificationFingerprint,
+          input.bindingFingerprint,
+          input.fingerprintKeyVersion,
+          input.personId,
+          input.householdId,
+          input.action,
+          input.environment,
+          input.serverOperationId,
+          input.offerId,
+          input.amountMinor,
+          input.currency,
+          input.factorLevel,
+          input.effectiveFactorAgeSeconds,
+          input.now.toISOString(),
+        ],
+      );
+      return { kind: 'bound', duplicate: false };
+    });
+  }
+
   async authorizeActor(input: {
     readonly actor: CommerceActor;
     readonly planVersionId?: string;
@@ -301,21 +531,30 @@ export class CommerceRuntimeRepository {
     readonly actorPersonId: string;
     readonly configuredFounderPersonId?: string;
     readonly correlationId: string;
+    readonly runtimeInitiationPermitted?: boolean;
     readonly now: Date;
   }): Promise<{ readonly state: 'enabled' | 'disabled'; readonly revision: number }> {
+    const activationReason =
+      input.environment === 'production' ? 'founder_live_activation' : 'founder_test_activation';
     if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
+      (input.nextState === 'enabled' && input.reasonCode !== activationReason) ||
+      (input.nextState === 'disabled' &&
+        ['founder_test_activation', 'founder_live_activation'].includes(input.reasonCode))
     ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
+      throw new DomainError('invalid_input', 'Stripe initiation reason does not match its state');
     }
-    if (input.environment === 'production' && input.nextState === 'enabled') {
-      throw new DomainError(
-        'not_authorized',
-        'Live Stripe initiation is unavailable in this frozen candidate',
-      );
+    const runtimePermitted = input.runtimeInitiationPermitted ?? input.environment === 'test';
+    if (input.nextState === 'enabled' && !runtimePermitted) {
+      throw new DomainError('not_authorized', 'Runtime Stripe initiation is disabled');
     }
     return this.database.transaction(async (transaction) => {
+      await assertStripeControlOperator({
+        executor: transaction,
+        actorPersonId: input.actorPersonId,
+        ...(input.configuredFounderPersonId === undefined
+          ? {}
+          : { configuredFounderPersonId: input.configuredFounderPersonId }),
+      });
       const existing = await transaction.query<
         { readonly state: 'enabled' | 'disabled'; readonly revision: number } & Record<
           string,
@@ -332,23 +571,29 @@ export class CommerceRuntimeRepository {
         throw new DomainError('conflict', 'Stripe initiation control revision changed');
       }
       const revision = previousRevision + 1;
-      await transaction.query(
+      const changed = await transaction.query<{ readonly changed_at: unknown }>(
         `INSERT INTO commerce_stripe_initiation_controls(
            environment, state, revision, changed_by_person_id, reason_code, changed_at
-         ) VALUES ($1,$2,$3,$4,$5,$6)
+         ) VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP)
          ON CONFLICT (environment) DO UPDATE SET
            state = EXCLUDED.state, revision = EXCLUDED.revision,
            changed_by_person_id = EXCLUDED.changed_by_person_id,
-           reason_code = EXCLUDED.reason_code, changed_at = EXCLUDED.changed_at`,
+           reason_code = EXCLUDED.reason_code, changed_at = EXCLUDED.changed_at
+         WHERE commerce_stripe_initiation_controls.revision = $6
+         RETURNING changed_at`,
         [
           input.environment,
           input.nextState,
           revision,
           input.actorPersonId,
           input.reasonCode,
-          input.now.toISOString(),
+          input.expectedRevision,
         ],
       );
+      const changedAt = changed.rows[0]?.changed_at;
+      if (changedAt === undefined) {
+        throw new DomainError('conflict', 'Stripe initiation control revision changed');
+      }
       await transaction.query(
         `INSERT INTO commerce_stripe_initiation_control_events(
            id, environment, previous_state, next_state, revision, actor_person_id,
@@ -363,7 +608,7 @@ export class CommerceRuntimeRepository {
           input.actorPersonId,
           input.reasonCode,
           input.correlationId,
-          input.now.toISOString(),
+          asDate(changedAt).toISOString(),
         ],
       );
       return { state: input.nextState, revision };
@@ -374,6 +619,7 @@ export class CommerceRuntimeRepository {
     readonly environment: 'test' | 'production';
     readonly actorPersonId: string;
     readonly configuredFounderPersonId?: string;
+    readonly runtimeInitiationPermitted?: boolean;
   }): Promise<{
     readonly environment: 'test' | 'production';
     readonly state: 'absent' | 'enabled' | 'disabled';
@@ -385,14 +631,15 @@ export class CommerceRuntimeRepository {
       | 'founder_disable'
       | 'incident_stop'
       | 'configuration_change';
-    readonly liveEnableAvailable: false;
+    readonly liveEnableAvailable: boolean;
   }> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
     const result = await this.database.query<
       {
         readonly state: 'enabled' | 'disabled';
@@ -418,23 +665,27 @@ export class CommerceRuntimeRepository {
       ...(row === undefined
         ? {}
         : { changedAt: asDate(row.changed_at), reasonCode: row.reason_code }),
-      liveEnableAvailable: false,
+      liveEnableAvailable:
+        input.environment === 'production' && input.runtimeInitiationPermitted === true,
     };
   }
 
   async stripeSessionRetryRepairProjection(input: {
     readonly householdId: string;
     readonly serverOperationId: string;
+    readonly environment?: 'test' | 'production';
     readonly actorPersonId: string;
     readonly configuredFounderPersonId?: string;
     readonly now: Date;
   }): Promise<StripeSessionRetryRepairProjection> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
+    const environment = input.environment ?? 'test';
     const result = await this.database.query<
       {
         readonly id: string;
@@ -461,7 +712,7 @@ export class CommerceRuntimeRepository {
                 AND intent.provider_requested_expires_at = operation.requested_expires_at
                 AND intent.expires_at = intent.provider_requested_expires_at + interval '5 minutes')
                 AS intent_exact,
-              (operation.requested_expires_at > $3::timestamptz + interval '30 minutes') AS deadline_open,
+              (operation.requested_expires_at > CURRENT_TIMESTAMP + interval '30 minutes') AS deadline_open,
               (operation.next_retry_at IS NULL AND operation.attempt_count = operation.authorized_attempt_limit)
                 AS exhausted_hold,
               EXISTS (
@@ -470,7 +721,8 @@ export class CommerceRuntimeRepository {
                 JOIN household_memberships membership
                   ON membership.household_id = authority.household_id
                  AND membership.person_id = authority.person_id
-                JOIN commerce_stripe_initiation_controls control ON control.environment = 'test'
+                JOIN commerce_stripe_initiation_controls control
+                  ON control.environment = operation.environment
                 JOIN commerce_stripe_eligible_households eligible
                   ON eligible.environment = control.environment
                  AND eligible.household_id = operation.household_id
@@ -483,10 +735,12 @@ export class CommerceRuntimeRepository {
                   AND control.state = 'enabled'
                   AND eligible.cohort_key = 'founding_household_v1'
                   AND eligible.benefit_key = 'family_v1_monthly_1499'
-                  AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > $3
-                  AND policy.state = 'active' AND policy.policy_expires_at > $3
+                  AND eligible.state = 'eligible'
+                  AND eligible.eligibility_expires_at > CURRENT_TIMESTAMP
+                  AND policy.state = 'active'
+                  AND policy.policy_expires_at > CURRENT_TIMESTAMP
                   AND policy.benefit_key = eligible.benefit_key
-                  AND policy.live_approved = false
+                  AND (operation.environment <> 'production' OR policy.live_approved = true)
               ) AS gates_open
        FROM commerce_stripe_session_operations operation
        JOIN commerce_checkout_intents intent
@@ -494,13 +748,14 @@ export class CommerceRuntimeRepository {
         AND intent.id = operation.checkout_intent_id
        LEFT JOIN owner_attention_items attention
          ON attention.dedupe_key =
-              ('stripe_session_unknown_test_checkout_' || operation.server_operation_id)
+              ('stripe_session_unknown_' || operation.environment || '_checkout_' ||
+               operation.server_operation_id)
         AND attention.source_type = 'commerce_session_operation'
         AND attention.source_id = operation.server_operation_id
         AND attention.state IN ('open','snoozed')
-       WHERE operation.environment = 'test' AND operation.action = 'checkout'
+       WHERE operation.environment = $3 AND operation.action = 'checkout'
          AND operation.household_id = $1 AND operation.server_operation_id = $2`,
-      [input.householdId, input.serverOperationId, input.now.toISOString()],
+      [input.householdId, input.serverOperationId, environment],
     );
     const row = result.rows[0];
     if (row === undefined) throw new DomainError('not_found', 'Stripe session operation not found');
@@ -509,7 +764,7 @@ export class CommerceRuntimeRepository {
       operationId: row.id,
       householdId: row.household_id,
       serverOperationId: row.server_operation_id,
-      environment: 'test',
+      environment,
       action: 'checkout',
       state: row.state,
       attemptCount: row.attempt_count,
@@ -518,6 +773,7 @@ export class CommerceRuntimeRepository {
       providerDeadline: asDate(row.requested_expires_at),
       attentionState,
       repairAvailable:
+        environment === 'test' &&
         row.state === 'outcome_unknown' &&
         row.attempt_count === 6 &&
         row.authorized_attempt_limit === 6 &&
@@ -533,6 +789,7 @@ export class CommerceRuntimeRepository {
   async requestStripeSessionRetryRepair(input: {
     readonly householdId: string;
     readonly serverOperationId: string;
+    readonly environment?: 'test' | 'production';
     readonly expectedRevision: 0;
     readonly reasonCode: 'founder_bounded_same_key_retry';
     readonly correlationId: string;
@@ -541,11 +798,19 @@ export class CommerceRuntimeRepository {
     readonly runtimeInitiationPermitted: boolean;
     readonly now: Date;
   }): Promise<StripeSessionRetryRepairResult> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
+    const environment = input.environment ?? 'test';
+    if (environment === 'production') {
+      throw new DomainError(
+        'not_authorized',
+        'Live unknown Checkout outcomes remain held for authentic provider reconciliation',
+      );
     }
     if (
       !input.runtimeInitiationPermitted ||
@@ -789,14 +1054,21 @@ export class CommerceRuntimeRepository {
     readonly eligibilityExpiresAt?: Date;
     readonly now: Date;
   }): Promise<'eligible' | 'revoked'> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
     const environment = input.environment ?? 'test';
     return this.database.transaction(async (transaction) => {
+      await assertStripeControlOperator({
+        executor: transaction,
+        actorPersonId: input.actorPersonId,
+        ...(input.configuredFounderPersonId === undefined
+          ? {}
+          : { configuredFounderPersonId: input.configuredFounderPersonId }),
+      });
+      const databaseClock = await transaction.query<{ readonly database_now: unknown }>(
+        'SELECT CURRENT_TIMESTAMP AS database_now',
+      );
+      const databaseNowValue = databaseClock.rows[0]?.database_now;
+      if (databaseNowValue === undefined) throw new Error('Database clock is unavailable');
+      const databaseNow = asDate(databaseNowValue);
       const household = await transaction.query(
         'SELECT id FROM households WHERE id = $1 FOR UPDATE',
         [input.householdId],
@@ -809,14 +1081,14 @@ export class CommerceRuntimeRepository {
          ) VALUES (
            $1,'founding_household_v1','family_v1_monthly_1499',
            CASE WHEN $1 = 'test' THEN 'active' ELSE 'disabled' END,
-           CASE WHEN $1 = 'test' THEN 25 ELSE 0 END,
+           CASE WHEN $1 = 'test' THEN 1 ELSE 0 END,
            $2,false,1,$3,$4
          ) ON CONFLICT (environment) DO NOTHING`,
         [
           environment,
-          new Date(input.now.getTime() + 180 * 24 * 60 * 60_000).toISOString(),
+          new Date(databaseNow.getTime() + 180 * 24 * 60 * 60_000).toISOString(),
           input.actorPersonId,
-          input.now.toISOString(),
+          databaseNow.toISOString(),
         ],
       );
       const policy = await transaction.query<
@@ -834,10 +1106,11 @@ export class CommerceRuntimeRepository {
       const cohort = policy.rows[0];
       const policyExpiresAt = cohort === undefined ? new Date(0) : asDate(cohort.policy_expires_at);
       if (
-        cohort === undefined ||
-        cohort.state !== 'active' ||
-        policyExpiresAt <= input.now ||
-        (environment === 'production' && !cohort.live_approved)
+        input.nextState === 'eligible' &&
+        (cohort === undefined ||
+          cohort.state !== 'active' ||
+          policyExpiresAt <= databaseNow ||
+          (environment === 'production' && !cohort.live_approved))
       ) {
         throw new DomainError('not_authorized', 'The environment-specific cohort is not active');
       }
@@ -856,24 +1129,28 @@ export class CommerceRuntimeRepository {
       const existingEligibility = existing.rows[0];
       const alreadyConsumesCapacity =
         existingEligibility?.state === 'eligible' &&
-        asDate(existingEligibility.eligibility_expires_at) > input.now;
+        asDate(existingEligibility.eligibility_expires_at) > databaseNow;
       if (input.nextState === 'eligible' && !alreadyConsumesCapacity) {
+        const maxActive = cohort?.max_active ?? 0;
         const capacity = await transaction.query<{ readonly active_count: number }>(
           `SELECT count(*)::int AS active_count
            FROM commerce_stripe_eligible_households
            WHERE environment = $1 AND state = 'eligible' AND eligibility_expires_at > $2`,
-          [environment, input.now.toISOString()],
+          [environment, databaseNow.toISOString()],
         );
-        if ((capacity.rows[0]?.active_count ?? cohort.max_active) >= cohort.max_active) {
+        if ((capacity.rows[0]?.active_count ?? maxActive) >= maxActive) {
           throw new DomainError('conflict', 'The environment-specific cohort is at capacity');
         }
       }
       const requestedExpiry =
-        input.eligibilityExpiresAt ?? new Date(input.now.getTime() + 30 * 24 * 60 * 60_000);
-      const eligibilityExpiresAt = new Date(
-        Math.min(requestedExpiry.getTime(), policyExpiresAt.getTime()),
-      );
-      if (eligibilityExpiresAt <= input.now) {
+        input.eligibilityExpiresAt ?? new Date(databaseNow.getTime() + 30 * 24 * 60 * 60_000);
+      const eligibilityExpiresAt =
+        input.nextState === 'eligible'
+          ? new Date(Math.min(requestedExpiry.getTime(), policyExpiresAt.getTime()))
+          : existingEligibility === undefined
+            ? new Date(databaseNow.getTime() + 1_000)
+            : asDate(existingEligibility.eligibility_expires_at);
+      if (input.nextState === 'eligible' && eligibilityExpiresAt <= databaseNow) {
         throw new DomainError('invalid_input', 'Cohort eligibility expiry must be in the future');
       }
       await transaction.query(
@@ -890,7 +1167,7 @@ export class CommerceRuntimeRepository {
           input.householdId,
           input.nextState,
           input.actorPersonId,
-          input.now.toISOString(),
+          databaseNow.toISOString(),
           input.correlationId,
           eligibilityExpiresAt.toISOString(),
         ],
@@ -910,7 +1187,7 @@ export class CommerceRuntimeRepository {
           input.actorPersonId,
           input.correlationId,
           eligibilityExpiresAt.toISOString(),
-          input.now.toISOString(),
+          databaseNow.toISOString(),
         ],
       );
       return input.nextState;
@@ -923,13 +1200,12 @@ export class CommerceRuntimeRepository {
     readonly runtimeInitiationPermitted: boolean;
     readonly now?: Date;
   }): Promise<void> {
-    if (!input.runtimeInitiationPermitted || input.environment === 'production') {
+    if (!input.runtimeInitiationPermitted) {
       throw new DomainError(
         'not_authorized',
         'Stripe initiation remains founder-gated and disabled',
       );
     }
-    const now = input.now ?? new Date();
     const result = await this.database.query(
       `SELECT 1
        FROM commerce_stripe_initiation_controls control
@@ -940,11 +1216,21 @@ export class CommerceRuntimeRepository {
        WHERE control.environment = $2 AND control.state = 'enabled'
          AND eligible.cohort_key = 'founding_household_v1'
          AND eligible.benefit_key = 'family_v1_monthly_1499'
-         AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > $3
-         AND policy.state = 'active' AND policy.policy_expires_at > $3
+         AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > CURRENT_TIMESTAMP
+         AND policy.state = 'active' AND policy.policy_expires_at > CURRENT_TIMESTAMP
+         AND policy.max_active > 0
          AND policy.benefit_key = eligible.benefit_key
-         AND ($2 <> 'production' OR policy.live_approved = true)`,
-      [input.householdId, input.environment, now.toISOString()],
+         AND ($2 <> 'production' OR policy.live_approved = true)
+         AND (
+           SELECT count(*)::int
+           FROM commerce_stripe_eligible_households cohort_member
+           WHERE cohort_member.environment = $2
+             AND cohort_member.cohort_key = policy.cohort_key
+             AND cohort_member.benefit_key = policy.benefit_key
+             AND cohort_member.state = 'eligible'
+             AND cohort_member.eligibility_expires_at > CURRENT_TIMESTAMP
+         ) <= policy.max_active`,
+      [input.householdId, input.environment],
     );
     if (result.rowCount !== 1) {
       throw new DomainError(
@@ -954,6 +1240,244 @@ export class CommerceRuntimeRepository {
     }
   }
 
+  async stripeCohortControlProjection(input: {
+    readonly environment: 'test' | 'production';
+    readonly actorPersonId: string;
+    readonly configuredFounderPersonId?: string;
+  }): Promise<StripeCohortControlProjection> {
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
+    const result = await this.database.query<
+      {
+        readonly state: 'disabled' | 'active' | 'expired';
+        readonly max_active: number;
+        readonly policy_expires_at: unknown;
+        readonly live_approved: boolean;
+        readonly revision: number;
+        readonly changed_at: unknown;
+      } & Record<string, unknown>
+    >(
+      `SELECT state, max_active, policy_expires_at, live_approved, revision, changed_at
+       FROM commerce_stripe_cohort_policies WHERE environment = $1`,
+      [input.environment],
+    );
+    const row = result.rows[0];
+    return row === undefined
+      ? {
+          environment: input.environment,
+          state: 'absent',
+          maxActive: 0,
+          liveApproved: false,
+          revision: 0,
+        }
+      : {
+          environment: input.environment,
+          state: row.state,
+          maxActive: row.max_active,
+          policyExpiresAt: asDate(row.policy_expires_at),
+          liveApproved: row.live_approved,
+          revision: row.revision,
+          changedAt: asDate(row.changed_at),
+        };
+  }
+
+  async changeStripeCohortPolicy(input: {
+    readonly environment: 'test' | 'production';
+    readonly nextState: 'disabled' | 'active' | 'expired';
+    readonly maxActive: number;
+    readonly policyExpiresAt?: Date;
+    readonly liveApproved: boolean;
+    readonly expectedRevision: number;
+    readonly reasonCode:
+      | 'cohort_activation'
+      | 'cohort_change'
+      | 'cohort_expiration'
+      | 'founder_disable'
+      | 'incident_stop';
+    readonly actorPersonId: string;
+    readonly configuredFounderPersonId?: string;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<StripeCohortControlProjection> {
+    if (
+      !Number.isSafeInteger(input.maxActive) ||
+      input.maxActive < 0 ||
+      input.maxActive > 1 ||
+      !Number.isFinite(input.now.getTime())
+    ) {
+      throw new DomainError('invalid_input', 'Stripe cohort control is invalid');
+    }
+    return this.database.transaction(async (transaction) => {
+      await assertStripeControlOperator({
+        executor: transaction,
+        actorPersonId: input.actorPersonId,
+        ...(input.configuredFounderPersonId === undefined
+          ? {}
+          : { configuredFounderPersonId: input.configuredFounderPersonId }),
+      });
+      const databaseClock = await transaction.query<{ readonly database_now: unknown }>(
+        'SELECT CURRENT_TIMESTAMP AS database_now',
+      );
+      const databaseNowValue = databaseClock.rows[0]?.database_now;
+      if (databaseNowValue === undefined) throw new Error('Database clock is unavailable');
+      const databaseNow = asDate(databaseNowValue);
+      const active = input.nextState === 'active';
+      const policyExpiresAt = active ? input.policyExpiresAt : databaseNow;
+      const activationReason =
+        input.reasonCode === 'cohort_activation' || input.reasonCode === 'cohort_change';
+      const disabledReason =
+        input.reasonCode === 'cohort_change' ||
+        input.reasonCode === 'founder_disable' ||
+        input.reasonCode === 'incident_stop';
+      const expiredReason =
+        input.reasonCode === 'cohort_expiration' || input.reasonCode === 'incident_stop';
+      if (
+        (active &&
+          (input.maxActive !== 1 ||
+            policyExpiresAt === undefined ||
+            !Number.isFinite(policyExpiresAt.getTime()) ||
+            policyExpiresAt <= databaseNow ||
+            !activationReason ||
+            input.liveApproved !== (input.environment === 'production'))) ||
+        (input.nextState === 'disabled' &&
+          (input.maxActive !== 0 || input.liveApproved || !disabledReason)) ||
+        (input.nextState === 'expired' &&
+          (input.maxActive !== 0 || input.liveApproved || !expiredReason))
+      ) {
+        throw new DomainError('invalid_input', 'Stripe cohort state and approval are inconsistent');
+      }
+      const currentResult = await transaction.query<
+        {
+          readonly state: 'disabled' | 'active' | 'expired';
+          readonly max_active: number;
+          readonly policy_expires_at: unknown;
+          readonly live_approved: boolean;
+          readonly revision: number;
+        } & Record<string, unknown>
+      >(
+        `SELECT state, max_active, policy_expires_at, live_approved, revision
+         FROM commerce_stripe_cohort_policies WHERE environment = $1 FOR UPDATE`,
+        [input.environment],
+      );
+      const current = currentResult.rows[0];
+      const previousRevision = current?.revision ?? 0;
+      if (previousRevision !== input.expectedRevision) {
+        throw new DomainError('conflict', 'Stripe cohort policy revision changed');
+      }
+      const revision = previousRevision + 1;
+      const changed = await transaction.query<
+        {
+          readonly state: 'disabled' | 'active' | 'expired';
+          readonly max_active: number;
+          readonly policy_expires_at: unknown;
+          readonly live_approved: boolean;
+          readonly revision: number;
+          readonly changed_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `INSERT INTO commerce_stripe_cohort_policies(
+           environment, cohort_key, benefit_key, state, max_active, policy_expires_at,
+           live_approved, revision, changed_by_person_id, changed_at
+         ) VALUES ($1,'founding_household_v1','family_v1_monthly_1499',$2,$3,$4,$5,$6,$7,$8)
+         ON CONFLICT (environment) DO UPDATE SET
+           state = EXCLUDED.state, max_active = EXCLUDED.max_active,
+           policy_expires_at = EXCLUDED.policy_expires_at,
+           live_approved = EXCLUDED.live_approved, revision = EXCLUDED.revision,
+           changed_by_person_id = EXCLUDED.changed_by_person_id,
+           changed_at = EXCLUDED.changed_at
+         WHERE commerce_stripe_cohort_policies.revision = $9
+         RETURNING state, max_active, policy_expires_at, live_approved, revision, changed_at`,
+        [
+          input.environment,
+          input.nextState,
+          input.maxActive,
+          (policyExpiresAt as Date).toISOString(),
+          input.liveApproved,
+          revision,
+          input.actorPersonId,
+          databaseNow.toISOString(),
+          input.expectedRevision,
+        ],
+      );
+      const row = changed.rows[0];
+      if (row === undefined) throw new DomainError('conflict', 'Stripe cohort revision changed');
+      await transaction.query(
+        `INSERT INTO commerce_stripe_cohort_policy_events_v2(
+           id, environment, previous_state, next_state, previous_max_active, next_max_active,
+           previous_policy_expires_at, next_policy_expires_at,
+           previous_live_approved, next_live_approved, expected_revision, next_revision,
+           actor_person_id, reason_code, correlation_id, occurred_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+        [
+          this.idFactory.next('stripe-cohort-control-event'),
+          input.environment,
+          current?.state ?? 'absent',
+          row.state,
+          current?.max_active ?? null,
+          row.max_active,
+          current === undefined ? null : asDate(current.policy_expires_at).toISOString(),
+          asDate(row.policy_expires_at).toISOString(),
+          current?.live_approved ?? null,
+          row.live_approved,
+          input.expectedRevision,
+          row.revision,
+          input.actorPersonId,
+          input.reasonCode,
+          input.correlationId,
+          asDate(row.changed_at).toISOString(),
+        ],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.idFactory,
+        {
+          actorPersonId: input.actorPersonId,
+          audience: 'hq',
+          correlationId: input.correlationId,
+          now: asDate(row.changed_at),
+        },
+        {
+          action: 'commerce.stripe_cohort_control_changed',
+          resourceType: 'commerce_stripe_cohort_policy',
+          resourceId: input.environment,
+          outcome: 'completed',
+          metadata: {
+            state: row.state,
+            maxActive: row.max_active,
+            liveApproved: row.live_approved,
+            revision: row.revision,
+          },
+        },
+        {
+          eventType: 'commerce.stripe_cohort_control_changed.v2',
+          aggregateType: 'commerce_stripe_cohort_policy',
+          aggregateId: input.environment,
+          payload: {
+            state: row.state,
+            maxActive: row.max_active,
+            liveApproved: row.live_approved,
+            revision: row.revision,
+          },
+        },
+      );
+      return {
+        environment: input.environment,
+        state: row.state,
+        maxActive: row.max_active,
+        policyExpiresAt: asDate(row.policy_expires_at),
+        liveApproved: row.live_approved,
+        revision: row.revision,
+        changedAt: asDate(row.changed_at),
+      };
+    });
+  }
+
+  /** Compatibility seam for the former approval-only test helper. */
   async changeStripeLiveCohortApproval(input: {
     readonly nextApproved: boolean;
     readonly expectedRevision: number;
@@ -962,60 +1486,224 @@ export class CommerceRuntimeRepository {
     readonly correlationId: string;
     readonly now: Date;
   }): Promise<{ readonly approved: boolean; readonly revision: number }> {
-    if (
-      input.configuredFounderPersonId === undefined ||
-      input.actorPersonId !== input.configuredFounderPersonId
-    ) {
-      throw new DomainError('not_authorized', 'The provisioned founder identity is required');
-    }
-    return this.database.transaction(async (transaction) => {
-      await transaction.query(
-        `INSERT INTO commerce_stripe_cohort_policies(
-           environment, cohort_key, benefit_key, state, max_active, policy_expires_at,
-           live_approved, revision, changed_by_person_id, changed_at
-         ) VALUES ('production','founding_household_v1','family_v1_monthly_1499',
-                   'disabled',0,$1,false,1,$2,$3)
-         ON CONFLICT (environment) DO NOTHING`,
-        [
-          new Date(input.now.getTime() + 180 * 24 * 60 * 60_000).toISOString(),
-          input.actorPersonId,
-          input.now.toISOString(),
-        ],
-      );
-      const policy = await transaction.query<
-        { readonly live_approved: boolean; readonly revision: number } & Record<string, unknown>
-      >(
-        `SELECT live_approved, revision FROM commerce_stripe_cohort_policies
-         WHERE environment = 'production' FOR UPDATE`,
-      );
-      const current = policy.rows[0];
-      if (current === undefined || current.revision !== input.expectedRevision) {
-        throw new DomainError('conflict', 'Live cohort approval revision changed');
-      }
-      const revision = current.revision + 1;
-      await transaction.query(
-        `UPDATE commerce_stripe_cohort_policies
-         SET live_approved = $1, revision = $2, changed_by_person_id = $3, changed_at = $4
-         WHERE environment = 'production'`,
-        [input.nextApproved, revision, input.actorPersonId, input.now.toISOString()],
-      );
-      await transaction.query(
-        `INSERT INTO commerce_stripe_cohort_policy_events(
-           id, environment, previous_live_approved, next_live_approved, revision,
-           actor_person_id, correlation_id, occurred_at
-         ) VALUES ($1,'production',$2,$3,$4,$5,$6,$7)`,
-        [
-          this.idFactory.next('stripe-cohort-policy-event'),
-          current.live_approved,
-          input.nextApproved,
-          revision,
-          input.actorPersonId,
-          input.correlationId,
-          input.now.toISOString(),
-        ],
-      );
-      return { approved: input.nextApproved, revision };
+    const changed = await this.changeStripeCohortPolicy({
+      environment: 'production',
+      nextState: input.nextApproved ? 'active' : 'disabled',
+      maxActive: input.nextApproved ? 1 : 0,
+      ...(input.nextApproved
+        ? { policyExpiresAt: new Date(input.now.getTime() + 30 * 24 * 60 * 60_000) }
+        : {}),
+      liveApproved: input.nextApproved,
+      expectedRevision: input.expectedRevision,
+      reasonCode: input.nextApproved ? 'cohort_activation' : 'founder_disable',
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+      correlationId: input.correlationId,
+      now: input.now,
     });
+    return { approved: changed.liveApproved, revision: changed.revision };
+  }
+
+  async stripeControlStatusProjection(input: {
+    readonly environment: 'test' | 'production';
+    readonly actorPersonId: string;
+    readonly configuredFounderPersonId?: string;
+    readonly now: Date;
+  }): Promise<StripeControlStatusProjection> {
+    if (!Number.isFinite(input.now.getTime())) {
+      throw new DomainError('invalid_input', 'Stripe status time is invalid');
+    }
+    await assertStripeControlOperator({
+      executor: this.database,
+      actorPersonId: input.actorPersonId,
+      ...(input.configuredFounderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: input.configuredFounderPersonId }),
+    });
+    type PreflightRow = {
+      readonly checked_at: unknown;
+      readonly evidence_level:
+        'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production';
+      readonly authenticity_kind: 'fixture_assertion' | 'provider_read';
+      readonly transport_kind: 'injected_fixture' | 'stripe_https';
+      readonly evidence_digest: string;
+      readonly product_active: boolean;
+      readonly price_active: boolean;
+      readonly portal_cancel_only: boolean;
+      readonly portal_mutation_controls_exact: boolean;
+      readonly portal_subscription_update_defaults_empty: boolean;
+      readonly portal_payment_method_update_enabled: boolean;
+      readonly promotions_enabled: boolean;
+      readonly automatic_tax_enabled: boolean;
+      readonly adaptive_pricing_enabled: boolean;
+      readonly account_charges_enabled: boolean | null;
+      readonly account_payouts_enabled: boolean | null;
+      readonly account_country: string | null;
+      readonly account_business_type: string | null;
+    } & Record<string, unknown>;
+    const [preflights, initiationEvents, cohortEvents, eligibilityEvents, eligible] =
+      await Promise.all([
+        this.database.query<PreflightRow>(
+          `SELECT checked_at, evidence_level, authenticity_kind, transport_kind,
+                  evidence_digest, product_active, price_active, portal_cancel_only,
+                  portal_mutation_controls_exact,
+                  portal_subscription_update_defaults_empty,
+                  portal_payment_method_update_enabled, promotions_enabled,
+                  automatic_tax_enabled, adaptive_pricing_enabled,
+                  account_charges_enabled, account_payouts_enabled,
+                  account_country, account_business_type
+           FROM commerce_stripe_preflight_records
+           WHERE environment = $1
+           ORDER BY checked_at DESC, id DESC LIMIT 50`,
+          [input.environment],
+        ),
+        this.database.query<
+          {
+            readonly previous_state: string;
+            readonly next_state: string;
+            readonly revision: number;
+            readonly reason_code: string;
+            readonly occurred_at: unknown;
+          } & Record<string, unknown>
+        >(
+          `SELECT previous_state, next_state, revision, reason_code, occurred_at
+           FROM commerce_stripe_initiation_control_events
+           WHERE environment = $1
+           ORDER BY occurred_at DESC, id DESC LIMIT 50`,
+          [input.environment],
+        ),
+        this.database.query<
+          {
+            readonly previous_state: string;
+            readonly next_state: string;
+            readonly next_revision: number;
+            readonly reason_code: string;
+            readonly occurred_at: unknown;
+          } & Record<string, unknown>
+        >(
+          `SELECT previous_state, next_state, next_revision, reason_code, occurred_at
+           FROM commerce_stripe_cohort_policy_events_v2
+           WHERE environment = $1
+           ORDER BY occurred_at DESC, id DESC LIMIT 50`,
+          [input.environment],
+        ),
+        this.database.query<
+          {
+            readonly household_id: string;
+            readonly previous_state: string;
+            readonly next_state: string;
+            readonly occurred_at: unknown;
+          } & Record<string, unknown>
+        >(
+          `SELECT household_id, previous_state, next_state, occurred_at
+           FROM commerce_stripe_eligibility_events
+           WHERE environment = $1
+           ORDER BY occurred_at DESC, id DESC LIMIT 50`,
+          [input.environment],
+        ),
+        this.database.query<
+          {
+            readonly household_id: string;
+            readonly eligibility_expires_at: unknown;
+            readonly occurred_at: unknown;
+          } & Record<string, unknown>
+        >(
+          `WITH latest AS (
+             SELECT household_id, next_state, eligibility_expires_at, occurred_at,
+                    row_number() OVER (
+                      PARTITION BY household_id ORDER BY occurred_at DESC, id DESC
+                    ) AS row_number
+             FROM commerce_stripe_eligibility_events
+             WHERE environment = $1
+           )
+           SELECT household_id, eligibility_expires_at, occurred_at
+           FROM latest
+           WHERE row_number = 1 AND next_state = 'eligible'
+             AND eligibility_expires_at > $2
+           ORDER BY occurred_at DESC, household_id LIMIT 2`,
+          [input.environment, input.now.toISOString()],
+        ),
+      ]);
+    if (eligible.rows.length > 1) {
+      throw new DomainError('conflict', 'Stripe cohort evidence exceeds its one-household cap');
+    }
+    const preflightState = (row: PreflightRow) => {
+      const accountReady =
+        input.environment === 'test' ||
+        (row.account_charges_enabled === true &&
+          row.account_payouts_enabled === true &&
+          row.account_country === 'US' &&
+          row.account_business_type === 'company');
+      const offerReady = row.product_active && row.price_active;
+      const portalReady =
+        row.portal_cancel_only &&
+        row.portal_mutation_controls_exact &&
+        row.portal_subscription_update_defaults_empty &&
+        row.portal_payment_method_update_enabled;
+      const checkoutPolicyReady =
+        !row.promotions_enabled && !row.automatic_tax_enabled && !row.adaptive_pricing_enabled;
+      return {
+        state:
+          accountReady && offerReady && portalReady && checkoutPolicyReady
+            ? row.authenticity_kind === 'provider_read'
+              ? ('verified' as const)
+              : ('configured' as const)
+            : ('unavailable' as const),
+        checkedAt: asDate(row.checked_at),
+        evidenceLevel: row.evidence_level,
+        authenticityKind: row.authenticity_kind,
+        transportKind: row.transport_kind,
+        evidenceDigest: row.evidence_digest,
+        checks: { accountReady, offerReady, portalReady, checkoutPolicyReady },
+      };
+    };
+    const latestPreflight = preflights.rows[0];
+    const evidence: StripeControlStatusProjection['evidence'][number][] = [
+      ...preflights.rows.map((row) => ({
+        kind: 'preflight' as const,
+        state: preflightState(row).state,
+        occurredAt: asDate(row.checked_at),
+        evidenceLevel: row.evidence_level,
+        authenticityKind: row.authenticity_kind,
+        transportKind: row.transport_kind,
+        evidenceDigest: row.evidence_digest,
+      })),
+      ...initiationEvents.rows.map((row) => ({
+        kind: 'initiation_control' as const,
+        state: `${row.previous_state}_to_${row.next_state}`,
+        occurredAt: asDate(row.occurred_at),
+        revision: row.revision,
+        reasonCode: row.reason_code,
+      })),
+      ...cohortEvents.rows.map((row) => ({
+        kind: 'cohort_control' as const,
+        state: `${row.previous_state}_to_${row.next_state}`,
+        occurredAt: asDate(row.occurred_at),
+        revision: row.next_revision,
+        reasonCode: row.reason_code,
+      })),
+      ...eligibilityEvents.rows.map((row) => ({
+        kind: 'eligibility' as const,
+        state: `${row.previous_state}_to_${row.next_state}`,
+        occurredAt: asDate(row.occurred_at),
+        subjectId: row.household_id,
+      })),
+    ];
+    evidence.sort((left, right) => right.occurredAt.getTime() - left.occurredAt.getTime());
+    return {
+      environment: input.environment,
+      preflight:
+        latestPreflight === undefined ? { state: 'unknown' } : preflightState(latestPreflight),
+      eligibleHouseholds: eligible.rows.map((row) => ({
+        householdId: row.household_id,
+        state: 'eligible' as const,
+        eligibilityExpiresAt: asDate(row.eligibility_expires_at),
+        occurredAt: asDate(row.occurred_at),
+      })),
+      evidence: evidence.slice(0, 50),
+    };
   }
 
   async recordStripePreflight(input: {
@@ -1030,6 +1718,10 @@ export class CommerceRuntimeRepository {
     const canonical = JSON.stringify({
       environment: input.evidence.environment,
       accountId: input.evidence.accountId,
+      accountChargesEnabled: input.evidence.accountChargesEnabled,
+      accountPayoutsEnabled: input.evidence.accountPayoutsEnabled,
+      accountCountry: input.evidence.accountCountry,
+      accountBusinessType: input.evidence.accountBusinessType,
       apiVersion: input.evidence.apiVersion,
       offer: input.evidence.offer,
       portalConfigurationId: input.evidence.portalConfigurationId,
@@ -1039,6 +1731,7 @@ export class CommerceRuntimeRepository {
       portalCancellationMode: input.evidence.portalCancellationMode,
       portalProrationBehavior: input.evidence.portalProrationBehavior,
       portalSubscriptionUpdateDefaultsEmpty: input.evidence.portalSubscriptionUpdateDefaultsEmpty,
+      portalPaymentMethodUpdateEnabled: input.evidence.portalPaymentMethodUpdateEnabled,
       promotionsEnabled: input.evidence.promotionsEnabled,
       automaticTaxEnabled: input.evidence.automaticTaxEnabled,
       adaptivePricingEnabled: input.evidence.adaptivePricingEnabled,
@@ -1062,8 +1755,10 @@ export class CommerceRuntimeRepository {
          evidence_digest, checked_at, transport_kind, runtime_run_id,
          authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
          portal_cancellation_mode, portal_proration_behavior,
-         portal_subscription_update_defaults_empty
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'month',$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)`,
+         portal_subscription_update_defaults_empty,
+         portal_payment_method_update_enabled, account_charges_enabled,
+         account_payouts_enabled, account_country, account_business_type
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'month',$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)`,
       [
         id,
         input.evidence.environment,
@@ -1094,6 +1789,11 @@ export class CommerceRuntimeRepository {
         input.evidence.portalCancellationMode,
         input.evidence.portalProrationBehavior,
         input.evidence.portalSubscriptionUpdateDefaultsEmpty,
+        input.evidence.portalPaymentMethodUpdateEnabled,
+        input.evidence.accountChargesEnabled,
+        input.evidence.accountPayoutsEnabled,
+        input.evidence.accountCountry,
+        input.evidence.accountBusinessType,
       ],
     );
     return digest;
@@ -2405,7 +3105,10 @@ export class CommerceRuntimeRepository {
          FROM commerce_checkout_intents intent
          JOIN commerce_event_inbox inbox
            ON inbox.id = $1 AND inbox.external_event_id = $2
-          AND inbox.event_type = 'checkout.session.completed'
+          AND inbox.event_type IN (
+            'checkout.session.completed',
+            'checkout.session.async_payment_succeeded'
+          )
           AND inbox.provider = 'stripe' AND inbox.environment = $3
           AND inbox.provider_object_id = $11 AND inbox.authenticity = 'verified'
          WHERE intent.provider = 'stripe' AND intent.environment = $3
@@ -2998,6 +3701,7 @@ export class CommerceRuntimeRepository {
     readonly actor: CommerceActor;
     readonly environment: 'test' | 'production';
     readonly runtimeInitiationPermitted: boolean;
+    readonly runtimePortalPermitted?: boolean;
     readonly now: Date;
   }): Promise<{
     readonly checkoutState:
@@ -3048,16 +3752,27 @@ export class CommerceRuntimeRepository {
       `SELECT
          (SELECT state FROM commerce_stripe_initiation_controls WHERE environment = $2) AS control_state,
          (SELECT state FROM commerce_stripe_eligible_households
-          WHERE household_id = $1 AND environment = $2 AND eligibility_expires_at > $3) AS eligible_state,
+          WHERE household_id = $1 AND environment = $2
+            AND eligibility_expires_at > CURRENT_TIMESTAMP) AS eligible_state,
          (SELECT policy.state FROM commerce_stripe_cohort_policies policy
           JOIN commerce_stripe_eligible_households eligible
             ON eligible.environment = policy.environment AND eligible.household_id = $1
           WHERE policy.environment = $2 AND policy.state = 'active'
-            AND policy.policy_expires_at > $3
+            AND policy.policy_expires_at > CURRENT_TIMESTAMP
+            AND policy.max_active > 0
             AND policy.benefit_key = 'family_v1_monthly_1499'
-            AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > $3
+            AND eligible.state = 'eligible'
+            AND eligible.eligibility_expires_at > CURRENT_TIMESTAMP
             AND eligible.benefit_key = policy.benefit_key
-            AND ($2 <> 'production' OR policy.live_approved = true)) AS cohort_state,
+            AND ($2 <> 'production' OR policy.live_approved = true)
+            AND (
+              SELECT count(*)::int FROM commerce_stripe_eligible_households cohort_member
+              WHERE cohort_member.environment = $2
+                AND cohort_member.cohort_key = policy.cohort_key
+                AND cohort_member.benefit_key = policy.benefit_key
+                AND cohort_member.state = 'eligible'
+                AND cohort_member.eligibility_expires_at > CURRENT_TIMESTAMP
+            ) <= policy.max_active) AS cohort_state,
          (SELECT state FROM commerce_checkout_intents
           WHERE household_id = $1 AND environment = $2
             AND state IN ('prepared','session_created')
@@ -3155,7 +3870,6 @@ export class CommerceRuntimeRepository {
                 row.operation_server_id !== null
               ? 'pending_provider'
               : input.runtimeInitiationPermitted &&
-                  input.environment === 'test' &&
                   row.eligible_state === 'eligible' &&
                   row.cohort_state === 'active' &&
                   row.control_state === 'enabled'
@@ -3166,11 +3880,9 @@ export class CommerceRuntimeRepository {
     return {
       checkoutState,
       canonicalAccessActive,
-      portalAvailable:
-        input.runtimeInitiationPermitted && input.environment === 'test' && row.customer_count > 0,
+      portalAvailable: input.runtimePortalPermitted === true && row.customer_count > 0,
       runtimeInitiationEnabled:
         input.runtimeInitiationPermitted &&
-        input.environment === 'test' &&
         row.cohort_state === 'active' &&
         row.control_state === 'enabled',
       ...(row.operation_server_id === null ||

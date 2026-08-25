@@ -83,7 +83,7 @@ export function FeedbackScreen() {
         Share feedback
       </Text>
       <View style={s.banner} accessibilityRole="summary">
-        <Text style={s.label}>Local text-only boundary</Text>
+        <Text style={s.label}>Text-only feedback</Text>
         <Text style={s.muted}>
           Do not paste passwords, payment-card numbers, one-time codes, private keys, or emergency
           details. Attachments, recording, transcription, email, external models, and customer
@@ -132,8 +132,7 @@ export function FeedbackScreen() {
           value={researchRetention}
         />
         <Text style={s.body}>
-          Allow minimized text to remain available for product-feedback research for up to 23 hours
-          in this local candidate.
+          Allow minimized text to remain available for product-feedback research for up to 23 hours.
         </Text>
       </View>
 
@@ -154,19 +153,18 @@ export function FeedbackScreen() {
           pressed && { opacity: 0.82 },
         ]}
       >
-        <Text style={s.buttonTextPrimary}>{busy ? 'Recording…' : 'Submit local feedback'}</Text>
+        <Text style={s.buttonTextPrimary}>{busy ? 'Recording…' : 'Submit feedback'}</Text>
       </Pressable>
 
       {receipt ? (
         <View style={s.card} accessibilityLiveRegion="polite">
-          <Text style={s.label}>Local receipt {receipt.feedback.id}</Text>
+          <Text style={s.label}>Feedback received</Text>
           <Text style={s.body}>
-            {receipt.feedback.status.replaceAll('_', ' ')} ·{' '}
-            {receipt.feedback.redactionStatus.replaceAll('_', ' ')}
+            Your feedback was recorded with reference {receipt.feedback.id}.
           </Text>
           <Text style={s.muted}>
-            No media was accepted, no provider processed this feedback, and no external action was
-            executed.
+            No media was accepted, no outside service received the feedback, and no customer action
+            was started automatically.
           </Text>
         </View>
       ) : null}

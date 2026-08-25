@@ -82,7 +82,7 @@ export default function CheckPage() {
       });
       setSharedWith((current) => [...new Set([...current, personId])]);
       setShareStatus(
-        `Redacted result shared locally with ${displayName}. No notification was sent, and the submitted artifact was not included.`,
+        `Redacted result shared with ${displayName} in BoomerBuddy. No notification was sent, and the submitted message or website address was not included.`,
       );
     } catch (caught) {
       setShareStatus(readableError(caught));
@@ -198,18 +198,18 @@ export default function CheckPage() {
             />
           )}
           <p className="help">
-            BoomerBuddy will not open the URL. Analysis uses local rules only, does not consult a
-            live reputation provider, and can be wrong.
+            BoomerBuddy will not open the website address or look it up with an outside service. The
+            result can be wrong.
           </p>
           <p className="notice notice-warning">
-            Before you submit: the local service minimizes and encrypts the input, retains it for up
-            to 30 days, and deletes it sooner if you delete the check. History never displays the
+            Before you submit: the service minimizes and encrypts the input, retains it for up to 30
+            days, and deletes it sooner if you delete the check. History never displays the
             submitted text or URL.
           </p>
           {!canCheckText && !canCheckUrl ? (
             <p className="notice notice-warning">
-              Checks are unavailable in this household scope. Choose another active household or
-              return Home.
+              Checks are unavailable for your role in this household. Choose another active
+              household or return Home.
             </p>
           ) : null}
           {error && (
@@ -240,11 +240,7 @@ export default function CheckPage() {
             data-household-id={result.householdId}
             aria-live="polite"
           >
-            <span className="dev-pill">
-              {result.provider.state === 'mock'
-                ? 'Mock analysis'
-                : `Provider: ${result.provider.state}`}
-            </span>
+            <span className="dev-pill">Analysis result</span>
             <h2 ref={resultHeading} tabIndex={-1}>
               Check result
             </h2>
@@ -254,37 +250,22 @@ export default function CheckPage() {
             </p>
             <p>{result.summary}</p>
             <dl className="definition-grid">
-              <dt>Evidence sufficiency</dt>
+              <dt>How much information was available</dt>
               <dd>
-                {sufficiencyText[result.evidenceSufficiency]} — how much supporting information the
-                local rules found, not a probability.
+                {sufficiencyText[result.evidenceSufficiency]} - this describes what the check could
+                examine, not the chance that something is safe or harmful.
               </dd>
-              <dt>Calibration</dt>
-              <dd>
-                {result.calibration === 'not_calibrated' ? 'Not calibrated' : result.calibration}.
-                This result has not been empirically calibrated and must not be read as certainty.
-              </dd>
-              <dt>Provider</dt>
-              <dd>
-                {result.provider.name}, state: {result.provider.state}, version{' '}
-                {result.provider.version}
-              </dd>
-              <dt>Rules</dt>
-              <dd>{result.rulesetVersion}</dd>
-              <dt>Household scope</dt>
+              <dt>Important limit</dt>
+              <dd>This result can be wrong and must not be read as proof or certainty.</dd>
+              <dt>Household</dt>
               <dd>{selectedHouseholdName}</dd>
-              <dt>Reference</dt>
-              <dd>
-                {result.id} — searchable in local HQ audit metadata; not an external incident
-                number.
-              </dd>
               <dt>Retention</dt>
               <dd>
                 Scheduled for deletion {new Date(result.retention.deleteAfter).toLocaleDateString()}{' '}
                 unless you delete it sooner.
               </dd>
             </dl>
-            <h3>What the local rules observed</h3>
+            <h3>What the check noticed</h3>
             {result.evidence.length ? (
               <ul className="plain-list">
                 {result.evidence.map((item, index) => (
@@ -308,7 +289,7 @@ export default function CheckPage() {
                 .sort((a, b) => a.priority - b.priority)
                 .map((action) => (
                   <li key={action.key}>
-                    <strong>{action.title}</strong> — {action.detail}
+                    <strong>{action.title}</strong> - {action.detail}
                     {action.officialChannelOnly && (
                       <span className="meta"> Use an independently verified official channel.</span>
                     )}
@@ -323,9 +304,9 @@ export default function CheckPage() {
               <section className="card" aria-labelledby="share-result-heading">
                 <h3 id="share-result-heading">Share this redacted result</h3>
                 <p>
-                  Sharing grants an eligible Trusted Circle person access to this result metadata,
-                  evidence, and safe actions. It never includes the submitted text or URL and does
-                  not send a notification.
+                  Sharing lets an eligible Trusted Circle person see the result details, warning
+                  signs, and safe actions. It never includes the submitted text or website address
+                  and does not send a notification.
                 </p>
                 {shareTargets.length ? (
                   <div className="button-row">
@@ -362,8 +343,8 @@ export default function CheckPage() {
                   </p>
                 )}
                 <p className="help">
-                  Receive-escalation notifications remain scaffolded and are not implemented in this
-                  build.
+                  Notifications for newly shared Checks are not available in this beta. Contact the
+                  person directly if help is urgent.
                 </p>
               </section>
             ) : null}

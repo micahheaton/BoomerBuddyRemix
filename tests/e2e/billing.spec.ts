@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { customerUrl, signInCustomer } from './helpers';
 
-test('billing and success surfaces remain fail-closed without founder activation', async ({
+test('billing and success surfaces remain fail-closed without billing activation', async ({
   page,
 }) => {
   await signInCustomer(page, 'owner-alice');
@@ -12,19 +12,18 @@ test('billing and success surfaces remain fail-closed without founder activation
     billingLink.click(),
   ]);
   await expect(page.getByRole('heading', { name: 'Manage billing' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'unavailable' })).toBeVisible();
-  await expect(page.getByText(/not in the founder-approved billing cohort/iu)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Billing is not available' })).toBeVisible();
+  await expect(page.getByText(/online billing is not available/iu)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toHaveCount(0);
 
   await page.goto(
     `${customerUrl}/member/billing/success?session_id=cs_live_forged&canonicalAccessActive=true`,
   );
+  await expect(page.getByRole('heading', { name: 'We are confirming your payment' })).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Payment evidence is still pending' }),
+    page.getByText(/Returning from Checkout does not by itself activate/iu),
   ).toBeVisible();
-  await expect(page.getByText(/Returning to this page did not grant access/iu)).toBeVisible();
-  await expect(page.getByText(/does not trust URL parameters/iu)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Review billing state' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Review billing' })).toBeVisible();
 });
 
 test('mocked billing journey preserves unknown retry, expiry, paid truth, and portal controls', async ({
@@ -96,7 +95,7 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     return {
       billing,
       evidenceNotice:
-        'Success redirects and provider status snapshots do not grant BoomerBuddy access.',
+        'Your membership becomes active only after BoomerBuddy confirms a successful payment.',
     };
   };
   await page.route('**/v1/commerce/stripe/billing', async (route) => {
@@ -127,11 +126,11 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
   });
 
   await page.goto(`${customerUrl}/member/billing`);
-  await expect(page.getByRole('heading', { name: 'pending provider' })).toBeVisible();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('outcome unknown');
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 1');
+  await expect(
+    page.getByRole('heading', { name: 'Confirming your billing request' }),
+  ).toBeVisible();
   await expect(page.getByTestId('billing-pending-operation')).toContainText(
-    'checkout-operation-unknown-0001',
+    'Your billing request is being confirmed',
   );
   await expect
     .poll(() =>
@@ -142,13 +141,23 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     .toBe('checkout-operation-unknown-0001');
 
   billingState = 'pending_retry';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('dispatching');
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 2');
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByTestId('billing-pending-operation')).toContainText(
+    'Please wait before starting another request',
+  );
 
   billingState = 'ready';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toBeVisible();
+  await expect(page.getByTestId('billing-customer-terms')).toContainText(
+    'Monthly charges are generally not refundable',
+  );
+  await expect(
+    page.getByTestId('billing-customer-terms').getByRole('link', { name: 'support' }),
+  ).toHaveAttribute('href', '/support');
+  await expect(
+    page.getByTestId('billing-customer-terms').getByRole('link', { name: 'billing terms' }),
+  ).toHaveAttribute('href', '/billing-terms');
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -156,8 +165,10 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
       ),
     )
     .toBeNull();
-  await page.getByRole('button', { name: 'Continue to test checkout' }).click();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 2');
+  await page.getByRole('button', { name: 'Continue to secure checkout' }).click();
+  await expect(page.getByTestId('billing-pending-operation')).toContainText(
+    'Your billing request is being confirmed',
+  );
   expect(checkoutOperation).toMatch(/^checkout-/u);
   expect(checkoutHousehold).toBe('household-sunrise');
   await expect
@@ -169,15 +180,15 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     .toBe(checkoutOperation);
 
   billingState = 'awaiting_payment';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('heading', { name: 'awaiting payment evidence' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirming your payment' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toHaveCount(0);
 
   billingState = 'active';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('heading', { name: 'active' })).toBeVisible();
-  await page.getByRole('button', { name: 'Open cancel-only billing portal' }).click();
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();
+  await page.getByRole('button', { name: 'Manage payment method or cancellation' }).click();
   expect(portalOperation).toMatch(/^portal-/u);
   expect(portalHousehold).toBe('household-sunrise');
-  await expect(page.getByRole('heading', { name: 'active' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();
 });

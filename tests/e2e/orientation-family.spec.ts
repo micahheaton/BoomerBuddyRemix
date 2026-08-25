@@ -215,11 +215,17 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
   await expect(sharedHistory.getByRole('button', { name: 'Delete record' })).toHaveCount(0);
   await sharedHistory.getByRole('button', { name: 'View result details' }).click();
   await expect(
-    sharedHistory.getByRole('heading', { name: 'Evidence and limitations' }),
+    sharedHistory.getByRole('heading', { name: 'Redacted result details' }),
+  ).toBeVisible();
+  await expect(
+    sharedHistory.getByRole('heading', { name: 'What the check noticed and its limits' }),
   ).toBeVisible();
   await expect(sharedHistory.getByRole('heading', { name: 'Safer next actions' })).toBeVisible();
-  await expect(sharedHistory).toContainText('Provider provenance');
-  await expect(sharedHistory).toContainText('Not calibrated');
+  await expect(sharedHistory).toContainText('Limited information');
+  await expect(sharedHistory).toContainText('Important limit');
+  await expect(sharedHistory).toContainText('Evidence gap:');
+  await expect(sharedHistory).not.toContainText('Provider provenance');
+  await expect(sharedHistory).not.toContainText('Not calibrated');
   await expect(sharedHistory).not.toContainText('JORDAN-SHARE-PROOF');
 
   await page

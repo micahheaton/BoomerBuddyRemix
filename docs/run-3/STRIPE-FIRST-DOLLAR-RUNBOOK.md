@@ -2,7 +2,7 @@
 
 Status: **production-capable, default-off control plane; live resource provisioning, deployed proof, and first payment remain open**
 
-Last reviewed: 2026-08-17
+Last reviewed: 2026-08-25
 
 This runbook defines the controlled Family first-payment rollout. It does not itself authorize a
 provider write, charge, refund, DNS change, or customer message. Never paste an API key, webhook secret, session cookie, or other secret
@@ -39,6 +39,14 @@ come from the controlled rollout. Tax and consumer-law decisions remain legal/ac
 ## Access and initiation invariants
 
 Payment initiation and webhook ingestion are independent controls.
+
+Before Checkout or Portal can be initiated, the production customer Clerk default session-token
+claims must include `{"reverification_id":"{{session.reverification_id}}"}`. Clerk documents that
+this shortcode identifies the unique reverification and is minted again for each new reverification.
+The API combines it with the signed `fva` freshness claim, fingerprints it, binds it to the exact
+household/action/offer/amount/idempotency operation, and rejects reuse. Never substitute a user ID,
+session ID, or other long-lived value. See Clerk's
+[reverification guide](https://clerk.com/docs/guides/secure/reverification#correlate-a-reverification-with-a-specific-action).
 
 1. Checkout requires all of: the exact configured environment and runtime surface, runtime
    initiation permission, a revisioned initiation control set to `enabled` by an active internal HQ

@@ -145,6 +145,13 @@ exists, including the required `boomerbuddy-mobile` template. Clerk express lega
 and the Terms of Service and Privacy Policy URLs are unset. No provider secret, user record, or
 customer PII was read or recorded.
 
+The exact closure configuration for the default session-token claims is
+`{"reverification_id":"{{session.reverification_id}}"}`. Clerk documents that the shortcode is
+unique to each reverification and can be combined with the signed `fva` freshness claim to bind one
+reverification to one sensitive action ([Clerk reverification](https://clerk.com/docs/guides/secure/reverification#correlate-a-reverification-with-a-specific-action)).
+An authentic production token and one-time Checkout/Portal replay test are still required before
+this gate is closed.
+
 The local web production build now registers `/sign-in/[[...sign-in]]`. With non-secret local Clerk
 placeholders, `/sign-in`, `/sign-in/client-trust`, `/sign-in/sso-callback`, and
 `/sign-in/oauth-callback` each returned HTTP 200 rather than 404. This is local build evidence only.
@@ -183,7 +190,7 @@ The account can accept charges, but it is intentionally empty and is not launch-
 | No sandbox context or authentic sandbox evidence was available | Billing owner | Isolated Stripe sandbox context and authentic Checkout, signed webhook, lifecycle, refund, and reconciliation receipts | Before live configuration | Fixtures and mocks alone are insufficient |
 | New customers lack a normal billing-authority grant path | Auth and billing owners | Recent-MFA, exact-household, audited, idempotent grant/revoke control with tenant and replay tests | Before Customer 1 can initiate Checkout | Stop any manual database or inferred-authority shortcut |
 | Customer Clerk MFA is disabled | Identity owner | Authenticator-app MFA and backup codes enabled, required-MFA flow proved after the nested sign-in route is deployed, and recovery tested without retaining PII | Before Checkout or Portal is available | Stop billing if a true recent second factor cannot be enrolled and proved |
-| Customer session claims omit billing reverification evidence | Identity and API owners | Exact non-PII reverification claim configured and a one-time operation-bound Checkout and Portal proof passes | Before Checkout or Portal is available | Stop billing on missing, stale, malformed, or reused evidence |
+| Customer session claims omit billing reverification evidence | Identity and API owners | Default session-token claim `{"reverification_id":"{{session.reverification_id}}"}` configured and a one-time operation-bound Checkout and Portal proof passes | Before Checkout or Portal is available | Stop billing on missing, stale, malformed, or reused evidence |
 | No mobile Clerk JWT template exists | Identity and mobile owners | Exact `boomerbuddy-mobile` template with audience, surface, 60-second lifetime, and observed device `azp` disposition | Before physical-device beta | Stop native auth on an unexpected or unallowlisted `azp` |
 | Customer Clerk legal URLs and express consent are unset | Legal, product, and identity owners | Approved deployed URLs and exact provider configuration receipt | Before any new customer sign-up or payment | Stop onboarding while the provider legal surface is incomplete |
 | Paid-only feedback eligibility is incomplete | Product and persistence owners | Verified paid entitlement can access approved feedback, or temporary sponsored overlap is labeled and approved | Before paid onboarding is called complete | Stop if promised feedback/support is inaccessible |

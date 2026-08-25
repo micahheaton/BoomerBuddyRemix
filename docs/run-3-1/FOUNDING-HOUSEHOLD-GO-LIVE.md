@@ -132,10 +132,30 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `Forwarded` header all match that exact direct probe. Every external `/`, API path, and operator route still crosses the HQ Clerk boundary. Mixed or malformed forwarding metadata and any
     changed provider probe must fail promotion until this exact predicate is reviewed; do not widen
     the anonymous HQ surface.
-18. Before publishing API or worker, use a one-off founder-controlled shell with the migration
-    credential and the complete production configuration. Run `npm ci --ignore-scripts`, then
-    `npm run db:migrate` twice. The first run must record exactly the 0001–0027 forward chain, and the
-    second must report no migrations to apply. Never enable per-startup migrations.
+18. Before publishing API or worker, keep Stripe initiation and Twilio disabled, quiesce API and
+    worker mutations, create an encrypted pre-migration backup outside the repository, and prove that
+    backup in a disposable restore. Then use a one-off founder-controlled shell with the migration
+    credential, a direct TLS database URL, pool maximum `1`, and the complete production
+    configuration. Run `npm ci --ignore-scripts`, then `npm run db:migrate` twice. For the current
+    production upgrade from schema `0027`, the first run must record exactly
+    `0028_run3_1_billing_authority_workflow.sql`,
+    `0029_run3_1_stripe_live_control_plane.sql`,
+    `0030_run3_1_billing_reverification_binding.sql`, and
+    `0031_run3_1_mobile_session_retention.sql`; a genuinely empty database instead records the
+    complete `0001` through `0031` forward chain. The second run must report
+    `Applied 0 migration(s): none`. Verify that `schema_migrations` is the exact checksum-valid
+    `0001` through `0031` prefix, then create a post-migration backup bound to the merged release
+    commit. Restore that new artifact into a fresh disposable database and verify the exact
+    `0001` through `0031` prefix plus the new billing-authority, Stripe-control, reverification, and
+    mobile-retention structures before publishing. Never enable per-startup migrations. After
+    `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. Prefer a
+    schema-compatible corrective tag with initiation and invitations disabled or a forward
+    corrective migration. A database rollback is allowed only before any post-migration durable
+    write and must be coordinated: stop and drain all services, prove the pre-migration backup in
+    disposable infrastructure, restore the complete database at the verified zero-write point,
+    deploy the matching pre-`0029` API, worker, web, and HQ set, and only then reopen traffic. Never
+    destructively down-migrate or discard consent, billing, audit, webhook, refund, dispute, job, or
+    reconciliation evidence.
 19. With that same controlled database connection, run `npm run identity:bootstrap-founder` once.
     Confirm the content-free receipt names `production-founder-v1`, the configured founder person,
     identity, organization, and employee assignment. An exact replay may report `exact_replay`; a
@@ -158,8 +178,9 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     deployment, exact founder-binding startup success occurs before any durable worker heartbeat or
     job loop, one durable retention job remains after restart, and no Stripe, Twilio, media,
     classification, transcription, or outbound handler is present.
-23. Publish customer web and HQ. Record deployment IDs, build IDs, origins, and response headers.
-    Verify HTTPS, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, and
+23. Publish customer web, complete its smoke gates, and only then publish HQ and complete its smoke
+    gates. Record deployment IDs, build IDs, origins, and response headers for each surface. Verify
+    HTTPS, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, and
     `X-Content-Type-Options: nosniff`. Confirm missing Clerk configuration returns a no-store 503.
 24. In an incognito browser, verify `/check` remains anonymous and `/member` is protected. Inspect
     Clerk's `__session` behavior for HTTPS, Secure, HttpOnly, SameSite, short expiry/refresh, logout,

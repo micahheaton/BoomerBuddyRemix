@@ -25,7 +25,6 @@ function exactIpv4LoopbackAuthorityPort(value: string | null): string | null {
 
 function isLoopbackForwardedFor(value: string | null): boolean {
   return (
-    value === null ||
     value === '127.0.0.1' ||
     value === '::1' ||
     value === '::ffff:127.0.0.1'
@@ -54,16 +53,20 @@ export function isExactReplitHqHealthCheck(input: ReplitHqHealthCheckInput): boo
 
   const mappedAuthority = `127.0.0.1:${mappedPort}`;
   const normalizedLoopbackHostname = url.hostname === 'localhost';
-  const forwardedHostIsSafe = input.forwardedHost === null || input.forwardedHost === mappedAuthority;
-  const forwardedPortIsSafe = input.forwardedPort === null || input.forwardedPort === input.port;
-  const forwardedProtoIsSafe = input.forwardedProto === null || input.forwardedProto === 'http';
+  const forwardedHeadersAbsent =
+    input.forwardedFor === null &&
+    input.forwardedHost === null &&
+    input.forwardedPort === null &&
+    input.forwardedProto === null;
+  const forwardedHeadersExact =
+    input.forwardedHost === mappedAuthority &&
+    input.forwardedPort === input.port &&
+    input.forwardedProto === 'http' &&
+    isLoopbackForwardedFor(input.forwardedFor);
 
   return (
     input.host === mappedAuthority &&
-    forwardedHostIsSafe &&
-    forwardedPortIsSafe &&
-    forwardedProtoIsSafe &&
-    isLoopbackForwardedFor(input.forwardedFor) &&
+    (forwardedHeadersAbsent || forwardedHeadersExact) &&
     url.protocol === 'http:' &&
     url.username === '' &&
     url.password === '' &&

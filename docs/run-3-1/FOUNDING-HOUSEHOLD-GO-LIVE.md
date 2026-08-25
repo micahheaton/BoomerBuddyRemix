@@ -124,8 +124,9 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     provider-selected loopback mapping while Next listens on the separate automatic `PORT`. After
     proving the two Clerk keys are present, HQ returns fixed content-free liveness only when the
     published-runtime marker, canonical listener port, canonical mapped raw Host, Next-normalized
-    listener URL, GET/HEAD method, empty query, exact Next-derived loopback forwarding metadata, and absence
-    of a raw `Forwarded` header all match that exact direct probe. Every external `/`, API path, and operator route still crosses the HQ Clerk boundary. A
+    listener URL, GET/HEAD method, empty query, either the complete exact Next-derived loopback
+    forwarding tuple or complete absence of all four `X-Forwarded-*` headers, and absence of a raw
+    `Forwarded` header all match that exact direct probe. Every external `/`, API path, and operator route still crosses the HQ Clerk boundary. Mixed or malformed forwarding metadata and any
     changed provider probe must fail promotion until this exact predicate is reviewed; do not widen
     the anonymous HQ surface.
 18. Before publishing API or worker, use a one-off founder-controlled shell with the migration

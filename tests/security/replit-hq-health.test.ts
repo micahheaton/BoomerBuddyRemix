@@ -38,6 +38,13 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     ).toBe(true);
   });
 
+  it.each(['forwardedFor', 'forwardedHost', 'forwardedPort', 'forwardedProto'] as const)(
+    'rejects a mixed forwarded-header shape with only %s absent',
+    (header) => {
+      expect(isExactReplitHqHealthCheck({ ...exactRequest, [header]: null })).toBe(false);
+    },
+  );
+
   it.each(['1104', '2208', '3000'])(
     'accepts canonical mapped loopback port %s independently of the listener',
     (mappedPort) => {

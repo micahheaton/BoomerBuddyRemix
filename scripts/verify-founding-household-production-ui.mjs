@@ -140,6 +140,7 @@ const identityUnavailableText = 'Production identity is unavailable.';
 const productionSignInPaths = [
   '/sign-in',
   '/sign-in/client-trust',
+  '/sign-in/session-recovery',
   '/sign-in/sso-callback',
   '/sign-in/oauth-callback',
 ];

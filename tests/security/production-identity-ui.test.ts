@@ -83,6 +83,7 @@ describe('production identity UI boundary', () => {
     for (const path of [
       '/sign-in',
       '/sign-in/client-trust',
+      '/sign-in/session-recovery',
       '/sign-in/sso-callback',
       '/sign-in/oauth-callback',
       '/unauthorized-sign-in',

@@ -58,6 +58,40 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
   `mailto:` draft is a separate user action and never runs as a receipt side effect.
 - Support copy does not claim that a person monitors receipts or promise a response window. Live
   mailbox custody, staffing, routing, escalation, and response evidence remain external gates.
+- `apps/mobile/store-metadata.json` is the ASCII-only `en-US` source packet for truthful listing
+  copy, age/content/privacy answers, a repository-observed data map, permission posture, reviewer
+  steps, release-note handling, and signed-device screenshot specifications. Every
+  provider-dependent field is labeled draft or pending. It contains no provider identifier,
+  reviewer credential, customer PII, secret, native purchase, checkout, billing link, price, or
+  payment steering.
+- Category choices are provider-specific drafts, not a shared mapping. Apple uses `Utilities` as the
+  proposed primary category and `Lifestyle` as the proposed secondary category. Google Play uses
+  the single proposed `Tools` application category. Recheck the current provider documentation and
+  console before approval or submission. See [Apple App Store categories](https://developer.apple.com/app-store/categories/)
+  and [Google Play categories and tags](https://support.google.com/googleplay/android-developer/answer/9859673?hl=en).
+- Apple listing checks require an app name of at least 2 characters and keywords longer than 2
+  characters within Apple's 100-byte keyword limit. For the initial Apple version, the packet omits
+  the What's New field because it is not available for the first version. Google Play release notes
+  are maintained separately and capped at 500 characters. Recheck these dated draft rules before
+  every release. See [Apple platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information)
+  and [Google Play prepare and roll out a release](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en).
+- Every current `apps/mobile/package.json` runtime dependency has an exact approved privacy
+  classification. Distribution verification fails if a dependency is added, removed, renamed, or
+  reclassified without updating that reviewed allowlist. This repository gate does not replace
+  current SDK disclosures, generated privacy manifests, or inspection of the exact signed IPA and
+  AAB.
+- Store review access is provider-specific. The same founder-controlled synthetic customer review
+  account must be reusable, non-expiring, valid for reviewers regardless of location, and delivered
+  only through the secure review fields in App Store Connect and Google Play Console. One-time-only
+  credentials and repository authentication bypasses are forbidden. Before delivery, preflight the
+  exact signed candidate against the protected-adult role, active household, required capabilities,
+  effective canonical access, protected-member and Trusted Circle allowances, and all listed flows.
+  Retain only content-free evidence, never credentials, tokens, customer PII, or Check content. See
+  [Apple platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information)
+  and [Google Play app access requirements](https://support.google.com/googleplay/android-developer/answer/15748846?hl=en).
+- Current provider questionnaires, SDK disclosures, signed manifests, live operations, screenshots,
+  reviewer-account preflight, and professional review must still be reconciled before any store
+  answer or listing is approved.
 - The isolated Feedback component remains source-only and unwired; production navigation and artifacts omit it.
 - Web export, TypeScript, and bundle inspection are build evidence, not device evidence.
 - The production verifier is a static artifact/payload and Expo-bundle check; it is not hydrated production-browser or native-device evidence.
@@ -119,6 +153,9 @@ Before a native beta, record on representative iOS and Android devices:
   unrevoked mobile session rows older than the configured retention floor and unreferenced by any
   evidence table; referenced sessions and revocation evidence are retained;
 - store-commerce/canonical-entitlement reconciliation if later introduced.
+- reviewer access on the exact signed candidate using only the preflighted non-expiring synthetic
+  review account, including the protected-adult household, capabilities, canonical access,
+  allowances, and every documented reviewer flow.
 
 Apple/Google/Expo account timing does not block the web-first candidate. It does block any claim of a
 native beta, store readiness, submission readiness, or native accessibility completion. No store
@@ -132,9 +169,12 @@ submission is authorized by this document.
   packages the favicon, and a byte-for-byte regeneration check passes. Signed iOS/Android inspection
   and store screenshots still require real builds and devices.
 - `npm run mobile:verify-distribution` validates the resolved manifests, exact API and identity,
-  ASCII-only canonical store metadata, legal-route source presence, version-source truth, absent
-  purchase steering, deterministic asset bytes/dimensions/opacity, and a build-input SHA-256 without
-  contacting a provider. See
+  ASCII-only canonical store metadata, bounded source-locale copy, split Apple and Google category
+  drafts, provider-split release notes, pending content/privacy declarations, the exact runtime
+  dependency privacy allowlist, the repository-observed data map, provider-specific non-expiring
+  synthetic reviewer-account requirements and preflight, pending screenshot/device matrix,
+  legal-route source presence, version-source truth, absent purchase steering, deterministic asset
+  bytes/dimensions/opacity, and a build-input SHA-256 without contacting a provider. See
   [MOBILE-DISTRIBUTION-RELEASE-RECEIPT.md](./MOBILE-DISTRIBUTION-RELEASE-RECEIPT.md).
 - Universal Links and Android App Links remain explicitly unconfigured until the company-controlled
   Apple Team ID, Android production signing SHA-256, and live two-way website association files are

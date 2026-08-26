@@ -1,5 +1,6 @@
 import { canonicalPublicOrigin } from '@boomerbuddy/config/exact-origin';
 import { ClerkProvider } from '@clerk/nextjs';
+import { ProductionAuthenticationRecovery } from './production-auth-recovery';
 
 export function IdentityProvider({ children }: { children: React.ReactNode }) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -21,7 +22,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       afterSignOutUrl="/sign-in"
       allowedRedirectOrigins={[publicOrigin]}
     >
-      {children}
+      <ProductionAuthenticationRecovery>{children}</ProductionAuthenticationRecovery>
     </ClerkProvider>
   );
 }

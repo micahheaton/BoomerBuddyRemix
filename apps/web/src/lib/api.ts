@@ -1,21 +1,25 @@
 import type { ErrorEnvelope } from '@boomerbuddy/contracts';
+import {
+  beginProductionAuthenticationRecovery,
+  selectedHouseholdStorageKey,
+  shouldBeginProductionAuthenticationRecovery,
+} from './auth-recovery';
 
 export const apiBaseUrl =
   process.env.NODE_ENV === 'production'
     ? '/api'
     : (process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:4000');
-const selectedHouseholdKey = 'boomerbuddy.selected-household';
 
 export function readSelectedHouseholdId(): string {
   return typeof window === 'undefined'
     ? ''
-    : (window.sessionStorage.getItem(selectedHouseholdKey) ?? '');
+    : (window.sessionStorage.getItem(selectedHouseholdStorageKey) ?? '');
 }
 
 export function setSelectedHouseholdId(householdId: string): void {
   if (typeof window === 'undefined') return;
-  if (householdId) window.sessionStorage.setItem(selectedHouseholdKey, householdId);
-  else window.sessionStorage.removeItem(selectedHouseholdKey);
+  if (householdId) window.sessionStorage.setItem(selectedHouseholdStorageKey, householdId);
+  else window.sessionStorage.removeItem(selectedHouseholdStorageKey);
 }
 
 export class ApiError extends Error {
@@ -38,6 +42,8 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     path === '/v1/public/check-contexts' ||
     path === '/v1/public/checks' ||
     path === '/v1/public/access-intents';
+  const intentionalSignOut =
+    path === '/v1/sessions/current' && (init.method ?? 'GET').toUpperCase() === 'DELETE';
   const selectedHouseholdId =
     path === '/v1/me' || anonymousPublicRequest ? '' : readSelectedHouseholdId();
   const callerSignal = init.signal ?? undefined;
@@ -66,11 +72,21 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
       } catch {
         // The fallback below remains safe when a proxy returns non-JSON.
       }
-      throw new ApiError(
+      const error = new ApiError(
         envelope?.error.message ?? `${serviceName()} could not complete that request.`,
         envelope?.error.code ?? 'request_failed',
         response.status,
       );
+      if (
+        shouldBeginProductionAuthenticationRecovery(
+          response.status,
+          process.env.NODE_ENV,
+          !anonymousPublicRequest && !intentionalSignOut,
+        )
+      ) {
+        void beginProductionAuthenticationRecovery();
+      }
+      throw error;
     }
 
     if (response.status === 204) return undefined as T;

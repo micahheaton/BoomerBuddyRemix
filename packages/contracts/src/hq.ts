@@ -113,6 +113,94 @@ export const hqProviderHealthResponseSchema = z.object({
   ),
 });
 
+const operationalHealthStatusSchema = z.enum(['healthy', 'warning', 'critical']);
+const operationalHealthCountSchema = z.number().int().nonnegative().max(1_000_000);
+const operationalHealthAgeSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
+
+export const operationalHealthAttentionCodeSchema = z.enum([
+  'worker_missing',
+  'worker_stale',
+  'worker_stopped',
+  'worker_draining',
+  'worker_clock_skew',
+  'worker_count_saturated',
+  'job_backlog_stale',
+  'job_running_stale',
+  'job_exhausted',
+  'job_dead_letter',
+  'job_clock_skew',
+  'job_count_saturated',
+  'outbox_backlog_stale',
+  'outbox_exhausted',
+  'outbox_causally_blocked',
+  'outbox_dead_letter',
+  'outbox_clock_skew',
+  'outbox_count_saturated',
+]);
+
+export const hqOperationalHealthResponseSchema = z
+  .object({
+    projection: z.literal('content_free_operational_health'),
+    generatedAt: isoDateTimeSchema,
+    status: operationalHealthStatusSchema,
+    thresholds: z
+      .object({
+        workerStaleAfterSeconds: z.number().int().min(10).max(3_600),
+        backlogStaleAfterSeconds: z.number().int().min(30).max(86_400),
+        clockSkewToleranceSeconds: z.number().int().min(1).max(30),
+        aggregateCountCeiling: z.number().int().min(1_000).max(1_000_000),
+      })
+      .strict(),
+    workers: z
+      .object({
+        status: operationalHealthStatusSchema,
+        observedCount: operationalHealthCountSchema,
+        runningCount: operationalHealthCountSchema,
+        drainingCount: operationalHealthCountSchema,
+        stoppedCount: operationalHealthCountSchema,
+        staleCount: operationalHealthCountSchema,
+        clockSkewCount: operationalHealthCountSchema,
+        oldestActiveHeartbeatAgeSeconds: operationalHealthAgeSchema.nullable(),
+        freshestActiveHeartbeatAgeSeconds: operationalHealthAgeSchema.nullable(),
+        countSaturated: z.boolean(),
+      })
+      .strict(),
+    durableJobs: z
+      .object({
+        status: operationalHealthStatusSchema,
+        queuedCount: operationalHealthCountSchema,
+        retryCount: operationalHealthCountSchema,
+        runningCount: operationalHealthCountSchema,
+        staleRunningCount: operationalHealthCountSchema,
+        exhaustedCount: operationalHealthCountSchema,
+        deadLetterCount: operationalHealthCountSchema,
+        actionableCount: operationalHealthCountSchema,
+        oldestActionableAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestStaleRunningAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestExhaustedAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestDeadLetterAgeSeconds: operationalHealthAgeSchema.nullable(),
+        countSaturated: z.boolean(),
+      })
+      .strict(),
+    outbox: z
+      .object({
+        status: operationalHealthStatusSchema,
+        unprocessedCount: operationalHealthCountSchema,
+        exhaustedCount: operationalHealthCountSchema,
+        causallyBlockedCount: operationalHealthCountSchema,
+        deadLetterCount: operationalHealthCountSchema,
+        actionableCount: operationalHealthCountSchema,
+        oldestActionableAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestExhaustedAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestCausallyBlockedAgeSeconds: operationalHealthAgeSchema.nullable(),
+        oldestDeadLetterAgeSeconds: operationalHealthAgeSchema.nullable(),
+        countSaturated: z.boolean(),
+      })
+      .strict(),
+    attentionCodes: z.array(operationalHealthAttentionCodeSchema).max(18),
+  })
+  .strict();
+
 export const hqAuditResponseSchema = z.object({
   events: z.array(
     z.object({
@@ -179,6 +267,7 @@ export const publicConfigResponseSchema = z.object({
 });
 
 export type HqOverviewResponse = z.infer<typeof hqOverviewResponseSchema>;
+export type HqOperationalHealthResponse = z.infer<typeof hqOperationalHealthResponseSchema>;
 export type HqSupportQueueResponse = z.infer<typeof hqSupportQueueResponseSchema>;
 export type HqReviewQueueResponse = z.infer<typeof hqReviewQueueResponseSchema>;
 export type HqRevenueResponse = z.infer<typeof hqRevenueResponseSchema>;

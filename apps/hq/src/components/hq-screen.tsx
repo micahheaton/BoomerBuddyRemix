@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type {
   BrowserSessionResponse,
   DevPersonaId,
+  HqOperationalHealthResponse,
   HqReviewQueueResponse,
   HqRevenueResponse,
   HqSupportQueueResponse,
@@ -752,15 +753,18 @@ function Revenue() {
 
 function System() {
   const [providers, setProviders] = useState<ProvidersResponse>();
+  const [operational, setOperational] = useState<HqOperationalHealthResponse>();
   const [audit, setAudit] = useState<AuditResponse>();
   const [error, setError] = useState('');
   useEffect(() => {
     Promise.all([
       hqRequest<ProvidersResponse>(apiPaths.hqProviderHealth),
+      hqRequest<HqOperationalHealthResponse>(apiPaths.hqOperationalHealth),
       hqRequest<AuditResponse>(apiPaths.hqAudit),
     ])
-      .then(([providerData, auditData]) => {
+      .then(([providerData, operationalData, auditData]) => {
         setProviders(providerData);
+        setOperational(operationalData);
         setAudit(auditData);
       })
       .catch((caught) => setError(readableError(caught)));
@@ -771,7 +775,7 @@ function System() {
         {error}
       </p>
     );
-  if (!providers || !audit)
+  if (!providers || !operational || !audit)
     return (
       <p role="status">
         {productionRuntime
@@ -781,6 +785,110 @@ function System() {
     );
   return (
     <>
+      <section className="section" aria-labelledby="operational-health-heading">
+        <div className="notice">
+          <DataLabel />
+          <h2 id="operational-health-heading">Content-free operational health</h2>
+          <p>
+            Overall status: <strong>{operational.status}</strong>. This owner-only projection uses
+            aggregate heartbeat, durable-job, and production-worker-handled outbox metadata. It
+            contains no payload, customer, household, tenant, submitted content, or provider alert
+            delivery data.
+          </p>
+          <p className="source">
+            Generated {new Date(operational.generatedAt).toLocaleString()} | worker stale after{' '}
+            {operational.thresholds.workerStaleAfterSeconds} seconds | actionable backlog stale
+            after {operational.thresholds.backlogStaleAfterSeconds} seconds | future timestamp
+            tolerance {operational.thresholds.clockSkewToleranceSeconds} seconds
+          </p>
+        </div>
+        <div className="metric-grid section">
+          <article className="hq-card">
+            <h3>Worker heartbeats</h3>
+            <p>
+              <strong>{operational.workers.status}</strong>
+            </p>
+            <p>
+              {operational.workers.runningCount} running | {operational.workers.drainingCount}{' '}
+              draining | {operational.workers.stoppedCount} stopped |{' '}
+              {operational.workers.staleCount} stale
+            </p>
+            <p className="source">
+              Oldest active heartbeat age:{' '}
+              {operational.workers.oldestActiveHeartbeatAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+          <article className="hq-card">
+            <h3>Durable jobs</h3>
+            <p>
+              <strong>{operational.durableJobs.status}</strong>
+            </p>
+            <p>
+              {operational.durableJobs.queuedCount} queued | {operational.durableJobs.retryCount}{' '}
+              retry | {operational.durableJobs.runningCount} running |{' '}
+              {operational.durableJobs.staleRunningCount} stale running |{' '}
+              {operational.durableJobs.exhaustedCount} exhausted |{' '}
+              {operational.durableJobs.deadLetterCount} dead-letter
+            </p>
+            <p className="source">
+              {operational.durableJobs.actionableCount} actionable | oldest actionable age:{' '}
+              {operational.durableJobs.oldestActionableAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest stale-running age:{' '}
+              {operational.durableJobs.oldestStaleRunningAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest exhausted age:{' '}
+              {operational.durableJobs.oldestExhaustedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest dead-letter age:{' '}
+              {operational.durableJobs.oldestDeadLetterAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+          <article className="hq-card">
+            <h3>Outbox backlog</h3>
+            <p>
+              <strong>{operational.outbox.status}</strong>
+            </p>
+            <p>
+              {operational.outbox.unprocessedCount} unprocessed |{' '}
+              {operational.outbox.exhaustedCount} exhausted |{' '}
+              {operational.outbox.causallyBlockedCount} causally blocked |{' '}
+              {operational.outbox.deadLetterCount} dead-letter
+            </p>
+            <p className="source">
+              {operational.outbox.actionableCount} actionable | oldest actionable age:{' '}
+              {operational.outbox.oldestActionableAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest exhausted age:{' '}
+              {operational.outbox.oldestExhaustedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest causally blocked age:{' '}
+              {operational.outbox.oldestCausallyBlockedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest dead-letter age:{' '}
+              {operational.outbox.oldestDeadLetterAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+        </div>
+        {operational.attentionCodes.length > 0 ? (
+          <div className="notice notice-warning" role="status">
+            <h3>Operational attention codes</h3>
+            <ul>
+              {operational.attentionCodes.map((code) => (
+                <li key={code}>{code.replaceAll('_', ' ')}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="notice">No operational attention code is active.</p>
+        )}
+      </section>
       <section className="metric-grid">
         {providers.providers.map((provider) => (
           <article className="hq-card" key={provider.key}>

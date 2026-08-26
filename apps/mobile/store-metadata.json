@@ -1,9 +1,39 @@
 {
   "schemaVersion": 1,
+  "sourceLocale": "en-US",
+  "supportedLocales": ["en-US"],
+  "localizationStatus": "source_only_no_translations_approved",
   "appName": "BoomerBuddy",
   "bundleIdentifier": "net.boomerbuddy.app",
   "androidPackage": "net.boomerbuddy.app",
   "marketingVersion": "0.1.0",
+  "subtitle": "Safer next steps for families",
+  "promotionalText": "Pause before you click, reply, pay, or share a code. Review warning signs and choose a safer next step.",
+  "shortDescription": "Review suspicious messages and links, then choose a safer next step.",
+  "fullDescription": "BoomerBuddy helps adults and families pause before acting on a suspicious message or link. Submit text or a URL for a structured review of warning signs, uncertainty, and safer next steps. Keep a private history of your own Checks, use explicit Family and Trusted Circle permissions, and complete a guided safety orientation. BoomerBuddy reviews only what you submit. It does not open websites, monitor messages, guarantee safety, or replace emergency services, a financial institution, law enforcement, or qualified professional advice. Access is invitation-only during early release.",
+  "keywords": ["scam safety", "online safety", "family", "suspicious message", "phishing"],
+  "categories": {
+    "status": "draft_pending_current_console_review",
+    "policyReviewedAt": "2026-08-26",
+    "policyCaveat": "Provider categories, tags, and console choices can change. Recheck the current provider documentation and console before approval or submission.",
+    "appleAppStore": {
+      "primary": "Utilities",
+      "secondary": "Lifestyle",
+      "status": "draft_pending_console_review",
+      "policySource": "https://developer.apple.com/app-store/categories/"
+    },
+    "googlePlay": {
+      "category": "Tools",
+      "status": "draft_pending_console_review",
+      "policySource": "https://support.google.com/googleplay/android-developer/answer/9859673?hl=en"
+    }
+  },
+  "audience": {
+    "summary": "Adults and families who want help reviewing suspicious messages and links.",
+    "providerAgeRatingStatus": "pending_current_console_questionnaire_and_professional_review",
+    "childDirected": false,
+    "madeForChildren": false
+  },
   "supportEmail": "support@boomerbuddy.net",
   "supportUrl": "https://app.boomerbuddy.net/support",
   "privacyPolicyUrl": "https://app.boomerbuddy.net/privacy",
@@ -11,5 +41,337 @@
   "accountDeletionUrl": "https://app.boomerbuddy.net/account-deletion",
   "customSchemeCheckUrl": "boomerbuddy://check",
   "universalAndAppLinksStatus": "blocked_pending_provider_signing_and_two_way_association",
-  "nativeCommerceStatus": "web_first_no_native_purchase_or_payment_steering"
+  "nativeCommerceStatus": "web_first_no_native_purchase_or_payment_steering",
+  "contentDeclarations": {
+    "status": "draft_pending_current_provider_questionnaires_and_professional_review",
+    "publicUserGeneratedContent": false,
+    "privateUserSubmittedContent": true,
+    "publicCommunicationOrChat": false,
+    "advertising": false,
+    "crossAppTracking": false,
+    "gamblingOrContests": false,
+    "sexualContent": false,
+    "graphicViolence": false,
+    "profanityInPublisherContent": false,
+    "controlledSubstancesInPublisherContent": false,
+    "locationSharing": false,
+    "nativePurchases": false,
+    "externalPaymentSteering": false,
+    "safetyLimitation": "Decision support can be wrong and is not monitoring, an emergency service, or professional advice."
+  },
+  "privacyDeclarations": {
+    "status": "draft_requires_current_sdk_disclosures_provider_questionnaires_and_professional_review",
+    "appleAppPrivacyStatus": "draft_not_submitted",
+    "googleDataSafetyStatus": "draft_not_submitted",
+    "nativePrivacyManifestStatus": "pending_signed_artifact_and_current_sdk_manifest_review",
+    "tracking": false,
+    "advertising": false,
+    "dataSale": false,
+    "dataItems": [
+      {
+        "category": "account_and_authentication_identifiers",
+        "examples": "Provider account ID, application session ID, and security state.",
+        "purposes": ["app_functionality", "account_management", "security_and_fraud_prevention"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "email_address_for_sign_in_and_recovery",
+        "examples": "Email address handled through hosted identity for sign-in, MFA, and recovery.",
+        "purposes": ["account_management", "security_and_fraud_prevention"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "profile_household_and_relationship_data",
+        "examples": "Display name, household membership, roles, consent state, and Trusted Circle permissions.",
+        "purposes": ["app_functionality", "account_management"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "user_submitted_check_content",
+        "examples": "Text or URL entered manually for a Check.",
+        "purposes": ["app_functionality", "security_and_fraud_prevention"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "check_results_and_private_history",
+        "examples": "Structured warning signs, safer next steps, and a private Check history.",
+        "purposes": ["app_functionality"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "support_receipt_state",
+        "examples": "A fixed support category, impact level, receipt state, and content-free reference.",
+        "purposes": ["customer_support", "app_functionality"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "orientation_privacy_and_deletion_state",
+        "examples": "Orientation completion, consent choices, privacy request state, and account deletion request state. The private family phrase is not stored in the mobile app.",
+        "purposes": ["app_functionality", "account_management"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
+        "category": "subscription_access_status",
+        "examples": "Canonical plan access, allowance, renewal, cancellation, or restoration status without payment-card or bank data.",
+        "purposes": ["app_functionality"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      }
+    ],
+    "notObservedInProductCode": [
+      "advertising_identifiers",
+      "cross_app_tracking",
+      "contacts_or_address_book",
+      "precise_or_coarse_location",
+      "camera_photos_video_or_audio",
+      "health_or_fitness_data",
+      "payment_card_or_bank_data",
+      "clipboard_reads",
+      "background_message_monitoring",
+      "third_party_analytics_or_advertising_sdk_events"
+    ],
+    "sdkDueDiligence": [
+      "Reconcile current Clerk and Expo SDK disclosures and generated privacy manifests against the signed artifacts before answering provider questionnaires.",
+      "Reconcile live API logs, retention, processors, deletion, and support operations before professional approval."
+    ],
+    "deletionPath": "In-app account deletion request plus the canonical public account deletion URL.",
+    "transport": "Production mobile requests are HTTPS bearer-token requests to api.boomerbuddy.net with browser cookies omitted."
+  },
+  "permissions": {
+    "expectedActiveAndroidPermissions": ["android.permission.INTERNET"],
+    "sensitivePermissionPromptsExpected": false,
+    "contactsCameraMicrophonePhotosLocationNotificationsTrackingExpected": false
+  },
+  "runtimeDependencyPrivacyClassification": {
+    "status": "approved_repository_allowlist_requires_current_sdk_and_signed_artifact_reconciliation",
+    "source": "apps/mobile/package.json#dependencies",
+    "unclassifiedDependencyPolicy": "fail_distribution_verification",
+    "currentSdkDisclosureReconciliationRequired": true,
+    "signedArtifactReconciliationRequired": true,
+    "classifications": {
+      "@boomerbuddy/contracts": "first_party_contracts_no_runtime_collection",
+      "@boomerbuddy/design": "first_party_static_design_no_runtime_collection",
+      "@clerk/expo": "hosted_identity_and_session_sdk",
+      "@react-navigation/native": "navigation_ui_runtime",
+      "@react-navigation/native-stack": "navigation_ui_runtime",
+      "expo": "application_runtime_framework",
+      "expo-auth-session": "hosted_auth_session_bridge",
+      "expo-constants": "runtime_configuration_reader",
+      "expo-crypto": "local_cryptography_utility",
+      "expo-secure-store": "secure_local_storage",
+      "expo-splash-screen": "static_startup_ui",
+      "expo-status-bar": "static_status_ui",
+      "expo-web-browser": "system_browser_auth_bridge",
+      "react": "ui_runtime_framework",
+      "react-dom": "web_preview_ui_runtime",
+      "react-native": "native_ui_and_network_runtime",
+      "react-native-safe-area-context": "native_layout_runtime",
+      "react-native-screens": "native_navigation_runtime",
+      "react-native-web": "web_preview_native_compatibility"
+    }
+  },
+  "reviewerFlow": {
+    "status": "draft_pending_non_expiring_synthetic_account_preflight_signed_build_and_provider_secure_delivery",
+    "credentialsIncludedInRepository": false,
+    "dataPolicy": "Use only founder-controlled synthetic reviewer identities and synthetic Check content. Do not use customer PII.",
+    "accountRequirements": {
+      "accountType": "founder_controlled_synthetic_review_account",
+      "nonExpiring": true,
+      "reusable": true,
+      "validRegardlessOfReviewerLocation": true,
+      "oneTimeCredentialOnly": false,
+      "oneTimeCredentialsForbidden": true,
+      "customerRealmOnly": true,
+      "repositoryAuthBypassForbidden": true,
+      "providerAndSecurityReviewRequiredForReusableMfaPath": true
+    },
+    "providerDelivery": {
+      "appleAppStoreReview": {
+        "channel": "app_store_connect_app_review_sign_in_fields_and_notes",
+        "samePreflightedAccountRequired": true,
+        "policySource": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information"
+      },
+      "googlePlayReview": {
+        "channel": "play_console_sign_in_details",
+        "samePreflightedAccountRequired": true,
+        "policySource": "https://support.google.com/googleplay/android-developer/answer/15748846?hl=en"
+      }
+    },
+    "accountPreflight": {
+      "status": "pending_noncharging_provider_setup_live_api_and_exact_signed_candidate",
+      "requiredBeforeCredentialDelivery": true,
+      "requiredRole": "protected_adult",
+      "isProtectedMember": true,
+      "isBillingManager": true,
+      "householdCount": 1,
+      "householdStatus": "active",
+      "requiredCapabilities": [
+        "check:text",
+        "check:url",
+        "history:read",
+        "family:manage",
+        "orientation:use"
+      ],
+      "canonicalAccessState": "effective",
+      "requiredAllowances": [
+        {
+          "kind": "protected_members",
+          "mustBePresent": true,
+          "limitAtLeast": 1,
+          "usedAtLeast": 1
+        },
+        {
+          "kind": "trusted_circle_participants",
+          "mustBePresent": true,
+          "limitAtLeast": 1,
+          "remainingAtLeast": 1
+        }
+      ],
+      "allListedFlowsMustPass": true,
+      "preflightEvidence": "Record only content-free safe IDs, states, capability names, allowance counters, exact build hash, UTC, and pass/fail. Do not record credentials, tokens, PII, or Check content."
+    },
+    "prerequisites": [
+      "Install the exact signed IPA or AAB identified by the release receipt.",
+      "Confirm the live API and Customer Clerk realm match that release receipt.",
+      "Preflight the same non-expiring synthetic review account against the required role, household, capabilities, canonical access, allowances, and every listed flow.",
+      "Deliver reusable account access only through each provider's secure review fields. Never place credentials or one-time codes in the repository, receipt, prompt, screenshot, or log."
+    ],
+    "steps": [
+      {
+        "id": "hosted_customer_sign_in_and_native_return",
+        "instruction": "Open BoomerBuddy, choose Member sign in, complete hosted customer authentication, and confirm the browser returns to the app.",
+        "preflightRequired": true
+      },
+      {
+        "id": "protected_adult_household_and_access",
+        "instruction": "On Home, confirm the synthetic protected-adult household, current canonical access summary, allowances, and required capabilities.",
+        "preflightRequired": true
+      },
+      {
+        "id": "manual_check_and_result",
+        "instruction": "Open Check, enter approved synthetic text or a reserved-domain URL manually, and review the warning signs and safer next steps.",
+        "preflightRequired": true
+      },
+      {
+        "id": "private_household_history",
+        "instruction": "Open History and confirm only the signed-in synthetic household records are visible.",
+        "preflightRequired": true
+      },
+      {
+        "id": "family_and_orientation",
+        "instruction": "Open Family and Orientation to review explicit roles, permissions, consent, and recovery guidance.",
+        "preflightRequired": true
+      },
+      {
+        "id": "support_legal_accessibility_and_deletion",
+        "instruction": "Open Help and policies, Support, Privacy, Terms, Accessibility, and Account deletion from the app.",
+        "preflightRequired": true
+      },
+      {
+        "id": "session_restart_and_sign_out",
+        "instruction": "Restart the app, confirm secure session restoration, sign out, and confirm protected content is no longer available.",
+        "preflightRequired": true
+      },
+      {
+        "id": "no_native_commerce_or_payment_steering",
+        "instruction": "Confirm that mobile shows access status only and offers no checkout, pricing, billing link, native purchase, or payment steering.",
+        "preflightRequired": true
+      }
+    ],
+    "knownUnavailableFeatures": [
+      "Public sign-up is not offered during invitation-only early release.",
+      "Inbound share targets, automatic message monitoring, native purchases, and external payment links are not available.",
+      "Universal Links and Android App Links remain blocked until signed two-way association is proved."
+    ]
+  },
+  "screenshots": {
+    "status": "pending_exact_signed_artifact_device_capture_and_current_store_dimension_check",
+    "captureRules": [
+      "Capture only the exact signed production candidate on representative physical devices.",
+      "Use founder-controlled synthetic identities, reserved domains, and synthetic Check content with no customer PII.",
+      "Do not show development banners, provider credentials, one-time codes, notifications, or unsupported feature claims.",
+      "Verify current provider pixel, count, and device-family requirements in each console before capture.",
+      "Retain artifact hash, device class, operating-system version, locale, text scale, screen-reader state, and UTC capture time in the release receipt."
+    ],
+    "matrix": [
+      {
+        "id": "ios_phone_primary",
+        "platform": "ios",
+        "formFactor": "phone",
+        "required": true,
+        "screens": [
+          "welcome_and_hosted_sign_in",
+          "home_and_current_access",
+          "check_input",
+          "check_result_and_safer_next_steps",
+          "family_or_orientation"
+        ],
+        "status": "pending_signed_device_capture"
+      },
+      {
+        "id": "ios_tablet_primary",
+        "platform": "ios",
+        "formFactor": "tablet",
+        "required": true,
+        "screens": [
+          "welcome_and_hosted_sign_in",
+          "home_and_current_access",
+          "check_input",
+          "check_result_and_safer_next_steps",
+          "help_and_policies"
+        ],
+        "status": "pending_signed_device_capture"
+      },
+      {
+        "id": "android_phone_primary",
+        "platform": "android",
+        "formFactor": "phone",
+        "required": true,
+        "screens": [
+          "welcome_and_hosted_sign_in",
+          "home_and_current_access",
+          "check_input",
+          "check_result_and_safer_next_steps",
+          "family_or_orientation"
+        ],
+        "status": "pending_signed_device_capture"
+      },
+      {
+        "id": "android_tablet_layout_check",
+        "platform": "android",
+        "formFactor": "tablet",
+        "required": false,
+        "screens": ["home_and_current_access", "check_result_and_safer_next_steps"],
+        "status": "pending_current_store_requirement_and_device_decision"
+      }
+    ],
+    "androidFeatureGraphic": {
+      "status": "pending_current_console_spec_and_approved_artwork",
+      "source": "Use the repository brand mark and palette only after signed-app screenshots and listing copy are approved."
+    }
+  },
+  "releaseNotes": {
+    "sourceLocale": "en-US",
+    "policyReviewedAt": "2026-08-26",
+    "policyCaveat": "Recheck the current provider documentation and console before every release.",
+    "appleAppStore": {
+      "initialVersionAction": "omit_whats_new_field",
+      "status": "draft_first_version_field_intentionally_absent",
+      "policySource": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information"
+    },
+    "googlePlay": {
+      "text": "Initial invitation-only early access for hosted sign-in, manual Check review, private history, explicit Family permissions, guided orientation, support receipts, and in-app policy and deletion paths.",
+      "status": "draft_pending_signed_build_verification",
+      "maximumCharacters": 500,
+      "policySource": "https://support.google.com/googleplay/android-developer/answer/9859348?hl=en"
+    },
+    "status": "draft_pending_signed_build_verification"
+  }
 }

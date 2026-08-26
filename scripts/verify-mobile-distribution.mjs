@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
@@ -51,6 +52,22 @@ function assertExactPublicUrl(value, pathname, label) {
       url.search === '' &&
       url.hash === '',
     `${label} must be a credential-free HTTPS URL without query or fragment`,
+  );
+}
+
+function assertBoundedText(value, minimum, maximum, label) {
+  assertRelease(typeof value === 'string', `${label} must be text`);
+  assertRelease(
+    value.length >= minimum && value.length <= maximum,
+    `${label} must be between ${minimum} and ${maximum} characters`,
+  );
+}
+
+function assertExactStringSet(value, expected, label) {
+  assertRelease(Array.isArray(value), `${label} must be an array`);
+  assertRelease(
+    JSON.stringify([...value].sort()) === JSON.stringify([...expected].sort()),
+    `${label} must match the reviewed set`,
   );
 }
 
@@ -113,6 +130,76 @@ assertRelease(
   metadata.marketingVersion === appConfig.version,
   'store marketing version must match Expo config',
 );
+assertRelease(metadata.sourceLocale === 'en-US', 'store source locale must remain en-US');
+assertExactStringSet(metadata.supportedLocales, ['en-US'], 'approved store locales');
+assertRelease(
+  metadata.localizationStatus === 'source_only_no_translations_approved',
+  'unreviewed translations must not be represented as approved',
+);
+assertBoundedText(metadata.appName, 2, 30, 'store app name');
+assertBoundedText(metadata.subtitle, 1, 30, 'store subtitle');
+assertBoundedText(metadata.promotionalText, 1, 170, 'store promotional text');
+assertBoundedText(metadata.shortDescription, 1, 80, 'store short description');
+assertBoundedText(metadata.fullDescription, 200, 4_000, 'store full description');
+assertRelease(
+  Array.isArray(metadata.keywords) &&
+    metadata.keywords.length >= 3 &&
+    metadata.keywords.every(
+      (keyword) => typeof keyword === 'string' && keyword.length > 2 && keyword.length <= 30,
+    ) &&
+    Buffer.byteLength(metadata.keywords.join(','), 'utf8') <= 100,
+  'store keywords must remain a bounded reviewed list',
+);
+assertRelease(
+  metadata.categories?.status === 'draft_pending_current_console_review' &&
+    metadata.categories.policyReviewedAt === '2026-08-26' &&
+    metadata.categories.policyCaveat ===
+      'Provider categories, tags, and console choices can change. Recheck the current provider documentation and console before approval or submission.' &&
+    metadata.categories.appleAppStore?.primary === 'Utilities' &&
+    metadata.categories.appleAppStore?.secondary === 'Lifestyle' &&
+    metadata.categories.appleAppStore?.status === 'draft_pending_console_review' &&
+    metadata.categories.appleAppStore?.policySource ===
+      'https://developer.apple.com/app-store/categories/' &&
+    metadata.categories.googlePlay?.category === 'Tools' &&
+    metadata.categories.googlePlay?.status === 'draft_pending_console_review' &&
+    metadata.categories.googlePlay?.policySource ===
+      'https://support.google.com/googleplay/android-developer/answer/9859673?hl=en',
+  'Apple and Google store categories must remain separate current-policy drafts',
+);
+assertRelease(
+  metadata.audience?.providerAgeRatingStatus ===
+    'pending_current_console_questionnaire_and_professional_review' &&
+    metadata.audience?.childDirected === false &&
+    metadata.audience?.madeForChildren === false,
+  'age and audience declarations must remain pending and non-child-directed',
+);
+const approvedListingCopy = [
+  metadata.subtitle,
+  metadata.promotionalText,
+  metadata.shortDescription,
+  metadata.fullDescription,
+  metadata.releaseNotes?.googlePlay?.text,
+].join('\n');
+for (const truthfulBoundary of [
+  'BoomerBuddy reviews only what you submit.',
+  'It does not open websites, monitor messages, guarantee safety',
+  'Access is invitation-only during early release.',
+]) {
+  assertRelease(
+    metadata.fullDescription.includes(truthfulBoundary),
+    `store description must retain truthful boundary: ${truthfulBoundary}`,
+  );
+}
+const listingCopyForClaimScan = approvedListingCopy.replaceAll(
+  'It does not open websites, monitor messages, guarantee safety',
+  '',
+);
+assertRelease(
+  !/(?:prevents? scams|guaranteed safe|monitors? (?:your )?(?:texts|messages)|24[/-]?7 support|real-time protection|bank-grade)/iu.test(
+    listingCopyForClaimScan,
+  ),
+  'store listing copy must not make an unproved safety, monitoring, or support claim',
+);
 assertRelease(appConfig.scheme === 'boomerbuddy', 'custom scheme must remain boomerbuddy');
 assertRelease(
   metadata.customSchemeCheckUrl === 'boomerbuddy://check',
@@ -141,6 +228,361 @@ assertRelease(
   !Object.hasOwn(appConfig.ios ?? {}, 'associatedDomains') &&
     !Object.hasOwn(appConfig.android ?? {}, 'intentFilters'),
   'partial universal/app-link associations are forbidden before provider closure',
+);
+
+assertRelease(
+  metadata.contentDeclarations?.status ===
+    'draft_pending_current_provider_questionnaires_and_professional_review',
+  'content declarations must remain explicitly unapproved drafts',
+);
+for (const field of [
+  'publicUserGeneratedContent',
+  'publicCommunicationOrChat',
+  'advertising',
+  'crossAppTracking',
+  'gamblingOrContests',
+  'sexualContent',
+  'graphicViolence',
+  'profanityInPublisherContent',
+  'controlledSubstancesInPublisherContent',
+  'locationSharing',
+  'nativePurchases',
+  'externalPaymentSteering',
+]) {
+  assertRelease(
+    metadata.contentDeclarations?.[field] === false,
+    `content declaration ${field} must remain false`,
+  );
+}
+assertRelease(
+  metadata.contentDeclarations?.privateUserSubmittedContent === true &&
+    metadata.contentDeclarations?.safetyLimitation ===
+      'Decision support can be wrong and is not monitoring, an emergency service, or professional advice.',
+  'private submitted content and the safety limitation must be declared truthfully',
+);
+
+const privacy = metadata.privacyDeclarations;
+assertRelease(
+  privacy?.status ===
+    'draft_requires_current_sdk_disclosures_provider_questionnaires_and_professional_review' &&
+    privacy.appleAppPrivacyStatus === 'draft_not_submitted' &&
+    privacy.googleDataSafetyStatus === 'draft_not_submitted' &&
+    privacy.nativePrivacyManifestStatus ===
+      'pending_signed_artifact_and_current_sdk_manifest_review',
+  'privacy declarations must remain drafts pending signed-SDK and professional review',
+);
+assertRelease(
+  privacy.tracking === false && privacy.advertising === false && privacy.dataSale === false,
+  'tracking, advertising, and data sale must remain absent',
+);
+const requiredPrivacyCategories = [
+  'account_and_authentication_identifiers',
+  'email_address_for_sign_in_and_recovery',
+  'profile_household_and_relationship_data',
+  'user_submitted_check_content',
+  'check_results_and_private_history',
+  'support_receipt_state',
+  'orientation_privacy_and_deletion_state',
+  'subscription_access_status',
+];
+assertExactStringSet(
+  privacy.dataItems?.map((item) => item.category),
+  requiredPrivacyCategories,
+  'repository-observed privacy categories',
+);
+const approvedPrivacyPurposes = new Set([
+  'app_functionality',
+  'account_management',
+  'security_and_fraud_prevention',
+  'customer_support',
+]);
+for (const item of privacy.dataItems) {
+  assertRelease(
+    typeof item.examples === 'string' && item.examples.length >= 10,
+    `privacy category ${item.category} must explain its actual data`,
+  );
+  assertRelease(
+    Array.isArray(item.purposes) &&
+      item.purposes.length > 0 &&
+      item.purposes.every((purpose) => approvedPrivacyPurposes.has(purpose)),
+    `privacy category ${item.category} must use reviewed purposes`,
+  );
+  assertRelease(
+    item.linkedToAccount === true && item.usedForTracking === false,
+    `privacy category ${item.category} must remain account-linked and non-tracking`,
+  );
+}
+assertExactStringSet(
+  privacy.notObservedInProductCode,
+  [
+    'advertising_identifiers',
+    'cross_app_tracking',
+    'contacts_or_address_book',
+    'precise_or_coarse_location',
+    'camera_photos_video_or_audio',
+    'health_or_fitness_data',
+    'payment_card_or_bank_data',
+    'clipboard_reads',
+    'background_message_monitoring',
+    'third_party_analytics_or_advertising_sdk_events',
+  ],
+  'data classes not observed in product code',
+);
+assertRelease(
+  Array.isArray(privacy.sdkDueDiligence) &&
+    privacy.sdkDueDiligence.length === 2 &&
+    privacy.sdkDueDiligence.join(' ').includes('signed artifacts'),
+  'privacy metadata must preserve current SDK and signed-artifact due diligence',
+);
+
+assertExactStringSet(
+  metadata.permissions?.expectedActiveAndroidPermissions,
+  ['android.permission.INTERNET'],
+  'expected Android permissions',
+);
+assertRelease(
+  metadata.permissions?.sensitivePermissionPromptsExpected === false &&
+    metadata.permissions?.contactsCameraMicrophonePhotosLocationNotificationsTrackingExpected ===
+      false,
+  'store permission declaration must match the least-privilege mobile surface',
+);
+
+const expectedRuntimeDependencyPrivacyClassifications = {
+  '@boomerbuddy/contracts': 'first_party_contracts_no_runtime_collection',
+  '@boomerbuddy/design': 'first_party_static_design_no_runtime_collection',
+  '@clerk/expo': 'hosted_identity_and_session_sdk',
+  '@react-navigation/native': 'navigation_ui_runtime',
+  '@react-navigation/native-stack': 'navigation_ui_runtime',
+  expo: 'application_runtime_framework',
+  'expo-auth-session': 'hosted_auth_session_bridge',
+  'expo-constants': 'runtime_configuration_reader',
+  'expo-crypto': 'local_cryptography_utility',
+  'expo-secure-store': 'secure_local_storage',
+  'expo-splash-screen': 'static_startup_ui',
+  'expo-status-bar': 'static_status_ui',
+  'expo-web-browser': 'system_browser_auth_bridge',
+  react: 'ui_runtime_framework',
+  'react-dom': 'web_preview_ui_runtime',
+  'react-native': 'native_ui_and_network_runtime',
+  'react-native-safe-area-context': 'native_layout_runtime',
+  'react-native-screens': 'native_navigation_runtime',
+  'react-native-web': 'web_preview_native_compatibility',
+};
+const dependencyPrivacy = metadata.runtimeDependencyPrivacyClassification;
+assertRelease(
+  dependencyPrivacy?.status ===
+    'approved_repository_allowlist_requires_current_sdk_and_signed_artifact_reconciliation' &&
+    dependencyPrivacy.source === 'apps/mobile/package.json#dependencies' &&
+    dependencyPrivacy.unclassifiedDependencyPolicy === 'fail_distribution_verification' &&
+    dependencyPrivacy.currentSdkDisclosureReconciliationRequired === true &&
+    dependencyPrivacy.signedArtifactReconciliationRequired === true,
+  'runtime dependency privacy classification must preserve fail-closed SDK reconciliation',
+);
+assertExactStringSet(
+  Object.keys(mobilePackage.dependencies ?? {}),
+  Object.keys(expectedRuntimeDependencyPrivacyClassifications),
+  'approved runtime mobile dependencies',
+);
+assertExactStringSet(
+  Object.keys(dependencyPrivacy.classifications ?? {}),
+  Object.keys(expectedRuntimeDependencyPrivacyClassifications),
+  'classified runtime mobile dependencies',
+);
+for (const [dependencyName, classification] of Object.entries(
+  expectedRuntimeDependencyPrivacyClassifications,
+)) {
+  assertRelease(
+    dependencyPrivacy.classifications[dependencyName] === classification,
+    `runtime dependency ${dependencyName} must retain its reviewed privacy classification`,
+  );
+}
+
+const reviewerFlow = metadata.reviewerFlow;
+assertRelease(
+  reviewerFlow?.status ===
+    'draft_pending_non_expiring_synthetic_account_preflight_signed_build_and_provider_secure_delivery' &&
+    reviewerFlow.credentialsIncludedInRepository === false,
+  'reviewer access must remain pending and provider-secure with no repository credentials',
+);
+assertRelease(
+  Array.isArray(reviewerFlow.prerequisites) &&
+    reviewerFlow.prerequisites.length === 4 &&
+    Array.isArray(reviewerFlow.steps) &&
+    reviewerFlow.steps.length === 8 &&
+    Array.isArray(reviewerFlow.knownUnavailableFeatures) &&
+    reviewerFlow.knownUnavailableFeatures.length === 3,
+  'reviewer flow must retain complete bounded instructions and unavailable-feature disclosure',
+);
+assertRelease(
+  reviewerFlow.accountRequirements?.accountType === 'founder_controlled_synthetic_review_account' &&
+    reviewerFlow.accountRequirements.nonExpiring === true &&
+    reviewerFlow.accountRequirements.reusable === true &&
+    reviewerFlow.accountRequirements.validRegardlessOfReviewerLocation === true &&
+    reviewerFlow.accountRequirements.oneTimeCredentialOnly === false &&
+    reviewerFlow.accountRequirements.oneTimeCredentialsForbidden === true &&
+    reviewerFlow.accountRequirements.customerRealmOnly === true &&
+    reviewerFlow.accountRequirements.repositoryAuthBypassForbidden === true &&
+    reviewerFlow.accountRequirements.providerAndSecurityReviewRequiredForReusableMfaPath === true,
+  'review access must use a reusable non-expiring synthetic customer account without a repository auth bypass',
+);
+assertRelease(
+  reviewerFlow.providerDelivery?.appleAppStoreReview?.channel ===
+    'app_store_connect_app_review_sign_in_fields_and_notes' &&
+    reviewerFlow.providerDelivery.appleAppStoreReview.samePreflightedAccountRequired === true &&
+    reviewerFlow.providerDelivery.appleAppStoreReview.policySource ===
+      'https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information' &&
+    reviewerFlow.providerDelivery?.googlePlayReview?.channel === 'play_console_sign_in_details' &&
+    reviewerFlow.providerDelivery.googlePlayReview.samePreflightedAccountRequired === true &&
+    reviewerFlow.providerDelivery.googlePlayReview.policySource ===
+      'https://support.google.com/googleplay/android-developer/answer/15748846?hl=en',
+  'Apple and Google review-account delivery must use their separate secure provider fields',
+);
+assertExactStringSet(
+  reviewerFlow.accountPreflight?.requiredCapabilities,
+  ['check:text', 'check:url', 'history:read', 'family:manage', 'orientation:use'],
+  'review-account required capabilities',
+);
+assertRelease(
+  reviewerFlow.accountPreflight?.status ===
+    'pending_noncharging_provider_setup_live_api_and_exact_signed_candidate' &&
+    reviewerFlow.accountPreflight.requiredBeforeCredentialDelivery === true &&
+    reviewerFlow.accountPreflight.requiredRole === 'protected_adult' &&
+    reviewerFlow.accountPreflight.isProtectedMember === true &&
+    reviewerFlow.accountPreflight.isBillingManager === true &&
+    reviewerFlow.accountPreflight.householdCount === 1 &&
+    reviewerFlow.accountPreflight.householdStatus === 'active' &&
+    reviewerFlow.accountPreflight.canonicalAccessState === 'effective' &&
+    reviewerFlow.accountPreflight.allListedFlowsMustPass === true,
+  'review-account preflight must prove protected-adult household scope and effective canonical access',
+);
+assertRelease(
+  JSON.stringify(reviewerFlow.accountPreflight.requiredAllowances) ===
+    JSON.stringify([
+      {
+        kind: 'protected_members',
+        mustBePresent: true,
+        limitAtLeast: 1,
+        usedAtLeast: 1,
+      },
+      {
+        kind: 'trusted_circle_participants',
+        mustBePresent: true,
+        limitAtLeast: 1,
+        remainingAtLeast: 1,
+      },
+    ]),
+  'review-account preflight must prove both canonical allowance counters',
+);
+assertExactStringSet(
+  reviewerFlow.steps?.map((step) => step.id),
+  [
+    'hosted_customer_sign_in_and_native_return',
+    'protected_adult_household_and_access',
+    'manual_check_and_result',
+    'private_household_history',
+    'family_and_orientation',
+    'support_legal_accessibility_and_deletion',
+    'session_restart_and_sign_out',
+    'no_native_commerce_or_payment_steering',
+  ],
+  'review-account flow preflights',
+);
+assertRelease(
+  reviewerFlow.steps.every(
+    (step) =>
+      step.preflightRequired === true &&
+      typeof step.instruction === 'string' &&
+      step.instruction.length >= 40,
+  ),
+  'every reviewer flow must require preflight and retain complete instructions',
+);
+const reviewerText = JSON.stringify(reviewerFlow);
+assertRelease(
+  reviewerText.includes('synthetic') &&
+    reviewerText.includes('Do not use customer PII.') &&
+    reviewerText.includes(
+      'no checkout, pricing, billing link, native purchase, or payment steering',
+    ),
+  'reviewer flow must require synthetic data and preserve the no-commerce boundary',
+);
+assertRelease(
+  !/(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]+|Bearer\s+[A-Za-z0-9._~-]+|password\s*[:=]|one[- ]time code\s*[:=]/u.test(
+    reviewerText,
+  ),
+  'reviewer instructions must not contain a credential or token value',
+);
+
+const screenshots = metadata.screenshots;
+assertRelease(
+  screenshots?.status ===
+    'pending_exact_signed_artifact_device_capture_and_current_store_dimension_check',
+  'screenshots must remain explicitly pending signed-device capture',
+);
+assertExactStringSet(
+  screenshots.matrix?.map((entry) => entry.id),
+  [
+    'ios_phone_primary',
+    'ios_tablet_primary',
+    'android_phone_primary',
+    'android_tablet_layout_check',
+  ],
+  'screenshot device matrix',
+);
+for (const entry of screenshots.matrix) {
+  assertRelease(
+    ['ios', 'android'].includes(entry.platform) &&
+      ['phone', 'tablet'].includes(entry.formFactor) &&
+      Array.isArray(entry.screens) &&
+      entry.screens.length >= 2 &&
+      entry.status.startsWith('pending_'),
+    `screenshot matrix entry ${entry.id} must remain a pending bounded specification`,
+  );
+}
+assertRelease(
+  screenshots.matrix.find((entry) => entry.id === 'ios_phone_primary')?.required === true &&
+    screenshots.matrix.find((entry) => entry.id === 'ios_tablet_primary')?.required === true &&
+    screenshots.matrix.find((entry) => entry.id === 'android_phone_primary')?.required === true &&
+    screenshots.matrix.find((entry) => entry.id === 'android_tablet_layout_check')?.required ===
+      false,
+  'phone and supported iPad captures must be required without overstating Android tablet scope',
+);
+assertRelease(
+  Array.isArray(screenshots.captureRules) &&
+    screenshots.captureRules.length === 5 &&
+    screenshots.captureRules.join(' ').includes('exact signed production candidate') &&
+    screenshots.captureRules.join(' ').includes('no customer PII') &&
+    screenshots.androidFeatureGraphic?.status ===
+      'pending_current_console_spec_and_approved_artwork',
+  'capture rules and Android feature graphic must remain pending and evidence-bound',
+);
+assertRelease(
+  metadata.releaseNotes?.sourceLocale === 'en-US' &&
+    metadata.releaseNotes.policyReviewedAt === '2026-08-26' &&
+    metadata.releaseNotes.policyCaveat ===
+      'Recheck the current provider documentation and console before every release.' &&
+    metadata.releaseNotes.status === 'draft_pending_signed_build_verification' &&
+    metadata.releaseNotes.appleAppStore?.initialVersionAction === 'omit_whats_new_field' &&
+    metadata.releaseNotes.appleAppStore?.status ===
+      'draft_first_version_field_intentionally_absent' &&
+    metadata.releaseNotes.appleAppStore?.policySource ===
+      'https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information' &&
+    !Object.hasOwn(metadata.releaseNotes.appleAppStore, 'text') &&
+    !Object.hasOwn(metadata.releaseNotes.appleAppStore, 'whatsNew') &&
+    metadata.releaseNotes.googlePlay?.status === 'draft_pending_signed_build_verification' &&
+    metadata.releaseNotes.googlePlay?.maximumCharacters === 500 &&
+    metadata.releaseNotes.googlePlay?.policySource ===
+      'https://support.google.com/googleplay/android-developer/answer/9859348?hl=en' &&
+    typeof metadata.releaseNotes.googlePlay?.text === 'string' &&
+    metadata.releaseNotes.googlePlay.text.length > 0 &&
+    [...metadata.releaseNotes.googlePlay.text].length <= 500,
+  'provider-split release notes must omit Apple first-version text and bound Google text to 500 characters',
+);
+const serializedStoreMetadata = JSON.stringify(metadata);
+assertRelease(
+  !/(?:appleTeamId|projectId|serviceAccount|signingSha|reviewerEmail|reviewerUsername|reviewerPassword)/iu.test(
+    serializedStoreMetadata,
+  ),
+  'store metadata must not contain guessed provider identifiers or reviewer credential fields',
 );
 
 assertRelease(

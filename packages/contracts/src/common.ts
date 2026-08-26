@@ -64,6 +64,7 @@ export const apiPaths = {
   hqSupportReceipts: '/v1/hq/support-receipts',
   hqReviewQueue: '/v1/hq/review-queue',
   hqProviderHealth: '/v1/hq/provider-health',
+  hqOperationalHealth: '/v1/hq/operational-health',
   hqAudit: '/v1/hq/audit',
   hqRevenue: '/v1/hq/revenue',
   hqAccessIntents: '/v1/hq/access-intents',

@@ -20,6 +20,38 @@ Severity guidance:
 
 No hosted alert receipt, on-call staffing, or founder-absence tabletop has occurred.
 
+## Local owner operational projection
+
+HQ now has an owner-only, no-store operational-health projection backed by aggregate database
+queries. It reports worker heartbeat state and age; bounded queued, retry, running, stale-running,
+exhausted, and unresolved dead-letter durable-job counts with oldest actionable, stale-running,
+exhausted, and unresolved dead-letter ages. Outbox counts use the same shared event-type allowlist
+as the production worker and expose unprocessed, exhausted, unhandled-predecessor-blocked, and
+unresolved dead-letter states with oldest ages. Intentionally unconsumed events do not affect health
+unless their causal position blocks an event that the production worker must handle. The response
+contains no job or event payload, type, customer, household, tenant, person, or provider-delivery
+detail.
+
+Historical stopped-heartbeat rows remain visible as a count but do not keep the projection in
+warning when a fresh running worker exists. The portable worker refreshes its presence heartbeat at
+a bounded cadence even while a long job or outbox handler is running, and serializes running,
+draining, and stopped writes so shutdown cannot be overwritten by a late running heartbeat.
+
+The deterministic local thresholds are 60 seconds for an active worker heartbeat, 300 seconds for
+an actionable backlog, and a bounded 5-second future-timestamp tolerance, with all returned counts
+capped at 1,000,000. Each projection samples one immutable application-clock observation after the
+owner role recheck and uses it for the audit, all aggregate queries, ages, and response timestamp.
+Timestamps through the tolerance clamp to age zero without a skew alert; timestamps beyond it fail
+closed. Missing or stale workers, beyond-tolerance future timestamps, expired running-job leases,
+exhausted attempts, unresolved causal blocking, unresolved dead letters, and saturated counts fail
+closed into explicit attention codes. A durable dead-letter ancestor remains unresolved until a
+replay descendant succeeds; outbox dead letters use `replay_resolved_at`, and a failed replay
+descendant remains critical as its own unresolved dead letter.
+
+This is operator visibility, not a hosted alert: it does not page anyone, prove alert receipt, prove
+a deployed worker is running, or alter worker routing. `/` and `/health/live` remain available for
+liveness, while `/health/ready`, `/metrics`, and `/v1/jobs` remain intentionally unavailable.
+
 ## Privacy fulfillment truth
 
 The current privacy workflow records identity review and a content-free plan. It does not claim that
@@ -58,6 +90,7 @@ monitoring, or founder absence. Those remain explicit `blocked` gates before act
 | Required proof | Current evidence tier | Status / exact blocker |
 | --- | --- | --- |
 | Error monitoring | none | **Blocked:** no hosted capture, redaction review, alert receipt, or retained incident event. |
+| Worker and backlog visibility | local aggregate projection | Owner-only HQ locally reports content-free heartbeat, durable-job, and outbox aggregate health with deterministic stale and saturation gates; deployed access, alert routing, receipt, and response evidence remain **blocked**. |
 | Privacy-minimized analytics | local design only | **Blocked:** no deployed analytics processor, approved event dictionary, consent review, or deletion/opt-out reconciliation. |
 | Redacted logs | local simulation | Local logger/redaction tests and secret scanning exist; deployed log sinks, access, retention, and sampled-event review are **blocked**. |
 | Alert routing | none | **Blocked:** no paging destination, receipt, escalation acknowledgement, or after-hours owner. |

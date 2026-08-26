@@ -25,6 +25,43 @@ The public store-listing fields are in
 ASCII-only so copying values into provider consoles does not silently substitute punctuation or
 control characters.
 
+That file is also the provider-neutral source packet for the `en-US` listing. It contains bounded
+app, subtitle, promotional, short, full-description, keyword, audience, content-declaration,
+privacy-data-map, permission, reviewer-flow, and screenshot-matrix drafts. Category and release-note
+handling are split by provider. Apple proposes `Utilities` primary and `Lifestyle` secondary, while
+Google Play proposes the single `Tools` application category. The initial Apple version omits the
+What's New field; Google Play has separate release notes capped at 500 characters. These are dated
+drafts, not provider approvals. Recheck [Apple App Store categories](https://developer.apple.com/app-store/categories/),
+[Apple platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information),
+[Google Play categories and tags](https://support.google.com/googleplay/android-developer/answer/9859673?hl=en),
+and [Google Play release preparation](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en)
+before every approval or submission.
+
+The privacy map distinguishes repository-observed account-linked data from data classes not observed
+in product code. It also classifies every runtime dependency currently declared in
+`apps/mobile/package.json`. Verification fails closed if that exact dependency allowlist changes or
+any dependency lacks its approved privacy classification. The allowlist remains repository evidence
+only; a fresh Clerk/Expo SDK disclosure review, generated privacy-manifest review, signed-artifact
+inspection, live-operation review, provider-form reconciliation, and professional review are still
+required before console answers are approved.
+
+Reviewer instructions contain no account, password, one-time code, token, PII, provider ID, or
+secret. Apple and Google access instructions use separate secure provider-console fields, but the
+same founder-controlled synthetic customer review account must be reusable, non-expiring, valid
+regardless of reviewer location, and never depend on a repository authentication bypass. Before
+credential delivery, preflight that account on the exact signed candidate as a protected adult and
+billing manager in one active household with every required capability, effective canonical access,
+protected-member and Trusted Circle allowances, and a pass for each documented flow. Store only
+content-free preflight evidence. See [Apple platform version information](https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information)
+and [Google Play app access requirements](https://support.google.com/googleplay/android-developer/answer/15748846?hl=en).
+The screenshot matrix is a capture specification only; every slot remains pending the exact signed
+candidate on a physical device.
+
+The packet is not a provider export, privacy opinion, age rating, accessibility claim, screenshot,
+reviewer-account delivery, or submission approval. Provider forms and dimension rules can change.
+Reconcile the current consoles and signed artifacts, record approval, and copy only the approved
+source-locale values through the company-controlled provider boundary.
+
 ## Provider-free verification
 
 From the repository root, run:
@@ -45,6 +82,12 @@ npx vitest run --project security mobile
 - absence of guessed Expo, Apple, or Google submission identifiers;
 - absence of partial Universal Link or App Link entitlements;
 - canonical public policy metadata and corresponding repository routes;
+- bounded `en-US` listing copy, split Apple and Google category drafts, provider-split release-note
+  rules, draft declarations, and explicit pending-review states;
+- an exact approved runtime dependency privacy allowlist that fails closed on any unclassified
+  change while preserving current SDK disclosure and signed-artifact reconciliation gates;
+- provider-specific secure review-account delivery, reusable non-expiring synthetic-account
+  requirements, exact account preflight assertions, and screenshot/device capture specifications;
 - absence of native purchase dependencies and mobile checkout, pricing, or billing routes;
 - exact deterministic icon regeneration, dimensions, opacity requirements, and SHA-256 hashes; and
 - a SHA-256 fingerprint of the mobile app, its imported workspace packages, dependency lock, and
@@ -78,6 +121,11 @@ An authorized operator must complete these steps from an approved clean commit:
    absence of unapproved associated-domain or HTTPS intent filters.
 7. Install the exact signed artifacts on representative physical devices and complete the device
    matrix in [MOBILE-AND-STORE-READINESS.md](./MOBILE-AND-STORE-READINESS.md).
+8. Preflight the same non-expiring synthetic customer review account for both providers against the
+   exact signed candidate. Prove the protected-adult and billing-manager roles, one active household,
+   all required capabilities, effective canonical access, both required allowance counters, and all
+   listed reviewer flows. Deliver access separately through App Store Connect and Google Play
+   Console secure review fields. Record no credential, token, customer PII, or Check content.
 
 Every rebuilt artifact needs a new receipt. A successful Expo export or simulator run cannot replace
 the signed-build receipt.
@@ -127,8 +175,12 @@ that two-way proof.
   evidence;
 - signed IPA/AAB builds, physical-device authentication/session/deep-link/offline/accessibility
   evidence, and representative iPhone, iPad, and Android coverage;
-- approved store descriptions, age/content/privacy declarations, reviewer instructions, screenshots,
-  Android feature graphic, localization, and professional legal/privacy/accessibility review; and
+- provider and professional approval of the repository-draft store descriptions, split category and
+  release-note handling, age/content/privacy declarations, reviewer instructions, and source locale;
+  exact runtime dependency/SDK/signed-artifact privacy reconciliation; preflight of the reusable
+  non-expiring synthetic review account; provider-specific secure reviewer-account delivery; exact
+  signed-device screenshots; Android feature graphic; any approved localization; and professional
+  legal/privacy/accessibility review; and
 - current Apple and Google commerce-policy review while native purchase and payment steering remain
   absent.
 

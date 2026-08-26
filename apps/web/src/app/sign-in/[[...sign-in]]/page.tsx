@@ -1,12 +1,18 @@
 'use client';
 
-import { SignIn } from '@clerk/nextjs';
-import { useState, type FormEvent } from 'react';
+import { SignIn, useClerk } from '@clerk/nextjs';
+import { useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contracts';
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
+import {
+  clearClerkSessionWhenLoaded,
+  createSessionRecoveryRetryController,
+  productionSessionRecoveryPath,
+  type SessionRecoveryRetryState,
+} from '../../../lib/auth-recovery';
 
 const personas: Array<{ id: DevPersonaId; name: string; detail: string }> = [
   {
@@ -185,8 +191,95 @@ function UnauthorizedSignInRecovery() {
   );
 }
 
+function SessionRecoveryContent({
+  retry,
+  retryBusy = false,
+  retryError = '',
+}: {
+  readonly retry?: () => void;
+  readonly retryBusy?: boolean;
+  readonly retryError?: string;
+}) {
+  return (
+    <>
+      <PublicHeader />
+      <main id="main-content" className="page-shell narrow">
+        <span className="eyebrow">Member session recovery</span>
+        <h1 className="page-title">Your previous session could not be verified</h1>
+        <p className="lede">
+          BoomerBuddy stopped instead of repeatedly returning you to the member area. This page does
+          not continue automatically.
+        </p>
+        <div className="card" style={{ marginTop: '2rem' }}>
+          <p>
+            Try a fresh member sign in. If you did not expect this message, or a fresh sign in still
+            fails, contact support and do not create another account.
+          </p>
+          <div className="button-row">
+            {retry ? (
+              <button className="button-primary" type="button" disabled={retryBusy} onClick={retry}>
+                {retryBusy ? 'Clearing session...' : 'Clear session and try member sign in'}
+              </button>
+            ) : (
+              <Link className="button button-primary" href="/sign-in">
+                Try member sign in
+              </Link>
+            )}
+            <a className="button button-secondary" href="mailto:support@boomerbuddy.net">
+              Email support
+            </a>
+          </div>
+          {retryError ? (
+            <p className="error" role="alert">
+              {retryError}
+            </p>
+          ) : null}
+        </div>
+      </main>
+      <PublicFooter />
+    </>
+  );
+}
+
+function ProductionSessionRecovery() {
+  const clerk = useClerk();
+  const [state, setState] = useState<SessionRecoveryRetryState>({ busy: false, error: '' });
+  const retry = useMemo(
+    () =>
+      createSessionRecoveryRetryController({
+        clearClerkSession: () =>
+          clearClerkSessionWhenLoaded({
+            clearClerkSession: () => clerk.signOut(),
+            isLoaded: () => clerk.loaded,
+          }),
+        confirmNavigation: () =>
+          new Promise((resolve) => {
+            window.setTimeout(() => resolve(window.location.pathname === '/sign-in'), 1_000);
+          }),
+        navigate: () => window.location.replace('/sign-in'),
+        onStateChange: setState,
+      }),
+    [clerk],
+  );
+
+  return (
+    <SessionRecoveryContent
+      retry={() => void retry.retry()}
+      retryBusy={state.busy}
+      retryError={state.error}
+    />
+  );
+}
+
 export default function SignInPage() {
   const pathname = usePathname();
   if (pathname === '/unauthorized-sign-in') return <UnauthorizedSignInRecovery />;
+  if (pathname === productionSessionRecoveryPath) {
+    return process.env.NODE_ENV === 'production' ? (
+      <ProductionSessionRecovery />
+    ) : (
+      <SessionRecoveryContent />
+    );
+  }
   return process.env.NODE_ENV === 'production' ? <ProductionSignIn /> : <DevelopmentSignIn />;
 }

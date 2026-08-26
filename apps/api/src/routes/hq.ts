@@ -3,6 +3,7 @@ import {
   hqAuditResponseSchema,
   hqChecksResponseSchema,
   hqHouseholdsResponseSchema,
+  hqOperationalHealthResponseSchema,
   hqOverviewResponseSchema,
   hqProviderHealthResponseSchema,
   hqReviewQueueResponseSchema,
@@ -153,6 +154,21 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
         lastCheckedAt: provider.lastCheckedAt.toISOString(),
         dataState,
       })),
+    });
+  });
+
+  app.get('/v1/hq/operational-health', async (request, reply) => {
+    const auth = await authorizeHq(request, context, 'hq:overview');
+    const health = await context.repositories.hq.ownerOperationalHealth({
+      actorPersonId: auth.principal.personId,
+      correlationId: correlationId(request),
+      observeNow: () => context.now(),
+    });
+    void reply.header('Cache-Control', 'private, no-store, max-age=0');
+    void reply.header('Pragma', 'no-cache');
+    return hqOperationalHealthResponseSchema.parse({
+      ...health,
+      generatedAt: health.generatedAt.toISOString(),
     });
   });
 

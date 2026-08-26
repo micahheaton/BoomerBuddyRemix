@@ -38,6 +38,8 @@ function unrefTimer(timer: unknown): void {
   }
 }
 
+const workerPresenceHeartbeatMaximumMs = 30_000;
+
 export class JobExecutionError extends Error {
   constructor(
     readonly code: string,
@@ -115,6 +117,8 @@ export class PortableWorker {
   private readonly active = new Set<Promise<void>>();
   private stopping = false;
   private stopPromise: Promise<void> | undefined;
+  private workerHeartbeatTail: Promise<void> = Promise.resolve();
+  private runningHeartbeatPending = false;
 
   constructor(
     private readonly jobs: DurableJobRepository,
@@ -140,6 +144,34 @@ export class PortableWorker {
           }),
         ),
     );
+  }
+
+  private updateWorkerState(state: 'running' | 'draining' | 'stopped'): Promise<void> {
+    const update = this.workerHeartbeatTail
+      .catch(() => undefined)
+      .then(async () => {
+        if (state === 'running' && this.stopping) return;
+        await this.jobs.updateWorkerHeartbeat({
+          workerId: this.config.workerId,
+          state,
+          currentJobCount: state === 'stopped' ? 0 : this.active.size,
+          version: 'run2-v1',
+          startedAt: this.startedAt,
+          now: this.clock(),
+        });
+      });
+    this.workerHeartbeatTail = update;
+    return update;
+  }
+
+  private refreshRunningHeartbeat(): void {
+    if (this.stopping || this.runningHeartbeatPending) return;
+    this.runningHeartbeatPending = true;
+    void this.updateWorkerState('running')
+      .catch((error) => this.logger.error('worker.heartbeat_failed', { error }))
+      .finally(() => {
+        this.runningHeartbeatPending = false;
+      });
   }
 
   private async processJob(job: DurableJob): Promise<void> {
@@ -338,21 +370,23 @@ export class PortableWorker {
 
   async start(): Promise<void> {
     this.logger.info('worker.started', { workerId: this.config.workerId });
-    while (!this.stopping) {
-      await this.jobs.updateWorkerHeartbeat({
-        workerId: this.config.workerId,
-        state: 'running',
-        currentJobCount: this.active.size,
-        version: 'run2-v1',
-        startedAt: this.startedAt,
-        now: this.clock(),
-      });
-      try {
-        await this.runOnce();
-      } catch (error) {
-        this.logger.error('worker.poll_failed', { error });
+    await this.updateWorkerState('running');
+    const heartbeatTimer = setInterval(
+      () => this.refreshRunningHeartbeat(),
+      Math.min(this.config.heartbeatIntervalMs, workerPresenceHeartbeatMaximumMs),
+    );
+    unrefTimer(heartbeatTimer);
+    try {
+      while (!this.stopping) {
+        try {
+          await this.runOnce();
+        } catch (error) {
+          this.logger.error('worker.poll_failed', { error });
+        }
+        await delay(this.config.pollIntervalMs, this.controller.signal);
       }
-      await delay(this.config.pollIntervalMs, this.controller.signal);
+    } finally {
+      clearInterval(heartbeatTimer);
     }
   }
 
@@ -365,14 +399,7 @@ export class PortableWorker {
   }
 
   private async finishStop(): Promise<void> {
-    await this.jobs.updateWorkerHeartbeat({
-      workerId: this.config.workerId,
-      state: 'draining',
-      currentJobCount: this.active.size,
-      version: 'run2-v1',
-      startedAt: this.startedAt,
-      now: this.clock(),
-    });
+    await this.updateWorkerState('draining');
     const completion = Promise.allSettled([...this.active]);
     let timeout: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([
@@ -387,14 +414,7 @@ export class PortableWorker {
       this.jobs.relinquishWorkerLeases({ workerId: this.config.workerId, now: this.clock() }),
       this.outbox.relinquishWorkerLeases({ workerId: this.config.workerId, now: this.clock() }),
     ]);
-    await this.jobs.updateWorkerHeartbeat({
-      workerId: this.config.workerId,
-      state: 'stopped',
-      currentJobCount: 0,
-      version: 'run2-v1',
-      startedAt: this.startedAt,
-      now: this.clock(),
-    });
+    await this.updateWorkerState('stopped');
     this.logger.info('worker.stopped', { workerId: this.config.workerId });
   }
 }

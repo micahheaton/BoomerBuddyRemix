@@ -11,7 +11,7 @@ Work only in C:\Dev\BoomerBuddy. Read AGENTS.md first. GitHub https://github.com
 
 Current evidence boundary
 
-Begin read-only. Verify Git root, origin, branch, HEAD, index/worktree status, upstream state, and active agents before editing. Preserve all user and agent work. The historical audited release is 9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf. The last immutable candidate with uninterrupted local verification, Playwright, and all four GitHub CI jobs green is 1fbd079de126aabccd788bfa3a854a77d1f6c1a3, but it is not live-capable because paid Family catalog and effective-entitlement semantics do not agree. The current worktree contains or may contain later uncommitted canonical-origin, billing-recovery, paid-feedback, support, mobile, copy, and documentation closure work. Do not claim that 1fbd079 evidence covers those changes. Do not invent a final SHA, test result, deployment receipt, or provider result.
+Begin read-only. Verify Git root, origin, branch, HEAD, index/worktree status, upstream state, and active agents before editing. Preserve all user and agent work. The historical audited release is 9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf. The last historical candidate with uninterrupted local verification, Playwright, and all four GitHub CI jobs green is 1fbd079de126aabccd788bfa3a854a77d1f6c1a3. The clean pushed implementation and local-validation baseline before this documentation correction is 9323bc5cdefb244a1f9be6f08e1f4007023ddc3c. All four jobs in GitHub Actions run 32950774457 completed successfully for that exact SHA. The 9323 baseline remains not live-capable because the Family catalogue is a hypothesis that provider-backed production entitlement verification cannot make effective. A real payment could reconcile without member access. This versioned prompt cannot bind its own final commit SHA because editing it changes the commit. After all approved changes are committed, derive the exact SHA and annotated tag from Git, verify CI for that exact SHA, and record them in an external release receipt. Do not invent a final SHA, test result, deployment receipt, or provider result.
 
 Read-only provider facts
 
@@ -25,13 +25,19 @@ Allowed local actions
 
 Coordinate the existing agents, use bounded subagents for independent gauntlet review, and make repository edits with regression tests. Run targeted tests after each coherent change, then the full gate. Make small imperative commits only after the integrated diff is reviewed and green. Push the branch and observe CI. Use narrowly scoped elevation for an exact Node, Prettier, tsx, or Playwright command only when the healthy Windows sandbox blocks that command with EPERM or uv_os_get_passwd ENOMEM. Keep sandboxing enabled and do not use shell-write workarounds.
 
-External gate
+Repository repair and external gates
+
+The paid-entitlement repair changes production access effectiveness and remains closed until the founder types this exact phrase in the active task:
+
+AUTHORIZE REPOSITORY-ONLY PAID FAMILY ENTITLEMENT REPAIR
+
+That phrase authorizes only the bounded repository repair and its local tests, reviewable commit, branch push, and CI. It does not authorize merge, tag, provider writes, deployment, customer contact, Checkout, payment, charge, or refund. Until the repair passes its full exact-SHA gate, the noncharging action packet is non-executable.
 
 The founder must type this exact phrase in the active task before any external setup write:
 
 CONFIRM NONCHARGING RELEASE SETUP
 
-Before that phrase, do not merge, tag, make a Replit pull, deploy, run a production migration, write Clerk or Stripe state in test or live mode, write EAS or another provider identity/account state, send external messages, spend money, charge, or refund. Local commits, branch pushes, and CI are allowed. After the phrase, perform only the reviewed noncharging exact-SHA action packet. The phrase does not authorize a live Checkout window, customer contact, customer consent, plan choice, payment, charge, refund, public store submission, provider agreement, legal/tax/bank attestation, Twilio, or an action outside the packet.
+Before that phrase, do not merge, tag, make a Replit pull, deploy, run a production migration, write Clerk or Stripe state in test or live mode, write EAS or another provider identity/account state, send external messages, spend money, charge, or refund. Local commits, branch pushes, and CI are allowed. After the phrase, perform only the reviewed noncharging actions bound by an external release receipt to the final exact SHA and annotated tag. The phrase does not authorize a live Checkout window, customer contact, customer consent, plan choice, payment, charge, refund, public store submission, provider agreement, legal/tax/bank attestation, Twilio, or an action outside the receipt.
 
 Business and product decisions
 
@@ -51,7 +57,7 @@ Run focused unit, integration, security, migration, web, HQ, worker, mobile, and
 
 Commit, release, and Replit policy
 
-Use short imperative commits on the current codex/ branch. After the complete local gate passes, push one exact candidate and require all GitHub CI jobs green for that SHA. Do not merge or tag before the external phrase. Replit never pushes. After the phrase and a reviewed noncharging packet, each of the four 2.0 Replit consumers may pull only the exact approved SHA, then must produce a service-specific build, health, origin, auth, and rollback receipt. Never touch the legacy BoomerBuddy Replit project. Do not enable live Checkout or take money in this task.
+Use short imperative commits on the current codex/ branch. After the complete local gate passes, push one exact candidate and require all GitHub CI jobs green for that SHA. Do not merge or tag before the external phrase. No versioned file may self-bind that candidate; derive the exact SHA and annotated tag from Git and record them with CI in an external release receipt. Replit never pushes. After the phrase and a reviewed noncharging receipt, each of the four 2.0 Replit consumers may pull only the exact approved SHA, then must produce a service-specific build, health, origin, auth, and rollback receipt. Never touch the legacy BoomerBuddy Replit project. Do not enable live Checkout or take money in this task.
 
 Stop conditions
 
@@ -63,7 +69,7 @@ Keep external effects at zero before confirmation. Make schema changes forward-o
 
 Verifiable completion
 
-Complete the local phase only when one new exact candidate SHA has a reviewed integrated diff, green full local verification, green Playwright and mobile checks, green GitHub CI, no prohibited dashes or secret/PII findings, and a GO, NO-GO, or REMEDIATE packet that separates closed local gates from authentic provider, deployment, signed-device, and human gates. The packet must list the exact noncharging provider and four-service Replit actions, evidence capture, stop conditions, and rollback. If the external phrase is absent, stop there without calling the release deployed or provider-ready. Do not claim Customer 1, recurring revenue, or first-payment readiness while support, paid feedback, mobile P0, authentic Stripe, Clerk post-auth routing, provider, deployment, or first-charge gates remain open.
+Complete the local phase only when one new exact candidate SHA has a reviewed integrated diff, green full local verification, green Playwright and mobile checks, green GitHub CI, no prohibited dashes or secret/PII findings, and a GO, NO-GO, or REMEDIATE packet that separates closed local gates from authentic provider, deployment, signed-device, and human gates. An external release receipt must derive and record the final exact SHA, annotated tag, CI run, exact noncharging provider and four-service Replit actions, evidence capture, stop conditions, and rollback. If paid-entitlement repair, the receipt, or either applicable exact phrase is absent, stop without calling the packet executable, the release deployed, or the providers ready. Do not claim Customer 1, recurring revenue, or first-payment readiness while support, paid feedback, mobile P0, authentic Stripe, Clerk post-auth routing, provider, deployment, or first-charge gates remain open.
 
 Durable goal
 

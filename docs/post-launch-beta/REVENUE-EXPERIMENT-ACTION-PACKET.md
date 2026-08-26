@@ -1,20 +1,34 @@
 # Revenue Experiment Action Packet
 
-Status: **prepared locally; no external action authorized or performed**
+Status: **non-executable local specification; no external action authorized or performed**
 
 Controlling registry: [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md)
 
-Candidate SHA: **NOT YET BOUND**. Replace this text with one reviewed 40-character commit SHA only
-after the integrated worktree, local gate, and CI are green for that exact commit. A branch name,
-dirty worktree, prior candidate, or documentation timestamp is not a substitute.
+Clean pushed implementation and local-validation baseline before this documentation correction:
+`9323bc5cdefb244a1f9be6f08e1f4007023ddc3c`. GitHub Actions run `32950774457` for that SHA is
+green across all four jobs. The 9323 baseline remains not live-capable because its Family
+catalogue is a hypothesis that provider-backed production entitlement verification cannot make
+effective.
+
+This versioned packet cannot bind the final commit SHA that contains itself because changing the
+packet changes that SHA. After the paid-entitlement repair and all approved changes are committed,
+execution must derive the exact SHA and annotated tag from Git, verify green local and GitHub CI
+evidence for that exact SHA, and record them in an external release receipt. A branch name, prior
+candidate, prior run, or documentation timestamp is not a substitute.
+
+This packet is non-executable until all of these conditions are true: the separately authorized
+paid-entitlement repair is complete and green; the final exact SHA, annotated tag, and green CI are
+recorded in an external release receipt; and the noncharging authorization below is present in the
+active task.
 
 External gate: **CLOSED** until the founder types this exact phrase in the active task after reviewing
-the candidate-bound packet:
+the external release receipt:
 
 `CONFIRM NONCHARGING RELEASE SETUP`
 
-The phrase authorizes only the exact noncharging sandbox and private-preview setup listed in the
-candidate-bound packet. It does not authorize a public experiment, participant contact, customer
+The phrase authorizes only the exact noncharging sandbox and private-preview setup bound by the
+external release receipt. It cannot make this packet executable while any prerequisite above is
+open. It does not authorize a public experiment, participant contact, customer
 consent, plan choice, a live Checkout window, a real payment, a charge, a refund, a production
 offer change, a live provider resource, or a production deployment.
 
@@ -104,9 +118,11 @@ Until both sides of a formula exist, report the numerator and the missing denomi
 Synthetic selections, Stripe test invoices, family goodwill, access receipts, and Checkout redirects
 are not paid conversion, CAC, MRR, retention, or willingness-to-pay evidence.
 
-## Local synthetic execution before the external gate
+## Local synthetic validation specification
 
-No provider or deployment access is needed for this phase.
+No provider or deployment access is needed for this validation. These steps describe the required
+local evidence, but this packet does not authorize executing them while its status is
+non-executable.
 
 1. Run the revenue registry unit tests and production-boundary security test from the exact
    candidate.
@@ -172,16 +188,17 @@ free text are not experiment data.
 No real-participant collector or route exists in the current repository. The private preview must
 remain noncollecting until a separate reviewed contract, retention schedule, consent flow,
 independent edge limit, kill switch, accessibility pass, and owner are implemented. The
-confirmation phrase in this packet can authorize private preview setup, but not participant contact
-or exposure.
+confirmation phrase can authorize private preview setup only after the external release receipt
+closes every prerequisite in this packet. It cannot authorize participant contact or exposure.
 
 ## Isolated Stripe sandbox specification
 
 Do not use live mode. Do not use or modify the existing `Boomer Buddy sandbox`, whose enabled
 legacy webhook targets `https://boomerbuddy.net/api/webhooks/stripe`. Do not point a BoomerBuddy 2.0
 application, webhook, environment variable, provider key, or inventory job at the research
-sandbox. After the external gate, create a new isolated sandbox owned by the company solely for
-offer research. Stop if isolation cannot be proved.
+sandbox. Only after every packet prerequisite, the external release receipt, and the external gate
+are complete may an authorized operator create a new isolated sandbox owned by the company solely
+for offer research. Stop if isolation cannot be proved.
 
 Create exactly two sandbox Products and four recurring Prices:
 
@@ -237,12 +254,14 @@ duplicate and out-of-order event observation, cancellation, credit application, 
 clock completion. No real payment instrument, customer identity, customer contact, or production
 endpoint may participate.
 
-## Candidate-bound external action order
+## Externally bound action order
 
-After, and only after, the exact phrase is present in the active task:
+After, and only after, the paid-entitlement repair is green, the external release receipt binds the
+final exact SHA, annotated tag, and green CI, and the exact phrase is present in the active task:
 
-1. Bind this packet to the reviewed 40-character candidate SHA and attach the exact green local and
-   CI receipts. Stop if the worktree or deployed source differs.
+1. Read the reviewed 40-character candidate SHA, annotated tag, and exact green local and CI
+   receipts from the external release receipt. Verify them directly against Git and CI. Do not edit
+   this packet to self-bind them. Stop if the worktree, tag, receipt, or deployed source differs.
 2. Perform read-only account and mode verification. Record the company owner, sandbox identifier,
    `livemode=false`, MFA and recovery custody, current object counts, and the legacy endpoint as
    redacted operator evidence outside Git. Stop on ambiguity.
@@ -282,9 +301,9 @@ edit the legacy webhook, do not change application configuration, and do not tou
 
 ## Completion receipt
 
-The packet is complete only when it records:
+The external release receipt is complete only when it records:
 
-- exact candidate SHA and clean-diff identity;
+- exact candidate SHA, annotated tag, and clean-diff identity derived from Git;
 - confirmation phrase timestamp and scope;
 - green local invariant, production-boundary, access-intent, accessibility, and CI receipts;
 - isolated sandbox identity and before/after inventory with `livemode=false`;

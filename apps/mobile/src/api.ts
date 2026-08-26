@@ -52,6 +52,10 @@ export async function mobileRequest<T>(
       }
       if (requestToken) headers.set('Authorization', `Bearer ${requestToken}`);
       else headers.delete('Authorization');
+      // Native customer authentication is Bearer-only. Never allow a caller-provided browser
+      // credential or origin to create an ambiguous production request.
+      headers.delete('Cookie');
+      headers.delete('Origin');
       if (!includeAuth) {
         headers.delete('X-BB-Household-Id');
       } else if (!headers.has('X-BB-Household-Id')) {
@@ -60,6 +64,7 @@ export async function mobileRequest<T>(
       }
       return fetch(`${baseUrl}${path}`, {
         ...init,
+        credentials: 'omit',
         signal: requestSignal,
         headers,
       });

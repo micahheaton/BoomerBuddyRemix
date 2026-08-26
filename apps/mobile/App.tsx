@@ -186,11 +186,45 @@ function MobileApplication(): React.ReactElement {
 
   if (isSignedIn && !principal && sessionError) {
     return (
-      <SessionRecoveryScreen
-        message={sessionError}
-        onRetry={() => setRestoreAttempt((attempt) => attempt + 1)}
-        onSignOut={() => void signOut()}
-      />
+      <NavigationContainer>
+        <Stack.Navigator
+          screenOptions={{
+            headerBackTitle: 'Back',
+            headerStyle: { backgroundColor: designTokens.colors.primaryHover },
+            headerTintColor: designTokens.colors.onPrimary,
+            headerTitleStyle: { fontWeight: '700' },
+          }}
+        >
+          <Stack.Screen name="SessionRecovery" options={{ title: 'Account recovery' }}>
+            {(props) => (
+              <SessionRecoveryScreen
+                {...props}
+                message={sessionError}
+                onRetry={() => setRestoreAttempt((attempt) => attempt + 1)}
+                onSignOut={() => void signOut()}
+              />
+            )}
+          </Stack.Screen>
+          <Stack.Screen
+            name="HelpPolicies"
+            component={HelpPoliciesScreen}
+            options={{ title: 'Help and policies' }}
+          />
+          <Stack.Screen name="Support" component={SupportScreen} options={{ title: 'Support' }} />
+          <Stack.Screen name="Privacy" component={PrivacyScreen} options={{ title: 'Privacy' }} />
+          <Stack.Screen name="Terms" component={TermsScreen} options={{ title: 'Terms' }} />
+          <Stack.Screen
+            name="Accessibility"
+            component={AccessibilityScreen}
+            options={{ title: 'Accessibility' }}
+          />
+          <Stack.Screen
+            name="AccountDeletion"
+            component={AccountDeletionScreen}
+            options={{ title: 'Account deletion' }}
+          />
+        </Stack.Navigator>
+      </NavigationContainer>
     );
   }
 

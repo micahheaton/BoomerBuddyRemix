@@ -33,6 +33,17 @@ describe('launch public surfaces', () => {
     }
   });
 
+  it('keeps the support route useful without claiming a staffed or monitored operation', async () => {
+    const support = await source('apps/web/src/app/support/page.tsx');
+
+    expect(support).toContain('Email is not an emergency channel.');
+    expect(support).toMatch(/Sending a message does not confirm delivery, review, or\s+a reply\./u);
+    expect(support).toContain('For an immediate threat, contact local emergency services.');
+    expect(support).toContain('do not send passwords, verification codes, payment card');
+    expect(support).not.toMatch(/monitored|best[- ]effort|response time|24-hour coverage/iu);
+    expect(support).not.toContain('Support can help');
+  });
+
   it('keeps public policy copy free of prohibited dash characters and unsafe support requests', async () => {
     const paths = [
       'apps/web/src/app/support/page.tsx',

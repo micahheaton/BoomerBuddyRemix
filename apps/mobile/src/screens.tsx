@@ -176,10 +176,11 @@ export function SignInScreen({
 }
 
 export function SessionRecoveryScreen({
+  navigation,
   message,
   onRetry,
   onSignOut,
-}: {
+}: NativeStackScreenProps<RootStackParamList, 'SessionRecovery'> & {
   message: string;
   onRetry: () => void;
   onSignOut: () => void;
@@ -195,6 +196,11 @@ export function SessionRecoveryScreen({
         secure sign-in flow.
       </Text>
       <ActionButton title="Try again" onPress={onRetry} />
+      <ActionButton
+        kind="secondary"
+        title="Help and policies"
+        onPress={() => navigation.navigate('HelpPolicies')}
+      />
       <ActionButton kind="secondary" title="Sign out" onPress={onSignOut} />
     </Screen>
   );

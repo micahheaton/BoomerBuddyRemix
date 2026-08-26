@@ -113,7 +113,7 @@ describe('mobile support receipt surface', () => {
     const screen = source('apps/mobile/src/support-screen.tsx');
 
     expect(app).toContain("import { SupportScreen } from './src/support-screen';");
-    expect(app.match(/name="Support"/gu) ?? []).toHaveLength(2);
+    expect(app.match(/name="Support"/gu) ?? []).toHaveLength(3);
     expect(screen).toContain('apiPaths.supportReceipts');
     expect(screen).toContain('`${apiPaths.supportReceipts}/withdrawals`');
     expect(screen).toContain(

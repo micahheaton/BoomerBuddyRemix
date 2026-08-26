@@ -28,6 +28,24 @@ Every Replit provenance check additionally requires all of the following:
 - `git status --porcelain=v1 --untracked-files=all` emits no entries before the service build.
   Staged, unstaged, and nonignored untracked content all fail closed.
 
+Each of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq` must use a
+different credential scoped only to `micahheaton/BoomerBuddyRemix`. Prefer a unique deploy key with
+**Allow write access** unchecked. A repository-scoped GitHub App installation or fine-grained token
+is acceptable only when its retained permission export shows `Contents: Read-only`,
+`Metadata: Read-only`, and no repository, organization, or user write permission. The matching
+credential must fetch the exact annotated tag successfully and this dry-run must exit nonzero:
+
+```text
+git push --dry-run origin HEAD:refs/heads/bb-denied-write-proof-<receipt-id>
+```
+
+Exit zero is a hard stop. Never run the proof without `--dry-run`, never test a force, delete, branch,
+or tag write, and never embed the credential in the remote URL. Record only a safe credential ID or
+fingerprint, type, repository scope, permission export, expiry or rotation date, successful tag
+fetch, nonzero denial classification, and recovery owner. Store each private value only in its
+matching Replit protected credential store. No project may share a credential or retain a
+write-capable Replit GitHub connection.
+
 Replit may package the reviewed source tree beneath a different provider-generated snapshot commit.
 That representation is accepted only when the configured annotated tag still dereferences to the
 recorded candidate commit, the two trees are identical, and the full porcelain status is empty. For
@@ -84,6 +102,23 @@ infrastructure, not the separate legacy `BoomerBuddy` Replit project. Do not poi
 application path or fallback at legacy `boomerbuddy.net`. Record provider screenshots without user
 records, email addresses, session identifiers, keys, or other PII. A local build proves only route
 generation; it does not prove Clerk configuration or a hydrated sign-in flow.
+
+The separate HQ Clerk production instance uses this different exact application-path contract:
+
+- Application Home URL: `https://hq.boomerbuddy.net/`.
+- Unauthorized sign-in URL: `https://hq.boomerbuddy.net/sign-in`.
+- Self-hosted sign-in component URL: `https://hq.boomerbuddy.net/sign-in`, backed by the Next
+  catch-all route `/sign-in/[[...sign-in]]` and `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`.
+- Account Portal fallback after HQ sign-in: `https://hq.boomerbuddy.net/`.
+
+The HQ application uses only audience `boomerbuddy-hq`, authorized party
+`https://hq.boomerbuddy.net`, and its own issuer, publishable key, secret key, PEM key, cookie realm,
+origin, account population, MFA, and recovery boundary. Keep the HQ root and every operator route
+private. Do not point an HQ field at Customer Clerk infrastructure, `accounts.boomerbuddy.net`, or
+legacy `boomerbuddy.net`. Record Customer and HQ before/after values and deployed synthetic outcomes
+in separate evidence blocks. A Customer success cannot close an HQ field, and an HQ success cannot
+close a Customer field. Stop on a sign-in loop, callback 404, wrong issuer/audience/authorized party,
+realm crossover, missing recent second factor, or unexpected account access.
 
 The only incoming-authority exception is the observed direct Replit Autoscale GET/HEAD homepage
 probe. It requires `REPLIT_DEPLOYMENT=1`, the canonical automatic listener `PORT`, an

@@ -21,17 +21,16 @@ export default function SupportPage() {
           received your request.
         </p>
         <p>
-          Support is monitored on a best-effort basis during the private beta. We do not promise
-          24-hour coverage. For an immediate threat, contact local emergency services. For a bank or
-          account problem, use a number from the organization&apos;s official website, statement, or
-          card.
+          Email is not an emergency channel. Sending a message does not confirm delivery, review, or
+          a reply. For an immediate threat, contact local emergency services. For a bank or account
+          problem, use a number from the organization&apos;s official website, statement, or card.
         </p>
       </PolicySection>
       <PolicySection title="Billing and account help">
         <p>
-          Support can help locate a receipt, explain access status, start cancellation or refund
-          review, and begin an account-deletion or privacy request. Support cannot ask for or accept
-          your full payment card number.
+          Use the address above to request a receipt lookup, an explanation of access status,
+          cancellation or refund review, or the start of an account-deletion or privacy process. Do
+          not send your full payment card number.
         </p>
         <p>
           Read the <Link href="/billing-terms">billing terms</Link> or the{' '}

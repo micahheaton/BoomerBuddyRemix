@@ -12,6 +12,34 @@ Do not publish a public customer surface until the frozen candidate's release ch
 configuration is structurally supported for the bounded one-household rollout, but it remains
 default-off and must fail closed when identity, secret custody, database, or provider evidence drifts.
 
+Before authorization, this runbook permits only read-only inventory. Do not create a tag until items
+1 through 3 below are true. Item 4 is then the first authorized external write. Do not make any
+Replit import or pull, provider configuration, database provision or migration, deployment, DNS
+change, message, spend, or other external write until item 4 is complete and recorded:
+
+1. The paid Family entitlement repair and applicable repository gates are complete on one clean,
+   pushed candidate whose exact 40-character SHA, tree, and green exact-SHA GitHub CI are recorded.
+2. Outside the candidate, an immutable `draft_pre_authorization` receipt based on
+   [NONCHARGING-RELEASE-RECEIPT.md](../post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md) records the
+   candidate, planned annotated tag, exact ordered action manifest, target safe IDs, canonical scope
+   digest, and zero external effects.
+3. The account holder cites that receipt ID and digest and types
+   `CONFIRM NONCHARGING RELEASE SETUP` in the active task.
+4. As the first authorized external write, the operator creates and pushes the planned annotated tag,
+   proves its remote tag object peels to the exact candidate and tree, and appends that evidence to the
+   frozen external receipt before any provider write, Replit pull, migration, or deployment.
+
+A changed candidate, tree, CI result, target, action order, provider inventory, or scope requires a new
+receipt, digest, and confirmation. The phrase authorizes only the listed noncharging actions. It does
+not authorize a customer account or contact, Checkout or Portal Session, charge, refund, first-payment
+window, mobile-store submission, legal or provider attestation, or an action absent from the manifest.
+
+The only canonical source is `https://github.com/micahheaton/BoomerBuddyRemix.git`. The four 2.0
+Replit consumers are `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and
+`boomerbuddy-hq`; they pull the exact approved tag and never push. The separate legacy Replit project
+`BoomerBuddy`, its root site `boomerbuddy.net`, Twilio evidence, and legacy Stripe webhook are outside
+this runbook and remain untouched.
+
 Replit's current official documentation supports importing public or private GitHub repositories, while secrets and database contents are not imported. It also distinguishes Autoscale, Reserved VM, Scheduled, and Static deployment types. Recheck the live provider UI and documentation before spending or publishing:
 
 - [Import from a provider](https://docs.replit.com/build/import-from-providers)
@@ -23,21 +51,45 @@ Replit's current official documentation supports importing public or private Git
 
 ## Company-custody prerequisites
 
-The founder must complete these without placing credentials in git, prompts, screenshots, or logs:
+Before authorization, perform only read-only inventory for these prerequisites. After authorization,
+perform only the exact actions named in the receipt without placing credentials in Git, prompts,
+screenshots, or logs:
 
-1. Create or confirm a company-controlled private Git remote with MFA, recovery owners, protected `main`, and immutable release tags.
-2. Confirm founder-controlled `boomerbuddy.net` registrar/DNS custody and recovery.
-3. Provision an external standard PostgreSQL staging database with backup/export capability. Replit-native PostgreSQL is acceptable only if the independent restore drill passes before activation.
-4. Provision the production identity integration and surface-separated secret custody. For the
+1. Confirm read-only that the company-controlled private remote is exactly
+   `https://github.com/micahheaton/BoomerBuddyRemix.git`, with MFA, recovery owners, protected `main`,
+   and immutable release tags. Do not create or select another source repository.
+2. Confirm read-only the company-controlled registrar/DNS custody and recovery for the three 2.0
+   public hosts. Do not change the root legacy `boomerbuddy.net` site, its routing, or its Replit
+   project.
+3. Inventory every existing managed PostgreSQL project and database in the intended company account.
+   Select the exact existing staging or production database only when its safe IDs, environment,
+   region, ownership, backup boundary, and application mapping match the receipt. Provision a new
+   database only when read-only inventory proves the intended target is absent and the authorized
+   action manifest names its provider, region, cost ceiling, owner, backup boundary, verification,
+   and rollback. Never create a second database merely because Replit exposes a Database button.
+   Replit-native PostgreSQL is acceptable only if the independent restore drill passes before
+   activation.
+4. Inventory the existing production identity applications and surface-separated secret custody.
+   Select the exact existing Customer and HQ applications by safe ID. Create, rename, delete, or
+   replace an application only when absence is proved and that exact operation appears in the
+   authorized manifest. For the
    bounded beta, the matching Replit project's encrypted Secrets store is accepted with the documented
    residual risk; do not share API and worker provider credentials or store any secret in source.
-5. Set a Replit monthly spending ceiling and billing-alert owner. Do not assume plan credits are a hard cap.
+5. Record the Replit monthly spending ceiling and billing-alert owner. Make a billing or limit change
+   only when the exact value and cost boundary are in the authorized manifest. Do not assume plan
+   credits are a hard cap.
 6. Record Replit account owner, MFA owner, recovery owner, workspace/project identifiers, plan, region where selectable, and termination/export procedure in [FOUNDER-PROVISIONING.md](./FOUNDER-PROVISIONING.md).
 
 ## Import the canonical source
 
-1. In the company-controlled Git host, verify the intended frozen tag and commit. Copy only the repository URL and tag name, never a token.
-2. In Replit, use **Import → GitHub**, connect the company organization with least repository scope, select the private repository, and import it.
+1. In the company-controlled Git host, verify the authorized annotated tag and commit from the
+   external receipt. Confirm the remote is exactly
+   `https://github.com/micahheaton/BoomerBuddyRemix.git`. Copy only that repository URL and tag name,
+   never a token. A planned tag is not evidence before the two-stage sequence above finishes.
+2. Only when Replit import is the next authorized action, use **Import → GitHub**, connect the company
+   organization with least repository scope, select only `micahheaton/BoomerBuddyRemix`, and import it
+   into the exact 2.0 project named in the receipt. Never import, connect, or synchronize the legacy
+   `BoomerBuddy` project.
 3. In the Replit Git pane or shell, fetch tags and check out the exact frozen candidate tag. Verify:
 
    ```sh
@@ -51,6 +103,41 @@ The founder must complete these without placing credentials in git, prompts, scr
 7. Treat every Replit project as a pull-only deployment consumer. Do not make emergency source edits in Replit and never push code or editor checkpoints from Replit. Make and review every change in the canonical GitHub repository, then have each service pull the exact approved commit before redeployment.
 
 The existing [`.replit`](../../.replit) file is a local development convenience (`npm run dev`); it is not a production deployment definition.
+
+## Technically enforced GitHub pull-only credentials
+
+Policy language is not sufficient. Before any Replit pull or deployment, give each 2.0 project its
+own repository-scoped read-only credential:
+
+| Replit project | Required credential boundary |
+| --- | --- |
+| `boomerbuddy-web` | Unique credential for `micahheaton/BoomerBuddyRemix`; fetch only |
+| `boomerbuddy-api` | Unique credential for `micahheaton/BoomerBuddyRemix`; fetch only |
+| `boomerbuddy-worker` | Unique credential for `micahheaton/BoomerBuddyRemix`; fetch only |
+| `boomerbuddy-hq` | Unique credential for `micahheaton/BoomerBuddyRemix`; fetch only |
+
+Prefer one unique GitHub deploy key per project with **Allow write access** unchecked. If provider
+constraints require a GitHub App installation or fine-grained token, retain an export proving that it
+is scoped only to this repository, has `Contents: Read-only` and `Metadata: Read-only`, and has no
+repository, organization, or user write permission. Do not reuse one credential across projects.
+Store the private value only in the matching Replit protected credential store. Keep the Git remote
+credential-free, and never place a private key, token, authenticated URL, or raw provider export in
+Git, a command transcript, screenshot, receipt, or application environment variable.
+
+Disable or remove any Replit GitHub connection that retains write permission. With the exact
+credential used by that project, prove the approved tag fetch succeeds. Then run only this
+nonmutating negative proof with a new receipt-specific branch name:
+
+```sh
+git push --dry-run origin HEAD:refs/heads/bb-denied-write-proof-<receipt-id>
+```
+
+It must exit nonzero because the credential cannot write. Exit zero is a hard stop, even though
+`--dry-run` did not create the ref. Never remove `--dry-run`, and never test a force, delete, branch,
+or tag write. Record only project name, safe credential ID or fingerprint, credential type,
+repository scope, permission export, expiry/rotation date, successful exact-tag fetch, nonzero denial
+classification, UTC timestamp, and recovery owner. A credential value or a user identity is not
+evidence.
 
 ## Intended deployment topology
 

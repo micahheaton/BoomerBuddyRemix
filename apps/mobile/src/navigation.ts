@@ -32,6 +32,7 @@ export function classifyNativeEntryUrl(url: string): NativeEntrySignal {
 
 export type RootStackParamList = {
   SignIn: undefined;
+  SessionRecovery: undefined;
   Home: undefined;
   Check: undefined;
   Result: { check: CheckResult };

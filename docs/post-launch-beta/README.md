@@ -6,6 +6,12 @@
 - [EXECUTION-PLAN-SUPPLEMENT.md](./EXECUTION-PLAN-SUPPLEMENT.md): immutable audit receipt for the 2026-08-24 live Stripe inventory and corrections now integrated into the base plan.
 - [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md): controlling planning index for every annual, Individual, and referral hypothesis. Its typed registry permits synthetic and Stripe sandbox evaluation only and cannot authorize production activation.
 - [REVENUE-EXPERIMENT-ACTION-PACKET.md](./REVENUE-EXPERIMENT-ACTION-PACKET.md): exact local synthetic specification and candidate-bound noncharging setup packet for an isolated offer-research Stripe sandbox and private, noncollecting website preview. It records that access-intent receipts are not leads and cannot currently measure lead-to-paid conversion.
+- [NONCHARGING-RELEASE-RECEIPT.md](./NONCHARGING-RELEASE-RECEIPT.md): standalone
+  template for the exact-SHA, default-off external release receipt. The completed receipt lives
+  outside the versioned candidate and records Google OAuth rotation, separate Customer and HQ Clerk
+  realms, read-only Replit credentials, managed PostgreSQL migration and restore, isolated Stripe
+  sandbox proof, minimum live Family monthly configuration with Checkout closed, monitoring,
+  support, rollback, and zero customer or money movement.
 - [GAUNTLET-PROMPT-PACK.md](./GAUNTLET-PROMPT-PACK.md): standalone phases G0 through G3.
 - [GAUNTLET-PROMPT-PACK-G4-G15.md](./GAUNTLET-PROMPT-PACK-G4-G15.md): standalone phases G4 through G15 and the exact G0 first prompt preserved at the end.
 
@@ -20,4 +26,14 @@ Section 3.0 of the base plan is authoritative for current execution. Its later s
 
 ## Execution authority
 
-Safe local edits, tests, commits, branch pushes, and CI may continue. Before merge/tag, any Replit pull/deploy, production migration, Clerk or Stripe write in any environment, EAS or other provider identity/account write, external message, spend, charge, or refund, the founder must type `CONFIRM NONCHARGING RELEASE SETUP` in the active task for the reviewed exact-SHA packet. The phrase authorizes only that noncharging setup packet. It does not authorize a customer charge, refund, consent, plan choice, provider agreement, or legal, tax, bank, or identity attestation.
+Safe local edits, tests, commits, branch pushes, and CI may continue. Before merge/tag, any Replit
+pull/deploy, production migration, Clerk or Stripe write in any environment, EAS or other provider
+identity/account write, external message, spend, charge, or refund, complete a preauthorization
+receipt outside the candidate. It binds the exact candidate SHA and tree, green CI, planned annotated
+tag, ordered action manifest, and scope digest without claiming that the tag exists. The founder must
+cite that receipt ID and digest and type `CONFIRM NONCHARGING RELEASE SETUP` in the active task. The
+first authorized action creates, pushes, and verifies the planned annotated tag, then appends its tag
+object and peeled commit to the external receipt before any provider write. A different merge result,
+squash, rebase, tree, CI result, or action scope requires a new candidate and confirmation. The phrase
+authorizes only that noncharging setup packet. It does not authorize a customer charge, refund,
+consent, plan choice, provider agreement, or legal, tax, bank, or identity attestation.

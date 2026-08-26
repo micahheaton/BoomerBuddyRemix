@@ -287,7 +287,9 @@ describe('mobile production surface', () => {
       expect(navigation).toContain(`${route}: undefined;`);
       expect(app).toContain(`name="${route}"`);
     }
-    expect(app.match(/name="HelpPolicies"/gu) ?? []).toHaveLength(2);
+    expect(app.match(/name="HelpPolicies"/gu) ?? []).toHaveLength(3);
+    expect(navigation).toContain('SessionRecovery: undefined;');
+    expect(app).toContain('name="SessionRecovery"');
     expect(screens).toContain("navigation.navigate('HelpPolicies')");
     expect(policies).toContain('support@boomerbuddy.net');
     expect(policies).toContain('subject &quot;Account deletion');

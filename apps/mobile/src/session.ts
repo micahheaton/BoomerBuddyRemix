@@ -13,12 +13,19 @@ export function readSelectedHouseholdId(): string | null {
 export async function restoreSelectedHouseholdId(): Promise<string | null> {
   if (Platform.OS === 'web') return selectedHouseholdId;
   await selectedHouseholdWrite.catch(() => undefined);
-  if (!(await SecureStore.isAvailableAsync())) {
+  try {
+    if (!(await SecureStore.isAvailableAsync())) {
+      selectedHouseholdId = null;
+      return null;
+    }
+    selectedHouseholdId = await SecureStore.getItemAsync(selectedHouseholdKey);
+    return selectedHouseholdId;
+  } catch {
+    // Household selection is a convenience preference, not authentication material. A keychain
+    // read failure must not prevent a valid identity session from restoring through /v1/me.
     selectedHouseholdId = null;
     return null;
   }
-  selectedHouseholdId = await SecureStore.getItemAsync(selectedHouseholdKey);
-  return selectedHouseholdId;
 }
 
 export function setSelectedHouseholdId(householdId: string | null): Promise<void> {
@@ -35,13 +42,20 @@ export function setSelectedHouseholdId(householdId: string | null): Promise<void
       } else {
         await SecureStore.deleteItemAsync(selectedHouseholdKey);
       }
-    });
+    })
+    .catch(() => undefined);
   return selectedHouseholdWrite;
 }
 
 export async function clearLegacyDevelopmentSessionToken(): Promise<void> {
-  if (Platform.OS === 'web' || !(await SecureStore.isAvailableAsync())) return;
-  await SecureStore.deleteItemAsync(legacyDevelopmentTokenKey);
+  if (Platform.OS === 'web') return;
+  try {
+    if (!(await SecureStore.isAvailableAsync())) return;
+    await SecureStore.deleteItemAsync(legacyDevelopmentTokenKey);
+  } catch {
+    // The retired development token is never used for current authentication. Failure to remove
+    // it must not prevent a valid Clerk identity from restoring through /v1/me.
+  }
 }
 
 export async function clearMobileDeviceState(): Promise<void> {

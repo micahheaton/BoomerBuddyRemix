@@ -107,6 +107,32 @@ describe('mobile API session retry', () => {
     dispose();
   });
 
+  it('omits browser credentials and strips caller cookie and origin headers', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.mobileRequest('/v1/transport-proof', {
+      credentials: 'include',
+      headers: {
+        Cookie: '__session=caller-controlled-cookie',
+        Origin: 'https://caller-controlled.test',
+      },
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(request?.headers);
+    expect(request?.credentials).toBe('omit');
+    expect(headers.has('Cookie')).toBe(false);
+    expect(headers.has('Origin')).toBe(false);
+    expect(headers.get('Authorization')).toBe('Bearer clerk-mobile-token');
+    dispose();
+  });
+
   it('does not expose unexpected provider or parser details to customer screens', async () => {
     const { api, authentication } = await mobileModules();
     const dispose = authentication.configureMobileAuthentication({

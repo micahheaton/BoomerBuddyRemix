@@ -193,8 +193,20 @@ describe('revenue hypothesis production boundary', () => {
   it('keeps the noncharging experiment packet isolated and honest about funnel evidence', async () => {
     const packet = await source('docs/post-launch-beta/REVENUE-EXPERIMENT-ACTION-PACKET.md');
 
-    expect(packet).toContain('Candidate SHA: **NOT YET BOUND**');
+    expect(packet).toContain(
+      'Status: **non-executable local specification; no external action authorized or performed**',
+    );
+    expect(packet).toContain('`9323bc5cdefb244a1f9be6f08e1f4007023ddc3c`');
+    expect(packet).toMatch(/9323 baseline remains not live-capable/u);
+    expect(packet).toContain(
+      'This versioned packet cannot bind the final commit SHA that contains itself',
+    );
+    expect(packet).toMatch(
+      /final exact SHA, annotated tag, and green CI are\s+recorded in an external release receipt/u,
+    );
+    expect(packet).toContain('paid-entitlement repair is complete and green');
     expect(packet).toContain('CONFIRM NONCHARGING RELEASE SETUP');
+    expect(packet).not.toContain('Candidate SHA: **NOT YET BOUND**');
     expect(packet).toContain('Family means coverage for one household group');
     expect(packet).toContain('Do not use or modify the existing `Boomer Buddy sandbox`');
     expect(packet).toContain('create a new isolated sandbox');

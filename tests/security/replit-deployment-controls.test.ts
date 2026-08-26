@@ -8,6 +8,7 @@ const root = process.cwd();
 const replitServiceScript = join(root, 'scripts/replit-service.mjs');
 const provenanceFixtureRoot = join(root, 'tmp');
 const canonicalGitHubOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git';
+const canonicalGitHubOriginWithoutGitSuffix = 'https://github.com/micahheaton/BoomerBuddyRemix';
 const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git';
 const canonicalReplitConfig = [
   'entrypoint = "scripts/replit-service.mjs"',
@@ -291,6 +292,7 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain(
       "const canonicalGitHubHttpsOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git'",
     );
+    expect(source).toContain("'https://github.com/micahheaton/BoomerBuddyRemix'");
     expect(source).toContain(
       "const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git'",
     );
@@ -402,7 +404,11 @@ describe('Run 3.1 Replit deployment controls', () => {
   });
 
   it('accepts only the exact credential-free HTTPS and deploy-key SSH canonical origins', async () => {
-    for (const originUrl of [canonicalGitHubOrigin, canonicalGitHubDeployKeyOrigin]) {
+    for (const originUrl of [
+      canonicalGitHubOrigin,
+      canonicalGitHubOriginWithoutGitSuffix,
+      canonicalGitHubDeployKeyOrigin,
+    ]) {
       const fixture = await createProvenanceFixture({ originUrl });
       try {
         const result = runFixtureBuild(fixture);

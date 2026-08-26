@@ -12,9 +12,12 @@ const services = {
   worker: '@boomerbuddy/worker',
 };
 const canonicalGitHubHttpsOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git';
+const canonicalGitHubHttpsOriginWithoutGitSuffix =
+  'https://github.com/micahheaton/BoomerBuddyRemix';
 const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git';
 const canonicalGitHubOrigins = new Set([
   canonicalGitHubHttpsOrigin,
+  canonicalGitHubHttpsOriginWithoutGitSuffix,
   canonicalGitHubDeployKeyOrigin,
 ]);
 const service = process.env.BB_REPLIT_SERVICE;

@@ -92,6 +92,76 @@ describe('isolated revenue hypotheses', () => {
     expect(seededFamilyAmounts).toEqual([1_499, 14_900]);
   });
 
+  it('keeps each annual candidate discounted from twelve monthly payments', () => {
+    for (const comparison of [
+      {
+        audience: 'family',
+        expectedAnnualMinor: 14_900,
+        expectedMonthlyMinor: 1_499,
+        expectedSavingsMinor: 3_088,
+        expectedDiscountBasisPoints: 1_717,
+      },
+      {
+        audience: 'individual',
+        expectedAnnualMinor: 8_900,
+        expectedMonthlyMinor: 899,
+        expectedSavingsMinor: 1_888,
+        expectedDiscountBasisPoints: 1_750,
+      },
+    ] as const) {
+      const monthly = revenueOfferHypothesisRegistry.find(
+        (hypothesis) =>
+          hypothesis.audience === comparison.audience && hypothesis.billingInterval === 'month',
+      );
+      const annual = revenueOfferHypothesisRegistry.find(
+        (hypothesis) =>
+          hypothesis.audience === comparison.audience && hypothesis.billingInterval === 'year',
+      );
+
+      expect(monthly?.amountMinor).toBe(comparison.expectedMonthlyMinor);
+      expect(annual?.amountMinor).toBe(comparison.expectedAnnualMinor);
+      const twelveMonthlyPayments = (monthly?.amountMinor ?? 0) * 12;
+      const savingsMinor = twelveMonthlyPayments - (annual?.amountMinor ?? 0);
+      expect(savingsMinor).toBe(comparison.expectedSavingsMinor);
+      expect(Math.round((savingsMinor * 10_000) / twelveMonthlyPayments)).toBe(
+        comparison.expectedDiscountBasisPoints,
+      );
+    }
+  });
+
+  it('keeps offer cells unique and referral liability derived from the matching monthly offer', () => {
+    const offerKeys = revenueOfferHypothesisRegistry.map((hypothesis) => hypothesis.hypothesisKey);
+    const offerCells = revenueOfferHypothesisRegistry.map(
+      (hypothesis) => `${hypothesis.audience}:${hypothesis.billingInterval}`,
+    );
+    const referralKeys = referralRevenueHypothesisRegistry.map(
+      (hypothesis) => hypothesis.hypothesisKey,
+    );
+
+    expect(new Set(offerKeys).size).toBe(offerKeys.length);
+    expect(new Set(offerCells).size).toBe(offerCells.length);
+    expect(new Set(referralKeys).size).toBe(referralKeys.length);
+
+    for (const referral of referralRevenueHypothesisRegistry) {
+      const eligibleOffer = revenueOfferHypothesisRegistry.find(
+        (offer) => offer.hypothesisKey === referral.eligibleOfferHypothesisKey,
+      );
+
+      expect(eligibleOffer).toBeDefined();
+      expect(eligibleOffer?.billingInterval).toBe('month');
+      expect(referral.creditMinor).toBe(eligibleOffer?.amountMinor);
+      expect(referral.maximumCreditPerReferrerMinor).toBe(
+        referral.creditMinor * referral.maximumQualifyingReferralsPerReferrer,
+      );
+      expect(referral.maximumCreditPerHouseholdMinor).toBe(referral.maximumCreditPerReferrerMinor);
+      expect(referral.maximumProgramLiabilityMinor % referral.creditMinor).toBe(0);
+      expect(referral.maximumProgramLiabilityMinor / referral.creditMinor).toBe(100);
+      expect(referral.maximumProgramLiabilityMinor).toBeGreaterThanOrEqual(
+        referral.maximumCreditPerHouseholdMinor,
+      );
+    }
+  });
+
   it('caps non-cash referral hypotheses and denies self-referral identities', () => {
     expect(
       referralRevenueHypothesisRegistry.map((hypothesis) => ({

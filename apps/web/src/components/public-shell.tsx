@@ -2,13 +2,11 @@ import Link from 'next/link';
 import { Brand } from './brand';
 
 export function PublicHeader() {
-  const production = process.env.NODE_ENV === 'production';
   return (
     <>
       <p className="dev-banner">
-        {production
-          ? 'Private beta · Public Check needs no account · Results can be wrong · Never enter passwords, access codes, or payment information'
-          : 'Local development build · Public Check needs no account; member access uses seeded people · Local rules-only analysis · No live reputation provider'}
+        Private beta - Public Check needs no account - Results can be wrong - Never enter passwords,
+        access codes, or payment information
       </p>
       <header className="site-header">
         <div className="header-inner">
@@ -20,7 +18,7 @@ export function PublicHeader() {
             <Link href="/trust">Trust</Link>
             <Link href="/support">Support</Link>
             <Link className="button button-primary" href="/sign-in">
-              {production ? 'Member sign in' : 'Development sign in'}
+              Member sign in
             </Link>
           </nav>
         </div>
@@ -30,13 +28,10 @@ export function PublicHeader() {
 }
 
 export function PublicFooter() {
-  const production = process.env.NODE_ENV === 'production';
   return (
     <footer className="site-footer">
       <div className="page-shell" style={{ paddingBlock: '1.2rem' }}>
-        <strong>
-          {production ? 'BoomerBuddy private beta' : 'BoomerBuddy local development build'}
-        </strong>
+        <strong>BoomerBuddy private beta</strong>
         <p>
           Analysis can be wrong. If money, accounts, or safety are at risk, pause and contact the
           organization using an independently verified number.

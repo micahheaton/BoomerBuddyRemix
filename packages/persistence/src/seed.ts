@@ -1,6 +1,20 @@
 import type { Database, SqlExecutor } from './database';
 import { CheckRepository, type ArtifactProtection, type DecisionRecord } from './checks';
 
+export type DemoSeedRuntimeEnvironment = 'development' | 'test' | 'production';
+
+export function assertDemoSeedingPermitted(
+  environment: DemoSeedRuntimeEnvironment,
+  databaseKind: Database['kind'],
+): void {
+  if (environment !== 'development' && environment !== 'test') {
+    throw new TypeError('Production refuses demo data seeding');
+  }
+  if (databaseKind !== 'pglite') {
+    throw new TypeError('Demo data seeding requires a local PGlite target');
+  }
+}
+
 export const seedPersonas = [
   { personaId: 'owner-alice', personId: 'person-owner-alice', displayName: 'Alice Owner' },
   { personaId: 'protected-pat', personId: 'person-protected-pat', displayName: 'Pat Protected' },
@@ -578,8 +592,10 @@ function transactionDatabase(database: Database, executor: SqlExecutor): Databas
 export async function seedDemoData(
   database: Database,
   protection: ArtifactProtection,
+  environment: DemoSeedRuntimeEnvironment,
   now: Date = new Date(),
 ): Promise<'seeded' | 'already_seeded'> {
+  assertDemoSeedingPermitted(environment, database.kind);
   return database.transaction(async (transaction) => {
     const marker = await transaction.query<Record<string, unknown>>(
       `SELECT 1 FROM local_demo_bootstraps WHERE bootstrap_key = 'run1-v1'`,
@@ -596,9 +612,11 @@ export async function seedDemoData(
          OR (SELECT count(*) FROM commerce_product_versions) <> 1
          OR EXISTS (
            SELECT 1 FROM commerce_plan_versions
-           WHERE id NOT IN ('founding_plus_beta_v2','founding_family_beta_v2')
+           WHERE id NOT IN (
+             'founding_plus_beta_v2','founding_family_beta_v2','family_v1'
+           )
          )
-         OR (SELECT count(*) FROM commerce_plan_versions) <> 2
+         OR (SELECT count(*) FROM commerce_plan_versions) <> 3
          OR EXISTS (SELECT 1 FROM analyses)
          OR EXISTS (SELECT 1 FROM provider_health)
          OR EXISTS (SELECT 1 FROM saved_searches)

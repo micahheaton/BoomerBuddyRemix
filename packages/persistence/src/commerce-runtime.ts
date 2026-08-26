@@ -1,11 +1,12 @@
 import { createHash, createHmac } from 'node:crypto';
 import { DomainError } from '@boomerbuddy/domain';
-import type {
-  CommerceActor,
-  ProviderFinancialRestrictionEvidence,
-  ProviderFailedPaymentEvidence,
-  StripeFoundingOffer,
-  StripePreflightEvidence,
+import {
+  isStripeFailedPaymentEventType,
+  type CommerceActor,
+  type ProviderFinancialRestrictionEvidence,
+  type ProviderFailedPaymentEvidence,
+  type StripeFoundingOffer,
+  type StripePreflightEvidence,
 } from '@boomerbuddy/integrations';
 import type { Database, SqlExecutor } from './database';
 import { resolveActiveBillingAuthority } from './entitlements';
@@ -1535,6 +1536,7 @@ export class CommerceRuntimeRepository {
       readonly portal_mutation_controls_exact: boolean;
       readonly portal_subscription_update_defaults_empty: boolean;
       readonly portal_payment_method_update_enabled: boolean;
+      readonly portal_invoice_history_enabled: boolean;
       readonly promotions_enabled: boolean;
       readonly automatic_tax_enabled: boolean;
       readonly adaptive_pricing_enabled: boolean;
@@ -1550,7 +1552,8 @@ export class CommerceRuntimeRepository {
                   evidence_digest, product_active, price_active, portal_cancel_only,
                   portal_mutation_controls_exact,
                   portal_subscription_update_defaults_empty,
-                  portal_payment_method_update_enabled, promotions_enabled,
+                  portal_payment_method_update_enabled, portal_invoice_history_enabled,
+                  promotions_enabled,
                   automatic_tax_enabled, adaptive_pricing_enabled,
                   account_charges_enabled, account_payouts_enabled,
                   account_country, account_business_type
@@ -1641,7 +1644,8 @@ export class CommerceRuntimeRepository {
         row.portal_cancel_only &&
         row.portal_mutation_controls_exact &&
         row.portal_subscription_update_defaults_empty &&
-        row.portal_payment_method_update_enabled;
+        row.portal_payment_method_update_enabled &&
+        row.portal_invoice_history_enabled;
       const checkoutPolicyReady =
         !row.promotions_enabled && !row.automatic_tax_enabled && !row.adaptive_pricing_enabled;
       return {
@@ -1732,6 +1736,7 @@ export class CommerceRuntimeRepository {
       portalProrationBehavior: input.evidence.portalProrationBehavior,
       portalSubscriptionUpdateDefaultsEmpty: input.evidence.portalSubscriptionUpdateDefaultsEmpty,
       portalPaymentMethodUpdateEnabled: input.evidence.portalPaymentMethodUpdateEnabled,
+      portalInvoiceHistoryEnabled: input.evidence.portalInvoiceHistoryEnabled,
       promotionsEnabled: input.evidence.promotionsEnabled,
       automaticTaxEnabled: input.evidence.automaticTaxEnabled,
       adaptivePricingEnabled: input.evidence.adaptivePricingEnabled,
@@ -1756,9 +1761,10 @@ export class CommerceRuntimeRepository {
          authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
          portal_cancellation_mode, portal_proration_behavior,
          portal_subscription_update_defaults_empty,
-         portal_payment_method_update_enabled, account_charges_enabled,
+         portal_payment_method_update_enabled, portal_invoice_history_enabled,
+         account_charges_enabled,
          account_payouts_enabled, account_country, account_business_type
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'month',$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'month',$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)`,
       [
         id,
         input.evidence.environment,
@@ -1790,6 +1796,7 @@ export class CommerceRuntimeRepository {
         input.evidence.portalProrationBehavior,
         input.evidence.portalSubscriptionUpdateDefaultsEmpty,
         input.evidence.portalPaymentMethodUpdateEnabled,
+        input.evidence.portalInvoiceHistoryEnabled,
         input.evidence.accountChargesEnabled,
         input.evidence.accountPayoutsEnabled,
         input.evidence.accountCountry,
@@ -3310,7 +3317,7 @@ export class CommerceRuntimeRepository {
       ],
     );
     if (
-      inbox.rows[0]?.event_type !== 'invoice.payment_failed' ||
+      !isStripeFailedPaymentEventType(inbox.rows[0]?.event_type ?? '') ||
       inbox.rows[0]?.provider_object_id !== input.evidence.providerInvoiceId ||
       inbox.rows[0]?.application_state === 'quarantined' ||
       binding.rowCount !== 1
@@ -3327,7 +3334,7 @@ export class CommerceRuntimeRepository {
          line_proration, period_starts_at, period_ends_at
        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
                  $17,$18,$19,$20,$21,$22)
-       ON CONFLICT (provider_invoice_id) DO NOTHING`,
+       ON CONFLICT (source_inbox_id) DO NOTHING`,
       [
         input.evidence.providerInvoiceId,
         input.environment,
@@ -3715,6 +3722,8 @@ export class CommerceRuntimeRepository {
     readonly canonicalAccessActive: boolean;
     readonly portalAvailable: boolean;
     readonly runtimeInitiationEnabled: boolean;
+    readonly recoveryReason?:
+      'payment_action_required' | 'payment_failed' | 'invoice_finalization_failed';
     readonly pendingOperation?: {
       readonly serverOperationId: string;
       readonly state: 'dispatching' | 'outcome_unknown';
@@ -3747,6 +3756,8 @@ export class CommerceRuntimeRepository {
         readonly operation_attempt_count: number | null;
         readonly operation_next_retry_at: unknown;
         readonly operation_expires_at: unknown;
+        readonly recovery_reason:
+          'payment_action_required' | 'payment_failed' | 'invoice_finalization_failed' | null;
       } & Record<string, unknown>
     >(
       `SELECT
@@ -3810,6 +3821,37 @@ export class CommerceRuntimeRepository {
             AND provider_record.financial_restriction IS NOT NULL) AS restriction_count,
          (SELECT count(*)::int FROM commerce_provider_customers
           WHERE household_id = $1 AND provider = 'stripe' AND environment = $2) AS customer_count,
+         COALESCE(
+           (SELECT CASE failed.failure_status
+              WHEN 'requires_action' THEN 'payment_action_required'
+              ELSE 'payment_failed'
+            END
+            FROM commerce_stripe_failed_invoice_evidence failed
+            JOIN commerce_stripe_dunning_events opened
+              ON opened.environment = failed.environment
+             AND opened.household_id = failed.household_id
+             AND opened.subscription_id = failed.subscription_id
+             AND opened.provider_invoice_id = failed.provider_invoice_id
+             AND opened.event_kind = 'opened'
+            WHERE failed.household_id = $1 AND failed.environment = $2
+              AND NOT EXISTS (
+                SELECT 1 FROM commerce_stripe_dunning_events closure
+                WHERE closure.dunning_window_key = opened.dunning_window_key
+                  AND closure.event_kind IN ('recovered','expired')
+              )
+            ORDER BY failed.attempt_count DESC, failed.occurred_at DESC,
+                     failed.source_inbox_id DESC LIMIT 1),
+           (SELECT 'invoice_finalization_failed'
+            FROM commerce_stripe_invoice_recovery_events recovery
+            WHERE recovery.household_id = $1 AND recovery.environment = $2
+              AND recovery.recovery_state = 'attention'
+              AND NOT EXISTS (
+                SELECT 1 FROM commerce_stripe_paid_invoice_evidence paid
+                WHERE paid.environment = recovery.environment
+                  AND paid.provider_invoice_id = recovery.provider_invoice_id
+              )
+            ORDER BY recovery.observed_at DESC, recovery.id DESC LIMIT 1)
+         ) AS recovery_reason,
          (SELECT operation.server_operation_id FROM commerce_stripe_session_operations operation
           JOIN commerce_checkout_intents intent
             ON intent.household_id = operation.household_id
@@ -3885,6 +3927,7 @@ export class CommerceRuntimeRepository {
         input.runtimeInitiationPermitted &&
         row.cohort_state === 'active' &&
         row.control_state === 'enabled',
+      ...(row.recovery_reason === null ? {} : { recoveryReason: row.recovery_reason }),
       ...(row.operation_server_id === null ||
       (row.operation_state !== 'dispatching' && row.operation_state !== 'outcome_unknown') ||
       row.operation_attempt_count === null

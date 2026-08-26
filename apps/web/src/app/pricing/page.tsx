@@ -31,9 +31,9 @@ export default function PricingPage() {
               <strong>USD 14.99 monthly</strong>
             </p>
             <p>
-              For one invited household. New Trusted Circle invitations are not self-service during
-              this private beta. Household roles, protected-adult consent, sharing permissions, and
-              billing authority remain separate.
+              For one invited household. You cannot create a new Trusted Circle invitation right
+              now. Household roles, protected-adult consent, sharing permissions, and billing
+              authority remain separate.
             </p>
             <p>Payment is available only to invited households with verified billing authority.</p>
           </article>

@@ -19,6 +19,13 @@ describe('mobile production API origin', () => {
     ['query', 'https://api.boomerbuddy.net?candidate=true'],
     ['fragment', 'https://api.boomerbuddy.net#candidate'],
     ['credentials', 'https://user:password@api.boomerbuddy.net'],
+    ['leading space', ' https://api.boomerbuddy.net'],
+    ['trailing space', 'https://api.boomerbuddy.net '],
+    ['line feed', 'https://api.\nboomerbuddy.net'],
+    ['tab', 'https://api.\tboomerbuddy.net'],
+    ['delete control', 'https://api.\u007fboomerbuddy.net'],
+    ['backslash', 'https://api.boomerbuddy.net\\'],
+    ['encoded host delimiter', 'https://api%2eboomerbuddy.net'],
   ])('rejects %s production configuration', (_name, configured) => {
     expect(() => resolveMobileApiOrigin({ configured, development: false })).toThrow();
   });

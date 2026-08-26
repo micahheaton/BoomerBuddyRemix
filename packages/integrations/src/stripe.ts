@@ -17,6 +17,7 @@ import type {
   StripePreflightEvidence,
   StripePreflightPort,
 } from './commerce';
+import { isStripeFailedPaymentEventType } from './commerce';
 
 export const stripeCheckoutIntegrationIdentifier = 'boomerbuddy_cqmfjzpt' as const;
 
@@ -677,8 +678,6 @@ function failedInvoiceEvidence(
   };
 }
 
-const resolvableInvoiceEventTypes = new Set(['invoice.paid', 'invoice.payment_failed']);
-
 function withBoundedGrace(
   lifecycle: NormalizedCommerceLifecycle,
   evidence: ReturnType<typeof subscriptionCommerceEvidence>,
@@ -863,6 +862,7 @@ export function normalizeStripeEvent(
   const lifecycleByEvent: Readonly<Record<string, NormalizedCommerceLifecycle>> = {
     'invoice.paid': 'active',
     'invoice.payment_failed': 'delinquent',
+    'invoice.payment_action_required': 'delinquent',
   };
   const eventLifecycle = lifecycleByEvent[envelope.type];
   return {
@@ -1014,6 +1014,7 @@ export class StripeAdapter
     const subscriptionUpdate = objectRecord(features?.subscription_update);
     const paymentMethodUpdate = objectRecord(features?.payment_method_update);
     const customerUpdate = objectRecord(features?.customer_update);
+    const invoiceHistory = objectRecord(features?.invoice_history);
     const observedLivemode = product.livemode;
     const accountChargesEnabled = account.charges_enabled === true;
     const accountPayoutsEnabled = account.payouts_enabled === true;
@@ -1050,7 +1051,8 @@ export class StripeAdapter
       paymentMethodUpdate?.enabled !== true ||
       customerUpdate?.enabled !== false ||
       !Array.isArray(customerUpdate.allowed_updates) ||
-      customerUpdate.allowed_updates.length !== 0
+      customerUpdate.allowed_updates.length !== 0 ||
+      invoiceHistory?.enabled !== true
     ) {
       throw new StripeWebhookError('stripe.preflight_resource_mismatch');
     }
@@ -1073,6 +1075,7 @@ export class StripeAdapter
       portalProrationBehavior: 'none',
       portalSubscriptionUpdateDefaultsEmpty: true,
       portalPaymentMethodUpdateEnabled: true,
+      portalInvoiceHistoryEnabled: true,
       retentionCouponEvidence: 'manual_founder_browser_required',
       promotionsEnabled: false,
       automaticTaxEnabled: false,
@@ -1475,7 +1478,9 @@ export class StripeAdapter
     };
 
     if (input.eventType.startsWith('invoice.')) {
-      if (!resolvableInvoiceEventTypes.has(input.eventType)) return null;
+      if (input.eventType !== 'invoice.paid' && !isStripeFailedPaymentEventType(input.eventType)) {
+        return null;
+      }
       const evidence = await invoiceEvidence(input.providerObjectId);
       const subscription =
         evidence.subscription === null
@@ -1522,7 +1527,7 @@ export class StripeAdapter
           ? candidatePaidPeriod
           : undefined;
       const candidateFailedPayment =
-        input.eventType === 'invoice.payment_failed' && evidence.subscription !== null
+        isStripeFailedPaymentEventType(input.eventType) && evidence.subscription !== null
           ? failedInvoiceEvidence(
               evidence.invoice,
               evidence.subscription,
@@ -1546,7 +1551,7 @@ export class StripeAdapter
             ...(failedPayment === undefined ? {} : { failedPaymentEvidence: failedPayment }),
             requiresAttention:
               (input.eventType === 'invoice.paid' && paidPeriod === undefined) ||
-              (input.eventType === 'invoice.payment_failed' && failedPayment === undefined),
+              (isStripeFailedPaymentEventType(input.eventType) && failedPayment === undefined),
           };
     }
     if (input.eventType === 'charge.refunded') {

@@ -46,6 +46,9 @@ const releaseMigrations = [
   '0030_run3_1_billing_reverification_binding.sql',
   '0031_run3_1_mobile_session_retention.sql',
   '0032_run3_1_private_beta_access_intents.sql',
+  '0033_run3_1_billing_recovery_evidence.sql',
+  '0034_run3_1_support_receipts.sql',
+  '0035_run3_1_paid_family_catalog.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -117,14 +120,16 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0032 and seeds stable local Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0035 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);
     await expect(runMigrations(database)).resolves.toEqual([]);
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe('seeded');
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
+      'seeded',
+    );
     const countsAfterFirstSeed = await publicTableCounts(database);
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
     await expect(publicTableCounts(database)).resolves.toEqual(countsAfterFirstSeed);
@@ -242,7 +247,7 @@ describe('frozen release migration and demo seed chain', () => {
     await expect(runMigrations(database, temporaryDirectory)).resolves.toEqual(
       releaseMigrations.slice(18),
     );
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
 
@@ -312,13 +317,15 @@ describe('frozen release migration and demo seed chain', () => {
     const before = await publicTableCounts(database);
     const failingDatabase = withSeedQueryFailure(database, 'INSERT INTO local_demo_bootstraps');
 
-    await expect(seedDemoData(failingDatabase, testArtifactProtection(), now)).rejects.toThrow(
-      'induced seed transaction failure',
-    );
+    await expect(
+      seedDemoData(failingDatabase, testArtifactProtection(), 'test', now),
+    ).rejects.toThrow('induced seed transaction failure');
     await expect(publicTableCounts(database)).resolves.toEqual(before);
 
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe('seeded');
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
+      'seeded',
+    );
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
     const marker = await database.query<{ bootstrap_key: string }>(

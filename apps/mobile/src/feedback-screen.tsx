@@ -86,8 +86,8 @@ export function FeedbackScreen() {
         <Text style={s.label}>Text-only feedback</Text>
         <Text style={s.muted}>
           Do not paste passwords, payment-card numbers, one-time codes, private keys, or emergency
-          details. Attachments, recording, transcription, email, external models, and customer
-          contact are disabled.
+          details. You can send text only. BoomerBuddy does not accept attachments or recordings
+          here, send this feedback to outside AI services, or contact you by email or text.
         </Text>
       </View>
 
@@ -153,7 +153,7 @@ export function FeedbackScreen() {
           pressed && { opacity: 0.82 },
         ]}
       >
-        <Text style={s.buttonTextPrimary}>{busy ? 'Recording…' : 'Submit feedback'}</Text>
+        <Text style={s.buttonTextPrimary}>{busy ? 'Recording...' : 'Submit feedback'}</Text>
       </Pressable>
 
       {receipt ? (
@@ -163,8 +163,8 @@ export function FeedbackScreen() {
             Your feedback was recorded with reference {receipt.feedback.id}.
           </Text>
           <Text style={s.muted}>
-            No media was accepted, no outside service received the feedback, and no customer action
-            was started automatically.
+            This did not open a support case or start an email or text message. If you allowed
+            follow-up, it can happen only inside BoomerBuddy.
           </Text>
         </View>
       ) : null}

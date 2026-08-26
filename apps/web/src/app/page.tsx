@@ -20,10 +20,14 @@ export default function HomePage() {
               <Link className="button button-primary" href="/check">
                 Check something now
               </Link>
-              <Link className="button button-secondary" href="/how-it-works">
-                See how it works
+              <Link className="button button-secondary" href="/pricing">
+                See Family pricing
               </Link>
             </div>
+            <p className="meta">
+              Family is USD 14.99 per month. Access is invite-only, and availability is shown on the
+              pricing page.
+            </p>
           </div>
           <aside className="hero-card" aria-label="What to do right now">
             <span className="dev-pill">A useful pause</span>

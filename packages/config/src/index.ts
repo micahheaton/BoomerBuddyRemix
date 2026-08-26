@@ -5,6 +5,11 @@ const booleanText = z.enum(['true', 'false']).transform((value) => value === 'tr
 const nonEmpty = z.string().trim().min(1);
 const boundedExternalIdentifier = /^[A-Za-z0-9][A-Za-z0-9._:-]{1,511}$/u;
 const boundedPersonIdentifier = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/u;
+const publishedDevelopmentSecretDefaults = {
+  artifactEncryptionKey: Buffer.alloc(32),
+  fingerprintKey: Buffer.alloc(32, 1),
+  safeWordPepper: Buffer.from('local-safe-word-pepper-not-for-production', 'utf8'),
+} as const;
 
 function postgresConnectionString(value: string, production: boolean): string {
   let url: URL;
@@ -40,6 +45,9 @@ const environmentSchema = z.object({
   BB_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(2).default(0),
   BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: booleanText.default(false),
   BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: booleanText.default(false),
+  BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: booleanText.default(false),
+  BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: booleanText.default(false),
+  BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED: booleanText.default(false),
   BB_DATABASE_DRIVER: z.enum(['pglite', 'postgres']).default('pglite'),
   BB_PGLITE_PATH: nonEmpty.optional(),
   DATABASE_URL: z.string().url().optional(),
@@ -112,6 +120,11 @@ export interface AppConfig {
   readonly accessIntents?: {
     readonly runtimeEnabled: boolean;
     readonly edgeRateLimitConfirmed: boolean;
+  };
+  readonly supportReceipts?: {
+    readonly customerAccessEnabled: boolean;
+    readonly intakeEnabled: boolean;
+    readonly hqQueueEnabled: boolean;
   };
   readonly database:
     | {
@@ -258,6 +271,34 @@ function decodeBase64Key(value: string): Buffer {
     throw new TypeError('Encryption material must be canonical base64 encoding of 32 bytes');
   }
   return decoded;
+}
+
+function refusePublishedProductionSecretDefaults(
+  environment: AppConfig['environment'],
+  material: {
+    readonly artifactEncryptionKey: Buffer;
+    readonly fingerprintKey: Buffer;
+    readonly safeWordPepper: Buffer;
+  },
+): void {
+  if (environment !== 'production') return;
+  if (
+    material.artifactEncryptionKey.equals(publishedDevelopmentSecretDefaults.artifactEncryptionKey)
+  ) {
+    throw new TypeError(
+      'Production refuses the published .env.example default for BB_ARTIFACT_KEY_BASE64',
+    );
+  }
+  if (material.fingerprintKey.equals(publishedDevelopmentSecretDefaults.fingerprintKey)) {
+    throw new TypeError(
+      'Production refuses the published .env.example default for BB_FINGERPRINT_KEY_BASE64',
+    );
+  }
+  if (material.safeWordPepper.equals(publishedDevelopmentSecretDefaults.safeWordPepper)) {
+    throw new TypeError(
+      'Production refuses the published .env.example default for BB_SAFE_WORD_PEPPER',
+    );
+  }
 }
 
 function origins(value: string, name: string): readonly string[] {
@@ -583,6 +624,15 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     throw new TypeError('BB_SESSION_SECRET is required outside production');
   }
   refuseUnsafeProduction(parsed);
+  if (
+    parsed.BB_SUPPORT_RECEIPTS_INTAKE_ENABLED &&
+    (!parsed.BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED ||
+      !parsed.BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED)
+  ) {
+    throw new TypeError(
+      'Support receipt intake requires customer history and the HQ queue to be enabled',
+    );
+  }
   const customerOrigins = origins(parsed.BB_CUSTOMER_ORIGINS, 'BB_CUSTOMER_ORIGINS');
   const hqOrigins = origins(parsed.BB_HQ_ORIGINS, 'BB_HQ_ORIGINS');
   if (customerOrigins.some((origin) => hqOrigins.includes(origin))) {
@@ -633,6 +683,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
   const fingerprintKey = decodeBase64Key(parsed.BB_FINGERPRINT_KEY_BASE64);
   const session = Buffer.from(parsed.BB_SESSION_SECRET ?? '', 'utf8');
   const safeWordPepper = Buffer.from(parsed.BB_SAFE_WORD_PEPPER, 'utf8');
+  refusePublishedProductionSecretDefaults(parsed.NODE_ENV, {
+    artifactEncryptionKey,
+    fingerprintKey,
+    safeWordPepper,
+  });
   const separateSecrets = [
     artifactEncryptionKey,
     fingerprintKey,
@@ -680,6 +735,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
         parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED &&
         parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED,
       edgeRateLimitConfirmed: parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED,
+    },
+    supportReceipts: {
+      customerAccessEnabled: parsed.BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED,
+      intakeEnabled: parsed.BB_SUPPORT_RECEIPTS_INTAKE_ENABLED,
+      hqQueueEnabled: parsed.BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED,
     },
     database,
     identity: {

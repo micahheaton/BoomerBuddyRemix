@@ -96,34 +96,6 @@ export function HelpPoliciesScreen({
   );
 }
 
-export function SupportScreen(): React.ReactElement {
-  return (
-    <PolicyLayout
-      title="Customer support"
-      summary="Use support for account, privacy, accessibility, or product help."
-    >
-      <PolicySection title="Contact support">
-        <Text style={s.body}>
-          Email <Text style={s.label}>{supportEmail}</Text> and briefly describe the help you need.
-        </Text>
-        <Text selectable style={s.label}>
-          {supportEmail}
-        </Text>
-        <Text style={s.muted}>
-          Do not send passwords, verification codes, payment-card details, safe words, or the full
-          text of a suspicious message.
-        </Text>
-      </PolicySection>
-      <PolicySection title="Response and safety">
-        <Text style={s.body}>
-          Support is monitored on a best-effort basis and does not promise 24-hour coverage. For an
-          immediate threat, contact local emergency services.
-        </Text>
-      </PolicySection>
-    </PolicyLayout>
-  );
-}
-
 export function PrivacyScreen(): React.ReactElement {
   return (
     <PolicyLayout
@@ -169,9 +141,9 @@ export function TermsScreen(): React.ReactElement {
       </PolicySection>
       <PolicySection title="What the service does">
         <Text style={s.body}>
-          BoomerBuddy provides rules-based help for reviewing suspicious messages and choosing a
-          safer next step. Results can be incomplete or wrong and are not an emergency, legal, or
-          financial service.
+          BoomerBuddy provides guidance for reviewing suspicious messages and choosing a safer next
+          step. Results can be incomplete or wrong and are not an emergency, legal, or financial
+          service.
         </Text>
       </PolicySection>
       <PolicySection title="Safe use">
@@ -386,8 +358,8 @@ export function AccountDeletionScreen(): React.ReactElement {
                 Response due by: {new Date(receipt.dueAt).toLocaleString()}
               </Text>
               <Text style={s.muted}>
-                Keep this receipt ID. The status shows the request workflow and does not claim that
-                deletion is complete until it says completed.
+                Keep this receipt ID. The status shows where the request stands. Deletion is not
+                complete until the status says completed.
               </Text>
               <PolicyButton
                 title={busy === 'loading' ? 'Refreshing request status…' : 'Refresh request status'}

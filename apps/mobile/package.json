@@ -11,7 +11,9 @@
     "web": "expo start --web",
     "build": "expo export --platform web --output-dir dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "assets:check": "node ../../scripts/generate-mobile-assets.mjs --check",
+    "verify:distribution": "node ../../scripts/verify-mobile-distribution.mjs"
   },
   "dependencies": {
     "@boomerbuddy/contracts": "*",

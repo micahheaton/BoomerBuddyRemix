@@ -10,13 +10,13 @@ const steps = [
     key: 'protection_subject',
     title: 'Confirm identity, enrollment, and consent',
     detail:
-      'Confirm whose identity and safety plan this is. This review does not verify identity. The protected adult must hold an accepted self-enrollment; household administration or payment never substitutes for that person’s consent.',
+      'Confirm whose account and safety plan this is. BoomerBuddy does not verify identity. The protected adult must enroll and consent for themselves; managing or paying for the household does not replace their consent.',
   },
   {
     key: 'trusted_circle',
     title: 'Consent and Trusted Circle',
     detail:
-      'Invite only people you know. Review the exact person, sharing permission, and withdrawal path. Each pairwise permission requires acceptance and can be ended independently. Notifications for newly shared Checks are not available in this beta, so agree on a direct contact method instead.',
+      'Invite only people you know. Each person must accept their own sharing permission, and either person can end it. Sharing a Check does not notify them, so agree on how to contact each other.',
   },
   {
     key: 'safe_word',
@@ -26,7 +26,7 @@ const steps = [
   },
   {
     key: 'practice_check',
-    title: 'Practice the Check and sharing workflow',
+    title: 'Practice checking and sharing',
     detail:
       'Use a fictional scenario to practice pausing, putting the suspicious message or website address into Check, reading warning signs and limits, choosing a safe action, and sharing only the redacted result when you deliberately want help.',
   },
@@ -40,7 +40,7 @@ const steps = [
     key: 'review',
     title: 'Review the plan',
     detail:
-      'Confirm whose safety plan this is, consent choices, each person’s permissions, the agreed contact plan, safe-word choice, Check and sharing workflow, recovery contacts, and independent verification steps.',
+      "Confirm who the plan is for, each person's consent and sharing choices, how to contact one another, the safe word, recovery contacts, and how to verify urgent requests independently.",
   },
 ] as const;
 
@@ -147,10 +147,10 @@ export default function OrientationPage() {
         <span className="eyebrow">Guided setup</span>
         <h1 className="member-heading">Orientation unavailable in this household</h1>
         <section className="notice notice-warning">
-          <h2>Protected-adult enrollment required</h2>
+          <h2>Protected adult access required</h2>
           <p>
-            Self-orientation and safe-word setup require an active protected-adult enrollment.
-            Household administrator access alone does not grant these protected workflows.
+            Only an enrolled protected adult can complete orientation and set a safe word. Managing
+            or paying for the household does not replace that adult&apos;s consent.
           </p>
         </section>
       </main>
@@ -161,8 +161,8 @@ export default function OrientationPage() {
       <span className="eyebrow">Guided setup</span>
       <h1 className="member-heading">Orientation</h1>
       <p className="lede">
-        Six guided stages cover identity, protected-person consent, Trusted Circle sharing,
-        notification limits, a realistic Check, recovery, and product boundaries.
+        Six guided stages cover identity, consent, Trusted Circle sharing, a realistic Check,
+        recovery, and what BoomerBuddy can and cannot do.
       </p>
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
@@ -220,9 +220,9 @@ export default function OrientationPage() {
               <p>{step.detail}</p>
               {step.key === 'trusted_circle' ? (
                 <p className="help">
-                  Completing this stage records that you reviewed the consent model. It does not
-                  create a relationship, grant a permission, or send a notification; those actions
-                  remain explicit in Family.
+                  Marking this step complete only records that you reviewed it. Add or remove people
+                  and sharing permissions separately in Family. BoomerBuddy does not send a
+                  notification when you finish this step.
                 </p>
               ) : null}
               {!done && !isCurrent ? (
@@ -246,8 +246,8 @@ export default function OrientationPage() {
                     onChange={(event) => setPhrase(event.target.value)}
                   />
                   <p className="help">
-                    The phrase is normalized only in memory. The service stores a salted,
-                    memory-hard verifier, not the phrase, and never displays it back here.
+                    BoomerBuddy never stores the phrase itself. It stores only a one-way protected
+                    value used to check it later, and it never displays the phrase here.
                   </p>
                   <div className="button-row">
                     <button

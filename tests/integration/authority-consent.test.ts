@@ -26,6 +26,7 @@ async function createAuthorityHarness(): Promise<AuthorityHarness> {
       fingerprintKey: Buffer.alloc(32, 11),
       fingerprintKeyVersion: 1,
     },
+    'test',
     now,
   );
   return {

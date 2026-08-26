@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { analyzeCheck } from '@boomerbuddy/fraud';
 import { describe, expect, it } from 'vitest';
 import { checkDto, decisionFromAssessment } from '../../apps/api/src/mappers';
@@ -8,6 +8,17 @@ const repositoryRoot = resolve(import.meta.dirname, '../..');
 
 function source(path: string): string {
   return readFileSync(resolve(repositoryRoot, path), 'utf8');
+}
+
+function productionSourceFiles(path: string): string[] {
+  const absolute = resolve(repositoryRoot, path);
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = join(absolute, entry.name);
+    if (entry.isDirectory()) {
+      return productionSourceFiles(resolve(path, entry.name));
+    }
+    return /\.(?:ts|tsx)$/u.test(entry.name) ? [entryPath] : [];
+  });
 }
 
 describe('customer-facing production copy', () => {
@@ -129,9 +140,7 @@ describe('customer-facing production copy', () => {
     expect(memberHome).toContain("process.env.NODE_ENV !== 'production' ? (");
     expect(messaging).toContain("const localOnlyEnabled = process.env.NODE_ENV !== 'production';");
     expect(messaging).toContain('Messaging remains unavailable during this private beta.');
-    expect(memberFamily).toContain(
-      'New Trusted Circle invitations are not available in this private beta.',
-    );
+    expect(memberFamily).toContain('You cannot invite a new trusted person right now');
     expect(memberFamily).not.toContain('Exact invited Clerk customer subject');
     expect(memberFamily).not.toContain('Run 1 permission');
     expect(memberFamily).not.toContain('client-supplied');
@@ -139,6 +148,8 @@ describe('customer-facing production copy', () => {
     expect(orientation).not.toContain('Notifications are unavailable in this build');
     expect(mobile).not.toContain('Future escalation notifications (not implemented)');
     expect(mobile).not.toContain('Future guided orientation help (not implemented)');
+    expect(mobile).not.toContain('Rules-only analysis');
+    expect(mobile).not.toContain('memory-hard verifier');
     expect(hqSponsoredAccess).toContain('New sponsored enrollment is disabled');
     expect(hqSponsoredAccess).toContain('New invitations are disabled');
     expect(hqSponsoredAccess).not.toContain('Exact Clerk customer subject');
@@ -153,34 +164,27 @@ describe('customer-facing production copy', () => {
     expect(billing).toContain('Monthly charges are generally not refundable after billing');
     expect(billing).toContain('href="/billing-terms"');
     expect(billing).toContain('href="/support"');
+    expect(billing).toContain('View invoices or manage billing');
+    expect(billing).toContain('invoice history that Stripe has made available');
+    expect(billing).toContain('does not reconstruct unavailable provider records');
+    expect(billing).toContain('Review payment in secure billing');
+    expect(billing).toContain('additional payment confirmation is required');
+    expect(billing).toContain('not claiming that a charge, invoice, or receipt exists');
     expect(billing).not.toContain("checkoutState.replaceAll('_', ' ')");
     expect(success).not.toContain("checkoutState.replaceAll('_', ' ')");
     expect(success).not.toContain('canonical server state');
     expect(success).not.toContain('Payment evidence is still pending');
   });
 
-  it('keeps edited customer copy free of en and em dashes', () => {
-    const paths = [
-      'apps/web/src/app/check/page.tsx',
-      'apps/web/src/app/member/check/page.tsx',
-      'apps/web/src/app/member/family/page.tsx',
-      'apps/web/src/app/member/founding-household/page.tsx',
-      'apps/web/src/app/member/history/page.tsx',
-      'apps/web/src/app/member/messaging/page.tsx',
-      'apps/web/src/app/member/orientation/page.tsx',
-      'apps/web/src/app/sign-in/[[...sign-in]]/page.tsx',
-      'apps/web/src/app/trust/page.tsx',
-      'apps/web/src/app/billing-terms/page.tsx',
-      'apps/web/src/app/feedback/page.tsx',
-      'apps/web/src/app/layout.tsx',
-      'apps/web/src/app/page.tsx',
-      'apps/web/src/app/privacy/page.tsx',
-      'apps/web/src/components/member-shell.tsx',
-      'apps/mobile/src/feedback-screen.tsx',
-      'apps/mobile/src/policy-screens.tsx',
-      'apps/mobile/src/screens.tsx',
+  it('keeps all web, HQ, and mobile production source free of en and em dashes', () => {
+    const files = [
+      ...productionSourceFiles('apps/web/src'),
+      ...productionSourceFiles('apps/hq/src'),
+      ...productionSourceFiles('apps/mobile'),
     ];
 
-    expect(paths.map(source).join('\n')).not.toMatch(/[\u2013\u2014]/u);
+    expect(files.map((path) => readFileSync(path, 'utf8')).join('\n')).not.toMatch(
+      /[\u2013\u2014]/u,
+    );
   });
 });

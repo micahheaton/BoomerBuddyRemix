@@ -2,6 +2,8 @@ import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import process from 'node:process';
 
+const webIdentityUnavailableText = 'Member sign in is temporarily unavailable';
+
 const routes = [
   {
     name: 'HQ Founding Household',
@@ -19,6 +21,7 @@ const routes = [
       'Historical access only.',
       'This page cannot create, preview, or accept a new sponsored enrollment.',
     ],
+    unconfiguredText: webIdentityUnavailableText,
     forbiddenText: ['Managed-identity activation is blocked'],
   },
   {
@@ -26,6 +29,7 @@ const routes = [
     directory: resolve('apps/web/.next/server/app/member'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
     requiredText: ['Open selected-household feedback', 'Manage sponsored access'],
+    unconfiguredText: webIdentityUnavailableText,
   },
   {
     name: 'customer sign in',
@@ -37,7 +41,7 @@ const routes = [
       routeKey: '/sign-in/[[...sign-in]]/page',
       serverRoot: resolve('apps/web/.next/server'),
     },
-    unconfiguredText: 'Member sign in is temporarily unavailable',
+    unconfiguredText: webIdentityUnavailableText,
     requiredText: ['Sign in to BoomerBuddy'],
     forbiddenText: [
       'Private Founding Household beta',
@@ -46,10 +50,28 @@ const routes = [
     ],
   },
   {
+    name: 'unauthorized member sign in',
+    directory: resolve('apps/web/.next/server/app/sign-in'),
+    staticDirectory: resolve('apps/web/.next/static/chunks'),
+    dynamicRoute: {
+      appPathsManifest: resolve('apps/web/.next/server/app-paths-manifest.json'),
+      expectedEntry: 'app/sign-in/[[...sign-in]]/page.js',
+      routeKey: '/sign-in/[[...sign-in]]/page',
+      serverRoot: resolve('apps/web/.next/server'),
+    },
+    unconfiguredText: webIdentityUnavailableText,
+    requiredText: [
+      'This sign-in cannot continue here',
+      'Opening this page by itself does not prove that a session was revoked.',
+      'Try member sign in again',
+    ],
+  },
+  {
     name: 'member messaging',
     directory: resolve('apps/web/.next/server/app/member/messaging'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
     requiredText: 'Messaging is not activated',
+    unconfiguredText: webIdentityUnavailableText,
   },
   {
     name: 'HQ messaging support',
@@ -74,6 +96,7 @@ const routes = [
     directory: resolve('apps/web/.next/server/app/feedback'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
     requiredText: 'Feedback intake is not activated',
+    unconfiguredText: webIdentityUnavailableText,
     forbiddenText: ['Submit local feedback'],
   },
   {
@@ -81,6 +104,7 @@ const routes = [
     directory: resolve('apps/web/.next/server/app/member/feedback'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
     requiredText: ['Share a product observation.', 'Submit feedback'],
+    unconfiguredText: webIdentityUnavailableText,
     forbiddenText: ['Feedback intake is not activated', 'Submit local feedback'],
   },
   {
@@ -113,6 +137,18 @@ if (!['unconfigured_identity', 'configured_static'].includes(productionUiExpecta
   );
 }
 const identityUnavailableText = 'Production identity is unavailable.';
+const productionSignInPaths = [
+  '/sign-in',
+  '/sign-in/client-trust',
+  '/sign-in/sso-callback',
+  '/sign-in/oauth-callback',
+];
+const productionAuthPaths = [...productionSignInPaths, '/unauthorized-sign-in'];
+const unauthorizedRewriteTarget = '/sign-in/unauthorized-sign-in';
+const productionAuthRoutesOnly = process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY === 'true';
+if (process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY !== undefined && !productionAuthRoutesOnly) {
+  throw new Error('BB_PRODUCTION_AUTH_ROUTES_ONLY must be true when set');
+}
 
 function isMissing(error) {
   return typeof error === 'object' && error !== null && error.code === 'ENOENT';
@@ -178,9 +214,28 @@ async function collectTextFiles(directory, files) {
   }
 }
 
+async function compiledApplicationEntry(applicationRoute) {
+  const appPaths = JSON.parse(await readFile(applicationRoute.appPathsManifest, 'utf8'));
+  if (appPaths[applicationRoute.routeKey] !== applicationRoute.expectedEntry) {
+    throw new Error(
+      `Application route ${applicationRoute.routeKey} is absent from the app manifest`,
+    );
+  }
+  const compiledEntry = resolve(applicationRoute.serverRoot, applicationRoute.expectedEntry);
+  if (!compiledEntry.startsWith(`${applicationRoute.serverRoot}${sep}`)) {
+    throw new Error(`Application route ${applicationRoute.routeKey} escaped the server build root`);
+  }
+  if (!(await stat(compiledEntry)).isFile()) {
+    throw new Error(`Application route ${applicationRoute.routeKey} has no compiled entry`);
+  }
+  return compiledEntry;
+}
+
 async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
   const files = new Set();
   let dynamicArtifact = false;
+  const compiledEntry =
+    dynamicRoute === undefined ? undefined : await compiledApplicationEntry(dynamicRoute);
   for (const extension of ['html', 'rsc', 'body']) {
     const sibling = `${directory}.${extension}`;
     try {
@@ -202,17 +257,8 @@ async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
     if (dynamicRoute === undefined) {
       throw new Error(`No generated HTML/RSC body was found under ${directory}`);
     }
-    const appPaths = JSON.parse(await readFile(dynamicRoute.appPathsManifest, 'utf8'));
-    if (appPaths[dynamicRoute.routeKey] !== dynamicRoute.expectedEntry) {
-      throw new Error(`Dynamic route ${dynamicRoute.routeKey} is absent from the app manifest`);
-    }
-    const compiledEntry = resolve(dynamicRoute.serverRoot, dynamicRoute.expectedEntry);
-    if (!compiledEntry.startsWith(`${dynamicRoute.serverRoot}${sep}`)) {
-      throw new Error(`Dynamic route ${dynamicRoute.routeKey} escaped the server build root`);
-    }
-    if (!(await stat(compiledEntry)).isFile()) {
-      throw new Error(`Dynamic route ${dynamicRoute.routeKey} has no compiled entry`);
-    }
+    if (compiledEntry === undefined)
+      throw new Error(`No compiled route was found under ${directory}`);
     const artifacts = new Set([compiledEntry]);
     await collectGeneratedJavaScript(directory, artifacts);
     generatedBody = (
@@ -253,6 +299,89 @@ async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
   );
   const combined = [generatedBody, ...chunks].join('\n');
   return { combined, generatedBody: dynamicArtifact ? combined : generatedBody };
+}
+
+async function verifyProductionAuthRouteResolution() {
+  const routesManifest = JSON.parse(
+    await readFile(resolve('apps/web/.next/routes-manifest.json'), 'utf8'),
+  );
+  const signInRoute = routesManifest.dynamicRoutes?.find(
+    (route) => route.page === '/sign-in/[[...sign-in]]',
+  );
+  if (signInRoute === undefined || typeof signInRoute.regex !== 'string') {
+    throw new Error('The production sign-in catch-all is absent from the routes manifest');
+  }
+  const signInRegex = new RegExp(signInRoute.regex);
+  for (const path of productionSignInPaths) {
+    if (!signInRegex.test(path)) {
+      throw new Error(`The production sign-in catch-all does not resolve ${path}`);
+    }
+  }
+
+  const rewrites = routesManifest.rewrites ?? {};
+  const rewriteRules = [
+    ...(rewrites.beforeFiles ?? []),
+    ...(rewrites.afterFiles ?? []),
+    ...(rewrites.fallback ?? []),
+  ];
+  const unauthorizedRewrite = rewriteRules.find(
+    (rule) =>
+      rule.source === '/unauthorized-sign-in' && rule.destination === unauthorizedRewriteTarget,
+  );
+  if (
+    unauthorizedRewrite === undefined ||
+    typeof unauthorizedRewrite.regex !== 'string' ||
+    !new RegExp(unauthorizedRewrite.regex).test('/unauthorized-sign-in')
+  ) {
+    throw new Error(
+      'The production unauthorized sign-in rewrite is absent from the routes manifest',
+    );
+  }
+
+  const redirectRules = routesManifest.redirects ?? [];
+  for (const path of productionAuthPaths) {
+    const redirect = redirectRules.find(
+      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
+    );
+    if (redirect !== undefined) {
+      throw new Error(`Production auth path ${path} unexpectedly matches a redirect`);
+    }
+  }
+  for (const path of productionSignInPaths) {
+    const rewrite = rewriteRules.find(
+      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
+    );
+    if (rewrite !== undefined) {
+      throw new Error(`Production sign-in path ${path} unexpectedly matches a rewrite`);
+    }
+  }
+  const unauthorizedMatches = rewriteRules.filter(
+    (rule) =>
+      typeof rule.regex === 'string' && new RegExp(rule.regex).test('/unauthorized-sign-in'),
+  );
+  if (unauthorizedMatches.length !== 1 || unauthorizedMatches[0] !== unauthorizedRewrite) {
+    throw new Error('The production unauthorized sign-in path has an ambiguous rewrite');
+  }
+  if (!signInRegex.test(unauthorizedRewriteTarget)) {
+    throw new Error(
+      'The production unauthorized sign-in rewrite target is not an application route',
+    );
+  }
+  const targetTransfer = [...redirectRules, ...rewriteRules].find(
+    (rule) =>
+      typeof rule.regex === 'string' && new RegExp(rule.regex).test(unauthorizedRewriteTarget),
+  );
+  if (targetTransfer !== undefined) {
+    throw new Error('The production unauthorized sign-in rewrite target is not terminal');
+  }
+}
+
+await verifyProductionAuthRouteResolution();
+if (productionAuthRoutesOnly) {
+  process.stdout.write(
+    'Production auth paths resolve to compiled application routes without redirect/rewrite loops; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
+  );
+  process.exit(0);
 }
 
 for (const route of routes) {
@@ -337,6 +466,6 @@ for (const value of [
 
 process.stdout.write(
   productionUiExpectation === 'unconfigured_identity'
-    ? 'Production route bodies and dynamic artifacts fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
-    : 'Configured production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
+    ? 'Production auth paths resolve to compiled application routes without redirect/rewrite loops, route bodies and dynamic artifacts fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
+    : 'Production auth paths resolve to compiled application routes without redirect/rewrite loops, configured production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
 );

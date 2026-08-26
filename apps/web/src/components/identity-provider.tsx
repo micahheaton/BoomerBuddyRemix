@@ -1,3 +1,4 @@
+import { canonicalPublicOrigin } from '@boomerbuddy/config/exact-origin';
 import { ClerkProvider } from '@clerk/nextjs';
 
 export function IdentityProvider({ children }: { children: React.ReactNode }) {
@@ -5,9 +6,9 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
 
   if (process.env.NODE_ENV !== 'production') return children;
 
-  const publicOrigin = process.env.BB_PUBLIC_ORIGIN;
+  const publicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true);
   if (!publishableKey || !publicOrigin) {
-    return <main role="alert">Production identity is unavailable.</main>;
+    return <main role="alert">Member sign in is temporarily unavailable.</main>;
   }
 
   return (

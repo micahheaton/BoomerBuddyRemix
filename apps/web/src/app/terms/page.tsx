@@ -18,10 +18,10 @@ export default function TermsPage() {
       </PolicySection>
       <PolicySection title="What the service does">
         <p>
-          BoomerBuddy offers educational, rules-based assistance for examining suspicious messages
-          and choosing a calmer next step. Results can be incomplete or wrong. The service is not a
-          bank, law firm, law-enforcement agency, credit bureau, emergency service, or guarantee
-          that material is safe or fraudulent.
+          BoomerBuddy offers educational guidance for reviewing suspicious messages and choosing a
+          calmer next step. Results can be incomplete or wrong. The service is not a bank, law firm,
+          law-enforcement agency, credit bureau, emergency service, or guarantee that material is
+          safe or fraudulent.
         </p>
       </PolicySection>
       <PolicySection title="Safe and acceptable use">

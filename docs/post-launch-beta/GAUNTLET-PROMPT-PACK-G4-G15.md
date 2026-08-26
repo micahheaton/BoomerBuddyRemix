@@ -6,7 +6,7 @@ Evidence baseline: 2026-08-24
 
 Audited release: `9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf`
 
-These prompts complete the pack. Each is standalone. Work only in the saved project, use synthetic data, preserve customer/HQ separation, keep Check from fetching submitted URLs, and keep Family at USD 14.99 monthly as the only production offer. `OFFER-HYPOTHESIS-REGISTRY.md` controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only; no prompt may move one into production configuration, customer copy, live provider resources, or external action. Keep payment web-first while mobile P0 continues in parallel, use `net.boomerbuddy.app` unless a verified collision stops for the founder, keep Twilio disabled, and keep customer PII and secrets out of evidence.
+These prompts complete the pack. Each is standalone. Work only in the saved project, use synthetic data, preserve customer/HQ separation, keep Check from fetching submitted URLs, and keep Family at USD 14.99 monthly as the sole approved production offer candidate, which is not live. `OFFER-HYPOTHESIS-REGISTRY.md` controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only; no prompt may move one into production configuration, customer copy, live provider resources, or external action. Keep payment web-first while mobile P0 continues in parallel, use `net.boomerbuddy.app` unless a verified collision stops for the founder, keep Twilio disabled, and keep customer PII and secrets out of evidence.
 
 ## G4 - Mobile auth, device, and native safety readiness
 

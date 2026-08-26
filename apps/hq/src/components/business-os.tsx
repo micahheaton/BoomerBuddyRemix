@@ -74,16 +74,16 @@ const opportunityStages: OpportunityStage[] = [
 
 const segmentLabels = {
   under_10k: 'Under 10,000 members',
-  '10k_50k': '10,000–49,999 members',
-  '50k_250k': '50,000–249,999 members',
+  '10k_50k': '10,000-49,999 members',
+  '50k_250k': '50,000-249,999 members',
   '250k_plus': '250,000+ members',
 } as const;
 
 const autonomyLabels: Record<AutonomyClass, string> = {
-  auto: 'AUTO — bounded execution',
-  approval: 'APPROVAL — owner decision required',
-  human: 'HUMAN — assigned person performs the work',
-  professional: 'PROFESSIONAL — qualified specialist required',
+  auto: 'AUTO - bounded execution',
+  approval: 'APPROVAL - owner decision required',
+  human: 'HUMAN - assigned person performs the work',
+  professional: 'PROFESSIONAL - qualified specialist required',
 };
 
 const integerFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -663,7 +663,7 @@ function OpportunityPipeline() {
               <div className="card-heading-row">
                 <div>
                   <EvidenceLabel>
-                    {opportunity.stale ? 'Stale — decision needed' : 'Current'}
+                    {opportunity.stale ? 'Stale - decision needed' : 'Current'}
                   </EvidenceLabel>
                   <h2>{opportunity.name}</h2>
                   <p className="source">
@@ -1379,7 +1379,7 @@ function AutonomyControls() {
           <div className={`kill-switch-state ${enabled ? 'is-enabled' : 'is-disabled'}`}>
             <strong>
               {!globalControlKnown
-                ? 'Global control unknown — HQ is fail-closed'
+                ? 'Global control unknown - HQ is fail-closed'
                 : globalKillSwitchEngaged
                   ? 'Global kill switch overrides this draft'
                   : `Draft per-action kill switch: ${enabled ? 'cleared' : 'engaged'}`}

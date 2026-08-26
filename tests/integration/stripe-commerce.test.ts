@@ -154,6 +154,7 @@ function livePreflightFixture(path: string): Readonly<Record<string, unknown>> {
         subscription_update: { enabled: false, default_allowed_updates: [] },
         payment_method_update: { enabled: true },
         customer_update: { enabled: false, allowed_updates: [] },
+        invoice_history: { enabled: true },
       },
     };
   }
@@ -422,6 +423,7 @@ describe('Stripe live runtime boundary', () => {
               subscription_update: { enabled: false, default_allowed_updates: [] },
               payment_method_update: { enabled: true },
               customer_update: { enabled: false, allowed_updates: [] },
+              invoice_history: { enabled: true },
             },
           };
         }
@@ -1077,6 +1079,7 @@ describe('Stripe test-mode transaction path', () => {
               subscription_update: { enabled: false, default_allowed_updates: [] },
               payment_method_update: { enabled: true },
               customer_update: { enabled: false, allowed_updates: [] },
+              invoice_history: { enabled: true },
             },
           };
         }
@@ -1330,6 +1333,7 @@ describe('Stripe test-mode transaction path', () => {
             subscription_update: { enabled: false, default_allowed_updates: [] },
             payment_method_update: { enabled: true },
             customer_update: { enabled: false, allowed_updates: [] },
+            invoice_history: { enabled: true },
           },
         };
       }
@@ -1623,6 +1627,7 @@ describe('Stripe test-mode transaction path', () => {
           subscription_update: { enabled: false, default_allowed_updates: [] },
           payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
         },
       };
     });
@@ -1649,6 +1654,7 @@ describe('Stripe test-mode transaction path', () => {
         readonly evidence_digest: string;
         readonly evidence_level: string;
         readonly portal_mutation_controls_exact: boolean;
+        readonly portal_invoice_history_enabled: boolean;
         readonly retention_coupon_evidence: string;
         readonly runtime_run_id: string;
         readonly transport_kind: string;
@@ -1656,6 +1662,7 @@ describe('Stripe test-mode transaction path', () => {
     >(
       `SELECT evidence_level, evidence_digest, transport_kind, runtime_run_id,
               authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
+              portal_invoice_history_enabled,
               account_charges_enabled, account_payouts_enabled, account_country,
               account_business_type
        FROM commerce_stripe_preflight_records
@@ -1674,6 +1681,7 @@ describe('Stripe test-mode transaction path', () => {
         account_country: null,
         account_business_type: null,
         portal_mutation_controls_exact: true,
+        portal_invoice_history_enabled: true,
         retention_coupon_evidence: 'manual_founder_browser_required',
       });
       expect(receipt.runtime_run_id).toMatch(/^api-/u);
@@ -3662,7 +3670,7 @@ describe('Stripe test-mode transaction path', () => {
     expect(state.rows[0]).toMatchObject({ lifecycle: 'pending', provider_records: 0, grants: 0 });
   });
 
-  it('quarantines ambiguous invoices and does not truncate paid-through access on early failure', async () => {
+  it('records finalization attention and preserves paid-through access through payment recovery', async () => {
     const cookie = await login(app, 'owner-alice');
     const checkout = await app.inject({
       method: 'POST',
@@ -3732,11 +3740,16 @@ describe('Stripe test-mode transaction path', () => {
     vi.mocked(transport.get).mockClear();
 
     clock.advance(1_000);
-    const sendInvoiceEvent = async (id: string, type: string, object: Record<string, unknown>) => {
+    const sendInvoiceEvent = async (
+      id: string,
+      type: string,
+      object: Record<string, unknown>,
+      eventCreated = Math.floor(clock.now().getTime() / 1_000),
+    ) => {
       const rawBody = JSON.stringify({
         id,
         type,
-        created: Math.floor(clock.now().getTime() / 1_000),
+        created: eventCreated,
         livemode: false,
         api_version: apiVersion,
         data: { object },
@@ -3763,15 +3776,36 @@ describe('Stripe test-mode transaction path', () => {
         object: 'invoice',
         subscription: 'sub_invoice_policy_fixture',
       },
+      created - 1,
     );
     expect(ambiguous.statusCode).toBe(202);
-    expect(ambiguous.json()).toMatchObject({ application: 'quarantined' });
+    expect(ambiguous.json()).toMatchObject({
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
     await runReconciliation(database, transport, clock.now);
     expect(transport.get).not.toHaveBeenCalled();
     const held = await database.query<
-      { lifecycle: string; status: string; error_code: string } & Record<string, unknown>
+      {
+        lifecycle: string;
+        status: string;
+        application_state: string;
+        error_code: string;
+        active_grants: number;
+        recovery_events: number;
+        attention_items: number;
+      } & Record<string, unknown>
     >(
-      `SELECT subscription.lifecycle, inbox.status, inbox.error_code
+      `SELECT subscription.lifecycle, inbox.status, inbox.application_state, inbox.error_code,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants,
+              (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events recovery
+               WHERE recovery.source_inbox_id = inbox.id
+                 AND recovery.recovery_state = 'attention') AS recovery_events,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.source_id = inbox.id
+                 AND attention.attention_kind = 'billing_reconciliation') AS attention_items
        FROM commerce_subscriptions subscription
        JOIN commerce_event_inbox inbox ON inbox.external_event_id = 'evt_invoice_finalization_failed'
        WHERE subscription.id = $1`,
@@ -3779,23 +3813,233 @@ describe('Stripe test-mode transaction path', () => {
     );
     expect(held.rows[0]).toMatchObject({
       lifecycle: 'active',
-      status: 'quarantined',
-      error_code: 'stripe.event_not_allowlisted',
+      status: 'processed',
+      application_state: 'ignored',
+      error_code: 'provider.reconciled_from_snapshot',
+      active_grants: 1,
+      recovery_events: 1,
+      attention_items: 1,
+    });
+    const terminalAttentionRun = await database.query<
+      { readonly id: string; readonly trigger_event_id: string } & Record<string, unknown>
+    >(
+      `SELECT run.id, run.trigger_event_id
+       FROM commerce_reconciliation_runs run
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_failed'`,
+    );
+    await expect(
+      new CommerceOperationsRepository(
+        database,
+        Buffer.alloc(32, 11),
+        1,
+      ).claimProviderReconciliationAutomaticAttempt({
+        id: terminalAttentionRun.rows[0]?.id ?? 'missing-run',
+        inboxId: terminalAttentionRun.rows[0]?.trigger_event_id ?? 'missing-inbox',
+        provider: 'stripe',
+        environment: 'test',
+        repairGeneration: 0,
+        now: clock.now(),
+      }),
+    ).resolves.toEqual({ kind: 'already_terminal', terminalState: 'attention' });
+    const finalizationStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(finalizationStatus.statusCode).toBe(200);
+    expect(finalizationStatus.json()).toMatchObject({
+      billing: {
+        canonicalAccessActive: true,
+        recoveryReason: 'invoice_finalization_failed',
+      },
+    });
+    const finalizationReplay = await sendInvoiceEvent(
+      'evt_invoice_finalization_failed',
+      'invoice.finalization_failed',
+      {
+        id: 'in_finalization_failed_fixture',
+        object: 'invoice',
+        subscription: 'sub_invoice_policy_fixture',
+      },
+      created - 1,
+    );
+    expect(finalizationReplay.statusCode).toBe(202);
+    expect(finalizationReplay.json()).toMatchObject({
+      duplicate: true,
+      application: 'reconciliation_queued',
+    });
+    await runReconciliation(database, transport, clock.now);
+    expect(transport.get).not.toHaveBeenCalled();
+    const finalizationReplayCounts = await database.query<
+      { recovery_events: number; attention_items: number } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events
+          WHERE provider_invoice_id = 'in_finalization_failed_fixture') AS recovery_events,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE dedupe_key = 'billing_invoice_finalization_' ||
+            (SELECT id FROM commerce_event_inbox
+             WHERE external_event_id = 'evt_invoice_finalization_failed')) AS attention_items`,
+    );
+    expect(finalizationReplayCounts.rows[0]).toEqual({ recovery_events: 1, attention_items: 1 });
+
+    clock.advance(1_000);
+    vi.mocked(transport.get).mockClear();
+    const paidThenFinalization = await sendInvoiceEvent(
+      'evt_invoice_finalization_after_paid',
+      'invoice.finalization_failed',
+      {
+        id: 'in_invoice_policy_initial',
+        object: 'invoice',
+        subscription: 'sub_invoice_policy_fixture',
+      },
+    );
+    expect(paidThenFinalization.statusCode).toBe(202);
+    const crashedJobs = new DurableJobRepository(database);
+    const crashedClaim = await crashedJobs.claim({
+      workerId: 'stripe-reconciliation-crashed-worker',
+      jobTypes: ['commerce.reconcile'],
+      limit: 1,
+      leaseDurationMs: 30_000,
+      now: clock.now(),
+    });
+    const crashedJob = crashedClaim[0];
+    expect(crashedJob?.type).toBe('commerce.reconcile');
+    if (crashedJob === undefined) throw new Error('Missing crash-window reconciliation job');
+    await expect(
+      crashedJobs.beginConsumerReceipt({
+        consumerKey: 'job-handler:commerce.reconcile:v1',
+        idempotencyKey: crashedJob.idempotencyKey,
+        jobId: crashedJob.id,
+        workerId: 'stripe-reconciliation-crashed-worker',
+        leaseDurationMs: 30_000,
+        now: clock.now(),
+      }),
+    ).resolves.toBe('acquired');
+    const crashedHandler = createStripeReconciliationHandler({
+      businessOs: new BusinessOsRepository(database),
+      commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+      commerceRuntime: new CommerceRuntimeRepository(database),
+      jobs: crashedJobs,
+      provider: new StripeTestAdapter(
+        transport,
+        { authorize: async () => ({ allowed: false, reason: 'test_worker' }) },
+        new Set(),
+        apiVersion,
+      ),
+      clock: clock.now,
+    });
+    await expect(
+      crashedHandler({
+        job: crashedJob,
+        idempotencyKey: crashedJob.idempotencyKey,
+        signal: new AbortController().signal,
+        heartbeat: async () => true,
+      }),
+    ).resolves.toBeUndefined();
+    expect(transport.get).not.toHaveBeenCalled();
+
+    const crashedState = await database.query<
+      {
+        automatic_attempt_count: number;
+        job_state: string;
+        recovery_state: string;
+        run_state: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT run.state AS run_state, run.automatic_attempt_count,
+              job.state AS job_state, recovery.recovery_state
+       FROM commerce_reconciliation_runs run
+       JOIN durable_jobs job
+         ON job.idempotency_key = ('stripe-reconcile:test:' || run.trigger_event_id)
+       JOIN commerce_stripe_invoice_recovery_events recovery
+         ON recovery.source_inbox_id = run.trigger_event_id
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_after_paid'`,
+    );
+    expect(crashedState.rows[0]).toMatchObject({
+      run_state: 'completed',
+      automatic_attempt_count: 1,
+      job_state: 'running',
+      recovery_state: 'resolved',
+    });
+
+    clock.advance(30_001);
+    const restartedJobs = new DurableJobRepository(database);
+    const restartedWorker = new PortableWorker(
+      restartedJobs,
+      new OutboxDeliveryRepository(database),
+      {
+        'commerce.reconcile': createStripeReconciliationHandler({
+          businessOs: new BusinessOsRepository(database),
+          commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+          commerceRuntime: new CommerceRuntimeRepository(database),
+          jobs: restartedJobs,
+          provider: new StripeTestAdapter(
+            transport,
+            { authorize: async () => ({ allowed: false, reason: 'test_worker' }) },
+            new Set(),
+            apiVersion,
+          ),
+          clock: clock.now,
+        }),
+      },
+      undefined,
+      {
+        workerId: 'stripe-reconciliation-restarted-worker',
+        pollIntervalMs: 100,
+        leaseDurationMs: 30_000,
+        heartbeatIntervalMs: 5_000,
+        shutdownTimeoutMs: 1_000,
+        batchSize: 10,
+        retryBaseMs: 100,
+        retryMaxMs: 1_000,
+      },
+      createLogger({ level: 'error', sink: () => undefined, clock: clock.now }),
+      clock.now,
+    );
+    await restartedWorker.runOnce();
+    await restartedWorker.stop();
+    expect(transport.get).not.toHaveBeenCalled();
+    const restartedState = await database.query<
+      {
+        automatic_attempt_count: number;
+        budget_attention: number;
+        finalization_attention: number;
+        job_state: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT run.automatic_attempt_count, job.state AS job_state,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.dedupe_key =
+                 ('billing_reconciliation_transport_' || run.trigger_event_id)
+                 AND attention.state IN ('open','snoozed')) AS budget_attention,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.dedupe_key =
+                 ('billing_invoice_finalization_' || run.trigger_event_id)
+                 AND attention.state IN ('open','snoozed')) AS finalization_attention
+       FROM commerce_reconciliation_runs run
+       JOIN durable_jobs job
+         ON job.idempotency_key = ('stripe-reconcile:test:' || run.trigger_event_id)
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_after_paid'`,
+    );
+    expect(restartedState.rows[0]).toEqual({
+      automatic_attempt_count: 1,
+      budget_attention: 0,
+      finalization_attention: 0,
+      job_state: 'succeeded',
     });
 
     clock.advance(1_000);
+    let failedAttemptCount = 1;
+    let failedPaymentIntentStatus: 'requires_action' | 'requires_payment_method' =
+      'requires_action';
     vi.mocked(transport.get).mockImplementation(async ({ path }) => {
-      if (
-        path === '/v1/invoices/in_payment_failed_fixture' ||
-        path === '/v1/invoices/in_payment_failed_repeat_fixture'
-      ) {
-        const repeated = path.endsWith('in_payment_failed_repeat_fixture');
-        const invoiceId = repeated
-          ? 'in_payment_failed_repeat_fixture'
-          : 'in_payment_failed_fixture';
-        const paymentIntentId = repeated
-          ? 'pi_payment_failed_repeat_fixture'
-          : 'pi_payment_failed_fixture';
+      if (path === '/v1/invoices/in_payment_action_required_fixture') {
+        const invoiceId = 'in_payment_action_required_fixture';
+        const paymentIntentId = 'pi_payment_action_required_fixture';
         return {
           id: invoiceId,
           object: 'invoice',
@@ -3812,7 +4056,7 @@ describe('Stripe test-mode transaction path', () => {
           discounts: [],
           pre_payment_credit_notes_amount: 0,
           post_payment_credit_notes_amount: 0,
-          attempt_count: 1,
+          attempt_count: failedAttemptCount,
           parent: { subscription_details: { subscription: 'sub_invoice_policy_fixture' } },
           payments: {
             object: 'list',
@@ -3839,7 +4083,7 @@ describe('Stripe test-mode transaction path', () => {
             has_more: false,
             data: [
               {
-                id: repeated ? 'il_payment_failed_repeat_fixture' : 'il_payment_failed_fixture',
+                id: 'il_payment_action_required_fixture',
                 object: 'line_item',
                 amount: 1499,
                 currency: 'usd',
@@ -3868,17 +4112,12 @@ describe('Stripe test-mode transaction path', () => {
           },
         };
       }
-      if (
-        path === '/v1/payment_intents/pi_payment_failed_fixture' ||
-        path === '/v1/payment_intents/pi_payment_failed_repeat_fixture'
-      ) {
+      if (path === '/v1/payment_intents/pi_payment_action_required_fixture') {
         return {
-          id: path.endsWith('pi_payment_failed_repeat_fixture')
-            ? 'pi_payment_failed_repeat_fixture'
-            : 'pi_payment_failed_fixture',
+          id: 'pi_payment_action_required_fixture',
           object: 'payment_intent',
           livemode: false,
-          status: 'requires_payment_method',
+          status: failedPaymentIntentStatus,
         };
       }
       if (path === '/v1/subscriptions/sub_invoice_policy_fixture') {
@@ -3886,14 +4125,49 @@ describe('Stripe test-mode transaction path', () => {
       }
       return {};
     });
-    const paymentFailed = await sendInvoiceEvent(
-      'evt_invoice_payment_failed',
-      'invoice.payment_failed',
-      { id: 'in_payment_failed_fixture', object: 'invoice' },
+    const paymentActionRequired = await sendInvoiceEvent(
+      'evt_invoice_payment_action_required',
+      'invoice.payment_action_required',
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
     );
-    expect(paymentFailed.statusCode).toBe(202);
-    expect(paymentFailed.json()).toMatchObject({ application: 'reconciliation_queued' });
+    expect(paymentActionRequired.statusCode).toBe(202);
+    expect(paymentActionRequired.json()).toMatchObject({
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const duplicateActionRequired = await sendInvoiceEvent(
+      'evt_invoice_payment_action_required',
+      'invoice.payment_action_required',
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
+    );
+    expect(duplicateActionRequired.statusCode).toBe(202);
+    expect(duplicateActionRequired.json()).toMatchObject({
+      duplicate: true,
+      application: 'reconciliation_queued',
+    });
     await runReconciliation(database, transport, clock.now);
+    const actionRequiredReconciliation = await database.query<
+      {
+        readonly application_state: string;
+        readonly error_code: string | null;
+        readonly failure_code: string | null;
+        readonly reconciliation_state: string;
+        readonly status: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT inbox.status, inbox.application_state, inbox.error_code,
+              run.state AS reconciliation_state, run.failure_code
+       FROM commerce_event_inbox inbox
+       JOIN commerce_reconciliation_runs run ON run.trigger_event_id = inbox.id
+       WHERE inbox.external_event_id = 'evt_invoice_payment_action_required'`,
+    );
+    expect(actionRequiredReconciliation.rows[0]).toMatchObject({
+      status: 'processed',
+      application_state: 'ignored',
+      error_code: 'provider.reconciled_from_snapshot',
+      reconciliation_state: 'completed',
+      failure_code: null,
+    });
     const grace = await database.query<
       { lifecycle: string; current_period_ends_at: unknown; active_grants: number } & Record<
         string,
@@ -3921,7 +4195,7 @@ describe('Stripe test-mode transaction path', () => {
     >(
       `SELECT event_kind, paid_through_at, grace_starts_at, grace_ends_at
        FROM commerce_stripe_dunning_events
-       WHERE provider_invoice_id = 'in_payment_failed_fixture'`,
+       WHERE provider_invoice_id = 'in_payment_action_required_fixture'`,
     );
     expect(dunning.rows[0]?.event_kind).toBe('opened');
     expect(new Date(String(dunning.rows[0]?.paid_through_at)).toISOString()).toBe(
@@ -3954,16 +4228,16 @@ describe('Stripe test-mode transaction path', () => {
               provider_invoice_line_id, provider_subscription_item_id,
               provider_product_id, line_proration, period_starts_at, period_ends_at
        FROM commerce_stripe_failed_invoice_evidence
-       WHERE provider_invoice_id = 'in_payment_failed_fixture'`,
+       WHERE provider_invoice_id = 'in_payment_action_required_fixture'`,
     );
     expect(failedProof.rows[0]).toMatchObject({
       amount_due: 1499,
       currency: 'usd',
       quantity: 1,
       attempt_count: 1,
-      failure_status: 'requires_payment_method',
-      provider_invoice_payment_id: 'inpay_in_payment_failed_fixture',
-      provider_invoice_line_id: 'il_payment_failed_fixture',
+      failure_status: 'requires_action',
+      provider_invoice_payment_id: 'inpay_in_payment_action_required_fixture',
+      provider_invoice_line_id: 'il_payment_action_required_fixture',
       provider_subscription_item_id: 'si_invoice_policy_fixture',
       provider_product_id: 'prod_family_fixture',
       line_proration: false,
@@ -3974,12 +4248,22 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(failedProof.rows[0]?.period_ends_at)).toISOString()).toBe(
       new Date((created + 30 * 86_400) * 1_000).toISOString(),
     );
+    const actionRequiredStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(actionRequiredStatus.json()).toMatchObject({
+      billing: { recoveryReason: 'payment_action_required' },
+    });
 
     clock.advance(1_000);
+    failedAttemptCount = 2;
+    failedPaymentIntentStatus = 'requires_payment_method';
     const repeatFailure = await sendInvoiceEvent(
       'evt_invoice_payment_failed_repeat',
       'invoice.payment_failed',
-      { id: 'in_payment_failed_repeat_fixture', object: 'invoice' },
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
     );
     expect(repeatFailure.statusCode).toBe(202);
     await runReconciliation(database, transport, clock.now);
@@ -4000,12 +4284,63 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(repeatedDunning.rows[0]?.current_period_ends_at)).toISOString()).toBe(
       new Date((created + 33 * 86_400) * 1_000).toISOString(),
     );
+    const attemptEvidence = await database.query<
+      { attempt_count: number; failure_status: string; source_event: string } & Record<
+        string,
+        unknown
+      >
+    >(
+      `SELECT failed.attempt_count, failed.failure_status,
+              inbox.external_event_id AS source_event
+       FROM commerce_stripe_failed_invoice_evidence failed
+       JOIN commerce_event_inbox inbox ON inbox.id = failed.source_inbox_id
+       WHERE failed.provider_invoice_id = 'in_payment_action_required_fixture'
+       ORDER BY failed.attempt_count`,
+    );
+    expect(attemptEvidence.rows).toEqual([
+      {
+        attempt_count: 1,
+        failure_status: 'requires_action',
+        source_event: 'evt_invoice_payment_action_required',
+      },
+      {
+        attempt_count: 2,
+        failure_status: 'requires_payment_method',
+        source_event: 'evt_invoice_payment_failed_repeat',
+      },
+    ]);
+    const failedStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(failedStatus.json()).toMatchObject({
+      billing: { recoveryReason: 'payment_failed' },
+    });
+    const billingRuntime = new CommerceRuntimeRepository(database);
+    const billingActor = await billingRuntime.resolveActor({
+      householdId: 'household-sunrise',
+      personId: 'person-owner-alice',
+      now: clock.now(),
+    });
+    const afterGraceStatus = await billingRuntime.stripeBillingStatus({
+      actor: billingActor,
+      environment: 'test',
+      runtimeInitiationPermitted: true,
+      runtimePortalPermitted: true,
+      now: new Date((created + 33 * 86_400) * 1_000 + 1),
+    });
+    expect(afterGraceStatus).toMatchObject({
+      canonicalAccessActive: false,
+      portalAvailable: true,
+      recoveryReason: 'payment_failed',
+    });
 
     clock.advance(1_000);
     vi.mocked(transport.get).mockImplementation(async ({ path }) => {
-      if (path === '/v1/invoices/in_paid_fixture') {
+      if (path === '/v1/invoices/in_finalization_failed_fixture') {
         return {
-          id: 'in_paid_fixture',
+          id: 'in_finalization_failed_fixture',
           object: 'invoice',
           livemode: false,
           status: 'paid',
@@ -4033,7 +4368,7 @@ describe('Stripe test-mode transaction path', () => {
                 id: 'inpay_paid_fixture',
                 object: 'invoice_payment',
                 livemode: false,
-                invoice: 'in_paid_fixture',
+                invoice: 'in_finalization_failed_fixture',
                 payment: { type: 'payment_intent', payment_intent: 'pi_paid_fixture' },
                 status: 'paid',
                 is_default: true,
@@ -4093,7 +4428,7 @@ describe('Stripe test-mode transaction path', () => {
       return {};
     });
     const paid = await sendInvoiceEvent('evt_invoice_paid', 'invoice.paid', {
-      id: 'in_paid_fixture',
+      id: 'in_finalization_failed_fixture',
       object: 'invoice',
     });
     expect(paid.statusCode).toBe(202);
@@ -4134,11 +4469,11 @@ describe('Stripe test-mode transaction path', () => {
     );
     expect(dunningAudit.rows.map((row) => row.event_kind).sort()).toEqual(['opened', 'recovered']);
     expect(new Set(dunningAudit.rows.map((row) => row.dunning_window_key))).toEqual(
-      new Set(['in_payment_failed_fixture']),
+      new Set(['in_payment_action_required_fixture']),
     );
     expect(
       dunningAudit.rows.find((row) => row.event_kind === 'recovered')?.provider_invoice_id,
-    ).toBe('in_paid_fixture');
+    ).toBe('in_finalization_failed_fixture');
     for (const audit of dunningAudit.rows) {
       expect(new Date(String(audit.paid_through_at)).toISOString()).toBe(
         new Date((created + 30 * 86_400) * 1_000).toISOString(),
@@ -4147,6 +4482,414 @@ describe('Stripe test-mode transaction path', () => {
         new Date((created + 33 * 86_400) * 1_000).toISOString(),
       );
     }
+    const resolvedFinalization = await database.query<
+      {
+        readonly attention_state: string;
+        readonly recovery_rows: number;
+        readonly recovery_state: string;
+        readonly resolved_at: unknown;
+        readonly source_inbox_id: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT recovery.source_inbox_id, recovery.recovery_state,
+              attention.state AS attention_state, attention.resolved_at,
+              (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events exact_recovery
+               WHERE exact_recovery.source_inbox_id = recovery.source_inbox_id) AS recovery_rows
+       FROM commerce_stripe_invoice_recovery_events recovery
+       JOIN commerce_event_inbox inbox ON inbox.id = recovery.source_inbox_id
+       JOIN owner_attention_items attention ON attention.source_id = recovery.source_inbox_id
+        AND attention.dedupe_key =
+          ('billing_invoice_finalization_' || recovery.source_inbox_id)
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_failed'`,
+    );
+    expect(resolvedFinalization.rows[0]).toMatchObject({
+      attention_state: 'resolved',
+      recovery_rows: 1,
+      recovery_state: 'attention',
+    });
+    expect(resolvedFinalization.rows[0]?.resolved_at).not.toBeNull();
+    const recoveryInboxId = resolvedFinalization.rows[0]?.source_inbox_id;
+    if (recoveryInboxId === undefined) throw new Error('Missing finalization recovery inbox');
+    const recoveryClosureEvidence = {
+      providerInvoiceId: 'in_finalization_failed_fixture',
+      externalSubscriptionId: 'sub_invoice_policy_fixture',
+      providerSubscriptionItemId: 'si_invoice_policy_fixture',
+      providerInvoiceLineId: 'il_paid_fixture',
+      providerInvoicePaymentId: 'inpay_paid_fixture',
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: 'pi_paid_fixture',
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountPaid: 1499 as const,
+      amountRemaining: 0 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      discountAmount: 0 as const,
+      taxAmount: 0 as const,
+      invoiceDiscountsEmpty: true as const,
+      invoiceTaxesEmpty: true as const,
+      invoiceCreditsEmpty: true as const,
+      providerPaidAt: clock.now(),
+      currentPeriodStartsAt: new Date(created * 1_000),
+      currentPeriodEndsAt: new Date((created + 30 * 86_400) * 1_000),
+    };
+    const recoveryClosure = new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1);
+    for (const staleState of ['snoozed', 'open'] as const) {
+      await database.query(
+        `INSERT INTO owner_attention_items(
+           id, attention_kind, source_type, source_id, dedupe_key, why_founder_required,
+           recommended_action, consequence_of_inaction, deadline, state, created_at, updated_at
+         ) VALUES ($1,'billing_reconciliation','commerce_event',$2,$3,$4,$5,$6,NULL,$7,$8,$8)`,
+        [
+          `attention-stale-finalization-${staleState}`,
+          recoveryInboxId,
+          `billing_invoice_finalization_${recoveryInboxId}`,
+          'A concurrent finalization worker had already selected unpaid recovery evidence.',
+          'No action is required after exact paid evidence commits.',
+          'The post-commit closure must resolve this stale operational projection.',
+          staleState,
+          clock.now().toISOString(),
+        ],
+      );
+      await expect(
+        recoveryClosure.resolveStripeInvoiceFinalizationAttentionFromPaidEvidence({
+          environment: 'test',
+          householdId: 'household-sunrise',
+          subscriptionId,
+          evidence: recoveryClosureEvidence,
+          now: clock.now(),
+        }),
+      ).resolves.toBe(1);
+    }
+    const closedConcurrentAttention = await database.query<
+      {
+        readonly active_grants: number;
+        readonly open_attention: number;
+        readonly recovery_rows: number;
+        readonly resolved_attention: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events
+          WHERE source_inbox_id = $1) AS recovery_rows,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE source_id = $1 AND dedupe_key = ('billing_invoice_finalization_' || $1)
+            AND state IN ('open','snoozed')) AS open_attention,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE source_id = $1 AND dedupe_key = ('billing_invoice_finalization_' || $1)
+            AND state = 'resolved') AS resolved_attention,
+         (SELECT count(*)::int FROM entitlement_grants
+          WHERE subscription_id = $2 AND revoked_at IS NULL) AS active_grants`,
+      [recoveryInboxId, subscriptionId],
+    );
+    expect(closedConcurrentAttention.rows[0]).toEqual({
+      recovery_rows: 1,
+      open_attention: 0,
+      resolved_attention: 3,
+      active_grants: 1,
+    });
+    const recoveredBillingStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(recoveredBillingStatus.statusCode).toBe(200);
+    expect(recoveredBillingStatus.json().billing).not.toHaveProperty('recoveryReason');
+  });
+
+  it('keeps exact paid invoice evidence dominant across failure ordering and a stale-read late commit', async () => {
+    const cookie = await login(app, 'owner-alice');
+    const checkout = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        cookie,
+        origin: customerOrigin,
+        'x-bb-household-id': 'household-sunrise',
+        'idempotency-key': 'checkout_paid_dominates_failure_0001',
+      },
+      payload: { offerId: 'founding_family_monthly_v1' },
+    });
+    const subscriptionId = checkout.json<{ checkout: { canonicalSubscriptionId: string } }>()
+      .checkout.canonicalSubscriptionId;
+    const created = Math.floor(clock.now().getTime() / 1_000);
+    const periodStartsAt = new Date(created * 1_000);
+    const periodEndsAt = new Date((created + 30 * 86_400) * 1_000);
+    const externalSubscriptionId = 'sub_paid_dominates_failure';
+    const providerSubscriptionItemId = 'si_paid_dominates_failure';
+    await activateCompletedCheckoutWithPaidInvoice({
+      app,
+      database,
+      transport,
+      now: clock.now,
+      canonicalSubscriptionId: subscriptionId,
+      externalSubscriptionId,
+      providerCustomerId: 'cus_paid_dominates_failure',
+      fixtureKey: 'paid_dominates_failure',
+      periodStart: created,
+      periodEnd: created + 30 * 86_400,
+    });
+
+    const commerce = new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1);
+    let eventSequence = 0;
+    const captureSource = async (
+      eventType: 'invoice.paid' | 'invoice.payment_failed',
+      providerInvoiceId: string,
+      observedAt: Date,
+    ) => {
+      eventSequence += 1;
+      return commerce.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `evt_exact_invoice_order_${String(eventSequence)}`,
+        eventType,
+        rawPayload: JSON.stringify({ eventType, providerInvoiceId, eventSequence }),
+        providerApiVersion: apiVersion,
+        providerObjectId: providerInvoiceId,
+        providerEventCreatedAt: observedAt,
+        evidenceTier: 'local_fixture',
+        transportKind: 'injected_fixture',
+        transportLivemode: false,
+        runtimeRunId: 'exact-invoice-order-test',
+        now: observedAt,
+      });
+    };
+    const captureSnapshot = async (observedAt: Date) => {
+      eventSequence += 1;
+      return commerce.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        eventType: 'subscription.reconciliation',
+        rawPayload: JSON.stringify({ externalSubscriptionId, eventSequence }),
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        normalizedLifecycle: 'active',
+        evidenceTier: 'local_fixture',
+        transportKind: 'injected_fixture',
+        transportLivemode: false,
+        runtimeRunId: 'exact-invoice-order-test',
+        now: observedAt,
+      });
+    };
+    const paidEvidence = (providerInvoiceId: string, observedAt: Date) => ({
+      providerInvoiceId,
+      externalSubscriptionId,
+      providerSubscriptionItemId,
+      providerInvoiceLineId: `il_${providerInvoiceId}`,
+      providerInvoicePaymentId: `inpay_${providerInvoiceId}`,
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: `pi_${providerInvoiceId}`,
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountPaid: 1499 as const,
+      amountRemaining: 0 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      discountAmount: 0 as const,
+      taxAmount: 0 as const,
+      invoiceDiscountsEmpty: true as const,
+      invoiceTaxesEmpty: true as const,
+      invoiceCreditsEmpty: true as const,
+      providerPaidAt: observedAt,
+      currentPeriodStartsAt: periodStartsAt,
+      currentPeriodEndsAt: periodEndsAt,
+    });
+    const failedEvidence = (providerInvoiceId: string) => ({
+      providerInvoiceId,
+      externalSubscriptionId,
+      providerSubscriptionItemId,
+      providerInvoiceLineId: `il_${providerInvoiceId}`,
+      providerInvoicePaymentId: `inpay_${providerInvoiceId}`,
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: `pi_${providerInvoiceId}`,
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountDue: 1499 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      attemptCount: 1,
+      failureStatus: 'requires_payment_method' as const,
+      lineProration: false as const,
+      currentPeriodStartsAt: periodStartsAt,
+      currentPeriodEndsAt: periodEndsAt,
+    });
+    const applyPaid = async (providerInvoiceId: string, observedAt: Date) => {
+      const [source, snapshot] = await Promise.all([
+        captureSource('invoice.paid', providerInvoiceId, observedAt),
+        captureSnapshot(observedAt),
+      ]);
+      const result = await commerce.applyProviderLifecycle({
+        inboxId: snapshot.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        householdId: 'household-sunrise',
+        subscriptionId,
+        externalSubscriptionId,
+        lifecycle: 'active',
+        currentPeriodStartsAt: periodStartsAt,
+        currentPeriodEndsAt: periodEndsAt,
+        accessEvidence: {
+          kind: 'payment_confirmed',
+          sourceInboxId: source.id,
+          evidence: paidEvidence(providerInvoiceId, observedAt),
+        },
+        authoritativeSnapshot: true,
+        now: observedAt,
+      });
+      await commerce.ignoreProviderEventAfterReconciliation({
+        inboxId: source.id,
+        now: observedAt,
+      });
+      return result;
+    };
+    const applyFailed = async (
+      sourceInboxId: string,
+      evidence: ReturnType<typeof failedEvidence>,
+      observedAt: Date,
+    ) => {
+      const snapshot = await captureSnapshot(observedAt);
+      const result = await commerce.applyProviderLifecycle({
+        inboxId: snapshot.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        householdId: 'household-sunrise',
+        subscriptionId,
+        externalSubscriptionId,
+        lifecycle: 'delinquent',
+        currentPeriodStartsAt: periodStartsAt,
+        currentPeriodEndsAt: periodEndsAt,
+        accessEvidence: { kind: 'payment_failed', sourceInboxId, evidence },
+        authoritativeSnapshot: true,
+        now: observedAt,
+      });
+      await commerce.ignoreProviderEventAfterReconciliation({
+        inboxId: sourceInboxId,
+        now: observedAt,
+      });
+      return result;
+    };
+
+    clock.advance(1_000);
+    const failureFirstAt = clock.now();
+    const failureFirstInvoice = 'in_failure_before_paid';
+    const failureFirstSource = await captureSource(
+      'invoice.payment_failed',
+      failureFirstInvoice,
+      failureFirstAt,
+    );
+    await expect(
+      applyFailed(failureFirstSource.id, failedEvidence(failureFirstInvoice), failureFirstAt),
+    ).resolves.toMatchObject({ outcome: 'applied', lifecycle: 'grace' });
+    clock.advance(1_000);
+    await expect(applyPaid(failureFirstInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+
+    clock.advance(1_000);
+    const paidFirstInvoice = 'in_paid_before_failure';
+    await expect(applyPaid(paidFirstInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+    clock.advance(1_000);
+    const paidFirstFailureAt = clock.now();
+    const paidFirstFailureSource = await captureSource(
+      'invoice.payment_failed',
+      paidFirstInvoice,
+      paidFirstFailureAt,
+    );
+    await expect(
+      applyFailed(paidFirstFailureSource.id, failedEvidence(paidFirstInvoice), paidFirstFailureAt),
+    ).resolves.toMatchObject({ outcome: 'superseded', lifecycle: 'active' });
+
+    clock.advance(1_000);
+    const stalledInvoice = 'in_stalled_failure_before_paid_commit';
+    const staleReadAt = clock.now();
+    const staleFailureSource = await captureSource(
+      'invoice.payment_failed',
+      stalledInvoice,
+      staleReadAt,
+    );
+    const staleFailureEvidence = failedEvidence(stalledInvoice);
+    let releaseLateCommit: (() => void) | undefined;
+    const lateCommitGate = new Promise<void>((resolve) => {
+      releaseLateCommit = resolve;
+    });
+    const lateFailureCommit = (async () => {
+      await lateCommitGate;
+      return applyFailed(staleFailureSource.id, staleFailureEvidence, staleReadAt);
+    })();
+    clock.advance(1_000);
+    await expect(applyPaid(stalledInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+    releaseLateCommit?.();
+    await expect(lateFailureCommit).resolves.toMatchObject({
+      outcome: 'superseded',
+      lifecycle: 'active',
+    });
+
+    const state = await database.query<
+      {
+        readonly active_grants: number;
+        readonly failed_evidence: number;
+        readonly lifecycle: string;
+        readonly opened_dunning: number;
+        readonly paid_evidence: number;
+        readonly recovered_dunning: number;
+        readonly superseded_failures: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT subscription.lifecycle,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants,
+              (SELECT count(*)::int FROM commerce_stripe_paid_invoice_evidence paid
+               WHERE paid.subscription_id = subscription.id
+                 AND paid.provider_invoice_id IN (
+                   'in_failure_before_paid', 'in_paid_before_failure',
+                   'in_stalled_failure_before_paid_commit'
+                 )) AS paid_evidence,
+              (SELECT count(*)::int FROM commerce_stripe_failed_invoice_evidence failed
+               WHERE failed.subscription_id = subscription.id
+                 AND failed.provider_invoice_id IN (
+                   'in_failure_before_paid', 'in_paid_before_failure',
+                   'in_stalled_failure_before_paid_commit'
+                 )) AS failed_evidence,
+              (SELECT count(*)::int FROM commerce_stripe_dunning_events dunning
+               WHERE dunning.subscription_id = subscription.id
+                 AND dunning.event_kind = 'opened') AS opened_dunning,
+              (SELECT count(*)::int FROM commerce_stripe_dunning_events dunning
+               WHERE dunning.subscription_id = subscription.id
+                 AND dunning.event_kind = 'recovered') AS recovered_dunning,
+              (SELECT count(*)::int FROM commerce_event_inbox inbox
+               WHERE inbox.external_event_id LIKE 'reconciliation:exact-invoice-order:%'
+                 AND inbox.application_state = 'superseded') AS superseded_failures
+       FROM commerce_subscriptions subscription
+       WHERE subscription.household_id = 'household-sunrise' AND subscription.id = $1`,
+      [subscriptionId],
+    );
+    expect(state.rows[0]).toEqual({
+      lifecycle: 'active',
+      active_grants: 1,
+      paid_evidence: 3,
+      failed_evidence: 3,
+      opened_dunning: 1,
+      recovered_dunning: 1,
+      superseded_failures: 2,
+    });
   });
 
   it('reconciles a full refund and chargeback without treating partial evidence as cancellation', async () => {

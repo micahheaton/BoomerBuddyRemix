@@ -18,6 +18,7 @@ import {
   type AuthContext,
 } from '../auth';
 import type { ApiContext } from '../context';
+import { entitlementResponseDto, entitlementRuntimeDto } from '../entitlement-response';
 import { orientationDto } from '../mappers';
 
 const subjectQuerySchema = z.object({ subjectPersonId: opaqueIdSchema.optional() }).strict();
@@ -163,58 +164,64 @@ export function registerOrientationRoutes(app: FastifyInstance, context: ApiCont
         : entitlements.sources.find(
             (source) => source.subscription.id === primarySource.subscriptionId,
           );
-    return entitlementResponseSchema.parse({
-      subject: { kind: 'household', id: household.householdId },
-      capabilities: [...entitlements.capabilities],
-      grants: entitlements.grants.map((grant) => {
-        if (grant.planVersionId === undefined || grant.subscriptionId === undefined) {
-          throw new TypeError('Canonical commerce grant linkage is unavailable');
-        }
-        return {
-          id: grant.id,
-          source: grant.source,
-          startsAt: grant.startsAt.toISOString(),
-          ...(grant.endsAt === undefined ? {} : { endsAt: grant.endsAt.toISOString() }),
-          sourceVerified: grant.sourceVerified,
-          planVersionId: grant.planVersionId,
-          subscriptionId: grant.subscriptionId,
-          effective: entitlements.portfolio.contributingGrantIds.includes(grant.id),
-        };
-      }),
-      commerce: {
-        accessState: entitlements.portfolio.accessState,
-        primary:
-          primarySource === null || primaryRecord === undefined
-            ? null
-            : {
-                subscriptionId: primarySource.subscriptionId,
-                source: primarySource.source,
-                lifecycle: primarySource.lifecycle,
-                precedence: primarySource.precedence,
-                sourceVerified: primaryRecord.subscription.sourceVerified,
-                reconciliationState: primaryRecord.reconciliationState,
-                startsAt: primaryRecord.subscription.startsAt.toISOString(),
-                ...(primaryRecord.subscription.accessEndsAt === undefined
-                  ? {}
-                  : { accessEndsAt: primaryRecord.subscription.accessEndsAt.toISOString() }),
-                plan: {
-                  id: primaryRecord.plan.id,
-                  key: primaryRecord.plan.key,
-                  version: primaryRecord.plan.version,
-                  displayName: primaryRecord.plan.displayName,
-                  state: primaryRecord.planState,
-                  prices: primaryRecord.plan.prices.map((price) => ({ ...price })),
-                },
-              },
-        sources: entitlements.portfolio.sources.map((source) => ({
-          ...source,
-          contributingGrantIds: [...source.contributingGrantIds],
-        })),
-        allowances: entitlements.portfolio.allowances.map((allowance) => ({ ...allowance })),
-        mode: 'local_mock',
-        hypothesis: true,
-      },
-      environment: context.config.environment === 'test' ? 'test' : 'development',
-    });
+    const runtime = entitlementRuntimeDto(context.config.environment);
+    return entitlementResponseSchema.parse(
+      entitlementResponseDto(
+        {
+          subject: { kind: 'household', id: household.householdId },
+          capabilities: [...entitlements.capabilities],
+          grants: entitlements.grants.map((grant) => {
+            if (grant.planVersionId === undefined || grant.subscriptionId === undefined) {
+              throw new TypeError('Canonical commerce grant linkage is unavailable');
+            }
+            return {
+              id: grant.id,
+              source: grant.source,
+              startsAt: grant.startsAt.toISOString(),
+              ...(grant.endsAt === undefined ? {} : { endsAt: grant.endsAt.toISOString() }),
+              sourceVerified: grant.sourceVerified,
+              planVersionId: grant.planVersionId,
+              subscriptionId: grant.subscriptionId,
+              effective: entitlements.portfolio.contributingGrantIds.includes(grant.id),
+            };
+          }),
+          commerce: {
+            accessState: entitlements.portfolio.accessState,
+            primary:
+              primarySource === null || primaryRecord === undefined
+                ? null
+                : {
+                    subscriptionId: primarySource.subscriptionId,
+                    source: primarySource.source,
+                    lifecycle: primarySource.lifecycle,
+                    precedence: primarySource.precedence,
+                    sourceVerified: primaryRecord.subscription.sourceVerified,
+                    reconciliationState: primaryRecord.reconciliationState,
+                    startsAt: primaryRecord.subscription.startsAt.toISOString(),
+                    ...(primaryRecord.subscription.accessEndsAt === undefined
+                      ? {}
+                      : { accessEndsAt: primaryRecord.subscription.accessEndsAt.toISOString() }),
+                    plan: {
+                      id: primaryRecord.plan.id,
+                      key: primaryRecord.plan.key,
+                      version: primaryRecord.plan.version,
+                      displayName: primaryRecord.plan.displayName,
+                      state: primaryRecord.planState,
+                      prices: primaryRecord.plan.prices.map((price) => ({ ...price })),
+                    },
+                  },
+            sources: entitlements.portfolio.sources.map((source) => ({
+              ...source,
+              contributingGrantIds: [...source.contributingGrantIds],
+            })),
+            allowances: entitlements.portfolio.allowances.map((allowance) => ({ ...allowance })),
+            mode: runtime.mode,
+            hypothesis: runtime.hypothesis,
+          },
+          environment: runtime.environment,
+        },
+        context.config.environment,
+      ),
+    );
   });
 }

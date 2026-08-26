@@ -5,7 +5,9 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await signInCustomer(page);
   const localAccess = page.getByTestId('local-access-summary');
   await expect(localAccess).toContainText('Local access hypothesis');
-  await expect(localAccess).toContainText('This record describes your current household access');
+  await expect(localAccess).toContainText(
+    'The features you can use depend on this household, your role, and each person',
+  );
   await expect(localAccess).toContainText('Protected adults');
   await expect(localAccess).toContainText('Trusted Circle participants');
   await page.getByRole('link', { name: 'Check', exact: true }).click();

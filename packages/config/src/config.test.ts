@@ -1,5 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { assertStripeOnlineRuntimePermitted, loadConfig } from './index';
+
+const publishedDevelopmentSecretDefaults = {
+  artifactEncryptionKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  fingerprintKey: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+  safeWordPepper: 'local-safe-word-pepper-not-for-production',
+} as const;
 
 function developmentEnvironment(): NodeJS.ProcessEnv {
   return {
@@ -67,6 +74,11 @@ describe('typed configuration', () => {
       runtimeEnabled: false,
       edgeRateLimitConfirmed: false,
     });
+    expect(config.supportReceipts).toEqual({
+      customerAccessEnabled: false,
+      intakeEnabled: false,
+      hqQueueEnabled: false,
+    });
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
     expect(config.messaging).toEqual({
@@ -82,6 +94,21 @@ describe('typed configuration', () => {
     const environment = developmentEnvironment();
     delete environment.BB_SEED_DEMO;
     expect(loadConfig(environment).database.seedDemo).toBe(false);
+  });
+
+  it('keeps the published development secret defaults usable outside production', () => {
+    const config = loadConfig({
+      ...developmentEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: publishedDevelopmentSecretDefaults.artifactEncryptionKey,
+      BB_FINGERPRINT_KEY_BASE64: publishedDevelopmentSecretDefaults.fingerprintKey,
+      BB_SAFE_WORD_PEPPER: publishedDevelopmentSecretDefaults.safeWordPepper,
+    });
+
+    expect(config.secrets.artifactEncryptionKey).toEqual(Buffer.alloc(32));
+    expect(config.secrets.fingerprintKey).toEqual(Buffer.alloc(32, 1));
+    expect(config.secrets.safeWordPepper.toString('utf8')).toBe(
+      publishedDevelopmentSecretDefaults.safeWordPepper,
+    );
   });
 
   it('keeps access-intent mutation off unless runtime and independent edge evidence are explicit', () => {
@@ -104,6 +131,29 @@ describe('typed configuration', () => {
         BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: 'true',
       }).accessIntents,
     ).toEqual({ runtimeEnabled: true, edgeRateLimitConfirmed: true });
+  });
+
+  it('keeps support receipts off by default and refuses unattended intake', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: 'true',
+      }).supportReceipts,
+    ).toEqual({ customerAccessEnabled: true, intakeEnabled: false, hqQueueEnabled: false });
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: 'true',
+      }),
+    ).toThrow('requires customer history and the HQ queue');
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: 'true',
+        BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: 'true',
+        BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED: 'true',
+      }).supportReceipts,
+    ).toEqual({ customerAccessEnabled: true, intakeEnabled: true, hqQueueEnabled: true });
   });
 
   it('requires an explicit bounded trusted-proxy hop count', () => {
@@ -166,6 +216,76 @@ describe('typed configuration', () => {
         DATABASE_URL: 'postgresql://test.invalid/database?sslmode=verify-full',
       }).database,
     ).toMatchObject({ driver: 'postgres' });
+  });
+
+  it.each([
+    ['BB_ARTIFACT_KEY_BASE64', publishedDevelopmentSecretDefaults.artifactEncryptionKey],
+    ['BB_FINGERPRINT_KEY_BASE64', publishedDevelopmentSecretDefaults.fingerprintKey],
+    ['BB_SAFE_WORD_PEPPER', publishedDevelopmentSecretDefaults.safeWordPepper],
+  ] as const)('refuses the exact published production default for %s', (name, value) => {
+    expect(() => loadConfig({ ...productionEnvironment(), [name]: value })).toThrow(
+      `published .env.example default for ${name}`,
+    );
+  });
+
+  it.each([
+    ['BB_ARTIFACT_KEY_BASE64', publishedDevelopmentSecretDefaults.artifactEncryptionKey],
+    ['BB_FINGERPRINT_KEY_BASE64', publishedDevelopmentSecretDefaults.fingerprintKey],
+  ] as const)('rejects the published key material for %s after decoding', (name, value) => {
+    expect(() =>
+      loadConfig({ ...productionEnvironment(), [name]: value.replace(/=+$/u, '') }),
+    ).toThrow(`published .env.example default for ${name}`);
+  });
+
+  it('accepts exact-value near misses for otherwise valid production material', () => {
+    const artifactEncryptionKey = Buffer.from(
+      publishedDevelopmentSecretDefaults.artifactEncryptionKey,
+      'base64',
+    );
+    const fingerprintKey = Buffer.from(publishedDevelopmentSecretDefaults.fingerprintKey, 'base64');
+    artifactEncryptionKey[artifactEncryptionKey.byteLength - 1] = 1;
+    fingerprintKey[fingerprintKey.byteLength - 1] = 2;
+
+    const config = loadConfig({
+      ...productionEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: artifactEncryptionKey.toString('base64'),
+      BB_FINGERPRINT_KEY_BASE64: fingerprintKey.toString('base64'),
+      BB_SAFE_WORD_PEPPER: `${publishedDevelopmentSecretDefaults.safeWordPepper}-rotated`,
+    });
+
+    expect(config.secrets.artifactEncryptionKey.equals(artifactEncryptionKey)).toBe(true);
+    expect(config.secrets.fingerprintKey.equals(fingerprintKey)).toBe(true);
+    expect(config.secrets.safeWordPepper.toString('utf8')).toBe(
+      `${publishedDevelopmentSecretDefaults.safeWordPepper}-rotated`,
+    );
+  });
+
+  it('accepts freshly generated valid production secret material', () => {
+    const artifactEncryptionKey = randomBytes(32);
+    const fingerprintKey = randomBytes(32);
+    artifactEncryptionKey[0] = 2;
+    fingerprintKey[0] = 3;
+    const safeWordPepper = `production-${randomBytes(24).toString('base64url')}`;
+
+    const config = loadConfig({
+      ...productionEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: artifactEncryptionKey.toString('base64'),
+      BB_FINGERPRINT_KEY_BASE64: fingerprintKey.toString('base64'),
+      BB_SAFE_WORD_PEPPER: safeWordPepper,
+    });
+
+    expect(config.secrets.artifactEncryptionKey.equals(artifactEncryptionKey)).toBe(true);
+    expect(config.secrets.fingerprintKey.equals(fingerprintKey)).toBe(true);
+    expect(config.secrets.safeWordPepper.equals(Buffer.from(safeWordPepper, 'utf8'))).toBe(true);
+  });
+
+  it('continues to refuse development session signing material in production', () => {
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_SESSION_SECRET: 'unused-production-session-secret-value',
+      }),
+    ).toThrow('unused development session signing material');
   });
 
   it.each([
@@ -238,12 +358,6 @@ describe('typed configuration', () => {
         BB_CLERK_HQ_JWT_KEY: productionEnvironment().BB_CLERK_CUSTOMER_JWT_KEY,
       }),
     ).toThrow('verification keys must be distinct');
-    expect(() =>
-      loadConfig({
-        ...productionEnvironment(),
-        BB_SESSION_SECRET: 'unused-production-session-secret-value',
-      }),
-    ).toThrow('unused development session signing material');
     expect(() =>
       loadConfig({
         ...productionEnvironment(),

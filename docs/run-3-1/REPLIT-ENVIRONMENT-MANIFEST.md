@@ -52,7 +52,7 @@ additional set, or any altered inventory or lock metadata remains a hard failure
 
 | Variable                            | Purpose                                                    | Secret? | Source / example                                              | Services                 | Requirement, default, and failure behavior                                                                                                                     |
 | ----------------------------------- | ---------------------------------------------------------- | ------- | ------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BB_PUBLIC_ORIGIN`                  | Exact browser-visible origin and mutation-origin authority | No      | published app URL, e.g. `https://customer.example.replit.app` | W or H, different values | Required HTTPS origin with no path/query/credentials. Missing/invalid makes the same-origin API proxy return 503 and the identity provider render unavailable. |
+| `BB_PUBLIC_ORIGIN`                  | Exact browser-visible origin and mutation-origin authority | No      | published app URL, e.g. `https://customer.example.replit.app` | W or H, different values | Required public HTTPS origin with no path/query/credentials/wildcard. Build and start normalize only safe equivalents such as a root slash, host casing, IDN spelling, and the default port, then pass that one canonical origin to Clerk and the API proxy. Missing/unsafe returns no-store 503 or stops before spawn; an incoming authority mismatch returns no-store 421 before Clerk. |
 | `BB_API_INTERNAL_ORIGIN`            | Exact upstream API origin for server proxy                 | No      | API published URL, e.g. `https://api.example.replit.app`      | W/H                      | Required HTTPS origin with no path/query/credentials. Missing/invalid returns private no-store 503.                                                            |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Select the correct browser Clerk application               | No      | customer or HQ `pk_live_...`                                  | W/H                      | Required in production; customer and HQ values come from separate Clerk apps. At build, the reviewed Next config aliases Replit-managed `CLERK_PUBLISHABLE_KEY` when this name is absent. |
 | `CLERK_SECRET_KEY`                  | Clerk Next.js server/middleware credential                 | Yes     | matching Clerk production application                         | W/H                      | Required only in the matching project. Missing makes every matched production request return no-store 503. Never prefix with `NEXT_PUBLIC_`.                   |
@@ -60,22 +60,40 @@ additional set, or any altered inventory or lock metadata remains a hard failure
 | `NEXT_PUBLIC_API_URL`               | Legacy local direct API target                             | No      | not set                                                       | none in production       | Production client uses same-origin `/api`; omit.                                                                                                               |
 | `EXPO_PUBLIC_API_URL`               | Mobile direct API target                                   | No      | not set                                                       | none                     | Mobile is outside Run 3.1 deployment.                                                                                                                          |
 
-The web and HQ proxies pass the exact configured `/sign-in` path into Clerk's server middleware and
-forward only the exact `__session` cookie plus a small header allowlist. They
-discard legacy BoomerBuddy session cookies and Authorization. The API independently verifies issuer,
-authorized party, signature, time, subject, provider session, and state. Customer tokens may omit
-`aud` only under ADR 0030; an explicit customer `aud` must match. HQ always requires its exact
-audience and bounded factor age.
+The web and HQ proxies require the raw Host and the complete Next-derived
+`X-Forwarded-Host/Port/Proto` authority tuple to resolve to the same canonical `BB_PUBLIC_ORIGIN`.
+They reject partial or crossed authority tuples and any raw `Forwarded` header before Clerk without
+constructing a redirect from untrusted request metadata. They then pass the exact configured
+`/sign-in` path and canonical public origin into Clerk's server middleware and forward only the exact
+`__session` cookie plus a small header allowlist. They discard legacy BoomerBuddy session cookies and
+Authorization. The API independently verifies issuer, authorized party, signature, time, subject,
+provider session, and state. Customer tokens may omit `aud` only under ADR 0030; an explicit customer
+`aud` must match. HQ always requires its exact audience and bounded factor age.
 
-HQ's only application-level liveness exception is the observed direct Replit Autoscale GET/HEAD
-homepage probe. It requires `REPLIT_DEPLOYMENT=1`, the canonical automatic listener `PORT`, an
+The matching Customer Clerk production instance uses this exact application-path contract:
+
+- Application Home URL: `https://app.boomerbuddy.net/member`.
+- Unauthorized sign-in URL: `https://app.boomerbuddy.net/unauthorized-sign-in`.
+- Self-hosted sign-in component URL: `https://app.boomerbuddy.net/sign-in`, backed by the Next
+  catch-all route `/sign-in/[[...sign-in]]` and `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`.
+- Account Portal fallback after customer sign-in: `https://app.boomerbuddy.net/member`.
+
+Keep the existing root-domain Clerk infrastructure, including `accounts.boomerbuddy.net` and the
+reviewed Clerk Frontend API or OAuth callback domain. These hosts are identity-provider
+infrastructure, not the separate legacy `BoomerBuddy` Replit project. Do not point any Customer
+application path or fallback at legacy `boomerbuddy.net`. Record provider screenshots without user
+records, email addresses, session identifiers, keys, or other PII. A local build proves only route
+generation; it does not prove Clerk configuration or a hydrated sign-in flow.
+
+The only incoming-authority exception is the observed direct Replit Autoscale GET/HEAD homepage
+probe. It requires `REPLIT_DEPLOYMENT=1`, the canonical automatic listener `PORT`, an
 exact canonical mapped `127.0.0.1:<port>` raw Host and the Next-normalized listener URL, no query,
 either the complete exact Next-derived loopback `X-Forwarded-For/Host/Port/Proto` tuple or complete
 absence of all four headers, and no raw `Forwarded` header. Mixed forwarding shapes fail closed. The
 exception runs only after the matching Clerk publishable and secret keys are present. The response is
-fixed content-free, no-store text with restrictive browser headers. External `/`, every operator
-route, and all `/api` paths remain behind the separate HQ Clerk middleware; near-match probes fail
-closed.
+fixed content-free, no-store text with restrictive browser headers on both web and HQ. External HQ
+`/`, every HQ operator route, and all HQ `/api` paths remain behind the separate HQ Clerk middleware;
+near-match probes fail closed on both applications.
 
 ## API and worker application configuration
 
@@ -86,7 +104,7 @@ closed.
 | `BB_TRUSTED_PROXY_HOPS`                     | Fastify proxy trust count                                           | No                                   | founder: `0`                                          | A/K/M                         | Production requires exactly `0` until deployed spoof-resistance evidence establishes another value; any nonzero value refuses config.                  |
 | `BB_DATABASE_DRIVER`                        | Customer truth database                                             | No                                   | founder: `postgres`                                   | A/K/M                         | Production requires `postgres`; PGlite refuses startup.                                                                                                |
 | `DATABASE_URL`                              | PostgreSQL connection                                               | Yes                                  | Replit DB; `postgresql://.../db?sslmode=verify-full`  | A/K/M; B uses separate target | Required, PostgreSQL scheme, one database, and exactly one `sslmode=require`, `verify-ca`, or `verify-full`. Use pooled runtime URLs for A/K and the direct migration URL for M; missing or downgrade modes refuse config. |
-| `BB_POSTGRES_POOL_MAX`                      | Per-process PostgreSQL connection cap                               | No                                   | A: `2`; K: `1`; M: `1`                               | A/K/M                         | Required explicitly in production; integer 1–10. Development/test default 10 when omitted. The initial 0.25-CU beta must use the listed caps so pressure queues in Node instead of consuming PostgreSQL backend memory. |
+| `BB_POSTGRES_POOL_MAX`                      | Per-process PostgreSQL connection cap                               | No                                   | A: `2`; K: `1`; M: `1`                               | A/K/M                         | Required explicitly in production; integer 1-10. Development/test default 10 when omitted. The initial 0.25-CU beta must use the listed caps so pressure queues in Node instead of consuming PostgreSQL backend memory. |
 | `BB_RUN_MIGRATIONS`                         | Runtime migration switch                                            | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; API/worker startup refuses `true`. The controlled `db:migrate` command still explicitly runs migrations.                  |
 | `BB_SEED_DEMO`                              | Demo seed switch                                                    | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; `true` refuses config.                                                                                                    |
 | `BB_ALLOW_DEV_IDENTITY`                     | Development issuer switch                                           | No                                   | founder: `false`                                      | A/K/M                         | Production requires `false`; `true` refuses config.                                                                                                    |
@@ -101,12 +119,12 @@ closed.
 | `BB_CLERK_HQ_ISSUER`                        | Exact HQ token issuer                                               | No                                   | HQ Clerk Frontend API HTTPS origin                    | A/K/M                         | Required and distinct from customer.                                                                                                                   |
 | `BB_CLERK_HQ_AUDIENCE`                      | Exact HQ token audience                                             | No                                   | `boomerbuddy-hq`                                      | A/K/M                         | Required and distinct from customer.                                                                                                                   |
 | `BB_CLERK_HQ_JWT_KEY`                       | Offline HQ JWT verification                                         | Public key, protect config integrity | HQ Clerk PEM public key                               | A/K/M                         | Required and distinct from customer.                                                                                                                   |
-| `BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS` | Bound fresh HQ MFA and token issue age                              | No                                   | `600`                                                 | A/K/M                         | Optional schema default 600; allowed 60–3600. Missing MFA/factor-age or stale token denies HQ.                                                         |
+| `BB_CLERK_HQ_MAX_SECOND_FACTOR_AGE_SECONDS` | Bound fresh HQ MFA and token issue age                              | No                                   | `600`                                                 | A/K/M                         | Optional schema default 600; allowed 60-3600. Missing MFA/factor-age or stale token denies HQ.                                                         |
 | `BB_ARTIFACT_KEY_BASE64`                    | AES key for encrypted submitted/minimized application records       | Yes                                  | distinct canonical base64 of 32 random bytes          | A/K/M                         | Required; wrong length/noncanonical/reused secret refuses config. Never rotate without a reviewed data migration.                                      |
 | `BB_FINGERPRINT_KEY_BASE64`                 | Keyed fingerprints, evidence binding, and nonreversible identifiers | Yes                                  | separate canonical base64 of 32 random bytes          | A/K/M                         | Required; wrong length/noncanonical/equal to another secret refuses config.                                                                            |
 | `BB_SAFE_WORD_PEPPER`                       | Safe-word verifier hardening                                        | Yes                                  | separate high-entropy string, 16+ characters          | A/K/M                         | Required and distinct. Missing/short/equal secret refuses config.                                                                                      |
 | `BB_LOG_LEVEL`                              | Structured log threshold                                            | No                                   | `info`                                                | A/K/M                         | Optional default `info`; only `debug`, `info`, `warn`, `error`. Do not use debug with customer traffic.                                                |
-| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | default `disabled`; reviewed rollout `live`           | A/K                           | Live is production-capable only with the complete surface-specific manifest below. Disabled mode refuses every Stripe field.                           |
+| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | default `disabled`; future reviewed rollout `live`    | A/K                           | Live is not currently production-capable. Disabled mode refuses every Stripe field, and a future candidate must close the catalog, entitlement, and complete surface-specific manifest gates below. |
 | `BB_TWILIO_MODE`                            | Messaging network boundary                                          | No                                   | `disabled`                                            | A/K/M                         | Only `disabled` parses; all Twilio credential/URL fields are refused.                                                                                  |
 
 `BB_SESSION_SECRET` is intentionally **absent** in production. Supplying it refuses startup because
@@ -139,21 +157,21 @@ nonproduction evidence and cannot be mixed with any live field.
 The initial 0.25-CU database capacity profile is API pool 2 plus worker pool 1/batch 1. A pooled Neon
 URL controls connection churn but does not replace these application-side active-work caps. SQLSTATE
 `53200` is a failed capacity gate and must not be hidden by immediate retry. Raise compute to at least
-0.5 CU (prefer bounded 0.5–1 CU autoscaling where available) if three fresh-database mixed-load runs
+0.5 CU (prefer bounded 0.5-1 CU autoscaling where available) if three fresh-database mixed-load runs
 cannot pass with these caps.
 
 ## Worker-only configuration
 
 | Variable                  | Purpose                            | Secret? | Source / example   | Services | Requirement, default, and failure behavior                                  |
 | ------------------------- | ---------------------------------- | ------- | ------------------ | -------- | --------------------------------------------------------------------------- |
-| `BB_WORKER_ID`            | Stable lease owner without content | No      | `run3-1-worker-01` | K        | Required, 2–200 safe identifier characters. Missing/invalid refuses worker. |
-| `BB_WORKER_POLL_MS`       | Poll interval                      | No      | `1000`             | K        | Optional default 1000; range 50–60000.                                      |
-| `BB_WORKER_LEASE_MS`      | Lease duration                     | No      | `30000`            | K        | Optional default 30000; range 5000–900000.                                  |
+| `BB_WORKER_ID`            | Stable lease owner without content | No      | `run3-1-worker-01` | K        | Required, 2-200 safe identifier characters. Missing/invalid refuses worker. |
+| `BB_WORKER_POLL_MS`       | Poll interval                      | No      | `1000`             | K        | Optional default 1000; range 50-60000.                                      |
+| `BB_WORKER_LEASE_MS`      | Lease duration                     | No      | `30000`            | K        | Optional default 30000; range 5000-900000.                                  |
 | `BB_WORKER_HEARTBEAT_MS`  | Lease heartbeat                    | No      | `10000`            | K        | Optional default 10000; must be less than half the lease duration.          |
-| `BB_WORKER_SHUTDOWN_MS`   | Graceful shutdown bound            | No      | `20000`            | K        | Optional default 20000; range 1000–120000.                                  |
-| `BB_WORKER_BATCH_SIZE`    | Per-cycle batch bound              | No      | production: `1`    | K        | Optional schema default 10; range 1–100. Set 1 for the initial 0.25-CU beta so claimed work matches the worker pool cap. |
-| `BB_WORKER_RETRY_BASE_MS` | Retry backoff base                 | No      | `1000`             | K        | Optional default 1000; range 100–60000.                                     |
-| `BB_WORKER_RETRY_MAX_MS`  | Retry backoff cap                  | No      | `300000`           | K        | Optional default 300000; range 1000–3600000.                                |
+| `BB_WORKER_SHUTDOWN_MS`   | Graceful shutdown bound            | No      | `20000`            | K        | Optional default 20000; range 1000-120000.                                  |
+| `BB_WORKER_BATCH_SIZE`    | Per-cycle batch bound              | No      | production: `1`    | K        | Optional schema default 10; range 1-100. Set 1 for the initial 0.25-CU beta so claimed work matches the worker pool cap. |
+| `BB_WORKER_RETRY_BASE_MS` | Retry backoff base                 | No      | `1000`             | K        | Optional default 1000; range 100-60000.                                     |
+| `BB_WORKER_RETRY_MAX_MS`  | Retry backoff cap                  | No      | `300000`           | K        | Optional default 300000; range 1000-3600000.                                |
 
 Production worker composition contains only reviewed internal jobs, including feedback retention and
 the bounded Stripe inventory/reconciliation handlers when the exact worker live manifest is present.

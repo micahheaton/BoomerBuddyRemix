@@ -422,10 +422,10 @@ export default function FamilyPage() {
           </div>
           {isProtectedMember && production ? (
             <section className="card" style={{ marginTop: '1rem' }}>
-              <h2>Inviting a new trusted person is not available</h2>
+              <h2>You cannot invite a new trusted person right now</h2>
               <p>
-                New Trusted Circle invitations are not available in this private beta. You can still
-                review existing relationships, cancel pending invitations, or revoke access above.
+                You can still review existing relationships, cancel a pending invitation, or remove
+                someone&apos;s access above.
               </p>
             </section>
           ) : isProtectedMember ? (

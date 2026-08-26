@@ -111,10 +111,10 @@ export default function HistoryPage() {
         <span className="eyebrow">History</span>
         <h1 className="member-heading">History unavailable in this household</h1>
         <section className="notice notice-warning">
-          <h2>No protected or explicitly shared history access</h2>
+          <h2>You do not have access to this history</h2>
           <p>
-            Your own history requires an active protected-adult enrollment. A Trusted Circle member
-            can read only results deliberately shared under an active permission.
+            An enrolled protected adult can see their own history. A Trusted Circle member can see
+            only the results that person deliberately shared with them.
           </p>
         </section>
       </main>
@@ -213,8 +213,9 @@ export default function HistoryPage() {
                     </button>
                   ) : (
                     <p className="meta">
-                      Only the check owner can delete this record. To leave shared access, withdraw
-                      from the pairwise relationship in <Link href="/member/family">Family</Link>.
+                      Only the person who created this Check can delete it. To stop seeing shared
+                      results, end the Trusted Circle connection in{' '}
+                      <Link href="/member/family">Family</Link>.
                     </p>
                   )}
                 </div>

@@ -10,3 +10,4 @@ export * from './identifiers';
 export * from './model';
 export * from './orientation';
 export * from './referral-credits';
+export * from './support-receipts';

@@ -87,7 +87,7 @@ export default function MemberHomePage() {
   );
 
   function allowanceSummary(label: string, allowance: typeof protectedAllowance): string {
-    if (!allowance) return `${label}: unavailable in the current access record.`;
+    if (!allowance) return `${label}: details are not available right now.`;
     const status =
       allowance.state === 'available'
         ? 'Available.'
@@ -97,7 +97,7 @@ export default function MemberHomePage() {
             ? 'Current use could not be confirmed.'
             : 'This allowance is not currently active.';
     if (allowance.used === null) {
-      return `${label}: current use unavailable; limit ${allowance.limit}. ${status}`;
+      return `${label}: we could not load current use. The limit is ${allowance.limit}. ${status}`;
     }
     return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} remaining. ${status}`;
   }
@@ -143,8 +143,8 @@ export default function MemberHomePage() {
               </Link>
             ) : (
               <p className="meta">
-                Checks require an active protected-adult enrollment in this household. Owner access
-                alone does not grant this protected workflow.
+                Only an enrolled protected adult can create a Check. Managing or paying for the
+                household does not give you access to another adult&apos;s Checks.
               </p>
             )}
           </section>
@@ -198,17 +198,13 @@ export default function MemberHomePage() {
           </section>
           {selectedHouseholdId ? (
             <section className="card">
-              <span className="dev-pill">
-                {process.env.NODE_ENV === 'production'
-                  ? 'Private beta · text only'
-                  : 'Local text-only path'}
-              </span>
+              <span className="dev-pill">Text feedback</span>
               <h2>Share feedback</h2>
               <p>
-                Record a product observation for this selected household. Media uploads and
-                automatic outbound follow-up are disabled.
+                Tell us what worked, what was confusing, or what went wrong. You can send text only,
+                and BoomerBuddy will not contact you by email or text automatically.
               </p>
-              <Link href="/member/feedback">Open selected-household feedback</Link>
+              <Link href="/member/feedback">Share feedback</Link>
             </section>
           ) : null}
           {process.env.NODE_ENV !== 'production' ? (
@@ -262,13 +258,13 @@ export default function MemberHomePage() {
             </span>
             <h2>{selectedEntitlements?.commerce.primary?.plan.displayName ?? 'Access details'}</h2>
             <p>
-              This record describes your current household access. Billing controls may be
-              unavailable for this household or your current role.
+              The features you can use depend on this household, your role, and each person&apos;s
+              consent. Billing controls are shown only to the person who manages billing.
             </p>
             {!selectedScope?.isBillingManager ? (
               <p className="meta">
-                Household plan totals are billing-manager-only. Your available actions still follow
-                the permissions for this selected household.
+                Only the person who manages billing can see household plan totals. You can still use
+                every feature your role and permissions allow.
               </p>
             ) : selectedEntitlements ? (
               <>
@@ -289,7 +285,7 @@ export default function MemberHomePage() {
                 in the actions above still apply.
               </p>
             ) : (
-              <p className="meta">Loading selected-household access details…</p>
+              <p className="meta">Loading access details...</p>
             )}
           </section>
         </div>

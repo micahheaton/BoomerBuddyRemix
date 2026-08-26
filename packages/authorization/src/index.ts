@@ -29,6 +29,9 @@ export const actions = [
   'orientation:view',
   'orientation:update',
   'entitlement:view',
+  'support_receipt:list',
+  'support_receipt:create',
+  'support_receipt:withdraw',
   'founding_household:view',
   'founding_household:accept',
   'founding_household:offboard',
@@ -36,6 +39,8 @@ export const actions = [
   'hq:households:list',
   'hq:reviews:list',
   'hq:support_queue:list',
+  'hq:support_receipts:read',
+  'hq:support_receipts:manage',
   'hq:review_queue:list',
   'hq:audit:list',
   'hq:business_os:read',
@@ -97,6 +102,16 @@ export type Resource =
       readonly subjectPersonId: PersonId;
     }
   | { readonly kind: 'entitlement'; readonly householdId: HouseholdId }
+  | {
+      readonly kind: 'support_receipt_collection';
+      readonly householdId: HouseholdId;
+      readonly ownerPersonId: PersonId;
+    }
+  | {
+      readonly kind: 'support_receipt';
+      readonly householdId: HouseholdId;
+      readonly openedByPersonId: PersonId;
+    }
   | {
       readonly kind: 'support_case';
       readonly householdId: HouseholdId;
@@ -374,6 +389,22 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       return { allowed: true, reason: 'allowed_by_policy' };
     }
     return deny('unsupported_action_resource');
+  }
+
+  if (resource.kind === 'support_receipt_collection') {
+    if (
+      (action === 'support_receipt:list' || action === 'support_receipt:create') &&
+      resource.ownerPersonId === principal.personId
+    ) {
+      return { allowed: true, reason: 'allowed_by_policy' };
+    }
+    return deny('not_owner_or_shared');
+  }
+
+  if (resource.kind === 'support_receipt') {
+    return action === 'support_receipt:withdraw' && resource.openedByPersonId === principal.personId
+      ? { allowed: true, reason: 'allowed_by_policy' }
+      : deny('not_owner_or_shared');
   }
 
   const capability = requiredCapability(action, resource);

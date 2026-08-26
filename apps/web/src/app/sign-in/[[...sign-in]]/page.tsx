@@ -2,7 +2,8 @@
 
 import { SignIn } from '@clerk/nextjs';
 import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contracts';
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
@@ -151,6 +152,41 @@ function ProductionSignIn() {
   );
 }
 
+function UnauthorizedSignInRecovery() {
+  return (
+    <>
+      <PublicHeader />
+      <main id="main-content" className="page-shell narrow">
+        <span className="eyebrow">Sign-in security</span>
+        <h1 className="page-title">This sign-in cannot continue here</h1>
+        <p className="lede">BoomerBuddy did not open member access from this page.</p>
+        <div className="card" style={{ marginTop: '2rem' }}>
+          <h2>If you followed a security email</h2>
+          <p>
+            The identity provider may send you here after an unfamiliar-device session is revoked.
+            Opening this page by itself does not prove that a session was revoked.
+          </p>
+          <p>
+            If you were trying to use BoomerBuddy, sign in again with your invited member account.
+            If this was unexpected, contact support before continuing.
+          </p>
+          <div className="button-row">
+            <Link className="button button-primary" href="/sign-in">
+              Try member sign in again
+            </Link>
+            <a className="button button-secondary" href="mailto:support@boomerbuddy.net">
+              Email support
+            </a>
+          </div>
+        </div>
+      </main>
+      <PublicFooter />
+    </>
+  );
+}
+
 export default function SignInPage() {
+  const pathname = usePathname();
+  if (pathname === '/unauthorized-sign-in') return <UnauthorizedSignInRecovery />;
   return process.env.NODE_ENV === 'production' ? <ProductionSignIn /> : <DevelopmentSignIn />;
 }

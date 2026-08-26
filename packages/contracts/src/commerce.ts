@@ -48,6 +48,9 @@ export const stripeBillingStatusResponseSchema = z.object({
     canonicalAccessActive: z.boolean(),
     portalAvailable: z.boolean(),
     runtimeInitiationEnabled: z.boolean(),
+    recoveryReason: z
+      .enum(['payment_action_required', 'payment_failed', 'invoice_finalization_failed'])
+      .optional(),
     pendingOperation: z
       .object({
         serverOperationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{15,159}$/u),

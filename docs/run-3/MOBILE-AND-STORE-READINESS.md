@@ -6,8 +6,9 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 
 - Expo config uses scheme `boomerbuddy` and iOS/Android identifier `net.boomerbuddy.app`.
 - Resolved native configuration denies arbitrary iOS network loads, removes the unused Face ID usage
-  description, and blocks Android storage, overlay, and vibration permissions. The separate API
-  origin boundary permits only `https://api.boomerbuddy.net` in production. The security suite
+  description, disables Android application backup, and blocks Android storage, overlay, and
+  vibration permissions. The separate API origin boundary permits only
+  `https://api.boomerbuddy.net` in production. The security suite
   resolves Expo's native manifests so these controls cannot regress behind a source-only `app.json`
   check.
 - EAS configuration requires a clean commit and pins EAS CLI `22.4.0`, Node `22.23.2`, and the
@@ -17,9 +18,15 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 - The exact pinned CLI accepted the corrected `eas.json` schema for the Android preview profile and
   then stopped at the expected Expo account login gate. Expo Doctor passed all 21 checks with its
   required read-only network access. Neither result is a signed-build or device receipt.
-- Production builds accept only `EXPO_PUBLIC_API_URL=https://api.boomerbuddy.net`; the EAS production
-  profile pins that public value. The Clerk secret key and all other server credentials remain absent
-  from the client.
+- The locked production-mobile dependency graph now reports 0 Critical, 0 High, and 23 Moderate
+  findings. The narrow Metro 0.84.5 overrides removed the prior `image-size` High path, the release
+  verifier has an empty High allowlist, and API, worker, web, and HQ production graphs each report
+  zero findings. The Moderate Clerk/Expo tooling paths remain tracked and may not be relabeled as
+  fixed. See [MOBILE-DEPENDENCY-AUDIT.md](./MOBILE-DEPENDENCY-AUDIT.md). Re-run the exact audit,
+  Doctor, export, and native-build evidence after any lock change and before distribution.
+- Production builds accept only `EXPO_PUBLIC_API_URL=https://api.boomerbuddy.net`; both EAS preview
+  and production profiles pin that public value. The Clerk secret key and all other server
+  credentials remain absent from the client.
 - Customer sign-in uses Clerk hosted auth and secure Expo token caching. API calls use the exact
   `boomerbuddy-mobile` custom JWT template with `aud=boomerbuddy-mobile`, `bb_surface=mobile`, and a
   maximum issued-to-expiry lifetime of 60 seconds.
@@ -43,9 +50,38 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
   BoomerBuddy does not choose a destination, read or upload contacts, or send automatically. This
   gate is separate from authenticated in-app sharing of a redacted Check with an already authorized
   Trusted Circle relationship.
+- Signed-in members can list, create, and withdraw private support receipts for the selected
+  household. Receipt creation accepts only one fixed category and one fixed impact. There is no
+  message, attachment, contact-detail, or URL field, and response parsing requires the contract's
+  explicit `contentIncluded=false`, `outboundMessage=not_sent`, and `providerAction=none` boundary.
+  Idempotency keys are retained for uncertain in-session create and withdrawal retries. The blank
+  `mailto:` draft is a separate user action and never runs as a receipt side effect.
+- Support copy does not claim that a person monitors receipts or promise a response window. Live
+  mailbox custody, staffing, routing, escalation, and response evidence remain external gates.
 - The isolated Feedback component remains source-only and unwired; production navigation and artifacts omit it.
 - Web export, TypeScript, and bundle inspection are build evidence, not device evidence.
 - The production verifier is a static artifact/payload and Expo-bundle check; it is not hydrated production-browser or native-device evidence.
+
+## Web-first commerce boundary
+
+- Family at USD 14.99 per month is the sole approved production offer candidate and is not live. Annual Family, Individual, referral,
+  coupon, trial, group-rate, and native-purchase offers remain non-public synthetic hypotheses.
+- The native app reads canonical household access only. A billing manager can refresh access after a
+  start, renewal, cancellation, or restoration has been confirmed. Refreshing never starts or changes
+  a purchase, and a provider status alone never grants access.
+- The app contains no Checkout, store purchase, web billing link, price steering, or provider account
+  management action. Customer 1 completes payment and billing management through the authenticated
+  customer web path. The native app then observes the reconciled entitlement.
+- Rechecked on 2026-08-25: external purchase links remain default-deny until an exact, current
+  storefront, jurisdiction,
+  program, application-version, and policy decision authorizes one. Apple currently treats the US
+  storefront differently from most other storefronts, while Google requires applicable program
+  enrollment and API integration for external offers. See [Apple App Review Guidelines 3.1](https://developer.apple.com/app-store/review/guidelines/),
+  [Google's US policy update](https://support.google.com/googleplay/android-developer/answer/15582165),
+  and [Google external offers integration](https://developer.android.com/google/play/billing/external/integration).
+- A future native purchase or external-link proposal requires a separate implementation, current
+  policy review, provider enrollment, server verification, restore/cancel/refund reconciliation,
+  signed-device matrix, accessibility proof, and rollback receipt.
 
 ## Permission policy
 
@@ -92,8 +128,17 @@ submission is authorized by this document.
 
 - Repository-owned icon, splash, Android adaptive icon, and web favicon PNGs are deterministic
   renders of the existing BoomerBuddy shield/check mark and shared palette. The manifest references
-  them, Expo Doctor passes, Expo export packages the favicon, and a byte-for-byte regeneration check
-  passes. Signed iOS/Android inspection and store screenshots still require real builds and devices.
+  them, the iOS/store icon is opaque RGB with no alpha channel, Expo Doctor passes, Expo export
+  packages the favicon, and a byte-for-byte regeneration check passes. Signed iOS/Android inspection
+  and store screenshots still require real builds and devices.
+- `npm run mobile:verify-distribution` validates the resolved manifests, exact API and identity,
+  ASCII-only canonical store metadata, legal-route source presence, version-source truth, absent
+  purchase steering, deterministic asset bytes/dimensions/opacity, and a build-input SHA-256 without
+  contacting a provider. See
+  [MOBILE-DISTRIBUTION-RELEASE-RECEIPT.md](./MOBILE-DISTRIBUTION-RELEASE-RECEIPT.md).
+- Universal Links and Android App Links remain explicitly unconfigured until the company-controlled
+  Apple Team ID, Android production signing SHA-256, and live two-way website association files are
+  available. The verifier rejects a partial local association.
 - `app.json` intentionally has no fabricated EAS project ID. `eas.json` intentionally has no Apple
   App Store Connect application ID, Apple team ID, or Google Play service-account reference.
 - An authorized operator must link the Expo project, confirm the bundle/package collision check for

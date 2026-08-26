@@ -14,6 +14,7 @@ const rules = [
     pattern: /\b(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})\b/gu,
   },
   { name: 'Google API key', pattern: /\bAIza[0-9A-Za-z_-]{35}\b/gu },
+  { name: 'Google OAuth client secret', pattern: /\bGOCSPX-[0-9A-Za-z_-]{20,}\b/gu },
   { name: 'npm access token', pattern: /\bnpm_[A-Za-z0-9]{36,}\b/gu },
   { name: 'OpenAI service key', pattern: /\bsk-(?:proj|svcacct)-[A-Za-z0-9_-]{20,}\b/gu },
   { name: 'SendGrid key', pattern: /\bSG\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{40,}\b/gu },

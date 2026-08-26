@@ -10,13 +10,16 @@ import { designTokens } from '@boomerbuddy/design';
 import { mobileRequest, readableError } from './src/api';
 import { configureMobileAuthentication } from './src/authentication';
 import { MobileHouseholdProvider } from './src/household';
-import type { NativeEntrySignal, RootStackParamList } from './src/navigation';
+import {
+  classifyNativeEntryUrl,
+  type NativeEntrySignal,
+  type RootStackParamList,
+} from './src/navigation';
 import {
   AccessibilityScreen,
   AccountDeletionScreen,
   HelpPoliciesScreen,
   PrivacyScreen,
-  SupportScreen,
   TermsScreen,
 } from './src/policy-screens';
 import {
@@ -26,6 +29,8 @@ import {
   restoreSelectedHouseholdId,
   setSelectedHouseholdId,
 } from './src/session';
+import { clearMobileDeviceStateSafely, completeMobileSignOut } from './src/sign-out';
+import { SupportScreen } from './src/support-screen';
 import { appStyles } from './src/theme';
 import {
   CheckScreen,
@@ -58,12 +63,6 @@ function requirePublishableKey(): string {
 
 const publishableKey = requirePublishableKey();
 
-function nativeEntrySignal(url: string): NativeEntrySignal {
-  if (/^boomerbuddy:\/\/check\/?$/u.test(url)) return 'route_only_check';
-  if (url.startsWith('boomerbuddy://check')) return 'rejected_payload';
-  return 'none';
-}
-
 function MobileApplication(): React.ReactElement {
   const { getToken, isLoaded, isSignedIn, sessionId, signOut: clerkSignOut } = useAuth();
   const [principal, setPrincipal] = useState<PrincipalDto>();
@@ -75,7 +74,7 @@ function MobileApplication(): React.ReactElement {
   useEffect(() => {
     let active = true;
     const observe = (url: string) => {
-      const signal = nativeEntrySignal(url);
+      const signal = classifyNativeEntryUrl(url);
       if (active && signal !== 'none') setNativeEntry(signal);
     };
     void Linking.getInitialURL()
@@ -100,10 +99,16 @@ function MobileApplication(): React.ReactElement {
           ...(request?.skipCache ? { skipCache: true } : {}),
         }),
       recoverUnauthorizedSession: async () => {
-        await clearMobileDeviceState();
+        const outcome = await completeMobileSignOut({
+          clearDeviceState: clearMobileDeviceState,
+          signOutIdentitySession: clerkSignOut,
+        });
         setPrincipal(undefined);
-        setSessionError('');
-        await clerkSignOut();
+        setSessionError(
+          outcome === 'complete'
+            ? ''
+            : 'Your session ended, but secure sign out did not finish. Check your connection and try again.',
+        );
       },
     });
   }, [clerkSignOut, getToken]);
@@ -113,7 +118,9 @@ function MobileApplication(): React.ReactElement {
     async function restoreSession() {
       if (!isLoaded) return;
       if (!isSignedIn) {
-        await clearMobileDeviceState();
+        // A device-keystore failure must not strand a signed-out user on the restore screen.
+        // The in-memory household selection is cleared before persisted cleanup is attempted.
+        await clearMobileDeviceStateSafely(clearMobileDeviceState);
         if (active) {
           setPrincipal(undefined);
           setSessionError('');
@@ -157,10 +164,16 @@ function MobileApplication(): React.ReactElement {
     } catch {
       /* Clerk sign-out and local preference cleanup still complete. */
     }
-    await clearMobileDeviceState();
-    await clerkSignOut();
+    const outcome = await completeMobileSignOut({
+      clearDeviceState: clearMobileDeviceState,
+      signOutIdentitySession: clerkSignOut,
+    });
     setPrincipal(undefined);
-    setSessionError('');
+    setSessionError(
+      outcome === 'complete'
+        ? ''
+        : 'We could not finish secure sign out. Check your connection and try again.',
+    );
   }
 
   if (!isLoaded || restoring)
@@ -229,6 +242,7 @@ function MobileApplication(): React.ReactElement {
                   <HomeScreen
                     {...props}
                     nativeEntrySignal={nativeEntry}
+                    onNativeEntryHandled={() => setNativeEntry('none')}
                     onSignOut={() => void signOut()}
                   />
                 )}

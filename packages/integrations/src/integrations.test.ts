@@ -342,6 +342,7 @@ describe('Stripe test adapter', () => {
           subscription_update: { enabled: false, default_allowed_updates: [] },
           payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
         },
       };
     };
@@ -367,6 +368,7 @@ describe('Stripe test adapter', () => {
       portalCancellationMode: 'at_period_end',
       portalProrationBehavior: 'none',
       portalSubscriptionUpdateDefaultsEmpty: true,
+      portalInvoiceHistoryEnabled: true,
       retentionCouponEvidence: 'manual_founder_browser_required',
       promotionsEnabled: false,
       automaticTaxEnabled: false,
@@ -467,6 +469,13 @@ describe('Stripe test adapter', () => {
           delete subscriptionUpdate.default_allowed_updates;
         },
       },
+      {
+        path: '/v1/billing_portal/configurations/bpc_cancel_only_fixture',
+        mutate: (value) => {
+          const features = value.features as Record<string, Record<string, unknown>>;
+          features.invoice_history = { enabled: false };
+        },
+      },
     ];
     for (const hostile of hostileResources) {
       get.mockImplementation(async ({ path }: { readonly path: string }) => {
@@ -537,6 +546,7 @@ describe('Stripe test adapter', () => {
           subscription_update: { enabled: false, default_allowed_updates: [] },
           payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
         },
       };
     };
@@ -745,7 +755,10 @@ describe('Stripe test adapter', () => {
               id: 'pi_invoice_fixture',
               object: 'payment_intent',
               livemode: false,
-              status: 'requires_payment_method',
+              status:
+                currentEventType === 'invoice.payment_action_required'
+                  ? 'requires_action'
+                  : 'requires_payment_method',
             };
       }
       return currentEventType === 'invoice.paid'
@@ -845,7 +858,11 @@ describe('Stripe test adapter', () => {
     ).resolves.toBeNull();
     expect(get).not.toHaveBeenCalled();
 
-    for (const eventType of ['invoice.paid', 'invoice.payment_failed']) {
+    for (const eventType of [
+      'invoice.paid',
+      'invoice.payment_failed',
+      'invoice.payment_action_required',
+    ]) {
       currentEventType = eventType;
       const resolved = await adapter.resolveEventSubscription({
         environment: 'test',
@@ -870,11 +887,14 @@ describe('Stripe test adapter', () => {
           providerInvoiceId: 'in_invoice_fixture',
           providerInvoicePaymentId: 'inpay_invoice_fixture',
           providerPaymentIntentId: 'pi_invoice_fixture',
-          failureStatus: 'requires_payment_method',
+          failureStatus:
+            eventType === 'invoice.payment_action_required'
+              ? 'requires_action'
+              : 'requires_payment_method',
         });
       }
     }
-    expect(get).toHaveBeenCalledTimes(6);
+    expect(get).toHaveBeenCalledTimes(9);
   });
 
   it.each([

@@ -4,7 +4,7 @@ import { IdentityProvider } from '../components/identity-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'BoomerBuddy HQ — owner control plane',
+  title: 'BoomerBuddy HQ - owner control plane',
   description: 'Role-scoped operating evidence for BoomerBuddy owner decisions.',
 };
 

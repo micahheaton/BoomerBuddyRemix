@@ -135,10 +135,10 @@ export const entitlementResponseSchema = z.object({
         sourcePlanVersionId: opaqueIdSchema,
       }),
     ),
-    mode: z.literal('local_mock'),
-    hypothesis: z.literal(true),
+    mode: z.enum(['local_mock', 'canonical']),
+    hypothesis: z.boolean(),
   }),
-  environment: z.enum(['development', 'test']),
+  environment: z.enum(['development', 'test', 'production']),
 });
 
 export type OrientationStateDto = z.infer<typeof orientationStateSchema>;

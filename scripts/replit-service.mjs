@@ -3,6 +3,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
+import { URL } from 'node:url';
 
 const services = {
   api: '@boomerbuddy/api',
@@ -24,13 +25,14 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 const workspace = services[service];
+let serviceEnvironment = process.env;
 const npmCommand = process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : 'npm';
 const npmPrefix = process.platform === 'win32' ? ['/d', '/s', '/c', 'npm.cmd'] : [];
 
 function run(args) {
   const result = spawnSync(npmCommand, [...npmPrefix, ...args], {
     cwd: process.cwd(),
-    env: process.env,
+    env: serviceEnvironment,
     encoding: 'utf8',
     maxBuffer: 32 * 1_024 * 1_024,
     shell: false,
@@ -44,7 +46,7 @@ function run(args) {
 function captureJson(args) {
   const result = spawnSync(npmCommand, [...npmPrefix, ...args], {
     cwd: process.cwd(),
-    env: process.env,
+    env: serviceEnvironment,
     encoding: 'utf8',
     maxBuffer: 32 * 1_024 * 1_024,
     shell: false,
@@ -504,6 +506,76 @@ if (mode === 'start') {
   }
 }
 
+function hasRejectedRawOriginCharacter(value) {
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (
+      codePoint === undefined ||
+      codePoint <= 0x20 ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      character === '\\'
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isLoopbackHostname(hostname) {
+  return (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    /^127(?:\.\d{1,3}){3}$/u.test(hostname) ||
+    hostname === '[::1]' ||
+    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/u.test(hostname)
+  );
+}
+
+function canonicalProductionPublicOrigin(value) {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > 2_048 ||
+    hasRejectedRawOriginCharacter(value) ||
+    !/^https:\/\/[^/?#]+\/?$/iu.test(value) ||
+    value.includes('%')
+  ) {
+    return undefined;
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  const hostname = url.hostname.toLowerCase();
+  if (
+    url.protocol !== 'https:' ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== '' ||
+    hostname === '' ||
+    hostname.includes('*') ||
+    hostname.endsWith('.') ||
+    isLoopbackHostname(hostname)
+  ) {
+    return undefined;
+  }
+  return url.origin;
+}
+
+if (service === 'web' || service === 'hq') {
+  const publicOrigin = canonicalProductionPublicOrigin(process.env.BB_PUBLIC_ORIGIN);
+  if (publicOrigin === undefined) {
+    throw new TypeError(
+      'A web or HQ Replit service requires one safe canonicalizable HTTPS BB_PUBLIC_ORIGIN',
+    );
+  }
+  serviceEnvironment = { ...process.env, BB_PUBLIC_ORIGIN: publicOrigin };
+}
+
 assertReleaseProvenance({ verifyCheckout: mode === 'build' });
 
 if (mode === 'build') {
@@ -555,7 +627,9 @@ if (mode === 'build') {
   );
 } else {
   const childEnvironment =
-    service === 'api' ? { ...process.env, BB_API_PORT: providerApiPort } : process.env;
+    service === 'api'
+      ? { ...serviceEnvironment, BB_API_PORT: providerApiPort }
+      : serviceEnvironment;
   const child = spawn(npmCommand, [...npmPrefix, 'run', 'start', '--workspace', workspace], {
     cwd: process.cwd(),
     env: childEnvironment,

@@ -1,12 +1,19 @@
 # Stripe First-Dollar Runbook
 
-Status: **production-capable, default-off control plane; live resource provisioning, deployed proof, and first payment remain open**
+Status: **NO-GO for production payment; default-off control plane and local fixture evidence only**
 
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-26
 
 This runbook defines the controlled Family first-payment rollout. It does not itself authorize a
 provider write, charge, refund, DNS change, or customer message. Never paste an API key, webhook secret, session cookie, or other secret
 into source, git, documentation, logs, screenshots, prompts, or support tickets.
+
+Current blocker: the historical `family_v1` catalog entry remains a `hypothesis`. Checkout can
+select that entry, but production entitlement verification refuses hypothesis backing from an
+authentic Stripe provider. A real payment could therefore reconcile without granting effective
+access. Do not provision or enable live payment initiation until a separately authorized,
+proof-gated repository repair makes the billed offer and effective entitlement semantics agree and
+the complete regression suite passes.
 
 ## Evidence boundary
 
@@ -16,7 +23,7 @@ into source, git, documentation, logs, screenshots, prompts, or support tickets.
 | `stripe_test` | **Blocked by founder-owned Stripe test resources, credentials, and an approved execution gate** | A real Stripe test account accepted/retrieved objects and delivered signed events. No such claim is made. |
 | `deployed_staging` | **Blocked** | The frozen build, Replit edge, HTTPS, worker, PostgreSQL, restore, identity, secret custody, and telemetry operated together. No such claim is made. |
 | `real_human` | **Blocked** | A founder-invited household completed the journey and gave consented feedback. No such claim is made. |
-| `live_production` | **Default-off; external proof open** | Code supports separate live API/worker custody and an operator-approved max-one cohort, but resource provisioning and authentic live preflight receipts are still required. |
+| `live_production` | **NO-GO; entitlement mismatch and external proof open** | Payment initiation remains closed. Repository semantics must first prove that the exact authentic paid Family offer grants the intended effective access without admitting local, test, stale, or mismatched backing. Resource provisioning and authentic live preflight receipts are also required. |
 | `first_real_charge` | **Not authorized and not performed** | Money moved and reconciled. No such claim is made. |
 
 Local tests use injected transports and fixture keys only. They do not call Stripe. Preserve that
@@ -151,16 +158,20 @@ against Stripe's [Invoice object](https://docs.stripe.com/api/invoices/object) d
 
 ## Webhook allowlist
 
-Configure only the events the frozen adapter accepts:
+Configure only the events the reviewed release-candidate adapter accepts:
 
 ```text
 checkout.session.completed
+checkout.session.async_payment_succeeded
+checkout.session.async_payment_failed
 checkout.session.expired
 customer.subscription.created
 customer.subscription.updated
 customer.subscription.deleted
 invoice.paid
 invoice.payment_failed
+invoice.payment_action_required
+invoice.finalization_failed
 charge.refunded
 refund.created
 refund.updated
@@ -169,8 +180,14 @@ charge.dispute.created
 charge.dispute.closed
 ```
 
-Every other event is captured only far enough to quarantine it as not allowlisted. Invoice
-finalization events do not prove payment.
+Every other event is captured only far enough to quarantine it as not allowlisted. Async Checkout
+success still does not grant access without the separately authenticated canonical `invoice.paid`
+evidence. Async failure and `invoice.payment_action_required` restrict or route recovery; they never
+grant or extend entitlement. `invoice.finalization_failed` records append-only recovery evidence,
+creates bounded owner attention, and surfaces truthful customer guidance without changing access or
+claiming that a charge, collectible invoice, or receipt exists. It never proves payment. Authentic
+Stripe sandbox delivery, restart, replay, and recovery evidence remain required before first
+payment.
 
 ## Local verification (no provider account)
 
@@ -208,7 +225,9 @@ receipt is retained.
 
 ## Exact founder steps for an isolated Stripe test
 
-These steps are blocked until the founder explicitly authorizes provider-side test work.
+These steps are blocked until the founder types `CONFIRM NONCHARGING RELEASE SETUP` in the active
+task for the reviewed exact-SHA packet. The phrase authorizes noncharging provider setup only and
+does not authorize customer contact, a live Checkout window, a charge, or a refund.
 
 1. In the founder-owned Stripe organization, confirm account ID, company custody, MFA, two recovery
    owners, roles, and test/live separation.
@@ -225,8 +244,11 @@ These steps are blocked until the founder explicitly authorizes provider-side te
    export without a secret or customer record.
 4. Create a restricted test key with the exact permission matrix above and retain it only in the
    founder-controlled deployment secret store.
-5. On an approved HTTPS staging API, create `/v1/webhooks/stripe` with the exact event allowlist.
-   Set or update the endpoint API version to exactly `2026-07-29.dahlia`; an account-default or
+5. On an approved HTTPS staging API, create the separate BoomerBuddy 2.0
+   `https://api.boomerbuddy.net/v1/webhooks/stripe` endpoint with the exact event allowlist. Create it
+   only after the active-task confirmation gate. Do not edit, delete, reuse, or redirect the enabled
+   legacy `https://boomerbuddy.net/api/webhooks/stripe` endpoint. Set or update the new 2.0 endpoint
+   API version to exactly `2026-07-29.dahlia`; an account-default or
    endpoint version is not assumed. Put its secret only in the secret store and retain a redacted
    endpoint/version/allowlist receipt.
 6. Set the `BB_STRIPE_TEST_*` names, `BB_STRIPE_MODE=test`, and `BB_FOUNDER_PERSON_ID` in the isolated
@@ -291,7 +313,7 @@ canonical evidence have actually been retained.
 ## Founder-only bounded repair commands
 
 These controls enqueue provider work when the worker is running. They are therefore blocked by the
-same explicit founder provider-action gate as the isolated Stripe test above. A GET is a local
+same exact active-task confirmation phrase as the isolated Stripe test above. A GET is a local
 projection; a POST is not permission to infer provider truth, clear an ambiguity, create a replacement
 Checkout, or operate in live mode. Use only a same-origin authenticated founder HQ session; never copy
 session cookies, CSRF material, or provider secrets into a terminal, prompt, document, or screenshot.
@@ -406,8 +428,8 @@ be partial or pending; see [refunds](https://docs.stripe.com/refunds) and
 
 ## Live and first-charge gates
 
-Live initiation is production-capable and default-off. The bounded rollout is Family $14.99/month
-only, with at most one active household. Annual, Individual, referral, promotion, Tax, and Twilio
+Live initiation is not production-capable and remains default-off. The proposed bounded rollout is
+Family $14.99/month only, with at most one active household. Annual, Individual, referral, promotion, Tax, and Twilio
 paths remain disabled. Arm in this order so every earlier step is safe to rehearse without opening
 Checkout:
 
@@ -450,6 +472,6 @@ charge already exist.
 - `stripe_test`: blocked by authentic provider-resource and signed-event evidence.
 - `deployed_staging`: blocked.
 - `real_human`: not performed.
-- `live_production`: code-capable and default-off; live resource, custody, preflight, and deployment
-  evidence remain open.
+- `live_production`: NO-GO and default-off; the paid Family entitlement mismatch plus live resource,
+  custody, preflight, and deployment evidence remain open.
 - `first_real_charge`: not performed.

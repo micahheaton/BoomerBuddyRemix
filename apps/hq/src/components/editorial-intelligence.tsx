@@ -93,7 +93,7 @@ export function EditorialIntelligenceBoard() {
 
       <section className="section table-wrap">
         <table>
-          <caption>Source health — no locators or source content</caption>
+          <caption>Source health - no locators or source content</caption>
           <thead>
             <tr>
               <th>Source</th>
@@ -123,7 +123,7 @@ export function EditorialIntelligenceBoard() {
 
       <section className="section table-wrap">
         <table>
-          <caption>Role-scoped editorial review queue — no draft content</caption>
+          <caption>Role-scoped editorial review queue - no draft content</caption>
           <thead>
             <tr>
               <th>Content version</th>

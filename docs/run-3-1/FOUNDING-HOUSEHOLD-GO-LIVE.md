@@ -19,11 +19,20 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    **Restrictions**, enable **Restricted mode**, and save. Public sign-up is a release blocker even
    though the UI hides sign-up. Do not use a shared customer/HQ tenant.
 4. In the customer Clerk application, configure only the intended sign-in methods, lock identifier
-   changes where practical, set the exact customer Replit HTTPS origin, and configure the standard
-   session token to carry audience `boomerbuddy-customer`. Require and record a signed-token lifetime
-   no longer than five minutes and a maximum customer session no longer than 24 hours for this beta;
-   if the provider cannot enforce and evidence those bounds, stop for review. Do not add authorization
-   roles or household IDs to Clerk claims.
+   changes where practical, and set the customer application Home URL to exactly
+   `https://app.boomerbuddy.net/member`, Unauthorized sign-in URL to exactly
+   `https://app.boomerbuddy.net/unauthorized-sign-in`, self-hosted sign-in component URL to exactly
+   `https://app.boomerbuddy.net/sign-in`, and Account Portal customer sign-in fallback to exactly
+   `https://app.boomerbuddy.net/member`. The deployed component must remain the local Next catch-all
+   `/sign-in/[[...sign-in]]` with `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`. Preserve the existing
+   root-domain Clerk infrastructure, including `accounts.boomerbuddy.net` and the reviewed Clerk
+   Frontend API or OAuth callback domain; do not point any field at the separate legacy
+   `BoomerBuddy` Replit project. Configure the standard session token to carry audience
+   `boomerbuddy-customer`. Require and record a signed-token lifetime no longer than five minutes and
+   a maximum customer session no longer than 24 hours for this beta; if the provider cannot enforce
+   and evidence those bounds, stop for review. Do not add authorization roles or household IDs to
+   Clerk claims. Record path/configuration evidence without keys, user records, email addresses,
+   session identifiers, or other PII.
 5. From customer Clerk **API keys**, record the production Frontend API/issuer origin, publishable
    key, secret key, and PEM public verification key. The secret key and PEM value go only into the
    services listed in the environment manifest. Never paste them into Git or this document.

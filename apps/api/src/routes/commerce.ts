@@ -62,6 +62,8 @@ const stripeEventAllowlist = new Set([
   'customer.subscription.deleted',
   'invoice.paid',
   'invoice.payment_failed',
+  'invoice.payment_action_required',
+  'invoice.finalization_failed',
   'charge.refunded',
   'refund.created',
   'refund.updated',

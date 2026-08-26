@@ -65,13 +65,19 @@ describe('rendered production customer funnel', () => {
     expect(rendered).toContain('current paid period');
   });
 
+  it('links the homepage directly to truthful Family pricing', () => {
+    const home = renderedProductionRoutes().home;
+
+    expect(home).toContain('href="/pricing"');
+    expect(home).toContain('Family is USD 14.99 per month.');
+    expect(home).toContain('Access is invite-only');
+  });
+
   it('does not advertise self-service household capacity that the private beta cannot provide', () => {
     const pricing = renderedProductionRoutes().pricing;
 
     expect(pricing).toContain('For one invited household.');
-    expect(pricing).toContain(
-      'New Trusted Circle invitations are not self-service during this private beta.',
-    );
+    expect(pricing).toContain('You cannot create a new Trusted Circle invitation right now.');
     expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
   });
 

@@ -117,17 +117,14 @@ export function HouseholdProvider({ children }: { children: React.ReactNode }) {
   );
 
   if (error) {
-    const production = process.env.NODE_ENV === 'production';
     return (
       <main id="main-content" className="member-shell member-main">
-        <h1 className="member-heading">
-          {production ? 'Your member session is unavailable' : 'Your local session is unavailable'}
-        </h1>
+        <h1 className="member-heading">Your member session is unavailable</h1>
         <p className="error" role="alert">
           {error}
         </p>
         <Link className="button button-primary" href="/sign-in">
-          {production ? 'Return to member sign in' : 'Return to development sign in'}
+          Return to member sign in
         </Link>
       </main>
     );

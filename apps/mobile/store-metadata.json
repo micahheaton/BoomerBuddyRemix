@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "appName": "BoomerBuddy",
+  "bundleIdentifier": "net.boomerbuddy.app",
+  "androidPackage": "net.boomerbuddy.app",
+  "marketingVersion": "0.1.0",
+  "supportEmail": "support@boomerbuddy.net",
+  "supportUrl": "https://app.boomerbuddy.net/support",
+  "privacyPolicyUrl": "https://app.boomerbuddy.net/privacy",
+  "termsOfUseUrl": "https://app.boomerbuddy.net/terms",
+  "accountDeletionUrl": "https://app.boomerbuddy.net/account-deletion",
+  "customSchemeCheckUrl": "boomerbuddy://check",
+  "universalAndAppLinksStatus": "blocked_pending_provider_signing_and_two_way_association",
+  "nativeCommerceStatus": "web_first_no_native_purchase_or_payment_steering"
+}

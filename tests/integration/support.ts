@@ -32,6 +32,11 @@ export function testConfig(): AppConfig {
     environment: 'test',
     api: { host: '127.0.0.1', port: 4100, trustedProxyHops: 0 },
     accessIntents: { runtimeEnabled: true, edgeRateLimitConfirmed: true },
+    supportReceipts: {
+      customerAccessEnabled: true,
+      intakeEnabled: true,
+      hqQueueEnabled: true,
+    },
     database: {
       driver: 'pglite',
       path: ':memory:',
@@ -69,11 +74,17 @@ export async function createApiHarness(
     readonly accessIntentRequestLimitPerMinute?: number;
     readonly accessIntentsEnabled?: boolean;
     readonly accessIntentsEdgeGuardConfirmed?: boolean;
+    readonly supportReceiptsCustomerAccessEnabled?: boolean;
+    readonly supportReceiptsIntakeEnabled?: boolean;
+    readonly supportReceiptsHqQueueEnabled?: boolean;
   } = {},
 ): Promise<ApiHarness> {
   const {
     accessIntentsEnabled = true,
     accessIntentsEdgeGuardConfirmed = accessIntentsEnabled,
+    supportReceiptsCustomerAccessEnabled = true,
+    supportReceiptsIntakeEnabled = supportReceiptsCustomerAccessEnabled,
+    supportReceiptsHqQueueEnabled = supportReceiptsIntakeEnabled,
     ...buildOptions
   } = options;
   const baseConfig = testConfig();
@@ -82,6 +93,11 @@ export async function createApiHarness(
     accessIntents: {
       runtimeEnabled: accessIntentsEnabled,
       edgeRateLimitConfirmed: accessIntentsEdgeGuardConfirmed,
+    },
+    supportReceipts: {
+      customerAccessEnabled: supportReceiptsCustomerAccessEnabled,
+      intakeEnabled: supportReceiptsIntakeEnabled,
+      hqQueueEnabled: supportReceiptsHqQueueEnabled,
     },
   };
   const database = await createPGliteDatabase(':memory:');

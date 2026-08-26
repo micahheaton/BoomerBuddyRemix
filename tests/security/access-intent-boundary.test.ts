@@ -85,7 +85,7 @@ describe('private-beta access-intent boundary', () => {
     expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED');
     expect(pricing).toContain('Private-beta access requests are paused');
     expect(privacy).toMatch(
-      /It does not contain your name,\s+email address, phone number, message/iu,
+      /It does not contain your name,\s+email\s+address, phone number, message/iu,
     );
     expect(privacy).toContain('Hosting, edge-security, and reliability');
     expect(support).toContain('Creating it does not send an email');

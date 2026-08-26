@@ -56,6 +56,51 @@ function hqPrincipal(role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_suppor
 }
 
 describe('deny-by-default authorization', () => {
+  it('keeps support receipts self-scoped while allowing only active HQ owners to operate the queue', () => {
+    const collection: Resource = {
+      kind: 'support_receipt_collection',
+      householdId: home,
+      ownerPersonId: person,
+    };
+    const receipt: Resource = {
+      kind: 'support_receipt',
+      householdId: home,
+      openedByPersonId: person,
+    };
+    for (const action of ['support_receipt:list', 'support_receipt:create'] as const) {
+      expect(authorize({ principal: principal(), action, resource: collection }).allowed).toBe(
+        true,
+      );
+      expect(
+        authorize({
+          principal: principal({ personId: protectedPerson }),
+          action,
+          resource: collection,
+        }).reason,
+      ).toBe('not_owner_or_shared');
+    }
+    expect(
+      authorize({ principal: principal(), action: 'support_receipt:withdraw', resource: receipt })
+        .allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: principal(),
+        action: 'support_receipt:withdraw',
+        resource: { ...receipt, openedByPersonId: protectedPerson },
+      }).reason,
+    ).toBe('not_owner_or_shared');
+    for (const action of ['hq:support_receipts:read', 'hq:support_receipts:manage'] as const) {
+      expect(
+        authorize({ principal: hqPrincipal('hq_owner'), action, resource: { kind: 'hq' } }).allowed,
+      ).toBe(true);
+      expect(
+        authorize({ principal: hqPrincipal('hq_support'), action, resource: { kind: 'hq' } })
+          .reason,
+      ).toBe('insufficient_role');
+    }
+  });
+
   it('denies missing principals, wrong audiences, cross-tenant access, and missing capabilities', () => {
     const resource: Resource = {
       kind: 'check_collection',

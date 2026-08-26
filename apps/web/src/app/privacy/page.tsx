@@ -41,10 +41,10 @@ export default function PrivacyPage() {
         <p>
           When you choose to ask about private-beta access from the pricing page, BoomerBuddy first
           creates a temporary receipt containing only a server-issued code, the fixed purpose, and a
-          recognized source and campaign label. Purpose-scoped HMAC and request-digest values
-          prevent duplicate creation and enforce abuse limits without storing the raw operation key
-          or network address. The receipt expires after seven days. It does not contain your name,
-          email address, phone number, message, account, or member identifier.
+          recognized source and campaign label. Protected one-way values prevent duplicate requests
+          and enforce abuse limits without storing the request key or network address in the
+          receipt. The receipt expires after seven days. It does not contain your name, email
+          address, phone number, message, account, or member identifier.
         </p>
         <p>
           This describes BoomerBuddy application storage. Hosting, edge-security, and reliability

@@ -187,7 +187,13 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
   billingState = 'active';
   await page.getByRole('button', { name: 'Refresh billing status' }).click();
   await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();
-  await page.getByRole('button', { name: 'Manage payment method or cancellation' }).click();
+  await expect(page.getByTestId('billing-invoice-recovery')).toContainText(
+    'invoice history that Stripe has made available',
+  );
+  await expect(
+    page.getByTestId('billing-invoice-recovery').getByRole('link', { name: 'contact support' }),
+  ).toHaveAttribute('href', '/support');
+  await page.getByRole('button', { name: 'View invoices or manage billing' }).click();
   expect(portalOperation).toMatch(/^portal-/u);
   expect(portalHousehold).toBe('household-sunrise');
   await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();

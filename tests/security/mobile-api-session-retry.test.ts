@@ -84,4 +84,70 @@ describe('mobile API session retry', () => {
     expect(recoverUnauthorizedSession).toHaveBeenCalledOnce();
     dispose();
   });
+
+  it('preserves an explicit authorized household scope while replacing caller authentication', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await api.mobileRequest('/v1/family', {
+      headers: {
+        Authorization: 'Bearer caller-controlled-token',
+        'X-BB-Household-Id': 'household-secondary',
+      },
+    });
+
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer clerk-mobile-token');
+    expect(headers.get('X-BB-Household-Id')).toBe('household-secondary');
+    dispose();
+  });
+
+  it('does not expose unexpected provider or parser details to customer screens', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response('not-json')));
+
+    await expect(api.mobileRequest('/v1/unexpected')).rejects.toThrow(
+      'BoomerBuddy received an unexpected response. Please try again.',
+    );
+    expect(api.readableError(new Error('sensitive provider implementation detail'))).toBe(
+      'Something went wrong. Please try again.',
+    );
+    dispose();
+  });
+
+  it('preserves HTTP status for safe feature availability recovery', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn<typeof fetch>().mockResolvedValue(
+        response(404, {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'This feature is not available right now.',
+            requestId: 'request-mobile-support-unavailable',
+          },
+        }),
+      ),
+    );
+
+    await expect(api.mobileRequest('/v1/support-receipts')).rejects.toMatchObject({
+      name: 'MobileCustomerError',
+      message: 'This feature is not available right now.',
+      status: 404,
+    });
+    dispose();
+  });
 });

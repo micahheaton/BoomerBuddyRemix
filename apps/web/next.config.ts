@@ -7,7 +7,7 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '',
   },
-  transpilePackages: ['@boomerbuddy/contracts', '@boomerbuddy/design'],
+  transpilePackages: ['@boomerbuddy/config', '@boomerbuddy/contracts', '@boomerbuddy/design'],
   async headers() {
     return [
       {
@@ -18,6 +18,14 @@ const nextConfig: NextConfig = {
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         ],
+      },
+    ];
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/unauthorized-sign-in',
+        destination: '/sign-in/unauthorized-sign-in',
       },
     ];
   },

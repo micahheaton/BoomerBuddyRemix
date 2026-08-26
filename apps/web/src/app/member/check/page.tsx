@@ -120,10 +120,10 @@ export default function CheckPage() {
         <span className="eyebrow">Check</span>
         <h1 className="member-heading">Check unavailable in this household</h1>
         <section className="notice notice-warning">
-          <h2>Protected-adult enrollment required</h2>
+          <h2>Protected adult access required</h2>
           <p>
-            Creating and owning a Check requires an active protected-adult enrollment in the
-            selected household. Household administrator access alone does not grant this workflow.
+            Only an enrolled protected adult can create a Check. Managing or paying for the
+            household does not give you access to another adult&apos;s Checks.
           </p>
         </section>
       </main>
@@ -343,8 +343,8 @@ export default function CheckPage() {
                   </p>
                 )}
                 <p className="help">
-                  Notifications for newly shared Checks are not available in this beta. Contact the
-                  person directly if help is urgent.
+                  Sharing saves the result in the other person&apos;s BoomerBuddy account, but it
+                  does not notify them. Contact them directly if help is urgent.
                 </p>
               </section>
             ) : null}

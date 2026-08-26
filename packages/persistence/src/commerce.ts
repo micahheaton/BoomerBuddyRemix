@@ -1,7 +1,8 @@
 import { DomainError } from '@boomerbuddy/domain';
-import type {
-  ProviderFailedPaymentEvidence,
-  ProviderPaidPeriodEvidence,
+import {
+  isStripeFailedPaymentEventType,
+  type ProviderFailedPaymentEvidence,
+  type ProviderPaidPeriodEvidence,
 } from '@boomerbuddy/integrations';
 import {
   constantTimeEqual,
@@ -146,6 +147,12 @@ export interface StripeReconciliationRepairResult {
   readonly repairJobId: string;
   readonly duplicate: boolean;
 }
+
+export type ProviderReconciliationAutomaticClaim =
+  | { readonly kind: 'claimed'; readonly automaticAttemptCount: number }
+  | { readonly kind: 'already_terminal'; readonly terminalState: 'completed' | 'attention' }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'binding_invalid' };
 
 export class CommerceOperationsRepository {
   constructor(
@@ -381,11 +388,11 @@ export class CommerceOperationsRepository {
         (input.accessEvidence.kind === 'payment_confirmed' &&
           evidenceEvent.event_type !== 'invoice.paid') ||
         (input.accessEvidence.kind === 'payment_failed' &&
-          evidenceEvent.event_type !== 'invoice.payment_failed') ||
+          !isStripeFailedPaymentEventType(evidenceEvent.event_type)) ||
         (input.accessEvidence.kind !== 'payment_confirmed' &&
           evidenceEvent.event_type === 'invoice.paid') ||
         (input.accessEvidence.kind !== 'payment_failed' &&
-          evidenceEvent.event_type === 'invoice.payment_failed')
+          isStripeFailedPaymentEventType(evidenceEvent.event_type))
       ) {
         throw new DomainError('conflict', 'Provider access evidence is invalid');
       }
@@ -722,6 +729,49 @@ export class CommerceOperationsRepository {
         ) {
           throw new DomainError('conflict', 'Paid invoice immutable authority facts conflict');
         }
+        const lockedFinalizationRecoveries = await transaction.query<
+          { readonly source_inbox_id: string } & Record<string, unknown>
+        >(
+          `SELECT source_inbox_id
+           FROM commerce_stripe_invoice_recovery_events
+           WHERE environment = $1 AND provider_invoice_id = $2
+             AND recovery_state = 'attention'
+             AND (
+               (household_id = $3 AND subscription_id = $4)
+               OR (household_id IS NULL AND subscription_id IS NULL)
+             )
+           FOR UPDATE`,
+          [input.environment, proof.providerInvoiceId, input.householdId, input.subscriptionId],
+        );
+        if (lockedFinalizationRecoveries.rowCount > 0) {
+          await transaction.query(
+            `UPDATE owner_attention_items attention
+             SET state = 'resolved', resolved_at = $5, updated_at = $5
+             WHERE attention.attention_kind = 'billing_reconciliation'
+               AND attention.source_type = 'commerce_event'
+               AND attention.state IN ('open','snoozed')
+               AND EXISTS (
+                 SELECT 1 FROM commerce_stripe_invoice_recovery_events recovery
+                 WHERE recovery.source_inbox_id = attention.source_id
+                   AND attention.dedupe_key =
+                     ('billing_invoice_finalization_' || recovery.source_inbox_id)
+                   AND recovery.environment = $1
+                   AND recovery.provider_invoice_id = $2
+                   AND recovery.recovery_state = 'attention'
+                   AND (
+                     (recovery.household_id = $3 AND recovery.subscription_id = $4)
+                     OR (recovery.household_id IS NULL AND recovery.subscription_id IS NULL)
+                   )
+               )`,
+            [
+              input.environment,
+              proof.providerInvoiceId,
+              input.householdId,
+              input.subscriptionId,
+              input.now.toISOString(),
+            ],
+          );
+        }
         if (activeDunningWindow !== undefined) {
           await transaction.query(
             `INSERT INTO commerce_stripe_dunning_events(
@@ -768,7 +818,7 @@ export class CommerceOperationsRepository {
              line_proration, period_starts_at, period_ends_at
             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
                       $18,$19,$20,$21,$22,$23)
-           ON CONFLICT (provider_invoice_id) DO NOTHING`,
+           ON CONFLICT (source_inbox_id) DO NOTHING`,
           [
             proof.providerInvoiceId,
             input.environment,
@@ -836,6 +886,50 @@ export class CommerceOperationsRepository {
           if (exactExistingFailure.rowCount !== 1) {
             throw new DomainError('conflict', 'Failed invoice evidence conflicts with prior proof');
           }
+        }
+        const paidForExactInvoice = await transaction.query<
+          {
+            readonly environment: string;
+            readonly household_id: string;
+            readonly subscription_id: string;
+            readonly provider_subscription_id: string;
+            readonly provider_subscription_item_id: string;
+            readonly period_starts_at: unknown;
+            readonly period_ends_at: unknown;
+          } & Record<string, unknown>
+        >(
+          `SELECT environment, household_id, subscription_id, provider_subscription_id,
+                  provider_subscription_item_id, period_starts_at, period_ends_at
+           FROM commerce_stripe_paid_invoice_evidence
+           WHERE provider_invoice_id = $1`,
+          [proof.providerInvoiceId],
+        );
+        const paidProof = paidForExactInvoice.rows[0];
+        if (paidProof !== undefined) {
+          if (
+            paidProof.environment !== input.environment ||
+            paidProof.household_id !== input.householdId ||
+            paidProof.subscription_id !== input.subscriptionId ||
+            paidProof.provider_subscription_id !== input.externalSubscriptionId ||
+            paidProof.provider_subscription_item_id !== proof.providerSubscriptionItemId ||
+            new Date(String(paidProof.period_starts_at)).getTime() !==
+              proof.currentPeriodStartsAt.getTime() ||
+            new Date(String(paidProof.period_ends_at)).getTime() !==
+              proof.currentPeriodEndsAt.getTime()
+          ) {
+            throw new DomainError('conflict', 'Failed invoice conflicts with prior paid proof');
+          }
+          await transaction.query(
+            `UPDATE commerce_event_inbox
+             SET status = 'processed', application_state = 'superseded', processed_at = $2
+             WHERE id = $1`,
+            [input.inboxId, input.now.toISOString()],
+          );
+          return {
+            eventId: input.inboxId,
+            outcome: 'superseded',
+            lifecycle: canonicalBefore.lifecycle,
+          };
         }
         if (
           canonicalBefore.source_verified &&
@@ -1193,6 +1287,281 @@ export class CommerceOperationsRepository {
       [input.inboxId, input.errorCode, input.now.toISOString()],
     );
     return result.rowCount === 1;
+  }
+
+  async recordStripeInvoiceFinalizationRecovery(input: {
+    readonly environment: 'test' | 'production';
+    readonly sourceInboxId: string;
+    readonly providerInvoiceId: string;
+    readonly providerSubscriptionId?: string;
+    readonly householdId?: string;
+    readonly subscriptionId?: string;
+    readonly observedAt: Date;
+  }): Promise<'attention' | 'resolved'> {
+    if (
+      (input.householdId === undefined) !== (input.subscriptionId === undefined) ||
+      (input.providerSubscriptionId === undefined && input.householdId !== undefined)
+    ) {
+      throw new DomainError('invalid_input', 'Stripe invoice recovery binding is incomplete');
+    }
+    return this.database.transaction(async (transaction) => {
+      const source = await transaction.query<
+        {
+          readonly event_type: string;
+          readonly provider_object_id: string | null;
+          readonly provider_event_created_at: unknown;
+          readonly payload_hmac: string;
+          readonly application_state: string;
+        } & Record<string, unknown>
+      >(
+        `SELECT event_type, provider_object_id, provider_event_created_at,
+                payload_hmac, application_state
+         FROM commerce_event_inbox
+         WHERE id = $1 AND provider = 'stripe' AND environment = $2
+           AND authenticity = 'verified'`,
+        [input.sourceInboxId, input.environment],
+      );
+      const row = source.rows[0];
+      if (
+        row === undefined ||
+        row.event_type !== 'invoice.finalization_failed' ||
+        row.provider_object_id !== input.providerInvoiceId ||
+        row.application_state === 'quarantined'
+      ) {
+        throw new DomainError('conflict', 'Stripe invoice recovery source is invalid');
+      }
+      const eventCreatedAt = new Date(String(row.provider_event_created_at));
+      if (!Number.isFinite(eventCreatedAt.getTime())) {
+        throw new DomainError('conflict', 'Stripe invoice recovery time is invalid');
+      }
+      if (input.householdId !== undefined && input.subscriptionId !== undefined) {
+        const binding = await transaction.query(
+          `SELECT 1 FROM commerce_provider_subscription_records
+           WHERE provider = 'stripe' AND environment = $1
+             AND external_subscription_id = $2 AND household_id = $3
+             AND subscription_id = $4`,
+          [
+            input.environment,
+            input.providerSubscriptionId,
+            input.householdId,
+            input.subscriptionId,
+          ],
+        );
+        if (binding.rowCount !== 1) {
+          throw new DomainError('conflict', 'Stripe invoice recovery binding is invalid');
+        }
+      }
+      const paid = await transaction.query(
+        `SELECT 1 FROM commerce_stripe_paid_invoice_evidence
+         WHERE environment = $1 AND provider_invoice_id = $2`,
+        [input.environment, input.providerInvoiceId],
+      );
+      const recoveryState = paid.rowCount === 1 ? 'resolved' : 'attention';
+      const inserted = await transaction.query(
+        `INSERT INTO commerce_stripe_invoice_recovery_events(
+           id, environment, source_inbox_id, provider_invoice_id,
+           provider_subscription_id, household_id, subscription_id, event_kind,
+           recovery_state, provider_event_created_at, evidence_digest, observed_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,'finalization_failed',$8,$9,$10,$11)
+         ON CONFLICT (source_inbox_id) DO NOTHING`,
+        [
+          this.idFactory.next('stripe-invoice-recovery'),
+          input.environment,
+          input.sourceInboxId,
+          input.providerInvoiceId,
+          input.providerSubscriptionId ?? null,
+          input.householdId ?? null,
+          input.subscriptionId ?? null,
+          recoveryState,
+          eventCreatedAt.toISOString(),
+          row.payload_hmac,
+          input.observedAt.toISOString(),
+        ],
+      );
+      if (inserted.rowCount === 1) return recoveryState;
+      const existing = await transaction.query<
+        { readonly recovery_state: 'attention' | 'resolved' } & Record<string, unknown>
+      >(
+        `SELECT recovery_state FROM commerce_stripe_invoice_recovery_events
+         WHERE source_inbox_id = $1 AND environment = $2
+           AND provider_invoice_id = $3
+           AND provider_subscription_id IS NOT DISTINCT FROM $4
+           AND household_id IS NOT DISTINCT FROM $5
+           AND subscription_id IS NOT DISTINCT FROM $6
+           AND event_kind = 'finalization_failed'
+           AND provider_event_created_at = $7 AND evidence_digest = $8`,
+        [
+          input.sourceInboxId,
+          input.environment,
+          input.providerInvoiceId,
+          input.providerSubscriptionId ?? null,
+          input.householdId ?? null,
+          input.subscriptionId ?? null,
+          eventCreatedAt.toISOString(),
+          row.payload_hmac,
+        ],
+      );
+      const existingRow = existing.rows[0];
+      if (existingRow === undefined) {
+        throw new DomainError('conflict', 'Stripe invoice recovery evidence conflicts');
+      }
+      return existingRow.recovery_state;
+    });
+  }
+
+  async ensureStripeInvoiceFinalizationAttention(input: {
+    readonly environment: 'test' | 'production';
+    readonly sourceInboxId: string;
+    readonly providerInvoiceId: string;
+    readonly now: Date;
+  }): Promise<'attention' | 'resolved'> {
+    return this.database.transaction(async (transaction) => {
+      const recovery = await transaction.query<
+        {
+          readonly environment: string;
+          readonly provider_invoice_id: string;
+          readonly recovery_state: 'attention' | 'resolved';
+        } & Record<string, unknown>
+      >(
+        `SELECT environment, provider_invoice_id, recovery_state
+         FROM commerce_stripe_invoice_recovery_events
+         WHERE source_inbox_id = $1
+         FOR UPDATE`,
+        [input.sourceInboxId],
+      );
+      const row = recovery.rows[0];
+      if (
+        row === undefined ||
+        row.environment !== input.environment ||
+        row.provider_invoice_id !== input.providerInvoiceId
+      ) {
+        throw new DomainError('conflict', 'Stripe invoice recovery attention binding is invalid');
+      }
+      const paid = await transaction.query(
+        `SELECT 1 FROM commerce_stripe_paid_invoice_evidence
+         WHERE environment = $1 AND provider_invoice_id = $2`,
+        [input.environment, input.providerInvoiceId],
+      );
+      if (row.recovery_state === 'resolved' || paid.rowCount === 1) return 'resolved';
+
+      const id = this.idFactory.next('attention');
+      await transaction.query(
+        `INSERT INTO owner_attention_items(
+           id, attention_kind, source_type, source_id, dedupe_key, why_founder_required,
+           recommended_action, consequence_of_inaction, deadline, state, created_at, updated_at
+         ) VALUES (
+           $1,'billing_reconciliation','commerce_event',$2,$3,
+           'A signed Stripe invoice finalization event requires operator review; access was not changed.',
+           'Review the authenticated Stripe invoice finalization failure and correct its billing configuration.',
+           'Payment cannot be confirmed until the invoice finalization failure is resolved.',
+           NULL,'open',$4,$4
+         )
+         ON CONFLICT (dedupe_key) WHERE state IN ('open','snoozed')
+         DO UPDATE SET
+           why_founder_required = excluded.why_founder_required,
+           recommended_action = excluded.recommended_action,
+           consequence_of_inaction = excluded.consequence_of_inaction,
+           deadline = NULL, state = 'open', updated_at = excluded.updated_at`,
+        [
+          id,
+          input.sourceInboxId,
+          `billing_invoice_finalization_${input.sourceInboxId}`,
+          input.now.toISOString(),
+        ],
+      );
+      return 'attention';
+    });
+  }
+
+  async resolveStripeInvoiceFinalizationAttentionFromPaidEvidence(input: {
+    readonly environment: 'test' | 'production';
+    readonly householdId: string;
+    readonly subscriptionId: string;
+    readonly evidence: ProviderPaidPeriodEvidence;
+    readonly now: Date;
+  }): Promise<number> {
+    return this.database.transaction(async (transaction) => {
+      const paid = await transaction.query<
+        {
+          readonly environment: string;
+          readonly household_id: string;
+          readonly subscription_id: string;
+          readonly provider_subscription_id: string;
+          readonly provider_subscription_item_id: string;
+          readonly period_starts_at: unknown;
+          readonly period_ends_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT environment, household_id, subscription_id, provider_subscription_id,
+                provider_subscription_item_id, period_starts_at, period_ends_at
+         FROM commerce_stripe_paid_invoice_evidence
+         WHERE provider_invoice_id = $1`,
+        [input.evidence.providerInvoiceId],
+      );
+      const paidProof = paid.rows[0];
+      if (
+        paidProof === undefined ||
+        paidProof.environment !== input.environment ||
+        paidProof.household_id !== input.householdId ||
+        paidProof.subscription_id !== input.subscriptionId ||
+        paidProof.provider_subscription_id !== input.evidence.externalSubscriptionId ||
+        paidProof.provider_subscription_item_id !== input.evidence.providerSubscriptionItemId ||
+        new Date(String(paidProof.period_starts_at)).getTime() !==
+          input.evidence.currentPeriodStartsAt.getTime() ||
+        new Date(String(paidProof.period_ends_at)).getTime() !==
+          input.evidence.currentPeriodEndsAt.getTime()
+      ) {
+        throw new DomainError('conflict', 'Paid invoice recovery closure evidence is invalid');
+      }
+      // Attention creation locks the same recovery rows. This post-commit pass therefore either
+      // waits for a stale creator or makes a later creator observe the committed paid evidence.
+      const recoveries = await transaction.query(
+        `SELECT source_inbox_id
+         FROM commerce_stripe_invoice_recovery_events
+         WHERE environment = $1 AND provider_invoice_id = $2
+           AND recovery_state = 'attention'
+           AND (
+             (household_id = $3 AND subscription_id = $4)
+             OR (household_id IS NULL AND subscription_id IS NULL)
+           )
+         FOR UPDATE`,
+        [
+          input.environment,
+          input.evidence.providerInvoiceId,
+          input.householdId,
+          input.subscriptionId,
+        ],
+      );
+      if (recoveries.rowCount === 0) return 0;
+      const resolved = await transaction.query(
+        `UPDATE owner_attention_items attention
+         SET state = 'resolved', resolved_at = $5, updated_at = $5
+         WHERE attention.attention_kind = 'billing_reconciliation'
+           AND attention.source_type = 'commerce_event'
+           AND attention.state IN ('open','snoozed')
+           AND EXISTS (
+             SELECT 1 FROM commerce_stripe_invoice_recovery_events recovery
+             WHERE recovery.source_inbox_id = attention.source_id
+               AND attention.dedupe_key =
+                 ('billing_invoice_finalization_' || recovery.source_inbox_id)
+               AND recovery.environment = $1
+               AND recovery.provider_invoice_id = $2
+               AND recovery.recovery_state = 'attention'
+               AND (
+                 (recovery.household_id = $3 AND recovery.subscription_id = $4)
+                 OR (recovery.household_id IS NULL AND recovery.subscription_id IS NULL)
+               )
+           )`,
+        [
+          input.environment,
+          input.evidence.providerInvoiceId,
+          input.householdId,
+          input.subscriptionId,
+          input.now.toISOString(),
+        ],
+      );
+      return resolved.rowCount;
+    });
   }
 
   async ignoreProviderEventAfterReconciliation(input: {
@@ -1618,35 +1987,74 @@ export class CommerceOperationsRepository {
 
   async claimProviderReconciliationAutomaticAttempt(input: {
     readonly id: string;
+    readonly inboxId: string;
     readonly provider: CommerceProvider;
     readonly environment: CommerceProviderEnvironment;
     readonly repairGeneration: number;
     readonly now: Date;
-  }): Promise<number | null> {
+  }): Promise<ProviderReconciliationAutomaticClaim> {
     if (!Number.isSafeInteger(input.repairGeneration) || input.repairGeneration < 0) {
       throw new DomainError('invalid_input', 'Invalid provider reconciliation generation');
     }
-    const result = await this.database.query<
-      { readonly automatic_attempt_count: number } & Record<string, unknown>
-    >(
-      `UPDATE commerce_reconciliation_runs
-       SET state = 'running', started_at = COALESCE(started_at, $5),
-           last_attempted_at = $5, repair_generation = GREATEST(repair_generation, $4),
-           automatic_attempt_count = automatic_attempt_count + 1
-       WHERE id = $1 AND provider = $2 AND environment = $3
-         AND state IN ('queued','running','attention')
-         AND automatic_attempt_count < authorized_attempt_limit
-         AND $4 <= manual_repair_revision + 1
-       RETURNING automatic_attempt_count`,
-      [
-        input.id,
-        input.provider,
-        input.environment,
-        input.repairGeneration,
-        input.now.toISOString(),
-      ],
-    );
-    return result.rows[0]?.automatic_attempt_count ?? null;
+    return this.database.transaction(async (transaction) => {
+      const locked = await transaction.query<
+        {
+          readonly state: string;
+          readonly trigger_event_id: string;
+          readonly completed_at: unknown;
+          readonly automatic_attempt_count: number;
+          readonly authorized_attempt_limit: number;
+          readonly manual_repair_revision: number;
+        } & Record<string, unknown>
+      >(
+        `SELECT state, trigger_event_id, completed_at, automatic_attempt_count,
+                authorized_attempt_limit, manual_repair_revision
+         FROM commerce_reconciliation_runs
+         WHERE id = $1 AND provider = $2 AND environment = $3
+         FOR UPDATE`,
+        [input.id, input.provider, input.environment],
+      );
+      const row = locked.rows[0];
+      if (row === undefined || row.trigger_event_id !== input.inboxId) {
+        return { kind: 'binding_invalid' };
+      }
+      if (row.state === 'completed' || (row.state === 'attention' && row.completed_at !== null)) {
+        return {
+          kind: 'already_terminal',
+          terminalState: row.state as 'completed' | 'attention',
+        };
+      }
+      if (
+        !['queued', 'running', 'attention'].includes(row.state) ||
+        row.automatic_attempt_count >= row.authorized_attempt_limit ||
+        input.repairGeneration > row.manual_repair_revision + 1
+      ) {
+        return { kind: 'unavailable' };
+      }
+      const result = await transaction.query<
+        { readonly automatic_attempt_count: number } & Record<string, unknown>
+      >(
+        `UPDATE commerce_reconciliation_runs
+         SET state = 'running', started_at = COALESCE(started_at, $5),
+             last_attempted_at = $5, repair_generation = GREATEST(repair_generation, $4),
+             automatic_attempt_count = automatic_attempt_count + 1
+         WHERE id = $1 AND provider = $2 AND environment = $3
+           AND trigger_event_id = $6
+         RETURNING automatic_attempt_count`,
+        [
+          input.id,
+          input.provider,
+          input.environment,
+          input.repairGeneration,
+          input.now.toISOString(),
+          input.inboxId,
+        ],
+      );
+      const attempt = result.rows[0]?.automatic_attempt_count;
+      return attempt === undefined
+        ? { kind: 'binding_invalid' }
+        : { kind: 'claimed', automaticAttemptCount: attempt };
+    });
   }
 
   async completeReconciliation(input: {

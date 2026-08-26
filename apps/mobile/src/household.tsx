@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { FamilyResponse, PrincipalDto } from '@boomerbuddy/contracts';
 import { mobileRequest } from './api';
 import { readSelectedHouseholdId, setSelectedHouseholdId } from './session';
@@ -77,18 +77,21 @@ export function MobileHouseholdProvider({
     setSelectedId(householdId);
   }
 
-  function replacePrincipal(nextPrincipal: PrincipalDto, preferredHouseholdId?: string): string {
-    const stored = readSelectedHouseholdId();
-    const selected =
-      nextPrincipal.households.find((scope) => scope.id === preferredHouseholdId)?.id ??
-      nextPrincipal.households.find((scope) => scope.id === stored)?.id ??
-      nextPrincipal.households[0]?.id ??
-      '';
-    void setSelectedHouseholdId(selected || null).catch(() => undefined);
-    setSelectedId(selected);
-    onPrincipalChanged(nextPrincipal);
-    return selected;
-  }
+  const replacePrincipal = useCallback(
+    (nextPrincipal: PrincipalDto, preferredHouseholdId?: string): string => {
+      const stored = readSelectedHouseholdId();
+      const selected =
+        nextPrincipal.households.find((scope) => scope.id === preferredHouseholdId)?.id ??
+        nextPrincipal.households.find((scope) => scope.id === stored)?.id ??
+        nextPrincipal.households[0]?.id ??
+        '';
+      void setSelectedHouseholdId(selected || null).catch(() => undefined);
+      setSelectedId(selected);
+      onPrincipalChanged(nextPrincipal);
+      return selected;
+    },
+    [onPrincipalChanged],
+  );
 
   const selectedScope = principal.households.find((scope) => scope.id === selectedHouseholdId);
   const value: HouseholdContextValue = {

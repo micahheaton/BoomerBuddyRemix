@@ -234,9 +234,9 @@ describe('one-shot local demo bootstrap', () => {
          VALUES ('person-existing','Existing Person',$1)`,
         [clock.now().toISOString()],
       );
-      await expect(seedDemoData(database, testArtifactProtection(), clock.now())).rejects.toThrow(
-        'requires an empty local database',
-      );
+      await expect(
+        seedDemoData(database, testArtifactProtection(), 'test', clock.now()),
+      ).rejects.toThrow('requires an empty local database');
       const existing = await database.query<{ display_name: string }>(
         `SELECT display_name FROM persons WHERE id = 'person-existing'`,
       );

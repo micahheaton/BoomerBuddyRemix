@@ -29,7 +29,7 @@ import type {
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
 import { buildUserInitiatedInvitationShareDraft } from '@boomerbuddy/contracts';
-import { mobileRequest, readableError } from './api';
+import { MobileCustomerError, mobileRequest, readableError } from './api';
 import {
   mobileHouseholdScopeSummary,
   useMobileHousehold,
@@ -119,25 +119,25 @@ export function SignInScreen({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'SignIn'>): React.ReactElement {
   const { startHostedAuth } = useHostedAuth();
-  const [busy, setBusy] = useState<'sign-in' | 'sign-up' | ''>('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  async function authenticate(mode: 'sign-in' | 'sign-up') {
-    setBusy(mode);
+  async function authenticate() {
+    setBusy(true);
     setError('');
     try {
       if (Platform.OS === 'web') {
         await Linking.openURL(customerWebSignInUrl);
         return;
       }
-      const result = await startHostedAuth({ mode });
+      const result = await startHostedAuth({ mode: 'sign-in' });
       if (!result.createdSessionId) {
         setError('Sign-in was not completed. You can try again when you are ready.');
       }
     } catch (caught) {
       setError(readableError(caught));
     } finally {
-      setBusy('');
+      setBusy(false);
     }
   }
   return (
@@ -158,14 +158,14 @@ export function SignInScreen({
       </View>
       {error ? <ErrorText message={error} /> : null}
       <ActionButton
-        title={busy === 'sign-in' ? 'Opening member sign in…' : 'Member sign in'}
-        disabled={Boolean(busy)}
-        onPress={() => void authenticate('sign-in')}
+        title={busy ? 'Opening member sign in…' : 'Member sign in'}
+        disabled={busy}
+        onPress={() => void authenticate()}
       />
       <ActionButton
         kind="secondary"
         title="Help and policies"
-        disabled={Boolean(busy)}
+        disabled={busy}
         onPress={() => navigation.navigate('HelpPolicies')}
       />
       <Text style={s.muted}>
@@ -203,34 +203,64 @@ export function SessionRecoveryScreen({
 export function HomeScreen({
   navigation,
   nativeEntrySignal,
+  onNativeEntryHandled,
   onSignOut,
 }: NativeStackScreenProps<RootStackParamList, 'Home'> & {
   nativeEntrySignal: NativeEntrySignal;
+  onNativeEntryHandled: () => void;
   onSignOut: () => void;
 }) {
-  const { principal, selectedHouseholdId, selectedScope, selectHousehold, householdName } =
-    useMobileHousehold();
+  const {
+    principal,
+    selectedHouseholdId,
+    selectedScope,
+    selectHousehold,
+    replacePrincipal,
+    householdName,
+  } = useMobileHousehold();
   const [entitlements, setEntitlements] = useState<{
     householdId: string;
     value: EntitlementResponse;
   }>();
   const [entitlementsUnavailableFor, setEntitlementsUnavailableFor] = useState('');
+  const [entitlementsRefreshingFor, setEntitlementsRefreshingFor] = useState('');
+  const [entitlementRefreshAttempt, setEntitlementRefreshAttempt] = useState(0);
   useEffect(() => {
     if (!selectedHouseholdId || !selectedScope?.isBillingManager) return;
     let active = true;
-    void mobileRequest<EntitlementResponse>('/v1/entitlements')
-      .then((response) => {
+    void Promise.resolve()
+      .then(() => {
+        if (active) setEntitlementsRefreshingFor(selectedHouseholdId);
+        return Promise.all([
+          mobileRequest<EntitlementResponse>('/v1/entitlements'),
+          mobileRequest<MeResponse>('/v1/me'),
+        ]);
+      })
+      .then(([response, me]) => {
         if (!active) return;
+        replacePrincipal(me.principal, selectedHouseholdId);
         setEntitlements({ householdId: selectedHouseholdId, value: response });
         setEntitlementsUnavailableFor('');
       })
       .catch(() => {
-        if (active) setEntitlementsUnavailableFor(selectedHouseholdId);
+        if (!active) return;
+        setEntitlements((current) =>
+          current?.householdId === selectedHouseholdId ? undefined : current,
+        );
+        setEntitlementsUnavailableFor(selectedHouseholdId);
+      })
+      .finally(() => {
+        if (active) setEntitlementsRefreshingFor('');
       });
     return () => {
       active = false;
     };
-  }, [selectedHouseholdId, selectedScope?.isBillingManager]);
+  }, [
+    entitlementRefreshAttempt,
+    replacePrincipal,
+    selectedHouseholdId,
+    selectedScope?.isBillingManager,
+  ]);
   const isUnassigned = principal.households.length === 0;
   const isProtectedMember = selectedScope?.isProtectedMember === true;
   const canCheck =
@@ -273,7 +303,7 @@ export function HomeScreen({
 
   return (
     <Screen>
-      <Text style={s.pill}>Rules-only analysis</Text>
+      <Text style={s.pill}>Pause and check</Text>
       <Text accessibilityRole="header" style={s.title}>
         Hello, {principal.displayName}
       </Text>
@@ -285,7 +315,9 @@ export function HomeScreen({
       {principal.households.length > 1 ? (
         <View style={s.card}>
           <Text style={s.heading}>Active household</Text>
-          <Text style={s.muted}>Checks, history, Family, and orientation use this one scope.</Text>
+          <Text style={s.muted}>
+            The household you choose applies to Check, History, Family, and Orientation.
+          </Text>
           {principal.households.map((scope, index) => (
             <Pressable
               accessibilityRole="radio"
@@ -319,27 +351,32 @@ export function HomeScreen({
       ) : null}
       {nativeEntrySignal === 'route_only_check' ? (
         <View style={s.card}>
-          <Text style={s.pill}>Route-only deep link observed</Text>
+          <Text style={s.pill}>Check opened</Text>
           <Text style={s.body}>
-            The link requested the Check screen without carrying an artifact. Nothing was pasted or
-            analyzed automatically.
+            BoomerBuddy opened Check without copying anything from the link. Paste the item yourself
+            if you want it reviewed.
           </Text>
           {canCheck ? (
             <ActionButton
-              title="Continue to empty Check"
-              onPress={() => navigation.navigate('Check')}
+              title="Continue to Check"
+              onPress={() => {
+                onNativeEntryHandled();
+                navigation.navigate('Check');
+              }}
             />
           ) : (
-            <Text style={s.muted}>Check is unavailable in this household scope.</Text>
+            <Text style={s.muted}>Check is unavailable for this household.</Text>
           )}
+          <ActionButton kind="secondary" title="Dismiss" onPress={onNativeEntryHandled} />
         </View>
       ) : nativeEntrySignal === 'rejected_payload' ? (
         <View style={s.banner}>
-          <Text style={s.label}>Deep-link payload rejected</Text>
+          <Text style={s.label}>Content was not opened</Text>
           <Text style={s.muted}>
-            BoomerBuddy accepts only the empty route signal. Suspicious content in a URL is not
-            ingested because links may leak through operating-system and app history.
+            For privacy, BoomerBuddy does not copy suspicious content from app links. Paste it into
+            Check yourself if you want it reviewed.
           </Text>
+          <ActionButton kind="secondary" title="Dismiss" onPress={onNativeEntryHandled} />
         </View>
       ) : null}
       <View style={s.navGrid}>
@@ -350,8 +387,8 @@ export function HomeScreen({
           />
         ) : !isUnassigned ? (
           <Text style={s.muted}>
-            Checks require an active protected-adult enrollment. Owner access alone does not grant
-            this protected workflow.
+            Only an enrolled protected adult can create a Check. Managing or paying for the
+            household does not give you access to another adult&apos;s Checks.
           </Text>
         ) : null}
         {!isUnassigned && canReadHistory ? (
@@ -361,7 +398,7 @@ export function HomeScreen({
             onPress={() => navigation.navigate('History')}
           />
         ) : !isUnassigned ? (
-          <Text style={s.muted}>History is unavailable in this household scope.</Text>
+          <Text style={s.muted}>History is unavailable for this household.</Text>
         ) : null}
         {canUseFamily ? (
           <ActionButton
@@ -378,7 +415,7 @@ export function HomeScreen({
           />
         ) : !isUnassigned ? (
           <Text style={s.muted}>
-            Orientation requires an active protected-adult enrollment in this household.
+            Only an enrolled protected adult can complete orientation for this household.
           </Text>
         ) : null}
         <ActionButton
@@ -393,8 +430,8 @@ export function HomeScreen({
           <Text style={s.pill}>Current access and plan</Text>
           <Text style={s.heading}>{accessSummary}</Text>
           <Text style={s.body}>
-            Your available features follow the selected household, your role, and each person&apos;s
-            consent. This screen shows access information only.
+            Your available features depend on the household you selected, your role, and each
+            person&apos;s consent.
           </Text>
           {!selectedScope?.isBillingManager ? (
             <Text style={s.muted}>
@@ -420,8 +457,27 @@ export function HomeScreen({
               in the actions above still apply.
             </Text>
           ) : (
-            <Text style={s.muted}>Loading selected-household access details…</Text>
+            <Text style={s.muted}>Loading access details...</Text>
           )}
+          {selectedScope?.isBillingManager ? (
+            <>
+              <Text style={s.muted}>
+                If Family access was recently started, renewed, canceled, or restored, confirmation
+                can take a moment. Refresh here before trying protected features again. This does
+                not start or change a purchase.
+              </Text>
+              <ActionButton
+                kind="secondary"
+                title={
+                  entitlementsRefreshingFor === selectedHouseholdId
+                    ? 'Refreshing access...'
+                    : 'Refresh access'
+                }
+                disabled={entitlementsRefreshingFor === selectedHouseholdId}
+                onPress={() => setEntitlementRefreshAttempt((attempt) => attempt + 1)}
+              />
+            </>
+          ) : null}
         </View>
       ) : null}
       <View style={s.card}>
@@ -571,10 +627,10 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
           Check unavailable in this household
         </Text>
         <View style={s.banner}>
-          <Text style={s.heading}>Protected-adult enrollment required</Text>
+          <Text style={s.heading}>Protected adult access required</Text>
           <Text style={s.body}>
-            Creating and owning a Check requires an active protected-adult enrollment. Household
-            administrator access alone does not grant this workflow.
+            Only an enrolled protected adult can create a Check. Managing or paying for the
+            household does not give you access to another adult&apos;s Checks.
           </Text>
         </View>
       </Screen>
@@ -606,7 +662,7 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
             }}
             style={[s.choice, { flexGrow: 1 }, effectiveKind === item && s.choiceSelected]}
           >
-            <View style={[s.radio, kind === item && s.radioSelected]} />
+            <View style={[s.radio, effectiveKind === item && s.radioSelected]} />
             <Text style={s.body}>{item === 'text' ? 'Message text' : 'Website URL'}</Text>
           </Pressable>
         ))}
@@ -629,14 +685,14 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         value={content}
       />
       <Text style={s.muted}>
-        Rules-only analysis does not visit a submitted website or check it against live online
-        services. It can miss warning signs, so do not treat a result as proof that something is
-        safe.
+        BoomerBuddy reviews only the message text or website address you submit. It does not open
+        the website or compare it with live online data. It can miss warning signs, so do not treat
+        a result as proof that something is safe.
       </Text>
       {!canCheckText && !canCheckUrl ? (
         <View style={s.banner}>
           <Text style={s.label}>Checks unavailable</Text>
-          <Text style={s.muted}>Choose a household scope whose plan includes checking.</Text>
+          <Text style={s.muted}>Choose a household where your membership includes Check.</Text>
         </View>
       ) : null}
       <View style={s.banner}>
@@ -728,7 +784,7 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
   return (
     <Screen>
       <View accessibilityLiveRegion="polite" style={[s.card, s.risk, riskStyle(check.risk)]}>
-        <Text style={s.pill}>Rules-only analysis</Text>
+        <Text style={s.pill}>BoomerBuddy Check</Text>
         <Text style={s.pill}>{check.access.kind === 'owned' ? 'Yours' : 'Shared with you'}</Text>
         <Text accessibilityRole="header" style={s.title}>
           Check result
@@ -818,7 +874,7 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
             ))
           ) : (
             <Text style={s.muted}>
-              No active relationship has permission to view deliberately shared checks.
+              No one in your Trusted Circle currently has permission to view shared Checks.
             </Text>
           )}
           {shareStatus ? (
@@ -827,8 +883,8 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
             </Text>
           ) : null}
           <Text style={s.muted}>
-            Notifications for newly shared Checks are not available in this beta. The person you
-            share with can review it in their BoomerBuddy account.
+            Sharing saves this result in the other person&apos;s BoomerBuddy account, but it does
+            not notify them. Contact them directly if help is urgent.
           </Text>
         </View>
       ) : check.access.kind === 'shared' ? (
@@ -836,7 +892,7 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
           <Text style={s.heading}>Shared with you</Text>
           <Text style={s.body}>
             Only the check owner can reshare or delete this result. To leave shared access, withdraw
-            from the pairwise relationship in Family.
+            from the Trusted Circle connection in Family.
           </Text>
           <ActionButton
             kind="secondary"
@@ -887,7 +943,7 @@ export function HistoryScreen({
         setTotal(0);
         setLoadedHouseholdId(selectedHouseholdId);
         setLoading(false);
-        setError('History is unavailable in this household scope.');
+        setError('History is unavailable for this household.');
         return () => {
           active = false;
         };
@@ -990,7 +1046,7 @@ export function HistoryScreen({
                 {riskLabels[check.risk]} · {supportingInformationLabels[check.evidenceSufficiency]}
               </Text>
               <Text style={s.muted}>
-                {new Date(check.createdAt).toLocaleString()} · Rules-only analysis
+                {new Date(check.createdAt).toLocaleString()} - BoomerBuddy Check
               </Text>
               <ActionButton
                 kind="secondary"
@@ -1166,7 +1222,9 @@ export function FamilyScreen({
         },
       );
       if (accepted.householdId !== acceptedHouseholdId) {
-        throw new Error('The accepted household did not match the invitation you reviewed.');
+        throw new MobileCustomerError(
+          'The accepted household did not match the invitation you reviewed.',
+        );
       }
       setPreview(undefined);
       setConsentConfirmed(false);
@@ -1175,13 +1233,13 @@ export function FamilyScreen({
       setStatus('Invitation accepted with permission to view deliberately shared checks.');
       const refreshedMe = await mobileRequest<MeResponse>('/v1/me');
       if (!refreshedMe.principal.households.some((scope) => scope.id === acceptedHouseholdId)) {
-        throw new Error(
+        throw new MobileCustomerError(
           'Invitation accepted, but the reviewed household is not available in this session.',
         );
       }
       const nextHouseholdId = replacePrincipal(refreshedMe.principal, acceptedHouseholdId);
       if (nextHouseholdId !== acceptedHouseholdId) {
-        throw new Error('The reviewed household could not be selected safely.');
+        throw new MobileCustomerError('The reviewed household could not be selected safely.');
       }
       await load(acceptedHouseholdId);
     } catch (caught) {
@@ -1478,7 +1536,7 @@ export function FamilyScreen({
           ) : null}
         </>
       ) : selectedHouseholdId ? (
-        <Loading label="Loading scoped family view…" />
+        <Loading label="Loading Family..." />
       ) : (
         <View style={s.card}>
           <Text style={s.heading}>No household access</Text>
@@ -1493,12 +1551,12 @@ const orientationSteps = [
   [
     'protection_subject',
     'Confirm identity, enrollment, and consent',
-    'Confirm whose identity and plan this is. This review does not verify identity. The protected adult needs accepted self-enrollment; administration or payment never replaces that person’s consent.',
+    'Confirm whose account and safety plan this is. BoomerBuddy does not verify identity. The protected adult must enroll and consent for themselves; managing or paying for the household does not replace their consent.',
   ],
   [
     'trusted_circle',
     'Consent and Trusted Circle',
-    'Review the exact person, sharing permission, and withdrawal path. Pairwise permission requires acceptance and can end independently. Notifications for newly shared Checks are not available in this beta, so agree on a direct contact method.',
+    'Invite only people you know. Each person must accept their own sharing permission, and either person can end it. Sharing a Check does not notify them, so agree on how to contact each other.',
   ],
   [
     'safe_word',
@@ -1507,18 +1565,18 @@ const orientationSteps = [
   ],
   [
     'practice_check',
-    'Practice the Check and sharing workflow',
+    'Practice checking and sharing',
     'Use a fictional bank-message scenario to practice pausing, entering suspicious material in Check, reading what it noticed and its limits, taking a safe action, and deliberately sharing only a redacted result.',
   ],
   [
     'capabilities_and_limits',
     'Understand limits and recovery',
-    'Rules-only analysis does not visit submitted websites, check live online services, monitor messages, or guarantee safety. If money, access, or credentials were exposed, stop contact, use independently found official channels, secure the account, and seek qualified help.',
+    'BoomerBuddy reviews only what you submit. It does not open websites, compare them with live online data, monitor messages, or guarantee safety. If money, access, or passwords were exposed, stop contact, use independently found official channels, secure the account, and seek qualified help.',
   ],
   [
     'review',
     'Review the plan',
-    'Confirm identity and protected-person scope, consent, pairwise permissions, manual contact plan, safe word, Check and sharing workflow, recovery contacts, and independent verification steps.',
+    "Confirm who the plan is for, each person's consent and sharing choices, how to contact one another, the safe word, recovery contacts, and how to verify urgent requests independently.",
   ],
 ] as const;
 type OrientationKey = (typeof orientationSteps)[number][0];
@@ -1623,8 +1681,8 @@ export function OrientationScreen(): React.ReactElement {
         Orientation
       </Text>
       <Text style={s.body}>
-        Six guided stages cover identity, protected-person consent, Trusted Circle sharing,
-        notification limits, a realistic Check, recovery, and product boundaries.
+        Six guided stages cover identity, consent, Trusted Circle sharing, a realistic Check,
+        recovery, and what BoomerBuddy can and cannot do.
       </Text>
       {announcement ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>
@@ -1634,10 +1692,10 @@ export function OrientationScreen(): React.ReactElement {
       {error ? <ErrorText message={error} /> : null}
       {!canUseOrientation ? (
         <View style={s.banner}>
-          <Text style={s.heading}>Protected-adult enrollment required</Text>
+          <Text style={s.heading}>Protected adult access required</Text>
           <Text style={s.body}>
-            Self-orientation and safe-word setup require an active protected-adult enrollment.
-            Household administrator access alone does not grant these protected workflows.
+            Only an enrolled protected adult can complete orientation and set a safe word. Managing
+            or paying for the household does not replace that adult&apos;s consent.
           </Text>
         </View>
       ) : !visibleState ? (
@@ -1669,9 +1727,9 @@ export function OrientationScreen(): React.ReactElement {
                 <Text style={s.body}>{detail}</Text>
                 {key === 'trusted_circle' ? (
                   <Text style={s.muted}>
-                    Completing this stage records review only. It does not create a relationship,
-                    grant permission, or send a notification; those actions remain explicit in
-                    Family.
+                    Marking this step complete only records that you reviewed it. Add or remove
+                    people and sharing permissions separately in Family. BoomerBuddy does not send a
+                    notification when you finish this step.
                   </Text>
                 ) : null}
                 {!done && !isCurrent ? (
@@ -1688,8 +1746,8 @@ export function OrientationScreen(): React.ReactElement {
                       value={phrase}
                     />
                     <Text style={s.muted}>
-                      Normalized only in memory; the service stores a salted memory-hard verifier,
-                      not the phrase.
+                      BoomerBuddy never stores the phrase itself. It stores only a one-way protected
+                      value used to check it later.
                     </Text>
                     <ActionButton
                       title="Save and complete"

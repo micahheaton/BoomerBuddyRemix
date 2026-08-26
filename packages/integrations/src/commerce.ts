@@ -1,5 +1,14 @@
 export type CommerceProviderEnvironment = 'test' | 'sandbox' | 'production';
 
+export const stripeFailedPaymentEventTypes = [
+  'invoice.payment_failed',
+  'invoice.payment_action_required',
+] as const;
+
+export function isStripeFailedPaymentEventType(eventType: string): boolean {
+  return stripeFailedPaymentEventTypes.some((candidate) => candidate === eventType);
+}
+
 export interface StripeFoundingOffer {
   readonly offerId: 'founding_family_monthly_v1';
   readonly planVersionId: 'family_v1';
@@ -185,6 +194,7 @@ export interface StripePreflightEvidence {
   readonly portalProrationBehavior: 'none';
   readonly portalSubscriptionUpdateDefaultsEmpty: true;
   readonly portalPaymentMethodUpdateEnabled: true;
+  readonly portalInvoiceHistoryEnabled: true;
   readonly retentionCouponEvidence: 'manual_founder_browser_required';
   readonly promotionsEnabled: false;
   readonly automaticTaxEnabled: false;

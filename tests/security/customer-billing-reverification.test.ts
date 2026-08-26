@@ -198,6 +198,7 @@ function transport(): StripeTransport {
             subscription_update: { enabled: false, default_allowed_updates: [] },
             payment_method_update: { enabled: true },
             customer_update: { enabled: false, allowed_updates: [] },
+            invoice_history: { enabled: true },
           },
         };
       }
@@ -251,7 +252,7 @@ describe('customer billing recent-MFA boundary', () => {
   beforeEach(async () => {
     database = await createPGliteDatabase(':memory:');
     await runMigrations(database);
-    await seedDemoData(database, testArtifactProtection(), now);
+    await seedDemoData(database, testArtifactProtection(), 'test', now);
     await database.query(
       `UPDATE identities SET issuer = 'https://hq.clerk.test', subject = 'user_production_founder'
        WHERE id = 'identity-hq-heidi'`,

@@ -2,8 +2,9 @@
 
 ## Boundary
 
-Family at USD 14.99 per month is the only public or live offer. Its production Checkout contract,
-Stripe mapping, and customer copy remain separate from this registry.
+Family at USD 14.99 per month is the sole approved production offer candidate. It is not a live
+offer. Its default-off Checkout contract, Stripe mapping, and customer copy remain separate from
+this registry.
 
 For every annual, Individual, and referral hypothesis, this document is the controlling planning
 index and `packages/domain/src/revenue-hypotheses.ts` is the controlling typed registry. If another
@@ -33,6 +34,12 @@ approved offer requires a new versioned production contract that passes the prom
 | `offer-hypothesis-individual-monthly-v1` | Individual monthly USD 8.99 | 899 cents | month | synthetic candidate | synthetic, stripe_sandbox |
 | `offer-hypothesis-individual-annual-v1` | Individual annual USD 89 | 8,900 cents | year | synthetic candidate | synthetic, stripe_sandbox |
 
+The Family annual candidate saves USD 30.88, or about 17.17 percent, compared with twelve Family
+monthly payments. The Individual annual candidate saves USD 18.88, or about 17.50 percent, compared
+with twelve Individual monthly payments. Automated tests bind these exact comparisons. Family is
+the household coverage hypothesis; no separate employer, association, or bulk group price has been
+specified, so the registry does not invent one.
+
 The former USD 119 Family annual founding experiment is retired. The legacy
 `founding_experiment` kind can remain readable for historical catalog, migration, and replay
 evidence, but no active domain hypothesis emits USD 119 and no new experiment may select it.
@@ -48,6 +55,15 @@ Both referral hypotheses require the referred subscription's first settled payme
 same person, same household, same payment identity, and an already-attributed recipient. They do
 not allow cash payout, transfer, external action, public activation, production activation, or live
 provider writes.
+
+## Experiment execution
+
+[REVENUE-EXPERIMENT-ACTION-PACKET.md](./REVENUE-EXPERIMENT-ACTION-PACKET.md) is the exact synthetic
+measurement specification and candidate-bound noncharging setup packet. It keeps offer-research
+provider objects in a new isolated Stripe sandbox, leaves the existing legacy-webhook sandbox and
+all live resources untouched, and permits only a private noncollecting website preview. It also
+records the current funnel boundary: an access-intent receipt proves only `intent_created`, not an
+email, received or qualified lead, payment, lead-to-paid conversion, or recurring revenue.
 
 ## Promotion gate
 

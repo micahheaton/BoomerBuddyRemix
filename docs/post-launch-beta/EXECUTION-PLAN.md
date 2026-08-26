@@ -1,12 +1,16 @@
 # BoomerBuddy Revenue Acceleration and Autonomous Beta Plan
 
-Status: Execution-ready planning artifact; blanket execution authorization recorded 2026-08-25
+Status: Living execution plan. The 2026-08-24 audit is historical; the current closure ledger in Section 3 controls.
 
 Evidence date: 2026-08-24
 
 Release audited: `9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf`
 
 Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
+
+Last immutable candidate with complete local and GitHub CI evidence: `1fbd079de126aabccd788bfa3a854a77d1f6c1a3`
+
+Current repository state: later canonical-origin, billing-recovery, paid-feedback, support, mobile, and documentation closure work may be uncommitted. No historical receipt or `1fbd079` result covers that later work until a new exact SHA passes the full gate.
 
 Primary outcome: Onboard the first genuine paying household within seven calendar days if every objective safety, payment, support, consent, and evidence gate passes, then operate a controlled 30-day beta that earns greater autonomy from measured results.
 
@@ -16,9 +20,11 @@ This plan does not claim that a two-year product can be completed in seven days.
 
 ### 1.1 Current execution authority
 
-On 2026-08-25, the founder granted blanket execution authorization for the in-scope work described by this plan, including repository changes, account and provider setup, bounded spend, release work, pricing, lead generation, and production activation. Agents do not need to stop for another founder approval merely because an older phase labels an action founder-only. The active user instruction is the authority record; this document does not create authority by itself.
+Local repository edits, local tests, reviewable commits, branch pushes, and CI are authorized. A separate release gate now controls external effects. Do not merge, tag, make any Replit pull, deploy, run a production migration, write Clerk or Stripe state in any environment, write EAS or other provider identity/account state, send an external message, spend money, charge, refund, or alter production until the founder types this exact phrase in the active task:
 
-That authorization does not waive objective closure gates. Before an external or irreversible action, the responsible agent must still verify the exact target and environment, preserve secrets and customer PII, satisfy applicable legal and provider requirements, capture evidence, define a bounded cap, and have a tested rollback or containment path. A provider-required identity check, legal attestation, bank or tax confirmation, customer consent, customer plan choice, or customer payment authorization remains a truthful action by the actual account holder or customer. Agents may prepare and guide those steps but may not impersonate another person or fabricate evidence.
+`CONFIRM NONCHARGING RELEASE SETUP`
+
+That phrase authorizes only the reviewed noncharging release-setup scope described by the then-current exact-SHA packet. It does not authorize a customer charge, refund, customer consent, customer plan choice, customer communication, legal attestation, tax or bank attestation, or an action outside that packet. Before every external or irreversible action, the responsible agent must still verify the exact target and environment, preserve secrets and customer PII, satisfy applicable legal and provider requirements, capture evidence, define a bounded cap, and have a tested rollback or containment path. Agents may prepare and guide human-only steps but may not impersonate another person or fabricate evidence.
 
 The fastest defensible revenue path is an assisted direct-to-household subscription. The first payer is an adult child, caregiver, household organizer, or older adult who already faces suspicious messages and wants a calm family response path. The paid job is recurring household coordination and safer follow-through, not access to an infallible scam detector.
 
@@ -41,8 +47,8 @@ Do not use a Payment Link, manual invoice, database entitlement edit, or dashboa
 ## 2. Non-negotiable boundaries
 
 - Use only `C:\Dev\BoomerBuddy`. Do not inspect Downloads, OneDrive, another checkout, or another worktree.
-- Keep `boomerbuddy.net` untouched. The active customer, API, and HQ domains are `app.boomerbuddy.net`, `api.boomerbuddy.net`, and `hq.boomerbuddy.net`.
-- Treat GitHub `micahheaton/BoomerBuddyRemix` as the only 2.0 source of truth. The `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq` Replit projects pull the exact approved commit and never push back to GitHub.
+- Keep the separate legacy Replit project `BoomerBuddy`, which serves `boomerbuddy.net`, untouched. It exists for legacy Twilio registration, privacy, terms, and messaging opt-in evidence and is not a BoomerBuddy 2.0 deployment target. Do not point Clerk, Stripe, API, worker, customer web, or HQ at it.
+- Treat GitHub `micahheaton/BoomerBuddyRemix` as the only 2.0 source of truth. Its four Replit deployment consumers are fixed: `boomerbuddy-web` serves `app.boomerbuddy.net`; `boomerbuddy-api` serves `api.boomerbuddy.net`; `boomerbuddy-worker` runs background jobs; and `boomerbuddy-hq` serves `hq.boomerbuddy.net`. Each pulls the exact approved GitHub commit and never pushes code back to GitHub.
 - Preserve separate customer and HQ Clerk realms, issuers, audiences, cookies, and origins.
 - Keep HQ private. Founder actions require the bound founder identity and recent MFA.
 - Keep Twilio disabled until a separate consent, sender, suppression, quiet-hours, delivery, and compliance gauntlet passes. Do not add Twilio credentials to source or prompts.
@@ -52,13 +58,33 @@ Do not use a Payment Link, manual invoice, database entitlement edit, or dashboa
 - No agent may accept consent, choose a plan, enter payment details, or authorize a charge for a customer.
 - [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis. Those entries are synthetic and Stripe sandbox only; this plan cannot promote them into production configuration, customer copy, live provider resources, or external action.
 - Customer-facing web, HQ, mobile, email, store, and support copy may not contain U+2013 or U+2014.
-- The 2026-08-25 blanket instruction supplies typed authority for in-scope external spend, messages, publications, releases, provider writes, and store actions. Each action still needs immutable evidence, a bounded cap, and rollback or containment.
+- The current release gate supersedes broader historical authority wording. External writes remain stopped until the exact phrase in Section 1.1 appears in the active task and the reviewed scope remains noncharging.
 
-## 3. Current-state audit
+## 3. Historical audit and current closure ledger
 
-### 3.1 Repository and release evidence
+### 3.0 Controlling current ledger, 2026-08-26
 
-Read-only Git checks established:
+Sections 3.1 through 3.10 preserve the `9b5d585` audit and later receipts. They are not a claim that the present worktree is clean, committed, deployed, or covered by CI. This ledger controls when historical wording differs from later evidence.
+
+| Surface | Current evidence | Current disposition |
+| --- | --- | --- |
+| Immutable repository evidence | Candidate `1fbd079de126aabccd788bfa3a854a77d1f6c1a3` passed uninterrupted local verification, Playwright, and all four GitHub CI jobs. | This is the last immutable evidence boundary, not proof for later local edits. |
+| Current local work | The shared worktree contains uncommitted canonical public-origin validation, auth-route recovery, billing recovery, paid-feedback, support, mobile, copy, production-config hardening, test-runner hardening, and documentation closure work. | Do not assign a final SHA, deployability, or CI result until the integrated diff is committed, pushed, and green on its own SHA. |
+| Current local validation receipt, 2026-08-26 | On the integrated dirty worktree: secrets passed across 738 text files; runtime dependency scope passed with 99 packages; all workspace and root typechecks, zero-warning lint, and formatting passed; unit passed 36 files and 422 tests; the default bounded integration command passed two fresh-worker shards totaling 68 files and 456 tests; security passed 42 files and 316 tests; the synthetic evaluation passed 12 of 12 with zero forbidden-action violations; Playwright passed 26 of 26; API, worker, web, HQ, and Expo web export builds passed; Expo Doctor passed 21 of 21; deterministic mobile assets, provider-free distribution inputs, production auth-route resolution, production fail-closed UI, and `git diff --check` passed. The dependency audit reported 1 Low, 23 Moderate, and zero High or Critical findings. | This is local uncommitted evidence only. It is not an exact-SHA GitHub CI receipt, managed PostgreSQL or restore proof, Stripe or Clerk provider proof, Replit deployment proof, signed native build, physical-device proof, store receipt, customer evidence, or payment evidence. |
+| Deployment topology | GitHub is source truth. The four BoomerBuddy 2.0 Replit consumers are web, API, worker, and HQ as mapped in Section 2; they pull exact commits and never push. | No Replit pull or deployment is authorized before `CONFIRM NONCHARGING RELEASE SETUP`. Do not assume any deployed surface contains `1fbd079` or later local work without an exact deployment receipt. |
+| Legacy site | The separate `BoomerBuddy` Replit project and `boomerbuddy.net` are legacy-only. | Excluded from synchronization, deployment, Clerk, Stripe 2.0, and product work. Preserve its Twilio evidence unchanged. |
+| Customer Clerk production instance | Read-only inspection found root-domain Clerk infrastructure, including `accounts.boomerbuddy.net`; that arrangement is not inherently wrong and must be preserved unless a staged change is proved necessary. Home URL, Unauthorized sign-in URL, and Account Portal fallbacks are blank or default to the root. Allowed subdomain restriction is disabled; the provider UI identifies `app.boomerbuddy.net` as a valid subdomain of the primary root. Provider logs show completed Google sign-in and session creation, while the observed app flow looped or reached `https://app.boomerbuddy.net/sign-in/client-trust` and returned 404. That path is Device Trust for an unrecognized device, not proof of true MFA. No user record or PII was retained. | Authentication can succeed at Clerk, but the post-auth application routing chain, true MFA/recovery, and subdomain restriction are not proved. Establish the exact `app.boomerbuddy.net` home, fallback, callback-path, and allowed-subdomain configuration, deploy matching canonical-origin code only after the external gate, then enable restriction with only required Customer app subdomains. Keep HQ in its separate Clerk app. Prove Account Portal, OAuth, web, native, true MFA, and recovery flows before and after. Treat any domain or home-origin change as downtime, key, and OAuth risk with staged rollback. |
+| Windows sandbox | The Windows filesystem sandbox is healthy and remains enabled. Some Node, Prettier, `tsx`, and Playwright file-replacement or user-identity operations can fail inside isolation with `EPERM` or `uv_os_get_passwd ENOMEM`; the same exact narrowly scoped command succeeds with approved elevation. | Do not disable sandboxing or use shell-write workarounds. Use scoped elevation only for the exact blocked command, keep repository boundaries intact, and retain the command result. This is host-tooling friction, not a product defect or provider sandbox. |
+| Production offer candidate | Family at USD 14.99 per month for one household is the sole approved production offer candidate. It is not live. Payment remains web-first, with mobile P0 in parallel. | Annual, Individual, group-rate, referral, coupon, credit, trial, and native-purchase ideas remain synthetic and Stripe sandbox only under the offer registry. |
+| Billing | `1fbd079` is not live-capable: the paid Family catalog and effective-entitlement mismatch leaves production payment at NO-GO. Later payment-action recovery, async Checkout, Portal/invoice guidance, and related tests are uncommitted local closure work and do not change that immutable evidence boundary. Live Stripe remains empty. Read-only sandbox access works and confirms zero Products, Prices, Coupons, Promotion Codes, or Portal configurations plus exactly one enabled legacy webhook at `https://boomerbuddy.net/api/webhooks/stripe`. | Reverify the integrated code on a new exact SHA. Keep the legacy webhook untouched. After the confirmation phrase, create a separate 2.0 endpoint under `api.boomerbuddy.net`; authentic sandbox resources/events, provider configuration, deployed preflight, Tax/receipt decisions, and first-payment evidence remain open. |
+| Support and feedback | Durable content-free support receipts, latest-state idempotent replay, tenant-scoped HQ handling, mobile retry classification, and production paid-entitlement feedback containment pass local automated tests. | Do not call Customer 1 ready until the new exact SHA passes CI and deployed authenticated support plus genuine paid-access feedback are proved. Never store customer PII or free-text artifacts in general evidence. |
+| Mobile | Mobile is P0 in parallel. `net.boomerbuddy.app` remains the default permanent identifier unless an Apple, Google, Clerk, or Expo collision is verified. Provider-free distribution inputs, deterministic assets, Expo Doctor, web export, API pinning, backup hardening, and mobile security tests pass locally. | Provider account state, identifier availability, production Clerk native token, signed iOS/Android artifacts, physical-device auth, accessibility, failure recovery, two-way link associations, and distribution receipts remain open. |
+| Twilio | No BoomerBuddy 2.0 consent/compliance enablement has passed. | Keep Twilio disabled. Do not reuse or modify the legacy site's registration surface. |
+| External release setup | The confirmation phrase has not been recorded in the current evidence packet. | Continue safe local work. Stop all provider writes, merge/tag, Replit pull/deploy, production migration, external messages/spend, charges, and refunds until the exact phrase and an exact-SHA action packet exist. |
+
+### 3.1 Historical audited repository and release evidence
+
+The following read-only Git checks describe the `9b5d585` audit, not the present worktree:
 
 | Fact | Evidence |
 | --- | --- |
@@ -71,11 +97,11 @@ Read-only Git checks established:
 | Worktree | Clean before and after inspection and verification |
 | Upstream | Local `origin/main` and live `git ls-remote` both resolved to the exact HEAD commit |
 
-The user reports API, worker, web, and HQ are published and healthy. That is current operator testimony. It is not a substitute for a dated browser, alert, restore, provider, or human receipt.
+At the audit, the user reported API, worker, web, and HQ published and healthy. That historical operator testimony is not a substitute for a dated exact-SHA browser, alert, restore, provider, or human receipt.
 
-### 3.2 Fresh local verification
+### 3.2 Historical `9b5d585` local verification and later immutable candidate
 
-An exact `npm ci` restored the lockfile-pinned dependency graph without changing tracked files. Fresh current-HEAD results:
+An exact `npm ci` restored the lockfile-pinned dependency graph without changing tracked files. The following results describe audited `9b5d585`:
 
 | Gate | Result | Evidence boundary |
 | --- | --- | --- |
@@ -92,17 +118,32 @@ An exact `npm ci` restored the lockfile-pinned dependency graph without changing
 | Static production UI | Passed fail-closed checks | No configured hydrated production-browser proof |
 | Full `npm run verify` | Failed | Five `no-undef` errors for `Buffer` in `scripts/replit-service.mjs` |
 
-The release is therefore not fully green even though tests and builds pass. Fix the lint failure and rerun the complete gate before any new release candidate.
+That audited release was therefore not fully green even though its individual tests and builds
+passed. The later candidate at `1fbd079de126aabccd788bfa3a854a77d1f6c1a3` fixed the Buffer lint
+failure and passed uninterrupted local verification plus all four GitHub CI jobs. That evidence
+does not automatically cover a later change set: every new candidate must rerun and bind the same
+gates to its own exact SHA.
 
 The E2E run also emitted Clerk's current deprecation warning for middleware path matching. Treat migration to resource-based authorization checks as P1 security maintenance, not as proof of a present auth bypass.
 
 ### 3.3 Dependency inventory
 
-Fresh `npm audit --json` reported 16 advisories: 1 low, 10 moderate, 5 high, 0 critical. The high findings are in the Expo and Metro build graph, including `image-size` denial-of-service advisories. Existing launch evidence accepted those findings only while mobile remained undeployed. Distributing a native build reopens the security gate and requires upgrade, removal, reachability proof, or a new signed risk acceptance.
+The audited `9b5d585` baseline's full `npm audit --json` reported 16 vulnerable nodes: 1 Low, 10
+Moderate, 5 High, and 0 Critical. The retained scoped evidence identified four mobile-production
+High nodes and two distinct `image-size` advisories; it did not retain the fifth full-audit node's
+identity. Preserve that count as historical evidence rather than presenting five distinct findings.
+
+The later locked graph pins the supported Metro packages to 0.84.5 and removes `image-size`.
+Fresh registry evidence now reports 1 Low, 23 Moderate, 0 High, and 0 Critical for the full graph;
+the production-mobile graph reports 23 Moderate and zero High/Critical; API, worker, web, and HQ
+production graphs each report zero findings. The empty High allowlist is enforced in
+`scripts/verify-run3-1-dependencies.mjs` and CI. The Moderate Clerk/Expo tooling chains remain open
+upstream risk and must be re-audited before a signed native distribution. See
+[MOBILE-DEPENDENCY-AUDIT.md](../run-3/MOBILE-DEPENDENCY-AUDIT.md).
 
 Do not run automatic audit fixes. The reported fallback to Expo 46 is a major, inappropriate downgrade for an Expo 57 app.
 
-### 3.4 Product strengths
+### 3.4 Audited product strengths
 
 The repository has unusually strong local foundations for an early beta:
 
@@ -118,7 +159,9 @@ The repository has unusually strong local foundations for an early beta:
 
 These are engineering assets. They are not customer demand, fraud efficacy, native readiness, provider success, or recurring-revenue evidence.
 
-### 3.5 P0 blockers to the first real payment
+### 3.5 Historical `9b5d585` blocker snapshot
+
+This table explains why the audited release was not launch-ready. Several repository blockers were closed in `1fbd079`; several others have later uncommitted closure work. It is preserved for traceability and does not override Section 3.0 or the exact current diff.
 
 | Blocker | Actual evidence | Required resolution |
 | --- | --- | --- |
@@ -135,16 +178,31 @@ These are engineering assets. They are not customer demand, fraud efficacy, nati
 | Native app cannot use production | Local identifiers, seeded mobile sessions, API rejects mobile audience, no Clerk Expo SDK, no production EAS profiles, no store assets, no signed device proof | Production native auth contract, permanent IDs, EAS setup, signed builds, physical-device matrix, privacy/support/deletion paths |
 | Full release gate is red | Five lint errors in the Replit service script | Fix and rerun `npm run verify` and E2E |
 
-#### 3.5.1 Read-only Customer Clerk facts, 2026-08-25
+#### 3.5.1 Read-only Customer Clerk facts, updated 2026-08-26
 
 The connected provider UI was inspected without changing a setting. The exact application was
 `BoomerBuddy Customer`, in its production instance, with invite-only access. Email verification
-codes, password sign-in, Google social sign-in, and Device Trust are enabled. Authenticator-app
-MFA, backup codes, and required MFA are disabled. The default session-token custom claims object is
+codes, password sign-in, Google social sign-in, and Device Trust are enabled. Phone numbers are
+disabled, so SMS MFA is unavailable. Authenticator-app MFA, backup codes, and required MFA are
+disabled. The default session-token custom claims object is
 empty, so it does not yet carry the billing reverification binding claim. No custom JWT template
 exists, including the required `boomerbuddy-mobile` template. Clerk express legal consent is off,
-and the Terms of Service and Privacy Policy URLs are unset. No provider secret, user record, or
-customer PII was read or recorded.
+and the Terms of Service and Privacy Policy URLs are unset. The instance uses root-domain Clerk
+infrastructure, including `accounts.boomerbuddy.net`. That arrangement is not inherently wrong and
+must not be replaced blindly. The Home URL, Unauthorized sign-in URL, and Account Portal fallbacks
+are blank or default to the root. Allowed subdomain restriction is disabled, and the provider UI
+identifies `app.boomerbuddy.net` as a valid subdomain of the primary root. Exact home, fallback,
+callback-path, and allowed-subdomain proof remains open. Provider logs show completed Google sign-in
+and session creation, but the observed app flow looped and the manual-email flow reached
+`/sign-in/client-trust` on the customer app and returned 404. That path is Device Trust for an
+unrecognized device, not true MFA. This separates provider authentication success from the broken
+post-auth application routing chain and leaves genuine MFA/recovery open. A Change domain or home-origin action can cause downtime and
+key or OAuth changes, so it requires staged validation and rollback. A later read-only Google SSO
+inspection confirmed that custom production credentials and the expected Clerk OAuth callback are
+configured, but the Clerk Dashboard rendered the Google OAuth client secret as readable text and
+the browser inspection surfaced it in the local task log. The secret value is not repeated or stored
+in this repository and must be treated as compromised, rotated in Google Cloud, replaced in Clerk,
+and revoked before further Google production sign-in. No user record or customer PII was retained.
 
 The exact closure configuration for the default session-token claims is
 `{"reverification_id":"{{session.reverification_id}}"}`. Clerk documents that the shortcode is
@@ -153,11 +211,12 @@ reverification to one sensitive action ([Clerk reverification](https://clerk.com
 An authentic production token and one-time Checkout/Portal replay test are still required before
 this gate is closed.
 
-The local web production build now registers `/sign-in/[[...sign-in]]`. With non-secret local Clerk
+Candidate `1fbd079` registers `/sign-in/[[...sign-in]]`. With non-secret local Clerk
 placeholders, `/sign-in`, `/sign-in/client-trust`, `/sign-in/sso-callback`, and
 `/sign-in/oauth-callback` each returned HTTP 200 rather than 404. This is local build evidence only.
-It does not close the exact-SHA deployment, real Clerk session, MFA enrollment, billing
-reverification, native JWT, or physical-device gates.
+It does not close the current local diff, exact-SHA deployment, provider home/fallback/path settings,
+allowed-subdomain proof, real Clerk post-auth routing, MFA enrollment, billing reverification, native
+JWT, or physical-device gates.
 
 ### 3.6 Stripe account inventory
 
@@ -190,14 +249,18 @@ The account can accept charges, but it is intentionally empty and is not launch-
 | Stripe Tax is active but has zero registrations | Qualified tax owner plus account holder | Written jurisdiction and registration decision with effective date; registration evidence if required | Before first taxable charge | Stop if advice or registration is unresolved |
 | Checkout and invoice code require zero tax | Billing/API owner plus tax owner | Qualified decision supports zero tax, or code/schema/test changes support required tax correctly | Before live preflight | Stop on any mismatch between provider tax and entitlement verification |
 | Manual payout schedule is active | Finance owner plus account holder | Written acceptance or verified schedule change, named reconciliation owner, and close runbook | Before first payment | Stop if funds or reconciliation ownership is unclear |
-| Sandbox contains an enabled legacy-site webhook and no 2.0 commerce resources | Billing and API owners | A clean isolated 2.0 sandbox or reviewed coexistence proof, followed by authentic 2.0 Checkout, signed-webhook, lifecycle, refund, and reconciliation receipts with unambiguous endpoint, secret, event, and replay isolation | Before live configuration | Do not edit or delete the legacy webhook; fixtures, mocks, or events delivered to the legacy endpoint are insufficient |
-| New customers lack a normal billing-authority grant path | Auth and billing owners | Recent-MFA, exact-household, audited, idempotent grant/revoke control with tenant and replay tests | Before Customer 1 can initiate Checkout | Stop any manual database or inferred-authority shortcut |
-| Customer Clerk MFA is disabled | Identity owner | Authenticator-app MFA and backup codes enabled, required-MFA flow proved after the nested sign-in route is deployed, and recovery tested without retaining PII | Before Checkout or Portal is available | Stop billing if a true recent second factor cannot be enrolled and proved |
+| Sandbox contains an enabled legacy-site webhook and no 2.0 commerce resources | Billing and API owners | After the confirmation phrase, a separate 2.0 webhook under `api.boomerbuddy.net` plus reviewed coexistence proof, followed by authentic 2.0 Checkout, signed-webhook, lifecycle, refund, and reconciliation receipts with unambiguous endpoint, secret, event, and replay isolation | Before live configuration | Do not edit or delete the legacy webhook; fixtures, mocks, or events delivered to the legacy endpoint are insufficient |
+| Current worktree has uncommitted closure work | Launch integrator | Integrated review, full local verification, Playwright, independent gauntlet, commit, push, and green GitHub CI bound to one new exact SHA | Before merge, provider setup, or deployment | Do not reuse `1fbd079` receipts for later changes or claim a final candidate while the worktree is dirty |
+| Customer Clerk app home/fallback configuration and post-auth routing are open | Identity, web, and platform owners | Preserve root-domain Clerk infrastructure such as `accounts.boomerbuddy.net`; prove exact `app.boomerbuddy.net` Home URL, Unauthorized sign-in URL, Account Portal fallback, callback paths, and allowed subdomains with matching deployed canonical-origin code and real-session Google plus email/MFA sign-in, return, sign-out, and recovery receipts without PII. Then enable allowed-subdomain restriction for only the required Customer app subdomains while HQ remains in its separate Clerk app | Before customer onboarding or billing | Do not make a blind Change domain action; prove Account Portal, OAuth, web, and native flows before and after, stop on downtime, key/OAuth drift, loop, callback mismatch, 404, wrong `azp`, or wrong realm, and use the staged rollback |
+| Google OAuth client secret was exposed by the Clerk Dashboard to the local browser-inspection log | Identity and security owners plus the Google Cloud credential custodian | Rotate the Google OAuth client secret in Google Cloud, replace the shared production credential in Clerk through an approved credential-custody session, revoke the exposed secret, and prove Google sign-in plus rollback without recording either secret | Before any further Google production sign-in or Customer 1 onboarding | Do not repeat, copy, commit, or reuse the exposed secret; stop if the replacement cannot be installed and verified atomically |
+| Billing-authority control is local but not proved in the deployed production realm | Auth and billing owners | The existing exact-household HQ grant/revoke workflow passes recent-MFA, founder-realm, audit, idempotency, revocation, tenant, and replay tests; then the exact candidate must prove the same flow with genuine production identity and rollback receipts | Before Customer 1 can initiate Checkout | Stop any manual database or inferred-authority shortcut, or any grant that lacks fresh operation-bound MFA |
+| Customer Clerk true MFA is disabled | Identity owner | Phone numbers are disabled, so SMS MFA is unavailable; enable and prove authenticator-app MFA plus backup-code recovery and the required-MFA flow after the nested sign-in route is deployed, without retaining PII | Before Checkout or Portal is available | Device Trust and `/sign-in/client-trust` are not true MFA; stop billing if a recent second factor and recovery cannot be enrolled and proved |
 | Customer session claims omit billing reverification evidence | Identity and API owners | Default session-token claim `{"reverification_id":"{{session.reverification_id}}"}` configured and a one-time operation-bound Checkout and Portal proof passes | Before Checkout or Portal is available | Stop billing on missing, stale, malformed, or reused evidence |
+| Customer Clerk allowed subdomain restriction is disabled | Identity and security owners | After exact deployment/config staging, enable restriction with only the required Customer app subdomain or subdomains; keep HQ in its separate Clerk app; prove Account Portal, OAuth, customer web, and native flows before and after | Before customer onboarding or billing | Stop on an unexpected allowed origin, HQ crossover, callback failure, key/OAuth drift, or missing rollback |
 | No mobile Clerk JWT template exists | Identity and mobile owners | Exact `boomerbuddy-mobile` template with audience, surface, 60-second lifetime, and observed device `azp` disposition | Before physical-device beta | Stop native auth on an unexpected or unallowlisted `azp` |
 | Customer Clerk legal URLs and express consent are unset | Legal, product, and identity owners | Approved deployed URLs and exact provider configuration receipt | Before any new customer sign-up or payment | Stop onboarding while the provider legal surface is incomplete |
 | Paid-only feedback eligibility is incomplete | Product and persistence owners | Verified paid entitlement can access approved feedback, or temporary sponsored overlap is labeled and approved | Before paid onboarding is called complete | Stop if promised feedback/support is inaccessible |
-| Failed-payment recovery and receipt/invoice UI are incomplete | Billing and web owners | Action-required/finalization event coverage, safe card update, receipt/invoice guidance, dunning and recovery tests | Before first payment | Stop if a customer cannot recover or obtain help |
+| Failed-payment recovery is locally implemented but lacks authentic provider proof | Billing and web owners | Exact-candidate local gate plus authentic sandbox action-required, repeated-attempt, finalization-failed, Portal invoice-history, restart, replay, and recovery receipts | Before first payment | Stop if a customer cannot recover, obtain help, or see truthful provider-backed invoice and receipt guidance |
 | Customer legal, support, accessibility, and deletion routes are incomplete | Product, ops, legal, and privacy owners | Public, linked, accessible routes with approved content and E2E evidence | Before scheduling Customer 1 | Stop when any required route is unavailable |
 | Mobile identifier availability for `net.boomerbuddy.app` is unverified | Mobile owner and account holder | Apple and Google console collision check and exact local configuration match | Before signed store build | Use it unless collision; a collision requires a verified replacement decision, with no invented suffix |
 | Apple/Google/Expo account, agreement, tax, banking, and credential state is unverified | Mobile owner and account holder | Console status checklist with no PII, named custody and recovery owners | Before the affected build or submission | Stop when any required agreement, attestation, or custody control is incomplete |
@@ -205,10 +268,11 @@ The account can accept charges, but it is intentionally empty and is not launch-
 | Web-first golden path and mobile P0 evidence are incomplete | Web and mobile owners | Web payment path passes; mobile P0 has signed-device evidence or an explicit owned closure plan in parallel | Day 5 go/no-go | Any unresolved P0 or launch-critical P1 is a no-go |
 | Twilio consent and compliance are unresolved | Compliance owner | Consent, sender registration, opt-out, suppression, quiet hours, privacy, delivery, budget, and incident evidence plus explicit enable decision | Later phase only | Keep Twilio disabled on any gap |
 | First-customer support and incident coverage is unverified | Ops owner | Named window and backup, escalation, refund/cancel runbook, incident log, and rehearsal | Before scheduling the customer | Stop when accountable coverage is unavailable |
+| Noncharging external release setup is not yet confirmed for the final exact SHA | Founder plus launch integrator | The founder types `CONFIRM NONCHARGING RELEASE SETUP` in the active task after reviewing the exact-SHA action packet | Before merge/tag, any Replit pull/deploy, production migration, provider write, external message, or spend | Continue safe local work only; the phrase does not authorize a charge, refund, customer consent, or an action outside the packet |
 
-### 3.8 Exact repository code anchors for major blockers
+### 3.8 Historical exact repository code anchors for major blockers
 
-Line numbers refer to the audited release and may move after edits. Paths and named controls are the durable anchors.
+Line numbers and claims refer to audited `9b5d585` and may move or be superseded after edits. Paths and named controls are historical anchors. Review the current diff before using any row as a present-tense claim.
 
 | Blocker | Exact repository anchors | What the anchor proves | Closure owner |
 | --- | --- | --- | --- |
@@ -231,9 +295,9 @@ Line numbers refer to the audited release and may move after edits. Paths and na
 | Native dependency containment expires on distribution | `docs/run-3-1/EXTERNAL-BETA-EVIDENCE.md:232-241`, `scripts/verify-run3-1-dependencies.mjs:116-140`, `scripts/verify-run3-1-dependencies.mjs:191-196` | High Expo/Metro findings were accepted only while mobile stayed undeployed | Security plus mobile |
 | Frontend violates the dash standard | Representative anchors: `apps/web/src/app/layout.tsx:7`, `apps/web/src/components/member-shell.tsx:70`, `apps/hq/src/app/layout.tsx:7`, `apps/hq/src/components/hq-screen.tsx:103`, `apps/mobile/src/screens.tsx:133-138` | Customer/HQ/native strings contain prohibited U+2013/U+2014 | Editorial plus QA |
 
-### 3.9 Mobile audit
+### 3.9 Historical mobile audit
 
-The Expo app is useful product code but not a production customer app:
+At audited `9b5d585`, the Expo app was useful product code but not a production customer app:
 
 - `apps/mobile/app.json` uses local slug, scheme, and `net.boomerbuddy.local` identifiers.
 - `apps/mobile/eas.json` lacks production build and submit profiles.
@@ -248,9 +312,9 @@ The Expo app is useful product code but not a production customer app:
 
 Recommended permanent bundle and application identifier: `net.boomerbuddy.app`. It is a reverse-DNS technical identity derived from the controlled `boomerbuddy.net` namespace. It is not a public URL and does not change the legacy site. The founder approved this assumption, but a collision in Apple, Google, Clerk, or Expo is a stop condition.
 
-### 3.10 Member experience audit
+### 3.10 Historical member experience audit
 
-The actual assisted path is plausible but not yet commercially coherent:
+At audited `9b5d585`, the assisted path was plausible but not yet commercially coherent:
 
 1. Public landing or Public Check.
 2. Founder invites an exact customer identity through the customer Clerk realm.
@@ -339,7 +403,7 @@ Do not call an account, free sponsored household, Checkout redirect, subscriptio
 - **Qualified professional:** applicable legal, tax, accounting, privacy, and security decisions.
 - **Customer:** identity, consent, plan, payment, optional research/follow-up choices, and product use.
 
-The 2026-08-25 blanket execution authorization permits Codex engineering to perform all in-scope actions that do not require another person to truthfully attest, consent, choose, or enter private payment or identity information. Founder references below identify accountability or an interactive account-holder step, not a request for another blanket approval.
+Codex engineering may perform safe local repository work, reviewable commits, branch pushes, and CI. The external-effect actions in Section 1.1 remain stopped until the exact confirmation phrase is recorded for the reviewed noncharging action packet. Founder references below identify accountability, an interactive account-holder step, or the explicit external gate.
 
 ### Workstream ownership and priority
 
@@ -353,8 +417,8 @@ Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2.
 | Day 3 | Billing and first-payment readiness for Family monthly only | Billing/API owner | Web Checkout/recovery UX; worker/webhook reconciliation; tax/receipt decisions; mobile P0 | Authentic sandbox matrix covers success, decline, action required, replay, cancel, refund, restart, and reconciliation |
 | Day 4 | Beta operations, support, security review, restore, and first-customer rehearsal | Ops owner | Monitoring; incident tabletop; exact-SHA full verification; mobile signed-device lane | Clean synthetic rehearsal, alert receipt, restore, support escalation, and timed rollback pass |
 | Day 5 | Go/no-go, live-capable default-off deployment, and read-only preflight | Launch integrator | Platform, billing, QA, mobile, ops, and support on-call | Go only with no unresolved P0 or launch-critical P1 and all objective/provider gates closed |
-| Day 6 | Bounded live onboarding and immediate reconciliation | Launch integrator; billing and ops owners watch | Auth/consent; member support; logs/alerts; mobile P0 closure | One approved payment, canonical entitlement, receipt, support, privacy, and provider/ledger evidence reconcile |
-| Day 7 | Observe return/use, close bounded defects, and decide next cohort | Product owner plus launch integrator | Commerce close; support/fraud/privacy review; retrospective; mobile/distribution plan | Record hold, continue, or expand; no unresolved P0/launch-critical P1; next gates are owned |
+| Day 6 | Noncharging exact-SHA provider setup and initiation-disabled deployment | Launch integrator; billing and ops owners watch | Auth configuration; support readiness; logs/alerts; mobile P0 closure | Zero-customer inventory, deployed health, rollback, and noncharging provider evidence reconcile |
+| Day 7 | Bounded live onboarding, immediate reconciliation, and initial observation | Product owner plus launch integrator | Commerce close; support/fraud/privacy review; retrospective; mobile/distribution plan | One approved payment and canonical entitlement reconcile; record hold, continue, or expand |
 
 ### Schedule
 
@@ -364,19 +428,20 @@ Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2.
 | Day 1 | Build billing-authority grant/revoke. Rewrite public pricing and billing copy. Add support, privacy, terms, billing terms, accessibility, and account-deletion entry points. Add dash enforcement. Start production native auth contract and EAS profiles. | Legal and tax review may continue, but unknowns remain visible | Golden path is coherent in local synthetic web; all new copy uses ASCII punctuation; P0 auth tests pass | Revert isolated changes if consent, auth, or product claims weaken |
 | Day 2 | Implement forward-only live Stripe seams across config, migration, API, worker, persistence, HQ, and UI. Keep initiation disabled. Add paid-feedback eligibility, payment recovery, missing webhook events, receipt/support UI. Continue mobile auth, central 401 recovery, assets, permissions allowlists, and native tests. | No live credentials in source; founder account access only through provider controls | Test-mode lifecycle composes in a production-like config while live initiation remains disabled | Fail closed on migration ambiguity, tenant leak, or payment/access mismatch |
 | Day 3 | Run authentic Stripe test Checkout, signed webhooks, test clocks, 3DS, failure, card update, cancellation, refund, dispute, duplicates, order changes, ambiguity, outage, restart, and inventory. Run cross-browser and accessibility matrix. Produce signed iOS/Android internal builds if accounts permit. | Stripe sandbox resources; Expo/Apple/Google/Clerk account actions; dependency disposition | Complete test-mode evidence, no unresolved Critical/High, signed internal builds or explicit external account blockers | Do not distribute native build with local auth, wrong API, risky dependency, or inaccurate privacy manifest |
-| Day 4 | Deploy exact candidate to staging or initiation-disabled production canary. Prove real PostgreSQL concurrency, backup and isolated restore, worker heartbeat, raw-body webhook edge, alert receipt, support drill, incident stop, and rollback. Physical-device mobile test begins. | Deployment target and immutable app identity are verified; provider settings remain noncharging | Exact SHA has deployed receipts, restore proof, alert proof, browser proof, and mobile device evidence | Roll back exact SHA on auth, privacy, restore, accessibility, or worker failure |
+| Day 4 | Prepare an exact candidate and a noncharging staging or initiation-disabled production-canary packet. After the exact phrase gate, deploy it and prove real PostgreSQL concurrency, backup and isolated restore, worker heartbeat, raw-body webhook edge, alert receipt, support drill, incident stop, and rollback. Physical-device mobile test begins only after its provider gate. | Deployment target and immutable app identity are verified; provider settings remain noncharging; `CONFIRM NONCHARGING RELEASE SETUP` is recorded before the first external write | Exact SHA has deployed receipts, restore proof, alert proof, browser proof, and mobile device evidence | Before the phrase, stop at the reviewed packet. After it, roll back exact SHA on auth, privacy, restore, accessibility, or worker failure |
 | Day 5 | Run two clean synthetic first-customer rehearsals across separate customer and HQ sessions. Complete independent review. Freeze candidate. Prepare live product, price, portal, webhook, receipts, and statement descriptor plan but do not charge. | Qualified tax/accounting/legal disposition; support backup; recent founder MFA | Signed GO, NO-GO, or REMEDIATE dossier. GO names exact live writes and rollback | Any unresolved P0 or launch-critical P1 is NO-GO. Other P1 items require a named owner, dated closure plan, bounded exposure, and explicit acceptance. A code change invalidates affected rehearsal evidence |
-| Day 6 | Use the recorded blanket authority for the exact SHA, max-one live cohort, and minimum Stripe live configuration. Create one product, one $14.99 monthly price, portal, webhook, and settings. Deploy with new Checkout disabled, verify zero-customer inventory, then open one bounded initiation window. | No account restriction; live secrets in approved custody; all objective closure gates passed | Live readiness is green with no customer or money yet; kill switch and reconciliation remain active | Disable new initiation first. Keep webhook and worker running to reconcile any accepted action |
+| Day 6 | After the exact noncharging confirmation phrase and the exact-SHA packet, perform only the reviewed setup: minimum Family monthly Stripe configuration and deployment with Checkout initiation disabled. Verify zero-customer inventory. Opening a live initiation window and taking payment require a separate first-charge gate. | No account restriction; live secrets in approved custody; all objective closure gates passed; exact phrase recorded | Noncharging live readiness is green with no customer or money yet; kill switch and reconciliation remain active | Do not open Checkout from the noncharging phrase. Disable new initiation first after any drift and keep webhook and worker running to reconcile an accepted action |
 | Day 7 | Customer personally signs in, consents, completes setup and useful Check, chooses the monthly offer, enters payment in Stripe Checkout, receives receipt, obtains canonical access, tests support, chooses feedback, and schedules follow-up. Observe web path and offer signed mobile beta if ready. | Customer availability and direct consent; founder operator and backup present | Every row in Section 5 reconciles. One real $14.99 subscription is active. Day 1 and Day 7 follow-ups exist | Stop and refund or cancel per policy on wrong charge, auth mismatch, unsafe experience, support failure, or unresolved provider outcome |
 
 ### Honest seven-day risks
 
-- The live-capable Stripe change is cross-cutting and currently blocked in multiple layers.
+- No immutable candidate is live-capable. `1fbd079` has the paid Family catalog and effective-entitlement mismatch, and later billing recovery work is uncommitted and still needs a new exact-SHA gate.
 - Tax treatment and recurring-subscription terms depend on launch geography and professional review.
 - A real customer and support operator must be available at the same time.
 - Real Clerk behavior, MFA, invite delivery, and session recovery can differ from fixtures.
 - Restore, monitoring, and raw-body webhook edge behavior need deployed proof.
-- Mobile production auth is unimplemented, not merely unconfigured.
+- Mobile production auth is implemented locally, but provider configuration, signed builds, and
+  physical-device authentication evidence remain open.
 - Apple organization enrollment is reviewed by Apple, App Store Connect must process an uploaded build before it appears, and the first build added for external TestFlight testing requires approval. A newly requested D-U-N-S number can take up to five business days, followed by up to two business days for Apple to receive it. These combined steps have no cited seven-day guarantee, so external iOS distribution is not on the Customer 1 critical path ([Apple enrollment](https://developer.apple.com/help/account/membership/enrolling-in-the-app/), [Apple D-U-N-S timing](https://developer.apple.com/help/account/membership/D-U-N-S/), [Apple build processing](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/), [Apple TestFlight review](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)).
 - Google verification must finish before submission. If the Play Console owner is a personal account created after 2023-11-13, Google requires at least 12 closed testers to remain opted in continuously for the preceding 14 days before the developer may apply for production access. Google says the later production-access review usually takes seven days or less but can take longer. Production distribution therefore cannot be promised inside seven days ([Google developer verification](https://support.google.com/googleplay/android-developer/answer/10841920?hl=en), [Google testing and production-access review](https://support.google.com/googleplay/android-developer/answer/14151465?hl=en)).
 - Internal distribution is a separate lane and does not change the web-first payment plan ([Google test tracks](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en), [Apple TestFlight overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)).
@@ -473,7 +538,7 @@ The founder stated that only a few hundred dollars are available. Use these hard
 | Autonomous Marketplace payment | $0 | Agents may research and rank only |
 | Founder-approved Marketplace item | $75 per item, $150 per month | Only if it fills a named device-test gap; no deposit, shipping, gift card, or agent meetup |
 
-Use existing family devices before buying hardware. The blanket execution authority covers a verified purchase within the $75 item cap. If representative coverage cannot be obtained under that cap, record the exact evidence gap and a priced recommendation; do not silently raise the cap.
+Use existing family devices before buying hardware. Do not purchase hardware before the current external spend gate is explicitly satisfied for an exact item and cap. If representative coverage cannot be obtained, record the exact evidence gap and a priced recommendation; do not silently spend or raise the cap.
 
 ### Spend lifecycle
 
@@ -588,6 +653,7 @@ Use scheduled bounded runs for daily and weekly operations. Create one durable g
 | Web | Fix Public Check production/local contradictions and signed-out recovery | Production branch renders only accurate copy and preserves ephemeral privacy |
 | Web | Add support, privacy, terms, billing terms, accessibility, and account-deletion entry points | Reachable from public, auth, billing, success, member, and error states |
 | Web | Fix non-shareable Check result focus and dynamic accessibility coverage | Keyboard and assistive-tech regression passes |
+| Identity | Rotate the exposed production Google OAuth client secret | Replacement is installed in Google Cloud and Clerk, the exposed credential is revoked, no secret value enters repository or evidence, and real Google sign-in plus rollback pass |
 | Billing auth | Founder-only billing-manager grant/revoke | Exact identity/household, recent MFA, audit, idempotency, revocation, cross-tenant negatives |
 | Billing | Forward-only live-capable runtime and migration | Live can be configured with initiation disabled and test lifecycle stays green |
 | Billing | Paid feedback eligibility | Verified paid household can submit minimized feedback without sponsored contamination |
@@ -754,11 +820,11 @@ Do not use one endless goal for support, growth, sales, or improve the product. 
 
 Live onboarding should not be a durable autonomous goal. It is a human session with explicit personal actions and stop points.
 
-## 14. Recorded execution authority and required human actions
+## 14. Current execution authority and required human actions
 
-The founder's 2026-08-25 blanket instruction authorizes agents to perform all technically delegable in-scope work after objective gates pass. This includes repository implementation, reviewable commits, account setup, provider configuration, DNS and deployment work, Family USD 14.99 monthly pricing, compliant lead-generation preparation and operation, bounded purchases and paid experiments, mobile build/distribution work, and production activation. Do not ask for another founder approval solely because an older plan or phase used the label founder-only.
+Safe local repository implementation, local verification, reviewable commits, branch pushes, and CI may continue. The exact phrase `CONFIRM NONCHARGING RELEASE SETUP` is required before merge/tag, Replit pull/deploy, production migration, Clerk or Stripe writes in any environment, EAS or other provider identity/account writes, external messages, spend, charges, or refunds. The phrase applies only to the reviewed noncharging exact-SHA packet and does not authorize a first charge or other customer action.
 
-Authorization is not evidence. Each action still needs the target, environment, account, amount, scope, policy basis, verification method, stop condition, and rollback or containment recorded before execution. Unknown provider outcomes must be reconciled before retry. The priority and closure rules in Sections 3 and 6 remain controlling.
+Authorization is not evidence. Each permitted action still needs the target, environment, account, amount, scope, policy basis, verification method, stop condition, and rollback or containment recorded before execution. Unknown provider outcomes must be reconciled before retry. The priority and closure rules in Sections 3 and 6 remain controlling.
 
 The following remain truthful human or qualified-professional actions where the provider, law, or customer relationship requires that person:
 
@@ -768,7 +834,7 @@ The following remain truthful human or qualified-professional actions where the 
 4. Customer 1 personally creates or accepts identity, gives or declines consent, chooses the plan, enters payment details, authorizes the charge, and chooses feedback, research, follow-up, and messaging preferences.
 5. Any person contacted through lead generation must have a lawful contact basis, receive accurate claims, and retain all required consent, opt-out, suppression, and privacy rights.
 
-Agents may prepare, navigate, validate, and document these steps, but may not impersonate the account holder, customer, professional, or provider reviewer. If required participation or truthful evidence is unavailable, the affected lane stops because its objective closure gate is open, not because another blanket permission is missing.
+Agents may prepare, navigate read-only surfaces, validate local work, and document these steps, but may not impersonate the account holder, customer, professional, or provider reviewer. If required participation, the exact external phrase, or truthful evidence is unavailable, the affected external lane stops while safe local work continues.
 
 ## 15. Primary external sources
 

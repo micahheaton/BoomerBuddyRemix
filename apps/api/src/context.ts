@@ -24,6 +24,7 @@ import {
   ProductionIdentityRepository,
   ReferralCreditRepository,
   SessionRepository,
+  SupportReceiptRepository,
   type Database,
 } from '@boomerbuddy/persistence';
 
@@ -49,6 +50,7 @@ export interface ApiRepositories {
   readonly publicChecks: PublicCheckRepository;
   readonly referrals: ReferralCreditRepository;
   readonly sessions: SessionRepository;
+  readonly supportReceipts: SupportReceiptRepository;
   readonly productionIdentities: ProductionIdentityRepository;
 }
 
@@ -170,5 +172,6 @@ export function createRepositories(
       entitlementRuntimeEnvironment,
       identityTokenVerifier,
     ),
+    supportReceipts: new SupportReceiptRepository(database, config.secrets.fingerprintKey),
   };
 }

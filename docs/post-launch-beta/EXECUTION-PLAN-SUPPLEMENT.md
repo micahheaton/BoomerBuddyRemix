@@ -51,7 +51,7 @@ The account can accept charges, but it is intentionally empty and is not launch-
 
 ## 3. Day 0 through Day 7 workstreams and owners
 
-Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2. Every owner works the highest unresolved gate in that order. Schedule pressure, sunk work, and provider timing never lower severity. Web-first payment is the revenue path. Mobile P0 work continues in parallel and is never silently deferred. Family at USD 14.99 per month is the only launch offer. USD 149 annual remains deferred. Twilio remains disabled.
+Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2. Every owner works the highest unresolved gate in that order. Schedule pressure, sunk work, and provider timing never lower severity. Web-first payment is the revenue path. Mobile P0 work continues in parallel and is never silently deferred. Family at USD 14.99 per month is the sole approved production offer candidate and is not live. USD 149 annual remains deferred. Twilio remains disabled.
 
 | Day | Primary workstream | Accountable owner | Parallel workstreams | Required exit evidence |
 | --- | --- | --- | --- | --- |

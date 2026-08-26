@@ -52,6 +52,53 @@ describe('production identity UI boundary', () => {
     expect(hqSignIn).toContain('required recent multi-factor verification');
   });
 
+  it('ships a public terminal recovery path and verifies every production sign-in route', async () => {
+    const [rootPackage, webProxy, webConfig, customerSignIn, support, verifier] = await Promise.all(
+      [
+        source('package.json'),
+        source('apps/web/src/proxy.ts'),
+        source('apps/web/next.config.ts'),
+        source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
+        source('apps/web/src/app/support/page.tsx'),
+        source('scripts/verify-founding-household-production-ui.mjs'),
+      ],
+    );
+
+    expect(JSON.parse(rootPackage).scripts['verify:production-auth-routes']).toContain(
+      'BB_PRODUCTION_AUTH_ROUTES_ONLY=true',
+    );
+    expect(webProxy).toContain("'/unauthorized-sign-in'");
+    expect(webConfig).toContain("source: '/unauthorized-sign-in'");
+    expect(webConfig).toContain("destination: '/sign-in/unauthorized-sign-in'");
+    expect(customerSignIn).toContain("pathname === '/unauthorized-sign-in'");
+    expect(customerSignIn).toContain('This sign-in cannot continue here');
+    expect(customerSignIn).toContain(
+      'Opening this page by itself does not prove that a session was revoked.',
+    );
+    expect(customerSignIn).toContain('href="/sign-in"');
+    expect(customerSignIn).not.toContain('redirect(');
+    expect(support).not.toContain('searchParams');
+    expect(support).not.toContain('async function SupportPage');
+
+    for (const path of [
+      '/sign-in',
+      '/sign-in/client-trust',
+      '/sign-in/sso-callback',
+      '/sign-in/oauth-callback',
+      '/unauthorized-sign-in',
+    ]) {
+      expect(verifier).toContain(`'${path}'`);
+    }
+    expect(verifier).toContain("resolve('apps/web/.next/routes-manifest.json')");
+    expect(verifier).toContain("process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY === 'true'");
+    expect(verifier).toContain("route.page === '/sign-in/[[...sign-in]]'");
+    expect(verifier).toContain("const unauthorizedRewriteTarget = '/sign-in/unauthorized-sign-in'");
+    expect(verifier).toContain('The production unauthorized sign-in path has an ambiguous rewrite');
+    expect(verifier).toContain(
+      'The production unauthorized sign-in rewrite target is not terminal',
+    );
+  });
+
   it('revokes the exact local session and Clerk upstream session on production sign-out', async () => {
     const [memberSignOut, hqSignOut] = await Promise.all([
       source('apps/web/src/components/production-sign-out.tsx'),
@@ -74,27 +121,49 @@ describe('production identity UI boundary', () => {
     ]);
 
     for (const proxy of [webProxy, hqProxy]) {
+      expect(proxy).toContain("from '@boomerbuddy/config/exact-origin'");
+      expect(proxy).toContain('isCanonicalPublicRequestOrigin(');
+      expect(proxy).toContain(
+        'const configuredPublicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true)',
+      );
       expect(proxy).toContain('clerkMiddleware(');
       expect(proxy).toContain("process.env.NODE_ENV !== 'production'");
       expect(proxy).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(proxy).toContain('CLERK_SECRET_KEY');
       expect(proxy).toContain('BB_PUBLIC_ORIGIN');
       expect(proxy).toContain('NEXT_PUBLIC_CLERK_SIGN_IN_URL');
-      expect(proxy).toContain(
-        'authorizedParties: configuredPublicOrigin === undefined ? [] : [configuredPublicOrigin]',
-      );
+      expect(proxy).toContain('authorizedParties: [configuredPublicOrigin]');
+      expect(proxy).not.toContain('authorizedParties: []');
       expect(proxy).toContain('!configuredPublicOrigin');
       expect(proxy).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
       expect(proxy).toContain('return NextResponse.next()');
       expect(proxy).toContain('status: 503');
+      expect(proxy).toContain('status: 421');
       expect(proxy).toContain("'cache-control': 'no-store'");
+      expect(proxy).toContain("request.headers.get('forwarded')");
+      expect(proxy).toContain("request.headers.get('host')");
+      expect(proxy).toContain("request.headers.get('x-forwarded-host')");
+      expect(proxy).toContain("request.headers.get('x-forwarded-port')");
+      expect(proxy).toContain("request.headers.get('x-forwarded-proto')");
+      expect(proxy).toContain("'/sign-in(.*)'");
       expect(proxy).toContain('auth.protect');
     }
     for (const provider of [webProvider, hqProvider]) {
-      expect(provider).toContain('Production identity is unavailable.');
+      expect(provider).toContain("from '@boomerbuddy/config/exact-origin'");
+      expect(provider).toContain(
+        'const publicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true)',
+      );
       expect(provider).toContain('!publishableKey || !publicOrigin');
       expect(provider).not.toContain("process.env.NODE_ENV !== 'production' || !publishableKey");
     }
+    expect(webProvider).toContain('Member sign in is temporarily unavailable.');
+    expect(hqProvider).toContain('Production identity is unavailable.');
+    expect(webProxy.indexOf('isExactReplitLoopbackHealthCheck({')).toBeGreaterThan(
+      webProxy.indexOf('!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY'),
+    );
+    expect(webProxy.indexOf('!isCanonicalPublicRequestOrigin(')).toBeGreaterThan(
+      webProxy.indexOf('isExactReplitLoopbackHealthCheck({'),
+    );
     for (const route of [
       "'/accessibility'",
       "'/account-deletion'",
@@ -106,6 +175,7 @@ describe('production identity UI boundary', () => {
       "'/support'",
       "'/terms'",
       "'/trust'",
+      "'/unauthorized-sign-in'",
       "'/api(.*)'",
     ]) {
       expect(webProxy).toContain(route);

@@ -134,6 +134,7 @@ async function createProvenanceFixture(
 function runFixtureBuild(
   fixture: ProvenanceFixture,
   service: 'api' | 'hq' | 'web' | 'worker' = 'worker',
+  environmentOverrides: NodeJS.ProcessEnv = {},
 ) {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
@@ -142,6 +143,10 @@ function runFixtureBuild(
     BB_RUN3_1_RELEASE_TAG: fixture.tag,
     NODE_ENV: 'production',
     REPLIT_DEPLOYMENT: '1',
+    ...(service === 'web' || service === 'hq'
+      ? { BB_PUBLIC_ORIGIN: `https://${service}.example.invalid` }
+      : {}),
+    ...environmentOverrides,
   };
   const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
   environment[pathKey] =
@@ -223,6 +228,27 @@ function reviewedOptionalLockfile(): Record<string, unknown> {
 }
 
 describe('Run 3.1 Replit deployment controls', () => {
+  it('keeps GitHub authoritative and excludes the legacy Replit project', async () => {
+    const instructions = await readFile(join(root, 'AGENTS.md'), 'utf8');
+
+    expect(instructions).toContain('https://github.com/micahheaton/BoomerBuddyRemix.git');
+    for (const service of [
+      '`boomerbuddy-web` serves the customer web application at `app.boomerbuddy.net`',
+      '`boomerbuddy-api` serves `api.boomerbuddy.net`',
+      '`boomerbuddy-worker` runs background work',
+      '`boomerbuddy-hq` serves `hq.boomerbuddy.net`',
+    ]) {
+      expect(instructions).toContain(service);
+    }
+    expect(instructions).toContain('Never push code from a Replit service back to GitHub');
+    expect(instructions).toContain(
+      'The separate Replit project named `BoomerBuddy`, serving `boomerbuddy.net`, is the legacy site',
+    );
+    expect(instructions).toContain(
+      'Do not edit, synchronize, republish, or retire that legacy project',
+    );
+  });
+
   it('uses one exact service selector and excludes the mobile build graph', async () => {
     const source = await readFile(join(root, 'scripts/replit-service.mjs'), 'utf8');
     const replit = await readFile(join(root, '.replit'), 'utf8');
@@ -270,7 +296,11 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('reviewNpmProblems(inventory)');
     expect(source).toContain('hashes and filenames only');
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
-    expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
+    expect(source).toContain('{ ...serviceEnvironment, BB_API_PORT: providerApiPort }');
+    expect(source).toContain('canonicalProductionPublicOrigin(process.env.BB_PUBLIC_ORIGIN)');
+    expect(source).toContain(
+      'serviceEnvironment = { ...process.env, BB_PUBLIC_ORIGIN: publicOrigin }',
+    );
     expect(source).toContain('A configured BB_API_PORT must equal the provider PORT');
     expect(worker).toContain('new ProductionIdentityRepository(database).assertFounderBinding');
     expect(worker).toContain('await runReplitWorkerLifecycle(');
@@ -305,6 +335,49 @@ describe('Run 3.1 Replit deployment controls', () => {
       });
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}${result.stderr}`).not.toContain('npm run start');
+    }
+  });
+
+  it('canonicalizes safe web origins and rejects unsafe values before a Replit build', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      for (const publicOrigin of [
+        'https://web.example.invalid/',
+        'https://WEB.example.invalid',
+        'https://web.example.invalid:443',
+        'https://b\u00fccher.example',
+      ]) {
+        const result = runFixtureBuild(fixture, 'web', { BB_PUBLIC_ORIGIN: publicOrigin });
+        expect(commandOutput(result), publicOrigin).toContain(
+          'Replit web build passed with an isolated production dependency graph.',
+        );
+        expect(result.status, publicOrigin).toBe(0);
+      }
+
+      for (const publicOrigin of [
+        'http://web.example.invalid',
+        'https://*.example.invalid',
+        'https://user@web.example.invalid',
+        'https://web.example.invalid/member',
+        'https://web.example.invalid?',
+        'https://web.example.invalid#',
+        'https://localhost',
+        'https://127.0.0.2',
+        'https://[::ffff:127.0.0.1]',
+        'https://web.\nexample.invalid',
+        'https://web.\texample.invalid',
+        'https://web.\u007fexample.invalid',
+        'https://web.example.invalid\\',
+      ]) {
+        const result = runFixtureBuild(fixture, 'web', { BB_PUBLIC_ORIGIN: publicOrigin });
+        expect(result.status, publicOrigin).not.toBe(0);
+        expect(commandOutput(result), publicOrigin).toContain(
+          'requires one safe canonicalizable HTTPS BB_PUBLIC_ORIGIN',
+        );
+        expect(commandOutput(result), publicOrigin).not.toContain('Replit web build passed');
+      }
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
     }
   });
 

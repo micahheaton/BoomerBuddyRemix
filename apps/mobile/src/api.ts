@@ -1,4 +1,4 @@
-import type { ErrorEnvelope } from '@boomerbuddy/contracts';
+import { errorEnvelopeSchema } from '@boomerbuddy/contracts';
 import { readMobileAuthenticationToken, recoverUnauthorizedMobileSession } from './authentication';
 import { resolveMobileApiOrigin } from './api-origin';
 import { readSelectedHouseholdId } from './session';
@@ -11,6 +11,21 @@ const baseUrl = resolveMobileApiOrigin({
   development: __DEV__,
 });
 
+export class MobileCustomerError extends Error {
+  override readonly name = 'MobileCustomerError';
+
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+  }
+}
+
+function customerError(message: string, status?: number): MobileCustomerError {
+  return new MobileCustomerError(message, status);
+}
+
 export async function mobileRequest<T>(
   path: string,
   init: RequestInit = {},
@@ -19,7 +34,7 @@ export async function mobileRequest<T>(
   const token = includeAuth ? await readMobileAuthenticationToken() : null;
   if (includeAuth && !token) {
     await recoverUnauthorizedMobileSession();
-    throw new Error('Your session ended. Sign in again to continue.');
+    throw customerError('Your session ended. Sign in again to continue.');
   }
   const selectedHouseholdId = includeAuth && path !== '/v1/me' ? readSelectedHouseholdId() : null;
   const callerSignal = init.signal ?? undefined;
@@ -37,8 +52,12 @@ export async function mobileRequest<T>(
       }
       if (requestToken) headers.set('Authorization', `Bearer ${requestToken}`);
       else headers.delete('Authorization');
-      if (selectedHouseholdId) headers.set('X-BB-Household-Id', selectedHouseholdId);
-      else headers.delete('X-BB-Household-Id');
+      if (!includeAuth) {
+        headers.delete('X-BB-Household-Id');
+      } else if (!headers.has('X-BB-Household-Id')) {
+        if (selectedHouseholdId) headers.set('X-BB-Household-Id', selectedHouseholdId);
+        else headers.delete('X-BB-Household-Id');
+      }
       return fetch(`${baseUrl}${path}`, {
         ...init,
         signal: requestSignal,
@@ -51,39 +70,53 @@ export async function mobileRequest<T>(
       try {
         refreshedToken = await readMobileAuthenticationToken({ skipCache: true });
       } catch {
-        throw new Error('BoomerBuddy could not refresh your session. Please try again.');
+        throw customerError('BoomerBuddy could not refresh your session. Please try again.');
       }
       if (!refreshedToken) {
         await recoverUnauthorizedMobileSession();
-        throw new Error('Your session ended. Sign in again to continue.');
+        throw customerError('Your session ended. Sign in again to continue.');
       }
       response = await send(refreshedToken);
     }
     if (!response.ok) {
       if (response.status === 401 && includeAuth) {
         await recoverUnauthorizedMobileSession();
-        throw new Error('Your session ended. Sign in again to continue.');
+        throw customerError('Your session ended. Sign in again to continue.');
       }
-      let error: ErrorEnvelope | undefined;
+      let errorMessage: string | undefined;
       try {
-        error = (await response.json()) as ErrorEnvelope;
+        const parsed = errorEnvelopeSchema.safeParse(await response.json());
+        if (parsed.success) errorMessage = parsed.data.error.message;
       } catch {
         /* Use safe fallback. */
       }
-      throw new Error(error?.error.message ?? 'BoomerBuddy could not complete that request.');
+      throw customerError(
+        errorMessage ?? 'BoomerBuddy could not complete that request.',
+        response.status,
+      );
     }
     if (response.status === 204) return undefined as T;
-    return (await response.json()) as T;
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw customerError('BoomerBuddy received an unexpected response. Please try again.');
+    }
   } catch (error) {
     if (timeoutController?.signal.aborted) {
-      throw new Error('BoomerBuddy did not respond in time. Check your connection and try again.');
+      throw customerError(
+        'BoomerBuddy did not respond in time. Check your connection and try again.',
+      );
     }
-    throw error;
+    if (error instanceof MobileCustomerError) throw error;
+    if (callerSignal?.aborted) throw customerError('The request was canceled. Please try again.');
+    throw customerError('BoomerBuddy could not connect. Check your connection and try again.');
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 
 export function readableError(error: unknown): string {
-  return error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+  return error instanceof MobileCustomerError
+    ? error.message
+    : 'Something went wrong. Please try again.';
 }

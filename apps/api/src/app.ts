@@ -34,6 +34,7 @@ import { registerPublicCheckRoutes } from './routes/public-checks';
 import { registerPrivacyRoutes } from './routes/privacy';
 import { registerReferralRoutes } from './routes/referrals';
 import { registerSessionRoutes } from './routes/sessions';
+import { registerSupportReceiptRoutes } from './routes/support-receipts';
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
@@ -242,7 +243,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       if (!cleanup.saturated) break;
       accessIntentsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
     }
-    return checksMoreDue || accessIntentsMoreDue;
+    let supportReceiptsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.supportReceipts.purgeTerminal(retentionBatchSize);
+      if (!cleanup.saturated) break;
+      supportReceiptsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    return checksMoreDue || accessIntentsMoreDue || supportReceiptsMoreDue;
   };
   let retentionNeedsContinuation = false;
   try {
@@ -258,6 +265,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           fingerprintKey: options.config.secrets.fingerprintKey,
           fingerprintKeyVersion: 1,
         },
+        options.config.environment,
         context.now(),
       );
     }
@@ -361,6 +369,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     mutationEnabled:
       context.config.accessIntents?.runtimeEnabled === true &&
       context.config.accessIntents.edgeRateLimitConfirmed === true,
+  });
+  registerSupportReceiptRoutes(app, context, {
+    customerAccessEnabled: context.config.supportReceipts?.customerAccessEnabled === true,
+    intakeEnabled:
+      context.config.supportReceipts?.customerAccessEnabled === true &&
+      context.config.supportReceipts.intakeEnabled === true &&
+      context.config.supportReceipts.hqQueueEnabled === true,
+    hqQueueEnabled: context.config.supportReceipts?.hqQueueEnabled === true,
   });
   registerPublicCheckRoutes(app, context, context.repositories.publicChecks);
   registerPrivacyRoutes(app, context);

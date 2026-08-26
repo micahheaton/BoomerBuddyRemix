@@ -49,7 +49,7 @@ export function MemberHeader() {
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}
-          <Link href="/support">Support</Link>
+          <Link href="/member/support">Support</Link>
           <Link href="/billing-terms">Billing terms</Link>
           {process.env.NODE_ENV === 'production' ? (
             <ProductionSignOut />

@@ -12,7 +12,7 @@ Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
 
 Run one prompt at a time in order unless a prompt explicitly opens parallel work. Start every phase from current repository evidence, not from an earlier phase's summary. A phase may use subagents for the named parallel workstreams, but one agent must own integration and the final evidence packet.
 
-The launch path is web-first. The only initial paid offer is Family at USD 14.99 per month for one household. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only. No phase may copy one into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A collision is a founder decision gate.
+The launch path is web-first. Family at USD 14.99 per month for one household is the sole approved production offer candidate and is not live. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only. No phase may copy one into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A collision is a founder decision gate.
 
 Twilio remains disabled until a later, separate consent and compliance gate covers sender registration, opt-out, suppression, quiet hours, delivery evidence, privacy, and incident handling. No phase in this pack authorizes Twilio credentials or traffic.
 
@@ -124,7 +124,7 @@ Prepare separate decision cells for offer and geography; tax/accounting; cancell
 
 Evidence gates
 
-Every launch-critical decision has one accountable human, an approval state, an effective date, an exact downstream action it authorizes, and a revocation/expiry rule. The record states that Family USD 14.99 monthly is the only launch offer, all annual, Individual, and referral hypotheses remain sandbox-only under the offer registry, payment is web-first, mobile remains P0 in parallel, Twilio stays disabled, and no customer PII enters project evidence. Any undecided launch-critical cell remains a stop gate, not an assumption.
+Every launch-critical decision has one accountable human, an approval state, an effective date, an exact downstream action it authorizes, and a revocation/expiry rule. The record states that Family USD 14.99 monthly is the sole approved production offer candidate and is not live, all annual, Individual, and referral hypotheses remain sandbox-only under the offer registry, payment is web-first, mobile remains P0 in parallel, Twilio stays disabled, and no customer PII enters project evidence. Any undecided launch-critical cell remains a stop gate, not an assumption.
 
 Tests
 

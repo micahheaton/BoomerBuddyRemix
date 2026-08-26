@@ -43,6 +43,14 @@ const stateTitle: Readonly<Record<Billing['checkoutState'], string>> = {
   restricted: 'Billing review needed',
 };
 
+const recoveryCopy: Readonly<Record<NonNullable<Billing['recoveryReason']>, string>> = {
+  payment_action_required:
+    'Your payment provider says additional payment confirmation is required.',
+  payment_failed: 'Your payment provider could not complete the latest payment attempt.',
+  invoice_finalization_failed:
+    'Billing setup needs attention before payment can be confirmed. BoomerBuddy is not claiming that a charge, invoice, or receipt exists.',
+};
+
 function operationId(prefix: 'checkout' | 'portal'): string {
   return `${prefix}-${crypto.randomUUID()}`;
 }
@@ -309,6 +317,22 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
               : ''}
           </p>
         ) : null}
+        {billing?.recoveryReason ? (
+          <p className="notice" data-testid="billing-recovery-reason">
+            {recoveryCopy[billing.recoveryReason]}{' '}
+            {billing.portalAvailable ? (
+              <>
+                Review secure billing for the next steps currently available. If it does not show a
+                recovery option, <Link href="/support">contact support</Link>.
+              </>
+            ) : (
+              <>
+                Secure billing is not currently available.{' '}
+                <Link href="/support">Contact support</Link> for the next steps currently available.
+              </>
+            )}
+          </p>
+        ) : null}
         {billing?.checkoutState === 'ready' && billing.runtimeInitiationEnabled ? (
           <>
             <div className="notice" data-testid="billing-customer-terms">
@@ -338,14 +362,25 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
           </>
         ) : null}
         {billing?.portalAvailable ? (
-          <button
-            className="button button-secondary"
-            type="button"
-            disabled={submitting !== undefined}
-            onClick={() => void openPortal()}
-          >
-            {submitting === 'portal' ? 'Opening portal…' : 'Manage payment method or cancellation'}
-          </button>
+          <>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={submitting !== undefined}
+              onClick={() => void openPortal()}
+            >
+              {submitting === 'portal'
+                ? 'Opening portal…'
+                : billing.recoveryReason
+                  ? 'Review payment in secure billing'
+                  : 'View invoices or manage billing'}
+            </button>
+            <p className="meta" data-testid="billing-invoice-recovery">
+              Stripe&apos;s billing portal shows invoice history that Stripe has made available. For
+              a missing invoice or payment receipt, <Link href="/support">contact support</Link>;
+              BoomerBuddy does not reconstruct unavailable provider records.
+            </p>
+          </>
         ) : null}
         <button
           className="button button-secondary"

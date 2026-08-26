@@ -264,6 +264,6 @@ To disable Replit production quickly, the founder stops/pauses the customer web,
 
 ## Current evidence and blocker decision
 
-Local Run 2/Run 3 gates prove standard Node builds and portability checks, not Replit deployment. No Replit project import, provider build, managed database connection, custom domain, TLS, staging proxy, alert, rollback, or cost-control evidence has been produced in this run. Stripe is production-capable but remains default-off until the exact surface manifests, live read preflight, and max-one cohort rehearsal are retained. Twilio remains disabled.
+Local Run 2/Run 3 gates prove standard Node builds and portability checks, not Replit deployment. No Replit project import, provider build, managed database connection, custom domain, TLS, staging proxy, alert, rollback, or cost-control evidence has been produced in this run. Stripe is not production-capable and remains default-off; the paid Family entitlement mismatch and every deployment/provider proof gate remain open. Twilio remains disabled.
 
 Therefore this runbook is `prepared`, not `test_proven` or `ready_for_live_review`.

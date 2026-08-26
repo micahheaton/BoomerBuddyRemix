@@ -315,6 +315,46 @@ describe('private-beta access-intent receipts', () => {
     expect(serialized).not.toContain('203.0.113.82');
   });
 
+  it('limits the global hourly quota atomically across distinct network buckets', async () => {
+    const repository = new AccessIntentRepository(harness.database, Buffer.alloc(32, 19), 2, 2);
+    const outcomes = await Promise.allSettled(
+      Array.from({ length: 3 }, (_, index) =>
+        repository.create({
+          purpose: 'private_beta_access_request',
+          attribution: { source: 'direct', campaign: 'none' },
+          clientKey: repository.clientKeyForNetworkAddress(`203.0.113.${index + 10}`),
+          operationKey: nextOperationKey(),
+          now: harness.clock.now(),
+        }),
+      ),
+    );
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(2);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    expect(rejected).toBeDefined();
+    if (rejected?.status !== 'rejected') throw new Error('Expected one global quota rejection');
+    expect(rejected.reason).toMatchObject({ code: 'conflict' });
+
+    const receipts = await harness.database.query<{ readonly count: number }>(
+      'SELECT count(*)::integer AS count FROM private_beta_access_intent_receipts',
+    );
+    const aggregate = await harness.database.query<{ readonly event_count: number }>(
+      'SELECT event_count FROM private_beta_access_intent_aggregates',
+    );
+    const globalBucket = await harness.database.query<{ readonly used_count: number }>(
+      `SELECT used_count FROM private_beta_access_intent_rate_buckets
+       WHERE scope = 'global'`,
+    );
+    const networkBuckets = await harness.database.query<{ readonly count: number }>(
+      `SELECT count(*)::integer AS count FROM private_beta_access_intent_rate_buckets
+       WHERE scope = 'network'`,
+    );
+    expect(receipts.rows).toEqual([{ count: 2 }]);
+    expect(aggregate.rows).toEqual([{ event_count: 2 }]);
+    expect(globalBucket.rows).toEqual([{ used_count: 2 }]);
+    expect(networkBuckets.rows).toEqual([{ count: 2 }]);
+  });
+
   it('deletes expired state in bounded batches and reports continuation without returning codes', async () => {
     for (let index = 0; index < 3; index += 1) {
       expect((await createIntent(harness.app, { origin: customerOrigin })).statusCode).toBe(201);

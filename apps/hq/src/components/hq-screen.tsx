@@ -18,6 +18,7 @@ import { FeedbackLearning } from './feedback-learning';
 import { FounderProvisioning } from './founder-provisioning';
 import { FoundingHouseholds } from './founding-households';
 import { ProductionHqSignOut } from './production-identity';
+import { SupportReceiptQueue } from './support-receipt-queue';
 import { StripeControl } from './stripe-control';
 import { hqRequest, readableError } from '../lib/api';
 
@@ -26,6 +27,7 @@ export type HqView =
   | 'customers'
   | 'fraud'
   | 'support'
+  | 'support-receipts'
   | 'revenue'
   | 'system'
   | 'privacy'
@@ -102,9 +104,14 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
     title: 'Assigned support',
     subtitle: 'Only active cases assigned to this support employee. Customer content is excluded.',
   },
+  'support-receipts': {
+    title: 'Support receipt queue',
+    subtitle:
+      'Owner-only category, impact, state, and timing evidence. Customer content is never submitted.',
+  },
   revenue: {
     title: 'Revenue workspace',
-    subtitle: 'Seeded research targets and follow-up cues—not a live CRM or verified pipeline.',
+    subtitle: 'Seeded research targets and follow-up cues, not a live CRM or verified pipeline.',
   },
   system: {
     title: 'System and audit',
@@ -129,8 +136,8 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   'founding-households': {
     title: 'Founding Households',
     subtitle: productionRuntime
-      ? 'Founder-gated, finite, identity-bound sponsor access—no card, automatic messaging, or public enrollment.'
-      : 'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
+      ? 'Founder-gated, finite, identity-bound sponsor access: no card, automatic messaging, or public enrollment.'
+      : 'Founder-gated, finite local sponsor access: no card, no messaging, and no production identity claim.',
   },
   'billing-authority': {
     title: 'Billing authority',
@@ -144,7 +151,7 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   },
   targets: {
     title: 'Credit-union segmentation',
-    subtitle: 'Official fixed-snapshot evidence for explainable fit—not leads or buyer intent.',
+    subtitle: 'Official fixed-snapshot evidence for explainable fit, not leads or buyer intent.',
   },
   pipeline: {
     title: 'Opportunity control plane',
@@ -212,9 +219,9 @@ function DevelopmentSignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void 
             value={personaId}
             onChange={(event) => setPersonaId(event.target.value as DevPersonaId)}
           >
-            <option value="hq-heidi">Heidi — HQ owner</option>
-            <option value="hq-riley">Riley — HQ reviewer</option>
-            <option value="hq-sam">Sam — HQ support</option>
+            <option value="hq-heidi">Heidi - HQ owner</option>
+            <option value="hq-riley">Riley - HQ reviewer</option>
+            <option value="hq-sam">Sam - HQ support</option>
           </select>
           {error && (
             <p className="error" role="alert">
@@ -269,6 +276,14 @@ function Shell({
           {isOwner && (
             <Link aria-current={view === 'customers' ? 'page' : undefined} href="/customers">
               Customers
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'support-receipts' ? 'page' : undefined}
+              href="/support-receipts"
+            >
+              Support receipts
             </Link>
           )}
           {(isOwner || canReview) && (
@@ -412,7 +427,7 @@ function Customers() {
     <div className="table-wrap">
       <table>
         <caption>
-          Household access summary — <DataLabel />
+          Household access summary - <DataLabel />
         </caption>
         <thead>
           <tr>
@@ -476,7 +491,7 @@ function OwnerFraud() {
       <div className="table-wrap section">
         <table>
           <caption>
-            Check metadata review — <DataLabel />
+            Check metadata review - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -540,7 +555,7 @@ function AssignedReviewQueue() {
       <div className="table-wrap section">
         <table>
           <caption>
-            Assigned fraud work cases — <DataLabel />
+            Assigned fraud work cases - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -597,7 +612,7 @@ function SupportQueue() {
       <div className="table-wrap section">
         <table>
           <caption>
-            Assigned support cases — <DataLabel />
+            Assigned support cases - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -661,7 +676,7 @@ function Revenue() {
       <section className="section table-wrap">
         <table>
           <caption>
-            Target accounts — <DataLabel state="seeded" />
+            Target accounts - <DataLabel state="seeded" />
           </caption>
           <thead>
             <tr>
@@ -684,7 +699,7 @@ function Revenue() {
       <section className="section table-wrap">
         <table>
           <caption>
-            Opportunities — <DataLabel state="seeded" />
+            Opportunities - <DataLabel state="seeded" />
           </caption>
           <thead>
             <tr>
@@ -710,7 +725,7 @@ function Revenue() {
                     {new Date(opportunity.nextActionAt).toLocaleString()}
                   </div>
                 </td>
-                <td>{opportunity.stale ? 'Stale — review needed' : 'Current in seed data'}</td>
+                <td>{opportunity.stale ? 'Stale - review needed' : 'Current in seed data'}</td>
               </tr>
             ))}
           </tbody>
@@ -768,7 +783,7 @@ function System() {
       </section>
       <section className="section table-wrap">
         <table>
-          <caption>Audit metadata — no artifact content</caption>
+          <caption>Audit metadata - no artifact content</caption>
           <thead>
             <tr>
               <th>Time</th>
@@ -1037,6 +1052,8 @@ export function HqScreen({ view }: { view: HqView }) {
         )
       ) : view === 'support' ? (
         <SupportQueue />
+      ) : view === 'support-receipts' ? (
+        <SupportReceiptQueue />
       ) : view === 'revenue' ? (
         <Revenue />
       ) : view === 'privacy' ? (

@@ -19,6 +19,7 @@ const productionSourceRoots = [
 const hypothesisGovernanceEntryPoints = [
   'docs/post-launch-beta/README.md',
   'docs/post-launch-beta/EXECUTION-PLAN.md',
+  'docs/post-launch-beta/REVENUE-EXPERIMENT-ACTION-PACKET.md',
   'docs/post-launch-beta/RUN-NEXT.md',
   'docs/post-launch-beta/RUN-NEXT-EXECUTION.md',
   'docs/post-launch-beta/GAUNTLET-PROMPT-PACK.md',
@@ -166,8 +167,9 @@ describe('revenue hypothesis production boundary', () => {
   });
 
   it('retains one exact public and Checkout offer', async () => {
-    const [publicConfig, pricing, checkoutContract, stripeConfig] = await Promise.all([
+    const [publicConfig, home, pricing, checkoutContract, stripeConfig] = await Promise.all([
       source('apps/api/src/app.ts'),
+      source('apps/web/src/app/page.tsx'),
       source('apps/web/src/app/pricing/page.tsx'),
       source('packages/contracts/src/commerce.ts'),
       source('packages/config/src/index.ts'),
@@ -176,10 +178,31 @@ describe('revenue hypothesis production boundary', () => {
     expect(publicConfig).toContain("key: 'family'");
     expect(publicConfig).toContain('monthlyUsd: 14.99');
     expect(publicConfig).toContain('annualUsd: null');
+    expect(home).toContain('Family is USD 14.99 per month');
     expect(pricing).toContain('USD 14.99 monthly');
-    expect(pricing).not.toMatch(/USD (?:8\.99|89|149)\b/u);
+    const publicOfferCopy = `${home}\n${pricing}`;
+    expect(publicOfferCopy).not.toMatch(/USD (?:8\.99|89|149)\b/u);
+    expect(publicOfferCopy).not.toMatch(/\$(?:8\.99|89|149)\b/u);
+    expect(publicOfferCopy).not.toMatch(/Individual (?:monthly|yearly|annual)/iu);
+    expect(publicOfferCopy).not.toMatch(/referral (?:credit|offer|reward)/iu);
     expect(checkoutContract).toContain("offerId: z.literal('founding_family_monthly_v1')");
     expect(stripeConfig).toContain('unitAmountMinor: 1499');
     expect(stripeConfig).toContain("billingInterval: 'month'");
+  });
+
+  it('keeps the noncharging experiment packet isolated and honest about funnel evidence', async () => {
+    const packet = await source('docs/post-launch-beta/REVENUE-EXPERIMENT-ACTION-PACKET.md');
+
+    expect(packet).toContain('Candidate SHA: **NOT YET BOUND**');
+    expect(packet).toContain('CONFIRM NONCHARGING RELEASE SETUP');
+    expect(packet).toContain('Family means coverage for one household group');
+    expect(packet).toContain('Do not use or modify the existing `Boomer Buddy sandbox`');
+    expect(packet).toContain('create a new isolated sandbox');
+    expect(packet).toContain('access-intent receipt proves only `intent_created`');
+    expect(packet).toMatch(/cannot currently measure lead-to-paid\s+conversion/u);
+    expect(packet).toMatch(/private, noncollecting website\s+preview/u);
+    expect(packet).toContain('zero live objects');
+    expect(packet).toContain('zero participant contacts');
+    expect(packet).not.toMatch(/employer.+USD|association.+USD|bulk.+USD/iu);
   });
 });

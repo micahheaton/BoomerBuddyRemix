@@ -123,17 +123,25 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     const source = await readFile(join(root, 'apps/hq/src/proxy.ts'), 'utf8');
     const missingIdentityCheck = source.indexOf('!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
     const livenessCheck = source.indexOf('isExactReplitHqHealthCheck({');
+    const canonicalOriginCheck = source.indexOf('!isCanonicalPublicRequestOrigin(');
     const clerkBoundary = source.indexOf('return productionClerkMiddleware(request, event)');
 
     expect(missingIdentityCheck).toBeGreaterThan(-1);
     expect(source).toContain('!process.env.CLERK_SECRET_KEY');
+    expect(source).toContain("from '@boomerbuddy/config/exact-origin'");
+    expect(source).toContain(
+      'const configuredPublicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true)',
+    );
     expect(source).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
     expect(source).toContain('signInUrl: productionClerkSignInUrl');
-    expect(source).toContain(
-      'authorizedParties: configuredPublicOrigin === undefined ? [] : [configuredPublicOrigin]',
-    );
+    expect(source).toContain('authorizedParties: [configuredPublicOrigin]');
+    expect(source).not.toContain('authorizedParties: []');
     expect(source).toContain('!configuredPublicOrigin');
     expect(livenessCheck).toBeGreaterThan(missingIdentityCheck);
+    expect(canonicalOriginCheck).toBeGreaterThan(livenessCheck);
+    expect(source).toContain('status: 421');
+    expect(source).toContain("'cache-control': 'no-store'");
+    expect(clerkBoundary).toBeGreaterThan(canonicalOriginCheck);
     expect(clerkBoundary).toBeGreaterThan(livenessCheck);
     expect(source).toContain("const isPublicRoute = createRouteMatcher(['/sign-in(.*)'])");
     expect(source).toContain('if (!isPublicRoute(request)) await auth.protect()');

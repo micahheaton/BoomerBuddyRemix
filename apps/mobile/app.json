@@ -19,6 +19,7 @@
     },
     "android": {
       "package": "net.boomerbuddy.app",
+      "allowBackup": false,
       "blockedPermissions": [
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",

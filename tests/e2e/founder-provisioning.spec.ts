@@ -27,7 +27,7 @@ test('configured founder can review and record secret-free provisioning status w
   await expect(page.locator('body')).not.toContainText('whsec_');
 
   await page.getByText('Record a bounded status transition').click();
-  await page.getByRole('button', { name: 'Record status only — run no external action' }).click();
+  await page.getByRole('button', { name: 'Record status only - run no external action' }).click();
   await expect(page.getByRole('status')).toContainText('No adapter, payment, message, deployment');
   await expect(page.getByRole('status')).toContainText('external action ran');
 });

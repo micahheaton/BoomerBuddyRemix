@@ -26,6 +26,7 @@ import {
   OutboxDeliveryRepository,
   PublicCheckRepository,
   ProductionIdentityRepository,
+  SupportReceiptRepository,
   runMigrations,
 } from '@boomerbuddy/persistence';
 import {
@@ -114,6 +115,10 @@ await runReplitWorkerLifecycle(
       hmacKeyVersion: 1,
     });
     const accessIntents = new AccessIntentRepository(database, appConfig.secrets.fingerprintKey);
+    const supportReceipts = new SupportReceiptRepository(
+      database,
+      appConfig.secrets.fingerprintKey,
+    );
     const feedback = new FeedbackRepository(database, {
       encryptionKey: appConfig.secrets.artifactEncryptionKey,
       encryptionKeyVersion: 1,
@@ -153,6 +158,7 @@ await runReplitWorkerLifecycle(
       const deleted = await checks.purgeDue({ now, limit: batch });
       const publicDeleted = await publicChecks.purgeExpired(now);
       const accessIntentCleanup = await accessIntents.purgeExpired(now, batch);
+      const supportReceiptCleanup = await supportReceipts.purgeTerminal(Math.min(batch, 100));
       const messagingDeleted =
         entitlementRuntimeEnvironment === 'local'
           ? await messaging.purgeExpiredSupportContent({ limit: batch, now })
@@ -173,6 +179,7 @@ await runReplitWorkerLifecycle(
           publicDeleted.contexts > 0 ||
           publicDeleted.results > 0 ||
           accessIntentCleanup.saturated ||
+          supportReceiptCleanup.saturated ||
           messagingDeleted.length === batch ||
           mobileRetention.cleanupSaturated,
       });

@@ -10,18 +10,32 @@ type NativePermission = {
   $: Record<string, string>;
 };
 
+type NativeIntentFilter = {
+  data?: NativePermission[];
+};
+
+type NativeActivity = {
+  $: Record<string, string>;
+  'intent-filter'?: NativeIntentFilter[];
+};
+
 type IntrospectedExpoConfig = {
   _internal: {
     modResults: {
       ios: {
         infoPlist: {
+          CFBundleURLTypes?: Array<{ CFBundleURLSchemes?: string[] }>;
           NSAppTransportSecurity?: { NSAllowsArbitraryLoads?: boolean };
           NSFaceIDUsageDescription?: string;
         };
+        entitlements: Record<string, unknown>;
       };
       android: {
         manifest: {
-          manifest: { 'uses-permission'?: NativePermission[] };
+          manifest: {
+            application?: Array<{ activity?: NativeActivity[] }>;
+            'uses-permission'?: NativePermission[];
+          };
         };
       };
     };
@@ -43,11 +57,42 @@ function introspectedExpoConfig(): IntrospectedExpoConfig {
 }
 
 describe('mobile production surface', () => {
+  it('pins the remediated Metro graph and permits no High dependency allowlist', () => {
+    const rootPackage = JSON.parse(source('package.json')) as {
+      overrides: Record<string, string>;
+    };
+    const lock = JSON.parse(source('package-lock.json')) as {
+      packages: Record<string, { version?: string }>;
+    };
+    const dependencyVerifier = source('scripts/verify-run3-1-dependencies.mjs');
+    const disposition = source('docs/run-3/MOBILE-DEPENDENCY-AUDIT.md');
+
+    expect(rootPackage.overrides).toMatchObject({
+      metro: '0.84.5',
+      'metro-config': '0.84.5',
+      'metro-transform-worker': '0.84.5',
+    });
+    const exactMetroNodes = Object.entries(lock.packages).filter(([path]) =>
+      /node_modules\/(?:metro|metro-config|metro-transform-worker)$/u.test(path),
+    );
+    expect(exactMetroNodes).toHaveLength(3);
+    expect(exactMetroNodes.every(([, metadata]) => metadata.version === '0.84.5')).toBe(true);
+    expect(
+      Object.keys(lock.packages).some((path) => /(?:^|\/)node_modules\/image-size$/u.test(path)),
+    ).toBe(false);
+    expect(dependencyVerifier).toContain('const allowedMobileHighAdvisories = new Set();');
+    expect(disposition).toContain('0 critical, 0 high, 23 moderate, 0 low');
+  });
+
   it('resolves a least-privilege native transport and permission surface', () => {
     const config = introspectedExpoConfig();
     const infoPlist = config._internal.modResults.ios.infoPlist;
     const permissions =
       config._internal.modResults.android.manifest.manifest['uses-permission'] ?? [];
+    const activities =
+      config._internal.modResults.android.manifest.manifest.application?.flatMap(
+        (application) => application.activity ?? [],
+      ) ?? [];
     const blockedPermissions = [
       'android.permission.READ_EXTERNAL_STORAGE',
       'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -69,6 +114,25 @@ describe('mobile production surface', () => {
         }),
       });
     }
+    expect(infoPlist.CFBundleURLTypes?.flatMap((entry) => entry.CFBundleURLSchemes ?? [])).toEqual(
+      expect.arrayContaining(['boomerbuddy', 'net.boomerbuddy.app']),
+    );
+    expect(
+      activities
+        .flatMap((activity) => activity['intent-filter'] ?? [])
+        .flatMap((filter) => filter.data ?? [])
+        .map((data) => data.$),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          'android:scheme': 'clerk',
+          'android:host': 'net.boomerbuddy.app.hosted-callback',
+        }),
+      ]),
+    );
+    expect(config._internal.modResults.ios.entitlements).toMatchObject({
+      'com.apple.developer.applesignin': ['Default'],
+    });
   });
 
   it('pins the native application identity and production EAS profiles', () => {
@@ -157,6 +221,7 @@ describe('mobile production surface', () => {
     const app = source('apps/mobile/App.tsx');
     const api = source('apps/mobile/src/api.ts');
     const apiOrigin = source('apps/mobile/src/api-origin.ts');
+    const screens = source('apps/mobile/src/screens.tsx');
     const session = source('apps/mobile/src/session.ts');
     const combined = `${app}\n${api}\n${session}`;
 
@@ -170,9 +235,12 @@ describe('mobile production surface', () => {
       "export const productionMobileApiOrigin = 'https://api.boomerbuddy.net';",
     );
     expect(api).toContain('readMobileAuthenticationToken({ skipCache: true })');
+    expect(app).toContain('completeMobileSignOut({');
+    expect(app).toContain('secure sign out did not finish');
     expect(combined).not.toContain('/v1/dev/sessions/mobile');
     expect(combined).not.toContain('writeSessionToken');
     expect(combined).not.toContain('readSessionToken');
+    expect(screens).not.toContain("mode: 'sign-up'");
   });
 
   it('keeps entitlement information without external payment steering', () => {
@@ -180,7 +248,12 @@ describe('mobile production surface', () => {
 
     expect(screens).toContain('Current access and plan');
     expect(screens).toContain('Household access is active');
-    expect(screens).toContain('This screen shows access information only.');
+    expect(screens).toContain('Your available features depend on the household you selected');
+    expect(screens).toContain('Family access was recently started, renewed, canceled, or restored');
+    expect(screens).toContain("'Refresh access'");
+    expect(screens).toContain('This does\n                not start or change a purchase.');
+    expect(screens).toContain("mobileRequest<MeResponse>('/v1/me')");
+    expect(screens).toContain('replacePrincipal(me.principal, selectedHouseholdId)');
     for (const prohibited of [
       'Payments are completed on',
       'Billing is managed on',
@@ -283,11 +356,50 @@ describe('mobile production surface', () => {
     expect(screens).not.toContain('scaffolded and not implemented');
     expect(screens).not.toContain('Future escalation notifications (not implemented)');
     expect(screens).not.toContain('Future guided orientation help (not implemented)');
-    expect(screens).toContain(
-      'Notifications for newly shared Checks are not available in this beta.',
-    );
+    expect(screens).toContain('Sharing saves this result in the other person&apos;s BoomerBuddy');
     expect(app).toContain('{__DEV__ ? (');
     expect(app).toContain('name="NativeProof"');
     expect(screens).toContain('Native intake proof');
+  });
+
+  it('keeps visual and accessibility selection state aligned for Check input', () => {
+    const screens = source('apps/mobile/src/screens.tsx');
+
+    expect(screens).toContain(
+      '<View style={[s.radio, effectiveKind === item && s.radioSelected]} />',
+    );
+    expect(screens).not.toContain('<View style={[s.radio, kind === item && s.radioSelected]} />');
+  });
+
+  it('clears handled or rejected native entry signals without retaining payload state', () => {
+    const app = source('apps/mobile/App.tsx');
+    const screens = source('apps/mobile/src/screens.tsx');
+
+    expect(app).toContain("onNativeEntryHandled={() => setNativeEntry('none')}");
+    expect(screens).toContain('onNativeEntryHandled();');
+    expect(screens.match(/title="Dismiss"/gu) ?? []).toHaveLength(2);
+  });
+
+  it('keeps experimental revenue offers out of the mobile customer surface', () => {
+    const customerSurface = [
+      source('apps/mobile/App.tsx'),
+      source('apps/mobile/src/screens.tsx'),
+      source('apps/mobile/src/policy-screens.tsx'),
+    ].join('\n');
+
+    for (const prohibited of [
+      'USD 149',
+      '$149',
+      'USD 8.99',
+      '$8.99',
+      'USD 89',
+      '$89',
+      'annual Family',
+      'Individual plan',
+      'referral bonus',
+      'group rate',
+    ]) {
+      expect(customerSurface).not.toContain(prohibited);
+    }
   });
 });

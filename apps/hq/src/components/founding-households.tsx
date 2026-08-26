@@ -321,7 +321,7 @@ export function FoundingHouseholds() {
       ) : null}
       {oneTimeCredential ? (
         <section className="hq-card section" aria-label="One-time invitation credential">
-          <span className="seed-label">Displayed once — founder manual handoff only</span>
+          <span className="seed-label">Displayed once - founder manual handoff only</span>
           <h2>Founding Household invitation</h2>
           <code>{oneTimeCredential}</code>
           <p className="source">
@@ -395,13 +395,13 @@ export function FoundingHouseholds() {
                 }
               >
                 <option value="family_beta_v1">
-                  Founding Family beta — 3 protected / 6 trusted
+                  Founding Family beta - 3 protected / 6 trusted
                 </option>
-                <option value="plus_beta_v1">Founding Plus beta — 1 protected / 2 trusted</option>
+                <option value="plus_beta_v1">Founding Plus beta - 1 protected / 2 trusted</option>
               </select>
             </label>
             <label>
-              Maximum households (1–25)
+              Maximum households (1-25)
               <input
                 type="number"
                 min={1}
@@ -413,7 +413,7 @@ export function FoundingHouseholds() {
               />
             </label>
             <label>
-              Invitation lifetime, days (1–14)
+              Invitation lifetime, days (1-14)
               <input
                 type="number"
                 min={1}
@@ -425,7 +425,7 @@ export function FoundingHouseholds() {
               />
             </label>
             <label>
-              Sponsored access, days (1–180)
+              Sponsored access, days (1-180)
               <input
                 type="number"
                 min={1}

@@ -96,6 +96,24 @@ export function StripeControl() {
       cohort.maxActive === 1 &&
       (activeEligibleHousehold === undefined || activeEligibleHousehold === householdId));
 
+  async function runPreflight(): Promise<void> {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const refreshed = await hqRequest<StripeControlStatusProjection>(apiPaths.hqStripePreflight, {
+        method: 'POST',
+        body: JSON.stringify({ environment }),
+      });
+      setStatus(refreshed);
+      setNotice(`Read-only ${environment} provider preflight evidence was recorded.`);
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function changeInitiation(event: FormEvent): Promise<void> {
     event.preventDefault();
     if (!initiation || initiationConfirmation !== initiationConfirmationText) {
@@ -267,6 +285,19 @@ export function StripeControl() {
             Persisted state: <strong>{status?.preflight.state ?? 'loading'}</strong>. No provider
             call runs when this page loads.
           </p>
+          <p>
+            This action performs only account, product, price, and Portal configuration reads. It
+            cannot create a Stripe resource or Checkout Session, and it is available while the
+            cohort and runtime initiation gates remain closed.
+          </p>
+          <button
+            className="primary"
+            type="button"
+            disabled={busy}
+            onClick={() => void runPreflight()}
+          >
+            Run read-only provider preflight
+          </button>
           {status?.preflight.state !== undefined && status.preflight.state !== 'unknown' ? (
             <dl>
               <dt>Checked</dt>

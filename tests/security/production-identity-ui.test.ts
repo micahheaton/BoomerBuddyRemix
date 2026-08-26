@@ -78,8 +78,12 @@ describe('production identity UI boundary', () => {
       expect(proxy).toContain("process.env.NODE_ENV !== 'production'");
       expect(proxy).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(proxy).toContain('CLERK_SECRET_KEY');
+      expect(proxy).toContain('BB_PUBLIC_ORIGIN');
       expect(proxy).toContain('NEXT_PUBLIC_CLERK_SIGN_IN_URL');
-      expect(proxy).toContain('{ signInUrl: productionClerkSignInUrl }');
+      expect(proxy).toContain(
+        'authorizedParties: configuredPublicOrigin === undefined ? [] : [configuredPublicOrigin]',
+      );
+      expect(proxy).toContain('!configuredPublicOrigin');
       expect(proxy).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
       expect(proxy).toContain('return NextResponse.next()');
       expect(proxy).toContain('status: 503');

@@ -97,6 +97,69 @@ function liveApiConfig(runtimeInitiationPermitted: boolean): AppConfig {
   };
 }
 
+function livePreflightFixture(path: string): Readonly<Record<string, unknown>> {
+  if (path === '/v1/account') {
+    return {
+      id: 'acct_livefixture1',
+      object: 'account',
+      charges_enabled: true,
+      payouts_enabled: true,
+      country: 'US',
+      business_type: 'company',
+    };
+  }
+  if (path === '/v1/products/prod_live_family_fixture') {
+    return {
+      id: 'prod_live_family_fixture',
+      object: 'product',
+      livemode: true,
+      active: true,
+    };
+  }
+  if (path === '/v1/prices/price_live_family_fixture') {
+    return {
+      id: 'price_live_family_fixture',
+      object: 'price',
+      livemode: true,
+      active: true,
+      product: 'prod_live_family_fixture',
+      currency: 'usd',
+      unit_amount: 1499,
+      unit_amount_decimal: '1499',
+      type: 'recurring',
+      billing_scheme: 'per_unit',
+      custom_unit_amount: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      recurring: {
+        interval: 'month',
+        interval_count: 1,
+        usage_type: 'licensed',
+        trial_period_days: null,
+      },
+    };
+  }
+  if (path === '/v1/billing_portal/configurations/bpc_live_cancel_fixture') {
+    return {
+      id: 'bpc_live_cancel_fixture',
+      object: 'billing_portal.configuration',
+      livemode: true,
+      active: true,
+      features: {
+        subscription_cancel: {
+          enabled: true,
+          mode: 'at_period_end',
+          proration_behavior: 'none',
+        },
+        subscription_update: { enabled: false, default_allowed_updates: [] },
+        payment_method_update: { enabled: true },
+        customer_update: { enabled: false, allowed_updates: [] },
+      },
+    };
+  }
+  return {};
+}
+
 describe('Stripe live runtime boundary', () => {
   it('accepts the API-scoped live boundary while keeping injected evidence local-only', async () => {
     const liveConfig = liveApiConfig(false);
@@ -136,6 +199,137 @@ describe('Stripe live runtime boundary', () => {
         initialize: false,
       }),
     ).rejects.toThrow('evidence tier does not match the runtime transport boundary');
+  });
+
+  it('denies a non-owner HQ preflight before any provider transport call', async () => {
+    const get = vi.fn(async ({ path }: Parameters<StripeTransport['get']>[0]) =>
+      livePreflightFixture(path),
+    );
+    const postForm = vi.fn(async () => ({}));
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveApiConfig(false),
+      database,
+      closeDatabase: false,
+      stripeTransport: { get, postForm },
+    });
+    const reviewer = await loginHq(app, 'hq-riley');
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers: { cookie: reviewer, origin: hqOrigin },
+      payload: { environment: 'production' },
+    });
+    expect(denied.statusCode, denied.body).toBe(403);
+    expect(get).not.toHaveBeenCalled();
+    expect(postForm).not.toHaveBeenCalled();
+    const evidence = await database.query<{ readonly count: number } & Record<string, unknown>>(
+      `SELECT count(*)::int AS count FROM commerce_stripe_preflight_records`,
+    );
+    expect(evidence.rows[0]?.count).toBe(0);
+    await app.close();
+    await database.close();
+  });
+
+  it('records founder preflight through four GETs while every live initiation gate stays closed', async () => {
+    const get = vi.fn(async ({ path }: Parameters<StripeTransport['get']>[0]) =>
+      livePreflightFixture(path),
+    );
+    const postForm = vi.fn(async () => ({}));
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveApiConfig(false),
+      database,
+      closeDatabase: false,
+      stripeTransport: { get, postForm },
+    });
+    const founder = await loginHq(app);
+    const headers = { cookie: founder, origin: hqOrigin };
+    const initiation = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/initiation-control?environment=production',
+      headers,
+    });
+    expect(initiation.statusCode, initiation.body).toBe(200);
+    expect(initiation.json()).toMatchObject({
+      state: 'absent',
+      revision: 0,
+      liveEnableAvailable: false,
+    });
+    const cohort = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/cohort-control?environment=production',
+      headers,
+    });
+    expect(cohort.statusCode, cohort.body).toBe(200);
+    expect(cohort.json()).toMatchObject({ state: 'absent', maxActive: 0, revision: 0 });
+
+    const wrongEnvironment = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers,
+      payload: { environment: 'test' },
+    });
+    expect(wrongEnvironment.statusCode, wrongEnvironment.body).toBe(503);
+    expect(get).not.toHaveBeenCalled();
+
+    const preflight = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers,
+      payload: { environment: 'production' },
+    });
+    expect(preflight.statusCode, preflight.body).toBe(200);
+    expect(preflight.json()).toMatchObject({
+      environment: 'production',
+      preflight: {
+        state: 'configured',
+        evidenceLevel: 'local_fixture',
+        authenticityKind: 'fixture_assertion',
+        transportKind: 'injected_fixture',
+        checks: {
+          accountReady: true,
+          offerReady: true,
+          portalReady: true,
+          checkoutPolicyReady: true,
+        },
+      },
+      eligibleHouseholds: [],
+    });
+    expect(get.mock.calls.map(([request]) => request.path).sort()).toEqual(
+      [
+        '/v1/account',
+        '/v1/billing_portal/configurations/bpc_live_cancel_fixture',
+        '/v1/prices/price_live_family_fixture',
+        '/v1/products/prod_live_family_fixture',
+      ].sort(),
+    );
+    expect(postForm).not.toHaveBeenCalled();
+    const rows = await database.query<
+      {
+        readonly preflight_records: number;
+        readonly checkout_intents: number;
+        readonly session_operations: number;
+        readonly initiation_controls: number;
+        readonly cohort_policies: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_preflight_records) AS preflight_records,
+         (SELECT count(*)::int FROM commerce_checkout_intents) AS checkout_intents,
+         (SELECT count(*)::int FROM commerce_stripe_session_operations) AS session_operations,
+         (SELECT count(*)::int FROM commerce_stripe_initiation_controls) AS initiation_controls,
+         (SELECT count(*)::int FROM commerce_stripe_cohort_policies) AS cohort_policies`,
+    );
+    expect(rows.rows[0]).toMatchObject({
+      preflight_records: 1,
+      checkout_intents: 0,
+      session_operations: 0,
+      initiation_controls: 0,
+      cohort_policies: 0,
+    });
+    await app.close();
+    await database.close();
   });
 
   it('fails Portal closed when its runtime configuration and adapter are absent', async () => {

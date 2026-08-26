@@ -45,6 +45,7 @@ const releaseMigrations = [
   '0029_run3_1_stripe_live_control_plane.sql',
   '0030_run3_1_billing_reverification_binding.sql',
   '0031_run3_1_mobile_session_retention.sql',
+  '0032_run3_1_private_beta_access_intents.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -116,7 +117,7 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0031 and seeds stable local Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0032 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);

@@ -2,6 +2,7 @@ import type { AppConfig } from '@boomerbuddy/config';
 import type { Logger } from '@boomerbuddy/observability';
 import type { IdentityTokenVerifier } from '@boomerbuddy/security';
 import {
+  AccessIntentRepository,
   AutomationBudgetRepository,
   BillingAuthorityRepository,
   BusinessOsRepository,
@@ -27,6 +28,7 @@ import {
 } from '@boomerbuddy/persistence';
 
 export interface ApiRepositories {
+  readonly accessIntents: AccessIntentRepository;
   readonly automationBudget: AutomationBudgetRepository;
   readonly billingAuthority: BillingAuthorityRepository;
   readonly checks: CheckRepository;
@@ -69,6 +71,12 @@ export function createRepositories(
   const configuredFounderPersonId =
     config.identity.founderPersonId ?? 'founder-identity-unconfigured';
   return {
+    accessIntents: new AccessIntentRepository(
+      database,
+      config.secrets.fingerprintKey,
+      config.environment === 'production' ? 500 : 5,
+      500,
+    ),
     automationBudget: new AutomationBudgetRepository(
       database,
       undefined,

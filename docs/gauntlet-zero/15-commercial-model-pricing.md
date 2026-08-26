@@ -2,6 +2,12 @@
 
 Status: **packaging and prices are hypotheses; no willingness-to-pay evidence exists**. Prices and policies checked 2026-08-15.
 
+Current offer amendment: 2026-08-25. Family at USD 14.99 per month is the only public or live
+offer. [OFFER-HYPOTHESIS-REGISTRY.md](../post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md) controls all
+annual, Individual, and referral hypotheses and limits them to synthetic or Stripe sandbox
+evaluation. The plan names, capacities, and prices below are retained as historical research inputs
+and cannot authorize production copy, configuration, provider resources, or external action.
+
 ## What is being sold
 
 The paid product is recurring household coordination and safer follow-through—not access to an AI classifier. Free use must resolve a real urgent question because free general AI, [Bitdefender Scamio](https://www.bitdefender.com/en-au/consumer/scamio), platform call screening and [AARP Fraud Watch](https://www.aarp.org/money/scams-fraud/about-fraud-watch-network/) constrain the price of a bare check.

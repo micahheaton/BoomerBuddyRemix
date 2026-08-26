@@ -37,6 +37,27 @@ export default function PrivacyPage() {
           website addresses, and unrecognized address values are not used for campaign attribution.
         </p>
       </PolicySection>
+      <PolicySection title="Private-beta access receipts">
+        <p>
+          When you choose to ask about private-beta access from the pricing page, BoomerBuddy first
+          creates a temporary receipt containing only a server-issued code, the fixed purpose, and a
+          recognized source and campaign label. Purpose-scoped HMAC and request-digest values
+          prevent duplicate creation and enforce abuse limits without storing the raw operation key
+          or network address. The receipt expires after seven days. It does not contain your name,
+          email address, phone number, message, account, or member identifier.
+        </p>
+        <p>
+          This describes BoomerBuddy application storage. Hosting, edge-security, and reliability
+          providers may process the original request address and limited network logs before page
+          parameters are removed. Do not put your name, email address, phone number, or message in a
+          pricing-page address.
+        </p>
+        <p>
+          Your device then opens its own email composer. No message is sent automatically. Support
+          receives your contact details only if you choose to send the email. A created receipt is
+          access intent, not proof that support received a lead or message.
+        </p>
+      </PolicySection>
       <PolicySection title="Sharing and retention">
         <p>
           Information is shared only with service providers needed to operate the product, when a

@@ -5,6 +5,18 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 ## Implemented production boundary
 
 - Expo config uses scheme `boomerbuddy` and iOS/Android identifier `net.boomerbuddy.app`.
+- Resolved native configuration denies arbitrary iOS network loads, removes the unused Face ID usage
+  description, and blocks Android storage, overlay, and vibration permissions. The separate API
+  origin boundary permits only `https://api.boomerbuddy.net` in production. The security suite
+  resolves Expo's native manifests so these controls cannot regress behind a source-only `app.json`
+  check.
+- EAS configuration requires a clean commit and pins EAS CLI `22.4.0`, Node `22.23.2`, and the
+  reviewed Expo SDK 57 Android and iOS builder images for preview and production profiles. EAS CLI
+  does not permit an `npm` profile key, so npm is selected by the npm lockfile and reviewed builder
+  image and must be recorded from the signed build job instead of claimed from `eas.json`.
+- The exact pinned CLI accepted the corrected `eas.json` schema for the Android preview profile and
+  then stopped at the expected Expo account login gate. Expo Doctor passed all 21 checks with its
+  required read-only network access. Neither result is a signed-build or device receipt.
 - Production builds accept only `EXPO_PUBLIC_API_URL=https://api.boomerbuddy.net`; the EAS production
   profile pins that public value. The Clerk secret key and all other server credentials remain absent
   from the client.
@@ -40,13 +52,19 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 Contacts, camera, microphone, photo library, notifications, and tracking permissions are denied by
 default because no reviewed feature currently needs them. Adding any permission requires a versioned
 purpose, least-privilege platform configuration, denial behavior, retention/deletion path, and a
-device regression. Customer address books may never be uploaded to create a marketing database.
+device regression. Android storage, overlay, and vibration permissions are explicitly blocked, and
+iOS App Transport Security explicitly denies arbitrary loads. Customer address books may never be
+uploaded to create a marketing database.
 
 ## Required device proof
 
 Before a native beta, record on representative iOS and Android devices:
 
 - signed build identity and company custody;
+- iOS 17 or later coverage because the pinned Clerk native SDK raises the deployment target to iOS
+  17, including an explicit product decision about older devices in the intended audience;
+- iPhone and iPad coverage while `ios.supportsTablet` remains enabled, including required iPad
+  layouts, accessibility behavior, screenshots, and store metadata;
 - hosted Google and email/MFA sign-in, callback return, secure restart restoration, and sign-out;
 - decode only a disposable test token locally and record whether `azp` is absent or the exact origin
   value, without recording the token or customer PII. Keep `BB_CLERK_MOBILE_AUTHORIZED_PARTIES=none`
@@ -80,5 +98,9 @@ submission is authorized by this document.
   App Store Connect application ID, Apple team ID, or Google Play service-account reference.
 - An authorized operator must link the Expo project, confirm the bundle/package collision check for
   `net.boomerbuddy.app`, and configure Apple/Google submission identities in the provider accounts.
+- Clerk's native plugin adds the Sign in with Apple entitlement. The production customer Clerk app
+  must enable and prove the Apple provider before iOS review while Google sign-in remains available,
+  or a documented App Review exception must be established. Do not remove the entitlement or guess
+  callback values before the signed build exposes the exact native return path.
 - Invite creation and native share actions remain development-gated. Device proof does not authorize
   enabling either action in a production build; that requires a separate reviewed product change.

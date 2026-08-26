@@ -63,6 +63,10 @@ describe('typed configuration', () => {
     });
     expect(config.identity.customerOrigins).toEqual(['http://127.0.0.1:3000']);
     expect(config.api.trustedProxyHops).toBe(0);
+    expect(config.accessIntents).toEqual({
+      runtimeEnabled: false,
+      edgeRateLimitConfirmed: false,
+    });
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
     expect(config.messaging).toEqual({
@@ -78,6 +82,28 @@ describe('typed configuration', () => {
     const environment = developmentEnvironment();
     delete environment.BB_SEED_DEMO;
     expect(loadConfig(environment).database.seedDemo).toBe(false);
+  });
+
+  it('keeps access-intent mutation off unless runtime and independent edge evidence are explicit', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: false, edgeRateLimitConfirmed: false });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: false, edgeRateLimitConfirmed: true });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: 'true',
+        BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: true, edgeRateLimitConfirmed: true });
   });
 
   it('requires an explicit bounded trusted-proxy hop count', () => {

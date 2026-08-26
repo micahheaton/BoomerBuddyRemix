@@ -11,7 +11,7 @@ Work only in the saved local project C:\Dev\BoomerBuddy. Never inspect Downloads
 
 Required reading
 
-Read AGENTS.md and every applicable nested AGENTS.md. Read docs/post-launch-beta/README.md, EXECUTION-PLAN.md, EXECUTION-PLAN-SUPPLEMENT.md, GAUNTLET-PROMPT-PACK.md, and GAUNTLET-PROMPT-PACK-G4-G15.md. Treat the integrated base plan as authoritative and the supplement as its audit receipt. Execute the intent of G2, G3, G4, G5, G6, G7, and G8. Read the product, architecture, security, consent, Run 3, Run 3.1, mobile, Clerk, Stripe, persistence, worker, testing, deployment, backup, restore, incident, support, feedback, accessibility, growth, and automation documents and the relevant code/tests. Do not import from reference/boomerbuddy-v1.
+Read AGENTS.md and every applicable nested AGENTS.md. Read docs/post-launch-beta/README.md, EXECUTION-PLAN.md, EXECUTION-PLAN-SUPPLEMENT.md, OFFER-HYPOTHESIS-REGISTRY.md, GAUNTLET-PROMPT-PACK.md, and GAUNTLET-PROMPT-PACK-G4-G15.md. Treat the integrated base plan as authoritative, the supplement as its audit receipt, and the offer registry as controlling for annual, Individual, and referral hypotheses. Execute the intent of G2, G3, G4, G5, G6, G7, and G8. Read the product, architecture, security, consent, Run 3, Run 3.1, mobile, Clerk, Stripe, persistence, worker, testing, deployment, backup, restore, incident, support, feedback, accessibility, growth, and automation documents and the relevant code/tests. Do not import from reference/boomerbuddy-v1.
 
 Allowed actions
 
@@ -19,7 +19,7 @@ Create a codex/ branch after the baseline is verified. Preserve the planning art
 
 Business and product decisions
 
-The first offer is Family at USD 14.99 monthly for one household. Family annual at USD 149 is defined but disabled. Do not add a trial, coupon, referral credit, adaptive pricing, native purchase, or another paid tier. The first payment remains web-first. Mobile is a parallel P0 safety surface and must reach production customer-Clerk authentication, signed internal iOS and Android builds, and physical-device evidence if the required accounts are available. Use net.boomerbuddy.app unless a verified provider collision stops for the founder. Keep separate customer and HQ Clerk realms and audiences. HQ remains private, founder-bound, and recent-MFA protected. Keep Twilio disabled. Check analysis must never fetch a submitted URL. Customer-facing and HQ copy may not contain U+2013 or U+2014.
+The first offer is Family at USD 14.99 monthly for one household. No annual, Individual, or referral offer exists in production. Their registry entries may be evaluated only with synthetic data or in Stripe sandbox and may not reach production configuration, customer copy, live provider resources, or external action. Do not add a trial, coupon, referral credit, adaptive pricing, native purchase, or another paid tier. The first payment remains web-first. Mobile is a parallel P0 safety surface and must reach production customer-Clerk authentication, signed internal iOS and Android builds, and physical-device evidence if the required accounts are available. Use net.boomerbuddy.app unless a verified provider collision stops for the founder. Keep separate customer and HQ Clerk realms and audiences. HQ remains private, founder-bound, and recent-MFA protected. Keep Twilio disabled. Check analysis must never fetch a submitted URL. Customer-facing and HQ copy may not contain U+2013 or U+2014.
 
 Forbidden actions
 

@@ -1,15 +1,21 @@
 {
   "cli": {
-    "version": ">= 16.0.0",
+    "version": "22.4.0",
+    "requireCommit": true,
     "appVersionSource": "remote"
   },
   "build": {
     "preview": {
+      "node": "22.23.2",
       "distribution": "internal",
       "channel": "preview",
       "environment": "preview",
       "android": {
-        "buildType": "apk"
+        "buildType": "apk",
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-57"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
       }
     },
     "preview-simulator": {
@@ -19,9 +25,16 @@
       }
     },
     "production": {
+      "node": "22.23.2",
       "autoIncrement": true,
       "channel": "production",
       "environment": "production",
+      "android": {
+        "image": "ubuntu-26.04-jdk-17-ndk-r27b-sdk-57"
+      },
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.boomerbuddy.net"
       }

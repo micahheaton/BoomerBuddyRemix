@@ -140,14 +140,16 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     production upgrade from schema `0027`, the first run must record exactly
     `0028_run3_1_billing_authority_workflow.sql`,
     `0029_run3_1_stripe_live_control_plane.sql`,
-    `0030_run3_1_billing_reverification_binding.sql`, and
-    `0031_run3_1_mobile_session_retention.sql`; a genuinely empty database instead records the
-    complete `0001` through `0031` forward chain. The second run must report
+    `0030_run3_1_billing_reverification_binding.sql`,
+    `0031_run3_1_mobile_session_retention.sql`, and
+    `0032_run3_1_private_beta_access_intents.sql`; a genuinely empty database instead records the
+    complete `0001` through `0032` forward chain. The second run must report
     `Applied 0 migration(s): none`. Verify that `schema_migrations` is the exact checksum-valid
-    `0001` through `0031` prefix, then create a post-migration backup bound to the merged release
+    `0001` through `0032` prefix, then create a post-migration backup bound to the merged release
     commit. Restore that new artifact into a fresh disposable database and verify the exact
-    `0001` through `0031` prefix plus the new billing-authority, Stripe-control, reverification, and
-    mobile-retention structures before publishing. Never enable per-startup migrations. After
+    `0001` through `0032` prefix plus the new billing-authority, Stripe-control, reverification,
+    mobile-retention, and privacy-minimized access-intent structures before publishing. Never enable
+    per-startup migrations. After
     `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. Prefer a
     schema-compatible corrective tag with initiation and invitations disabled or a forward
     corrective migration. A database rollback is allowed only before any post-migration durable

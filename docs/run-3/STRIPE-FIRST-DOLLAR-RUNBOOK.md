@@ -40,6 +40,12 @@ come from the controlled rollout. Tax and consumer-law decisions remain legal/ac
 
 Payment initiation and webhook ingestion are independent controls.
 
+The authenticated HQ resource-preflight action is also independent of payment initiation. It may
+perform only the four configured provider GETs and append their bounded receipt while the cohort,
+database initiation control, and `BB_STRIPE_LIVE_INITIATION_ENABLED` all remain closed. It never
+prepares a Checkout intent, creates a session-operation row, or sends a provider POST. This is the
+first arming check, not permission to accept money.
+
 Before Checkout or Portal can be initiated, the production customer Clerk default session-token
 claims must include `{"reverification_id":"{{session.reverification_id}}"}`. Clerk documents that
 this shortcode identifies the unique reverification and is minted again for each new reverification.
@@ -87,7 +93,7 @@ The API version is code-owned; there is no `BB_STRIPE_API_VERSION` override.
 | --- | --- | --- | --- |
 | Mode | `BB_STRIPE_MODE=test` | `BB_STRIPE_MODE=live` | Default is `disabled`. Production refuses test mode and all `BB_STRIPE_TEST_*` fields. |
 | Runtime surface | not used | `BB_STRIPE_RUNTIME_SURFACE=api` or `worker` | Each live project declares exactly one surface. |
-| Initiation | runtime test configuration | `BB_STRIPE_LIVE_INITIATION_ENABLED` | API defaults false and may become true only with all database/preflight gates; worker requires false. |
+| Initiation | runtime test configuration | `BB_STRIPE_LIVE_INITIATION_ENABLED` | API defaults false. After preflight and the max-one cohort rehearsal, set it true while the database initiation control is still disabled; enable that revisioned database control last. Worker requires false. |
 | Account | `BB_STRIPE_TEST_ACCOUNT_ID` | `BB_STRIPE_LIVE_ACCOUNT_ID` | Exact account returned by `/v1/account`; live preflight also requires charges and payouts enabled, country US, and business type company. |
 | API key | `BB_STRIPE_TEST_API_KEY` | `BB_STRIPE_LIVE_API_RESTRICTED_KEY` on API; `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY` on worker | Every value must be a restricted `rk_` credential and remain isolated to its surface. The deprecated `BB_STRIPE_LIVE_API_KEY` is rejected. |
 | Webhook secret | `BB_STRIPE_TEST_WEBHOOK_SECRET` | `BB_STRIPE_LIVE_WEBHOOK_SECRET` on API only | The exact endpoint secret is never copied to worker. A CLI listener secret is not interchangeable. |
@@ -133,7 +139,7 @@ No action in this section was executed while authoring this runbook.
 
 | Action | Method | Guard and ambiguity policy |
 | --- | --- | --- |
-| Resource preflight | GET account, product, price, Portal configuration | Runs only after the DB initiation/cohort gate for Checkout and before Portal creation. It asserts account, livemode, API contract, active resources, exact per-unit/no-trial price/amount/currency/interval, and the cancel/update/customer/payment controls exposed by the current Portal API. GETs are read-only and retryable. |
+| Resource preflight | GET account, product, price, Portal configuration | An explicit same-origin HQ owner action with recent MFA may run before the cohort, database initiation, and runtime initiation gates open. It asserts the exact configured environment/account, livemode, API contract, active resources, exact per-unit/no-trial price/amount/currency/interval, and the cancel/update/customer/payment controls exposed by the current Portal API, then appends a bounded receipt. GETs are read-only and retryable; this path has no provider POST or Checkout/session preparation. Checkout and Portal also perform fresh preflight reads before their own provider POST. |
 | Checkout creation | POST Checkout Session | One provider idempotency key is HMAC-derived from environment, action, household, and server operation ID. A `dispatch_started` receipt is appended before transport. A timeout, ambiguous response, or process death before the result is recorded leaves the operation unknown; a later pre-transport refusal cannot erase that earlier dispatch evidence. A durable lease retry reuses the same key, current gates, fresh preflight, and the API's reviewed customer-origin allowlist. The 23-hour requested provider deadline is rounded down once to a whole provider second before persistence; that exact second is sent and must be returned, while the local intent deadline is exactly five minutes later. Neither retry nor polling moves either deadline. An authenticated exact completion or expiry can repair a lost POST response. |
 | Portal creation | POST Billing Portal Session | Same durable operation/idempotency/outcome-unknown and customer-origin model. A proven pre-transport refusal is no-effect only when no earlier attempt has dispatch evidence. Live creation remains default-off behind the runtime and database controls. |
 | Financial reconciliation | GET subscription, invoice, PaymentIntent, charge, refund, dispute | Triggered from a durable job after authenticated inbox capture. Reads may retry. Evidence mismatch quarantines and opens owner attention; it never grants access. |
@@ -227,8 +233,16 @@ These steps are blocked until the founder explicitly authorizes provider-side te
    staging environment. Do not set any live name there.
 7. Deploy the frozen commit, run migrations, start API and worker, and verify the edge preserves the
    raw request body and `Stripe-Signature`. Retain redacted deployment and worker evidence.
-8. In a same-origin authenticated HQ founder session, without copying its cookie or CSRF material,
-   mark only the reviewed Founding Household eligible. Send this exact JSON body to
+8. Keep test Checkout initiation disabled and the cohort closed. In a same-origin authenticated HQ
+   founder session with recent MFA, run `POST /v1/hq/commerce/stripe/preflight` with
+   `{"environment":"test"}`. Confirm the persisted receipt names `test`, the exact configured
+   account/product/price/Portal contract, and provider-read evidence. Confirm Stripe request logs show
+   only GET account, product, price, and Portal configuration, with no Checkout or Portal Session POST.
+9. In the Stripe control screen, activate the revisioned test cohort with `maxActive=1` and a short,
+   explicit future expiry. Rehearse closing and reopening that cohort while initiation remains
+   disabled; use current revisions rather than guessed values.
+10. Without copying the founder session cookie or CSRF material, mark only the reviewed Founding
+   Household eligible. Send this exact JSON body to
    `POST /v1/hq/commerce/stripe/eligible-household` (replace placeholders, keep field names):
 
    ```json
@@ -242,7 +256,7 @@ These steps are blocked until the founder explicitly authorizes provider-side te
 
    Confirm the response is `state=eligible`. The environment-scoped cohort policy, benefit, capacity,
    and expiry still have to be active; eligibility alone does not enable Checkout.
-9. From that same-origin founder session, first GET
+11. From that same-origin founder session, first GET
    `/v1/hq/commerce/stripe/initiation-control?environment=test`. Use the returned current `revision`
    in this exact body to `POST /v1/hq/commerce/stripe/initiation-control`; never assume revision zero:
 
@@ -258,10 +272,10 @@ These steps are blocked until the founder explicitly authorizes provider-side te
 
    The integer `7` is illustrative only: replace it with the exact integer returned by the immediately
    preceding GET. Re-GET after any conflict; do not replay with a guessed revision.
-10. Confirm `/member/billing` shows `ready` for that household's billing manager. Execute only the
+12. Confirm `/member/billing` shows `ready` for that household's billing manager. Execute only the
     bounded test matrix the founder approved. Retain redacted object/event/inbox/job/canonical IDs and
     before/after state; do not retain card data, raw bodies, or secrets.
-11. Start the worker and observe the durable inventory run (or run
+13. Start the worker and observe the durable inventory run (or run
     `npm run stripe:inventory:enqueue` to enqueue the same bounded job manually). Verify every page
     receipt has the expected test account/environment/API version/run/cursor chain and that the final
     page says `has_more=false`. Any missing/error page must remain `attention`; do not call it clean.
@@ -394,24 +408,36 @@ be partial or pending; see [refunds](https://docs.stripe.com/refunds) and
 
 Live initiation is production-capable and default-off. The bounded rollout is Family $14.99/month
 only, with at most one active household. Annual, Individual, referral, promotion, Tax, and Twilio
-paths remain disabled. Complete these gates before enabling initiation:
+paths remain disabled. Arm in this order so every earlier step is safe to rehearse without opening
+Checkout:
 
 1. Create separate live Family product, monthly price, bounded Portal configuration, and webhook
    endpoint under the exact company account. Do not reuse test resources.
 2. Place the API restricted key and webhook secret only in the API secret store. Place the different
    worker restricted key only in the worker secret store. Set each project's exact
-   `BB_STRIPE_RUNTIME_SURFACE`; keep `BB_STRIPE_LIVE_INITIATION_ENABLED=false` everywhere.
-3. Record a read-only live preflight proving the configured account ID, `livemode=true`, API version,
-   charges enabled, payouts enabled, country US, business type company, exact $14.99/month resource,
-   and bounded Portal behavior. The account and resource receipt must contain no customer PII.
+   `BB_STRIPE_RUNTIME_SURFACE`; keep `BB_STRIPE_LIVE_INITIATION_ENABLED=false` everywhere and confirm
+   the database initiation control and cohort are absent or disabled.
+3. From the same-origin HQ Stripe control screen, as the configured active `hq_owner` with recent
+   MFA, run the read-only provider preflight. Record a live receipt proving the configured account
+   ID, `livemode=true`, API version, charges enabled, payouts enabled, country US, business type
+   company, exact $14.99/month resource, and bounded Portal behavior. Confirm provider logs contain
+   only the four expected GETs and no resource or Session POST. The receipt contains no customer PII.
 4. Prove production PostgreSQL concurrency, restore, edge, observability, legal/privacy/tax/accounting,
    support, incident response, and provider-test behavior for the frozen candidate.
-5. Through the same-origin HQ control path, an active `hq_owner` with recent MFA creates or updates an
-   active, unexpired, live-approved cohort with `max_active_households=1`, then enables the revisioned
-   live initiation control. Eligibility and active billing authority remain independently required.
-6. Set `BB_STRIPE_LIVE_INITIATION_ENABLED=true` only on the API project after the database controls
-   and preflight are verified. The worker must retain false. Observe the exact first payment and
-   canonical entitlement lineage; disable the revisioned control immediately on drift.
+5. While runtime and database initiation remain disabled, use current revisions to rehearse an
+   active, unexpired, live-approved cohort with `max_active_households=1`, its disable/rollback, and
+   its reactivation. Mark only the reviewed household eligible and verify its active billing
+   authority. None of these steps may create Checkout.
+6. Set `BB_STRIPE_LIVE_INITIATION_ENABLED=true` only on the API project and restart that exact frozen
+   build. The worker must retain false. Because the database initiation control is still disabled,
+   Checkout remains closed. Re-run the read-only preflight after restart; stop on any account,
+   environment, offer, Portal, custody, or evidence mismatch.
+7. Last, from the same-origin HQ control path, the configured active `hq_owner` with recent MFA uses
+   the immediately current revision to enable the database initiation control. Confirm the max-one
+   cohort, exact eligible household, and billing authority again immediately before this change.
+   Observe the exact first payment and canonical entitlement lineage; disable the revisioned database
+   control immediately on drift. If runtime rollback is needed, disable the database control first,
+   then return the API runtime switch to false while webhook ingestion and reconciliation continue.
 
 This document records the procedure, not proof that provider resources, deployed receipts, or a first
 charge already exist.

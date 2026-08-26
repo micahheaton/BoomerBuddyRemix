@@ -19,11 +19,15 @@ const isPublicRoute = createRouteMatcher([
 ]);
 const productionClerkSignInUrl = '/sign-in';
 const configuredClerkSignInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
+const configuredPublicOrigin = process.env.BB_PUBLIC_ORIGIN;
 const productionClerkMiddleware = clerkMiddleware(
   async (auth, request) => {
     if (!isPublicRoute(request)) await auth.protect();
   },
-  { signInUrl: productionClerkSignInUrl },
+  {
+    signInUrl: productionClerkSignInUrl,
+    authorizedParties: configuredPublicOrigin === undefined ? [] : [configuredPublicOrigin],
+  },
 );
 
 export default function proxy(request: NextRequest, event: NextFetchEvent) {
@@ -31,6 +35,7 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (
     !process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
     !process.env.CLERK_SECRET_KEY ||
+    !configuredPublicOrigin ||
     configuredClerkSignInUrl !== productionClerkSignInUrl
   ) {
     return new NextResponse('Production identity is unavailable.', {

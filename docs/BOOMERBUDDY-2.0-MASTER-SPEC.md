@@ -8,6 +8,13 @@ Implementation reconciliation: 2026-08-16
 
 Run 2 amendment: 2026-08-16
 
+Current offer amendment: 2026-08-25. For launch execution, Family at USD 14.99 per month is the
+only public or live offer. [OFFER-HYPOTHESIS-REGISTRY.md](./post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md)
+controls every annual, Individual, and referral hypothesis and limits each one to synthetic or
+Stripe sandbox evaluation. Older Plus, annual, USD 119, capacity, and referral language below is
+historical research context and cannot authorize production copy, configuration, provider
+resources, customer promises, or external action.
+
 Working product name: **BoomerBuddy** (not audience-tested or legally cleared)
 
 This document is the authoritative product and system contract. Detailed evidence lives in [Gauntlet Zero](./gauntlet-zero/00-executive-verdict.md); architectural decisions live in [ADRs](./adr/). Where this document conflicts with a workstream note, this document governs until a dated amendment explains the change.

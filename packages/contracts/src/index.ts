@@ -1,3 +1,4 @@
+export * from './access-intents';
 export * from './auth';
 export * from './billing-authority';
 export * from './business-os';

@@ -17,6 +17,7 @@ import {
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { createRepositories, type ApiContext } from './context';
+import { registerAccessIntentRoutes } from './routes/access-intents';
 import { registerCheckRoutes } from './routes/checks';
 import { registerBillingAuthorityRoutes } from './routes/billing-authority';
 import { registerBusinessOsRoutes } from './routes/business-os';
@@ -43,6 +44,8 @@ export interface BuildAppOptions {
   readonly closeDatabase?: boolean;
   /** Test/local override; production scheduling is deliberately blocked in Build Run 1. */
   readonly retentionSweepIntervalMs?: number;
+  /** Test seam for the process-local, content-free access-intent database-pressure guard. */
+  readonly accessIntentRequestLimitPerMinute?: number;
   /** Deterministic fixture transport for tests; runtime otherwise uses Stripe HTTPS in test mode. */
   readonly stripeTransport?: StripeTransport;
   readonly stripeEvidenceLevel?:
@@ -220,17 +223,26 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     ...(identityTokenVerifier === undefined ? {} : { identityTokenVerifier }),
   };
   const drainDueRetention = async (): Promise<boolean> => {
-    let moreDue = false;
+    let checksMoreDue = false;
     for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
       const deleted = await context.repositories.checks.purgeDue({
         now: context.now(),
         limit: retentionBatchSize,
       });
       if (deleted.length < retentionBatchSize) break;
-      moreDue = batch === retentionMaxBatchesPerSweep - 1;
+      checksMoreDue = batch === retentionMaxBatchesPerSweep - 1;
     }
     await context.repositories.publicChecks.purgeExpired(context.now());
-    return moreDue;
+    let accessIntentsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.accessIntents.purgeExpired(
+        context.now(),
+        retentionBatchSize,
+      );
+      if (!cleanup.saturated) break;
+      accessIntentsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    return checksMoreDue || accessIntentsMoreDue;
   };
   let retentionNeedsContinuation = false;
   try {
@@ -342,6 +354,14 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   installErrors(app, logger);
   registerBaseRoutes(app, context);
+  registerAccessIntentRoutes(app, context, {
+    ...(options.accessIntentRequestLimitPerMinute === undefined
+      ? {}
+      : { maximumApplicationRequestsPerMinute: options.accessIntentRequestLimitPerMinute }),
+    mutationEnabled:
+      context.config.accessIntents?.runtimeEnabled === true &&
+      context.config.accessIntents.edgeRateLimitConfirmed === true,
+  });
   registerPublicCheckRoutes(app, context, context.repositories.publicChecks);
   registerPrivacyRoutes(app, context);
   registerSessionRoutes(app, context);

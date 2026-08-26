@@ -31,6 +31,7 @@ export function testConfig(): AppConfig {
   return {
     environment: 'test',
     api: { host: '127.0.0.1', port: 4100, trustedProxyHops: 0 },
+    accessIntents: { runtimeEnabled: true, edgeRateLimitConfirmed: true },
     database: {
       driver: 'pglite',
       path: ':memory:',
@@ -63,9 +64,26 @@ export interface ApiHarness {
 
 export async function createApiHarness(
   clock = createMutableClock(),
-  options: { readonly retentionSweepIntervalMs?: number } = {},
+  options: {
+    readonly retentionSweepIntervalMs?: number;
+    readonly accessIntentRequestLimitPerMinute?: number;
+    readonly accessIntentsEnabled?: boolean;
+    readonly accessIntentsEdgeGuardConfirmed?: boolean;
+  } = {},
 ): Promise<ApiHarness> {
-  const config = testConfig();
+  const {
+    accessIntentsEnabled = true,
+    accessIntentsEdgeGuardConfirmed = accessIntentsEnabled,
+    ...buildOptions
+  } = options;
+  const baseConfig = testConfig();
+  const config: AppConfig = {
+    ...baseConfig,
+    accessIntents: {
+      runtimeEnabled: accessIntentsEnabled,
+      edgeRateLimitConfirmed: accessIntentsEdgeGuardConfirmed,
+    },
+  };
   const database = await createPGliteDatabase(':memory:');
   const app = await buildApp({
     config,
@@ -73,7 +91,7 @@ export async function createApiHarness(
     closeDatabase: false,
     now: clock.now,
     logger: createLogger({ level: 'error', sink: () => undefined, clock: clock.now }),
-    ...options,
+    ...buildOptions,
   });
   return {
     app,

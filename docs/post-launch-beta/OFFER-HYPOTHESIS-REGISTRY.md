@@ -5,11 +5,24 @@
 Family at USD 14.99 per month is the only public or live offer. Its production Checkout contract,
 Stripe mapping, and customer copy remain separate from this registry.
 
-The registry in `packages/domain/src/revenue-hypotheses.ts` is evidence for controlled future
-experiments only. Every entry has exactly two allowed scopes: `synthetic` and `stripe_sandbox`.
-Every entry disables public routes, production activation, and live provider writes. No API route,
-web billing surface, worker, Stripe integration, production configuration, or live contract may
-consume the registry.
+For every annual, Individual, and referral hypothesis, this document is the controlling planning
+index and `packages/domain/src/revenue-hypotheses.ts` is the controlling typed registry. If another
+post-launch plan, prompt, report, or backlog conflicts with this boundary, this boundary wins. Such
+text is historical or exploratory and grants no execution authority.
+
+The registry is evidence for controlled future experiments only. Every entry has exactly two
+allowed scopes: `synthetic` and `stripe_sandbox`. Every entry disables public routes, production
+activation, and live provider writes. Only test/spec code or an isolated sandbox orchestrator may
+read it. No production API route, web billing surface, worker, Stripe integration, configuration,
+customer copy, live contract, or live provider resource may consume it. Prompts must link here
+instead of restating candidate terms as approved production plans.
+
+Two historical Run 2 compatibility fixtures remain readable: `seededCommercePlanVersions` in
+`packages/domain/src/commerce.ts` and `priceHypotheses` in `packages/persistence/src/seed.ts`. They
+preserve immutable local migration, replay, and demo evidence, including former Plus and annual
+values. They are not current offer hypotheses, production Checkout contracts, provider mappings, or
+promotion inputs. Do not update historical rows in place or infer authority from them. A future
+approved offer requires a new versioned production contract that passes the promotion gate below.
 
 ## Version 1 subscription hypotheses
 

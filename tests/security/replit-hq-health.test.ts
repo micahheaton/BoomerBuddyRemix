@@ -128,7 +128,11 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     expect(missingIdentityCheck).toBeGreaterThan(-1);
     expect(source).toContain('!process.env.CLERK_SECRET_KEY');
     expect(source).toContain('configuredClerkSignInUrl !== productionClerkSignInUrl');
-    expect(source).toContain('{ signInUrl: productionClerkSignInUrl }');
+    expect(source).toContain('signInUrl: productionClerkSignInUrl');
+    expect(source).toContain(
+      'authorizedParties: configuredPublicOrigin === undefined ? [] : [configuredPublicOrigin]',
+    );
+    expect(source).toContain('!configuredPublicOrigin');
     expect(livenessCheck).toBeGreaterThan(missingIdentityCheck);
     expect(clerkBoundary).toBeGreaterThan(livenessCheck);
     expect(source).toContain("const isPublicRoute = createRouteMatcher(['/sign-in(.*)'])");

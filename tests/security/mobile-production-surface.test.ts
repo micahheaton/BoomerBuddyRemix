@@ -1,14 +1,76 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
+const mobileRoot = resolve(repositoryRoot, 'apps/mobile');
+
+type NativePermission = {
+  $: Record<string, string>;
+};
+
+type IntrospectedExpoConfig = {
+  _internal: {
+    modResults: {
+      ios: {
+        infoPlist: {
+          NSAppTransportSecurity?: { NSAllowsArbitraryLoads?: boolean };
+          NSFaceIDUsageDescription?: string;
+        };
+      };
+      android: {
+        manifest: {
+          manifest: { 'uses-permission'?: NativePermission[] };
+        };
+      };
+    };
+  };
+};
 
 function source(path: string): string {
   return readFileSync(resolve(repositoryRoot, path), 'utf8');
 }
 
+function introspectedExpoConfig(): IntrospectedExpoConfig {
+  const expoCli = resolve(repositoryRoot, 'node_modules/expo/bin/cli');
+  return JSON.parse(
+    execFileSync(process.execPath, [expoCli, 'config', '--type', 'introspect', '--json'], {
+      cwd: mobileRoot,
+      encoding: 'utf8',
+    }),
+  ) as IntrospectedExpoConfig;
+}
+
 describe('mobile production surface', () => {
+  it('resolves a least-privilege native transport and permission surface', () => {
+    const config = introspectedExpoConfig();
+    const infoPlist = config._internal.modResults.ios.infoPlist;
+    const permissions =
+      config._internal.modResults.android.manifest.manifest['uses-permission'] ?? [];
+    const blockedPermissions = [
+      'android.permission.READ_EXTERNAL_STORAGE',
+      'android.permission.WRITE_EXTERNAL_STORAGE',
+      'android.permission.SYSTEM_ALERT_WINDOW',
+      'android.permission.VIBRATE',
+    ];
+    const activePermissionNames = permissions
+      .filter((permission) => permission.$['tools:node'] !== 'remove')
+      .map((permission) => permission.$['android:name']);
+
+    expect(infoPlist.NSAppTransportSecurity?.NSAllowsArbitraryLoads).toBe(false);
+    expect(infoPlist).not.toHaveProperty('NSFaceIDUsageDescription');
+    expect(activePermissionNames).not.toEqual(expect.arrayContaining(blockedPermissions));
+    for (const permissionName of blockedPermissions) {
+      expect(permissions).toContainEqual({
+        $: expect.objectContaining({
+          'android:name': permissionName,
+          'tools:node': 'remove',
+        }),
+      });
+    }
+  });
+
   it('pins the native application identity and production EAS profiles', () => {
     const app = JSON.parse(source('apps/mobile/app.json')) as {
       expo: {
@@ -25,6 +87,7 @@ describe('mobile production surface', () => {
       };
     };
     const eas = JSON.parse(source('apps/mobile/eas.json')) as {
+      cli: { version: string; requireCommit: boolean; appVersionSource: string };
       build: Record<string, Record<string, unknown>>;
       submit: Record<string, Record<string, unknown>>;
     };
@@ -32,9 +95,8 @@ describe('mobile production surface', () => {
     expect(app.expo.scheme).toBe('boomerbuddy');
     expect(app.expo.ios.bundleIdentifier).toBe('net.boomerbuddy.app');
     expect(app.expo.android.package).toBe('net.boomerbuddy.app');
-    expect(app.expo.plugins).toEqual(
-      expect.arrayContaining(['@clerk/expo', 'expo-secure-store', 'expo-web-browser']),
-    );
+    expect(app.expo.plugins).toEqual(expect.arrayContaining(['@clerk/expo', 'expo-web-browser']));
+    expect(app.expo.plugins).toContainEqual(['expo-secure-store', { faceIDPermission: false }]);
     expect(app.expo.icon).toBe('./assets/icon.png');
     expect(app.expo.android.adaptiveIcon).toEqual({
       foregroundImage: './assets/adaptive-icon.png',
@@ -57,12 +119,37 @@ describe('mobile production surface', () => {
     }
     expect(app.expo.extra.mobileJwtTemplate).toBe('boomerbuddy-mobile');
     expect(JSON.stringify(app)).not.toMatch(/secret|private[_-]?key|sk_live/u);
+    expect(eas.cli).toEqual({
+      version: '22.4.0',
+      requireCommit: true,
+      appVersionSource: 'remote',
+    });
+    expect(eas.build.preview).toMatchObject({
+      node: '22.23.2',
+      distribution: 'internal',
+      channel: 'preview',
+      environment: 'preview',
+      android: {
+        buildType: 'apk',
+        image: 'ubuntu-26.04-jdk-17-ndk-r27b-sdk-57',
+      },
+      ios: { image: 'macos-tahoe-26.5-xcode-26.6' },
+    });
+    expect(eas.build['preview-simulator']).toEqual({
+      extends: 'preview',
+      ios: { simulator: true },
+    });
     expect(eas.build.production).toMatchObject({
+      node: '22.23.2',
       autoIncrement: true,
       channel: 'production',
       environment: 'production',
+      android: { image: 'ubuntu-26.04-jdk-17-ndk-r27b-sdk-57' },
+      ios: { image: 'macos-tahoe-26.5-xcode-26.6' },
       env: { EXPO_PUBLIC_API_URL: 'https://api.boomerbuddy.net' },
     });
+    expect(eas.build.preview).not.toHaveProperty('npm');
+    expect(eas.build.production).not.toHaveProperty('npm');
     expect(eas.submit).toHaveProperty('production');
   });
 

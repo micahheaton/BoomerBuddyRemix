@@ -9,14 +9,20 @@ type RenderedRoutes = Record<string, string> & {
   readonly privacy: string;
 };
 
-let renderedRoutes: RenderedRoutes | undefined;
+const renderedRoutesByAccessIntentState = new Map<boolean, RenderedRoutes>();
 
-function renderedProductionRoutes(): RenderedRoutes {
-  if (renderedRoutes !== undefined) return renderedRoutes;
+function renderedProductionRoutes(accessIntentsEnabled = false): RenderedRoutes {
+  const cached = renderedRoutesByAccessIntentState.get(accessIntentsEnabled);
+  if (cached !== undefined) return cached;
+  const accessIntentSetting = JSON.stringify(accessIntentsEnabled ? 'true' : 'false');
   const bundle = buildSync({
     entryPoints: [resolve(import.meta.dirname, 'fixtures/render-customer-pages.tsx')],
     bundle: true,
-    define: { 'process.env.NODE_ENV': '"production"' },
+    define: {
+      'process.env.NODE_ENV': '"production"',
+      'process.env.BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED': accessIntentSetting,
+      'process.env.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED': accessIntentSetting,
+    },
     external: ['next/link', 'react', 'react-dom/server', 'react/jsx-runtime'],
     format: 'cjs',
     jsx: 'automatic',
@@ -30,7 +36,8 @@ function renderedProductionRoutes(): RenderedRoutes {
   const commonJsModule: { exports: Record<string, unknown> } = { exports: {} };
   const execute = new Function('require', 'module', 'exports', output.text);
   execute(createRequire(import.meta.url), commonJsModule, commonJsModule.exports);
-  renderedRoutes = (commonJsModule.exports as { routes: RenderedRoutes }).routes;
+  const renderedRoutes = (commonJsModule.exports as { routes: RenderedRoutes }).routes;
+  renderedRoutesByAccessIntentState.set(accessIntentsEnabled, renderedRoutes);
   return renderedRoutes;
 }
 
@@ -56,6 +63,32 @@ describe('rendered production customer funnel', () => {
     expect(rendered).toContain('Monthly charges are generally not refundable');
     expect(rendered).toContain('Canceling stops future renewals');
     expect(rendered).toContain('current paid period');
+  });
+
+  it('does not advertise self-service household capacity that the private beta cannot provide', () => {
+    const pricing = renderedProductionRoutes().pricing;
+
+    expect(pricing).toContain('For one invited household.');
+    expect(pricing).toContain(
+      'New Trusted Circle invitations are not self-service during this private beta.',
+    );
+    expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
+  });
+
+  it('renders honest paused copy instead of an active access-intent control by default', () => {
+    const pricing = renderedProductionRoutes().pricing;
+
+    expect(pricing).toContain('Private-beta access requests are paused');
+    expect(pricing).toContain('no request or email has been sent');
+    expect(pricing).not.toContain('Create receipt and open email');
+  });
+
+  it('renders the active CTA only after both production enablement gates are true', () => {
+    const pricing = renderedProductionRoutes(true).pricing;
+
+    expect(pricing).toContain('Ask about private-beta access');
+    expect(pricing).toContain('Create receipt and open email');
+    expect(pricing).not.toContain('Private-beta access requests are paused');
   });
 
   it('discloses bounded campaign attribution and aggregate conversion measurement', () => {

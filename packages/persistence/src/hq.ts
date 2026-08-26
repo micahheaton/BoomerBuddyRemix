@@ -1,4 +1,5 @@
 import { DomainError, type CorrelationId, type PersonId } from '@boomerbuddy/domain';
+import type { AccessIntentProjection } from './access-intents';
 import type { Database } from './database';
 import { EntitlementRepository, type EntitlementRuntimeEnvironment } from './entitlements';
 import { asDate, randomIdFactory, type IdFactory } from './values';
@@ -98,7 +99,11 @@ export interface HqProjectionAccess {
 
 type HqEmployeeRole = 'hq_owner' | 'hq_reviewer' | 'hq_support';
 type HqProjection =
-  'owner_households' | 'owner_checks' | 'assigned_review_queue' | 'assigned_support_queue';
+  | 'owner_households'
+  | 'owner_checks'
+  | 'owner_access_intents'
+  | 'assigned_review_queue'
+  | 'assigned_support_queue';
 
 export class HqRepository {
   constructor(
@@ -330,6 +335,59 @@ export class HqRepository {
       providerState: row.provider_state,
       createdAt: asDate(row.created_at, 'analyses.created_at'),
     }));
+  }
+
+  async ownerAccessIntents(
+    access: HqProjectionAccess,
+    limit = 100,
+  ): Promise<{ readonly intents: readonly AccessIntentProjection[]; readonly truncated: boolean }> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new TypeError('Access-intent projection limit must be between 1 and 100');
+    }
+    await this.assertActiveRole(access.actorPersonId, 'hq_owner');
+    await this.auditProjectionAccess(access, 'owner_access_intents');
+    const result = await this.database.query<
+      {
+        readonly receipt_code: string;
+        readonly purpose: 'private_beta_access_request';
+        readonly attribution_source: AccessIntentProjection['attribution']['source'];
+        readonly attribution_campaign: AccessIntentProjection['attribution']['campaign'];
+        readonly lifecycle_state: 'intent_created';
+        readonly created_at: unknown;
+        readonly expires_at: unknown;
+      } & Record<string, unknown>
+    >(
+      `SELECT receipt_code, purpose, attribution_source, attribution_campaign,
+              lifecycle_state, created_at, expires_at
+       FROM private_beta_access_intent_receipts
+       WHERE EXISTS (
+         SELECT 1 FROM employee_assignments employee
+         JOIN organizations organization ON organization.id = employee.organization_id
+         WHERE employee.person_id = $1 AND employee.role = 'hq_owner'
+           AND employee.status = 'active' AND organization.kind = 'internal'
+       )
+       ORDER BY created_at DESC, receipt_code
+       LIMIT $2`,
+      [access.actorPersonId, limit + 1],
+    );
+    return {
+      intents: result.rows.slice(0, limit).map((row) => {
+        const createdAt = asDate(row.created_at, 'access-intent creation');
+        const expiresAt = asDate(row.expires_at, 'access-intent expiry');
+        return {
+          receiptCode: row.receipt_code,
+          purpose: row.purpose,
+          attribution: {
+            source: row.attribution_source,
+            campaign: row.attribution_campaign,
+          },
+          lifecycle: expiresAt <= access.now ? 'expired' : row.lifecycle_state,
+          createdAt,
+          expiresAt,
+        };
+      }),
+      truncated: result.rows.length > limit,
+    };
   }
 
   async assignedSupportCases(access: HqProjectionAccess): Promise<

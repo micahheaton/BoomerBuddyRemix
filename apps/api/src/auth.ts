@@ -36,6 +36,33 @@ export interface AuthContext {
 
 export const customerBillingSecondFactorMaximumAgeSeconds = 10 * 60;
 
+export function assertRecentHqMfa(auth: AuthContext, config: AppConfig): void {
+  if (auth.audience !== 'hq') {
+    throw new DomainError('not_authorized', 'HQ controls require HQ authentication');
+  }
+  if (auth.assurance.kind === 'development') {
+    if (config.environment === 'production') {
+      throw new DomainError('not_authorized', 'Production HQ controls require recent MFA');
+    }
+    return;
+  }
+  const maximumAge = config.identity.clerk?.hq.maxSecondFactorAgeSeconds ?? 10 * 60;
+  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
+  const secondFactorAge = auth.assurance.secondFactorAgeSeconds;
+  if (
+    firstFactorAge === undefined ||
+    secondFactorAge === undefined ||
+    !Number.isSafeInteger(firstFactorAge) ||
+    !Number.isSafeInteger(secondFactorAge) ||
+    firstFactorAge < 0 ||
+    secondFactorAge < 0 ||
+    firstFactorAge >= maximumAge ||
+    secondFactorAge >= maximumAge
+  ) {
+    throw new DomainError('not_authorized', 'HQ controls require recent MFA');
+  }
+}
+
 export type CustomerBillingReverificationEvidence =
   | { readonly kind: 'development' }
   | {

@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { analyzeCheck } from '@boomerbuddy/fraud';
 import { describe, expect, it } from 'vitest';
+import { checkDto, decisionFromAssessment } from '../../apps/api/src/mappers';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 
@@ -9,6 +11,59 @@ function source(path: string): string {
 }
 
 describe('customer-facing production copy', () => {
+  it('maps content-derived evidence to a customer-safe API label', async () => {
+    const assessment = await analyzeCheck(
+      {
+        kind: 'text',
+        content: 'Urgent: buy gift cards immediately and do not tell anyone.',
+      },
+      { now: new Date('2026-08-25T12:00:00.000Z') },
+    );
+    const decision = decisionFromAssessment(assessment);
+    const contentEvidence = decision.evidence.filter((item) => item.kind === 'artifact');
+
+    expect(contentEvidence.length).toBeGreaterThan(0);
+    expect(contentEvidence.map((item) => item.label)).toEqual(
+      contentEvidence.map(() => 'Pattern in the submitted content'),
+    );
+    expect(contentEvidence.map((item) => item.observation)).toEqual(
+      expect.arrayContaining([
+        'Uses urgent language that can pressure a rushed decision.',
+        'Requests a payment method often used in hard-to-reverse scams.',
+      ]),
+    );
+    expect(JSON.stringify(decision.evidence)).not.toContain('Local pattern');
+
+    const legacyCheck: Parameters<typeof checkDto>[0] = {
+      id: 'analysis-customer-copy-regression',
+      artifactId: 'artifact-customer-copy-regression',
+      householdId: 'household-customer-copy-regression',
+      ownerPersonId: 'person-customer-copy-regression',
+      kind: 'text',
+      risk: 'caution',
+      evidenceSufficiency: 'limited',
+      calibration: 'not_calibrated',
+      summary: 'A warning pattern was found.',
+      evidence: [
+        {
+          kind: 'artifact',
+          label: 'Local pattern',
+          observation: 'Uses urgent language that can pressure a rushed decision.',
+          limitations: 'A pattern is a warning signal, not proof of fraud.',
+        },
+      ],
+      actions: [],
+      provider: { name: 'local-unknown', state: 'unknown', version: '1' },
+      rulesetVersion: 'score-v2',
+      createdAt: new Date('2026-08-25T12:00:00.000Z'),
+      deleteAfter: new Date('2026-09-24T12:00:00.000Z'),
+      state: 'active',
+    };
+    expect(checkDto(legacyCheck, legacyCheck.ownerPersonId).evidence[0]?.label).toBe(
+      'Pattern in the submitted content',
+    );
+  });
+
   it('uses customer labels instead of development and internal analysis labels', () => {
     const publicCheck = source('apps/web/src/app/check/page.tsx');
     const memberHome = source('apps/web/src/app/member/page.tsx');

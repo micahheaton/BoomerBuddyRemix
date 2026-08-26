@@ -38,6 +38,8 @@ const environmentSchema = z.object({
   BB_API_HOST: nonEmpty.default('127.0.0.1'),
   BB_API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
   BB_TRUSTED_PROXY_HOPS: z.coerce.number().int().min(0).max(2).default(0),
+  BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: booleanText.default(false),
+  BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: booleanText.default(false),
   BB_DATABASE_DRIVER: z.enum(['pglite', 'postgres']).default('pglite'),
   BB_PGLITE_PATH: nonEmpty.optional(),
   DATABASE_URL: z.string().url().optional(),
@@ -101,6 +103,15 @@ export interface AppConfig {
     readonly port: number;
     /** Zero trusts the direct peer only; nonzero must match the reviewed hosting topology. */
     readonly trustedProxyHops: 0 | 1 | 2;
+  };
+  /**
+   * The public mutation is enabled only when the application switch and independently operated
+   * edge guard have both been explicitly confirmed. Hand-built test configurations may omit this
+   * object and therefore fail closed.
+   */
+  readonly accessIntents?: {
+    readonly runtimeEnabled: boolean;
+    readonly edgeRateLimitConfirmed: boolean;
   };
   readonly database:
     | {
@@ -663,6 +674,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       host: parsed.BB_API_HOST,
       port: parsed.BB_API_PORT,
       trustedProxyHops: parsed.BB_TRUSTED_PROXY_HOPS as 0 | 1 | 2,
+    },
+    accessIntents: {
+      runtimeEnabled:
+        parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED &&
+        parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED,
+      edgeRateLimitConfirmed: parsed.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED,
     },
     database,
     identity: {

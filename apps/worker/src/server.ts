@@ -8,6 +8,7 @@ import {
 import { createLogger } from '@boomerbuddy/observability';
 import { StripeHttpTransport } from '@boomerbuddy/integrations';
 import {
+  AccessIntentRepository,
   AutomationBudgetRepository,
   BusinessOsRepository,
   CheckRepository,
@@ -112,6 +113,7 @@ await runReplitWorkerLifecycle(
       hmacKey: appConfig.secrets.fingerprintKey,
       hmacKeyVersion: 1,
     });
+    const accessIntents = new AccessIntentRepository(database, appConfig.secrets.fingerprintKey);
     const feedback = new FeedbackRepository(database, {
       encryptionKey: appConfig.secrets.artifactEncryptionKey,
       encryptionKeyVersion: 1,
@@ -150,6 +152,7 @@ await runReplitWorkerLifecycle(
       const now = new Date();
       const deleted = await checks.purgeDue({ now, limit: batch });
       const publicDeleted = await publicChecks.purgeExpired(now);
+      const accessIntentCleanup = await accessIntents.purgeExpired(now, batch);
       const messagingDeleted =
         entitlementRuntimeEnvironment === 'local'
           ? await messaging.purgeExpiredSupportContent({ limit: batch, now })
@@ -169,6 +172,7 @@ await runReplitWorkerLifecycle(
           deleted.length === batch ||
           publicDeleted.contexts > 0 ||
           publicDeleted.results > 0 ||
+          accessIntentCleanup.saturated ||
           messagingDeleted.length === batch ||
           mobileRetention.cleanupSaturated,
       });

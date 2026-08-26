@@ -16,6 +16,14 @@ const productionSourceRoots = [
   'apps/worker/src',
   'packages',
 ] as const;
+const hypothesisGovernanceEntryPoints = [
+  'docs/post-launch-beta/README.md',
+  'docs/post-launch-beta/EXECUTION-PLAN.md',
+  'docs/post-launch-beta/RUN-NEXT.md',
+  'docs/post-launch-beta/RUN-NEXT-EXECUTION.md',
+  'docs/post-launch-beta/GAUNTLET-PROMPT-PACK.md',
+  'docs/post-launch-beta/GAUNTLET-PROMPT-PACK-G4-G15.md',
+] as const;
 
 async function source(path: string): Promise<string> {
   return readFile(resolve(repositoryRoot, path), 'utf8');
@@ -60,6 +68,64 @@ async function productionSourceGraph(): Promise<string> {
 }
 
 describe('revenue hypothesis production boundary', () => {
+  it('keeps every typed hypothesis immutable and limited to synthetic or sandbox execution', () => {
+    for (const hypothesis of revenueOfferHypothesisRegistry) {
+      expect(Object.isFrozen(hypothesis)).toBe(true);
+      expect(hypothesis.scopes).toEqual(['synthetic', 'stripe_sandbox']);
+      expect(hypothesis).toMatchObject({
+        publicRouteEnabled: false,
+        productionActivationEnabled: false,
+        liveProviderWriteEnabled: false,
+      });
+    }
+    for (const hypothesis of referralRevenueHypothesisRegistry) {
+      expect(Object.isFrozen(hypothesis)).toBe(true);
+      expect(hypothesis.scopes).toEqual(['synthetic', 'stripe_sandbox']);
+      expect(hypothesis).toMatchObject({
+        cashPayoutEnabled: false,
+        creditTransferEnabled: false,
+        externalActionEnabled: false,
+        publicRouteEnabled: false,
+        productionActivationEnabled: false,
+        liveProviderWriteEnabled: false,
+      });
+    }
+  });
+
+  it('labels the old Run 2 product catalog as compatibility evidence rather than offer authority', async () => {
+    const registry = await source('docs/post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md');
+
+    expect(registry).toContain('seededCommercePlanVersions');
+    expect(registry).toContain('priceHypotheses');
+    expect(registry).toContain('historical Run 2 compatibility fixtures');
+    expect(registry).toContain('They are not current offer hypotheses');
+  });
+
+  it('makes the controlling registry required reading in every execution prompt', async () => {
+    const entries = await Promise.all(
+      hypothesisGovernanceEntryPoints.map(async (path) => ({ path, content: await source(path) })),
+    );
+    for (const entry of entries) {
+      expect(entry.content, entry.path).toContain('OFFER-HYPOTHESIS-REGISTRY.md');
+    }
+
+    const promptPacks = entries.filter((entry) => entry.path.includes('GAUNTLET-PROMPT-PACK'));
+    for (const pack of promptPacks) {
+      const standalonePrompts = [...pack.content.matchAll(/```text\r?\n([\s\S]*?)\r?\n```/gu)].map(
+        (match) => match[1] ?? '',
+      );
+      expect(standalonePrompts.length, pack.path).toBeGreaterThan(0);
+      for (const prompt of standalonePrompts) {
+        expect(prompt, pack.path).toContain('OFFER-HYPOTHESIS-REGISTRY.md');
+        expect(prompt, pack.path).toMatch(/controlling/iu);
+      }
+    }
+
+    const currentPlan = entries.find((entry) => entry.path.endsWith('EXECUTION-PLAN.md'))?.content;
+    expect(currentPlan).toBeDefined();
+    expect(currentPlan).not.toMatch(/Enable annual Family|test Plus|\$119 founding annual/iu);
+  });
+
   it('keeps every hypothesis key, scope, and registry outside the production package graph', async () => {
     const [domainBarrel, domainManifest, productionSources] = await Promise.all([
       source('packages/domain/src/index.ts'),

@@ -50,6 +50,7 @@ Do not use a Payment Link, manual invoice, database entitlement edit, or dashboa
 - Never expose production secrets, session tokens, payment details, safe words, raw customer artifacts, or personal contact data.
 - Keep the first customer's personal details outside Git, agent prompts, screenshots, and general evidence. Retrieve them only from an approved founder-held system at execution time.
 - No agent may accept consent, choose a plan, enter payment details, or authorize a charge for a customer.
+- [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis. Those entries are synthetic and Stripe sandbox only; this plan cannot promote them into production configuration, customer copy, live provider resources, or external action.
 - Customer-facing web, HQ, mobile, email, store, and support copy may not contain U+2013 or U+2014.
 - The 2026-08-25 blanket instruction supplies typed authority for in-scope external spend, messages, publications, releases, provider writes, and store actions. Each action still needs immutable evidence, a bounded cap, and rollback or containment.
 
@@ -158,9 +159,10 @@ placeholders, `/sign-in`, `/sign-in/client-trust`, `/sign-in/sso-callback`, and
 It does not close the exact-SHA deployment, real Clerk session, MFA enrollment, billing
 reverification, native JWT, or physical-device gates.
 
-### 3.6 Live Stripe account inventory
+### 3.6 Stripe account inventory
 
-Evidence scope was the connected Stripe account in live mode only. The safe read-only inventory found:
+Safe read-only inventory covered the separate live account and the provider context named
+`Boomer Buddy sandbox`.
 
 - The account is a live US company account with card charges enabled and payouts enabled.
 - The live account has zero Products, zero Prices, zero Coupons, zero Promotion Codes, zero Subscriptions, zero webhook endpoints, and zero Customer Portal configurations.
@@ -169,8 +171,9 @@ Evidence scope was the connected Stripe account in live mode only. The safe read
 - Account support email and support URL are unset.
 - Account privacy policy URL and terms of service URL are unset.
 - Receipt email toggle values were not readable through the available interface and remain unknown until the account holder verifies them directly.
-- The connection exposed only live context. No sandbox or test-mode context was available, so no authentic sandbox evidence was gathered.
-- No Stripe write was performed. No Product, Price, Coupon, Promotion Code, Subscription, webhook endpoint, Portal configuration, Tax registration, payout, refund, dispute, customer, invoice, payment, account setting, or other Stripe resource was created, changed, archived, or deleted.
+- The separate `Boomer Buddy sandbox` has zero Products, zero Prices, zero Coupons, zero Promotion Codes, zero Subscriptions, and zero Customer Portal configurations.
+- That sandbox has one enabled legacy webhook endpoint targeting `https://boomerbuddy.net/api/webhooks/stripe` on API version `2025-09-30.clover`. It belongs to the legacy site, is not BoomerBuddy 2.0 evidence, and must not be edited or deleted. A 2.0 sandbox path requires either a clean isolated sandbox or reviewed coexistence proof that prevents endpoint, secret, event, and replay ambiguity.
+- No Stripe write was performed in either context. No Product, Price, Coupon, Promotion Code, Subscription, webhook endpoint, Portal configuration, Tax registration, payout, refund, dispute, customer, invoice, payment, account setting, or other Stripe resource was created, changed, archived, or deleted.
 
 The account can accept charges, but it is intentionally empty and is not launch-ready. The current release also rejects live Stripe at multiple application layers. A Dashboard-only shortcut cannot close the code, evidence, authority, reconciliation, tax, receipt, support, or rollback gates.
 
@@ -187,7 +190,7 @@ The account can accept charges, but it is intentionally empty and is not launch-
 | Stripe Tax is active but has zero registrations | Qualified tax owner plus account holder | Written jurisdiction and registration decision with effective date; registration evidence if required | Before first taxable charge | Stop if advice or registration is unresolved |
 | Checkout and invoice code require zero tax | Billing/API owner plus tax owner | Qualified decision supports zero tax, or code/schema/test changes support required tax correctly | Before live preflight | Stop on any mismatch between provider tax and entitlement verification |
 | Manual payout schedule is active | Finance owner plus account holder | Written acceptance or verified schedule change, named reconciliation owner, and close runbook | Before first payment | Stop if funds or reconciliation ownership is unclear |
-| No sandbox context or authentic sandbox evidence was available | Billing owner | Isolated Stripe sandbox context and authentic Checkout, signed webhook, lifecycle, refund, and reconciliation receipts | Before live configuration | Fixtures and mocks alone are insufficient |
+| Sandbox contains an enabled legacy-site webhook and no 2.0 commerce resources | Billing and API owners | A clean isolated 2.0 sandbox or reviewed coexistence proof, followed by authentic 2.0 Checkout, signed-webhook, lifecycle, refund, and reconciliation receipts with unambiguous endpoint, secret, event, and replay isolation | Before live configuration | Do not edit or delete the legacy webhook; fixtures, mocks, or events delivered to the legacy endpoint are insufficient |
 | New customers lack a normal billing-authority grant path | Auth and billing owners | Recent-MFA, exact-household, audited, idempotent grant/revoke control with tenant and replay tests | Before Customer 1 can initiate Checkout | Stop any manual database or inferred-authority shortcut |
 | Customer Clerk MFA is disabled | Identity owner | Authenticator-app MFA and backup codes enabled, required-MFA flow proved after the nested sign-in route is deployed, and recovery tested without retaining PII | Before Checkout or Portal is available | Stop billing if a true recent second factor cannot be enrolled and proved |
 | Customer session claims omit billing reverification evidence | Identity and API owners | Default session-token claim `{"reverification_id":"{{session.reverification_id}}"}` configured and a one-time operation-bound Checkout and Portal proof passes | Before Checkout or Portal is available | Stop billing on missing, stale, malformed, or reused evidence |
@@ -270,17 +273,7 @@ Use one offer for the first paid cohort:
 
 **Founding Family Beta: $14.99 per month, one household, guided setup included, cancel any time.**
 
-Do not introduce a trial, coupon, referral credit, adaptive pricing, app-store purchase, or multiple paid tiers before the first ten eligible household decisions are observed.
-
-Define the longer-term catalog now, but do not enable all of it on Day 7:
-
-| Plan | Monthly | Annual | Initial availability |
-| --- | ---: | ---: | --- |
-| Free | $0 | $0 | Public Check and urgent safer-action guidance |
-| Plus | $8.99 | $89 | Deferred until packaging evidence supports a smaller household plan |
-| Family | $14.99 | $149 | Monthly only for first paid cohort; annual after renewal, refund, and accounting proof |
-
-Do not use the old $119 founding annual hypothesis. It discounts too deeply before support cost, retention, and willingness to pay are known.
+Do not introduce a trial, coupon, referral credit, adaptive pricing, app-store purchase, or multiple paid tiers for the first paid cohort. Family monthly is the complete production catalog for this plan. Annual, Individual, and referral candidates are not a production backlog or approved catalog: their names, amounts, allowed scopes, and promotion gate are controlled only by [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md), and evaluation is limited to synthetic or Stripe sandbox evidence.
 
 ### 4.2 Refund and cancellation recommendation
 
@@ -288,7 +281,7 @@ Publish only after qualified legal and accounting review for the launch geograph
 
 - First subscription charge: full refund on request within 30 calendar days.
 - Monthly renewal: cancel any time, with access through the paid period. Refund duplicate, unauthorized, erroneous, or service-failure charges and honor any legal right.
-- Annual plan, when enabled: full refund within 30 days of initial annual charge, then a simple prorated refund for unused full months on request.
+- No annual refund promise is approved. Any later production proposal must first pass the offer registry promotion gate and receive qualified refund, tax, and accounting review.
 - Refund exceptions above the policy remain founder-approved until a staffed billing function exists.
 - A refund or cancellation never erases invoice, consent, audit, or reconciliation evidence that must be retained.
 - Customer access changes only from reconciled provider and policy truth, never from a browser redirect or support promise.
@@ -350,7 +343,7 @@ The 2026-08-25 blanket execution authorization permits Codex engineering to perf
 
 ### Workstream ownership and priority
 
-Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2. Every owner works the highest unresolved gate in that order. Schedule pressure, sunk work, and provider timing never lower severity. Web-first payment is the revenue path. Mobile P0 work continues in parallel and is never silently deferred. Family at USD 14.99 per month is the only launch offer. USD 149 annual remains deferred. Twilio remains disabled.
+Priority rule: P0 outranks launch-critical P1, which outranks other P1, then P2. Every owner works the highest unresolved gate in that order. Schedule pressure, sunk work, and provider timing never lower severity. Web-first payment is the revenue path. Mobile P0 work continues in parallel and is never silently deferred. Family at USD 14.99 per month is the only launch offer. Annual, Individual, and referral hypotheses remain sandbox-only under the offer registry. Twilio remains disabled.
 
 | Day | Primary workstream | Accountable owner | Parallel workstreams | Required exit evidence |
 | --- | --- | --- | --- | --- |
@@ -639,14 +632,14 @@ Use scheduled bounded runs for daily and weekly operations. Create one durable g
 
 | Surface | Backlog item |
 | --- | --- |
-| Packaging | Enable annual Family, then test Plus only with real comprehension and support-cost evidence |
+| Packaging | Evaluate annual or Individual hypotheses only in the offer registry's synthetic and Stripe sandbox scopes; any production proposal must pass its promotion gate |
 | Mobile | Public store readiness, external TestFlight, broader Play test, and production submission |
 | Mobile | Store billing only if retention and current policy justify the cost |
 | Product | Guided incident recovery plan, evidence checklist, official-contact directory, and family closure loop |
 | Product | Topic-selected source-linked family scam brief and recurring preparedness rehearsal |
 | Product | Image, screenshot, QR, document, audio, or call-related intake only after modality-specific safety and privacy gates |
 | Growth | Small paid social/search cells after attributable retention and CAC proof |
-| Referrals | User-initiated referral after recipient consent, abuse controls, accounting, and observed advocacy |
+| Referrals | Evaluate only the registry's sandbox referral hypotheses; any production proposal additionally requires recipient consent, abuse controls, accounting, and observed advocacy |
 | B2B | One reusable paid co-branded credit-union evaluation with aggregate small-cell reporting |
 | White label | Configuration-driven brand, domain, content, sponsor policy, and reporting; no source fork |
 | Autonomy | Capped publication, lifecycle, spend, sales, and release actions only after earned-authority gates |
@@ -701,7 +694,7 @@ Do not ban ordinary words because an AI detector dislikes them. A deterministic 
 ### Commercial
 
 - A measured direct Family subscription with known activation, support cost, refund, churn, CAC, and contribution.
-- A smaller Plus plan only if evidence supports it.
+- An Individual hypothesis remains sandbox-only unless evidence supports a new production contract through the offer registry promotion gate.
 - One standardized co-branded credit-union evaluation, then a reusable partner program.
 - Full white-label delivery only when contract value covers independent store, support, security, privacy, and release overhead.
 - Synthetic, isolated, resettable demos and complete prospect, customer, admin, security, and integration documentation.

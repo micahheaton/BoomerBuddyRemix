@@ -41,6 +41,7 @@ import {
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   assertMutationOrigin,
+  assertRecentHqMfa,
   authenticate,
   customerBillingReverificationEvidence,
   customerBillingReverificationHint,
@@ -97,33 +98,6 @@ function trustedCustomerOrigin(request: FastifyRequest): URL {
 function safeProviderFailure(error: unknown): DomainError {
   if (error instanceof DomainError) return error;
   return new DomainError('conflict', 'Stripe could not complete the request');
-}
-
-export function assertRecentHqMfa(auth: AuthContext, context: ApiContext): void {
-  if (auth.audience !== 'hq') {
-    throw new DomainError('not_authorized', 'HQ Stripe controls require HQ authentication');
-  }
-  if (auth.assurance.kind === 'development') {
-    if (context.config.environment === 'production') {
-      throw new DomainError('not_authorized', 'Production HQ Stripe controls require recent MFA');
-    }
-    return;
-  }
-  const maximumAge = context.config.identity.clerk?.hq.maxSecondFactorAgeSeconds ?? 10 * 60;
-  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
-  const secondFactorAge = auth.assurance.secondFactorAgeSeconds;
-  if (
-    firstFactorAge === undefined ||
-    secondFactorAge === undefined ||
-    !Number.isSafeInteger(firstFactorAge) ||
-    !Number.isSafeInteger(secondFactorAge) ||
-    firstFactorAge < 0 ||
-    secondFactorAge < 0 ||
-    firstFactorAge >= maximumAge ||
-    secondFactorAge >= maximumAge
-  ) {
-    throw new DomainError('not_authorized', 'HQ Stripe controls require recent MFA');
-  }
 }
 
 async function queueReconciliation(
@@ -243,6 +217,33 @@ export function registerCommerceRoutes(
         )
       : undefined;
 
+  const stripeControlStatus = async (environment: StripeEnvironment, auth: AuthContext) => {
+    const projection = await context.repositories.commerceRuntime.stripeControlStatusProjection({
+      environment,
+      actorPersonId: auth.principal.personId,
+      ...(context.config.identity.founderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+      now: context.now(),
+    });
+    return stripeControlStatusProjectionSchema.parse({
+      ...projection,
+      preflight:
+        projection.preflight.state === 'unknown'
+          ? projection.preflight
+          : { ...projection.preflight, checkedAt: projection.preflight.checkedAt.toISOString() },
+      eligibleHouseholds: projection.eligibleHouseholds.map((household) => ({
+        ...household,
+        eligibilityExpiresAt: household.eligibilityExpiresAt.toISOString(),
+        occurredAt: household.occurredAt.toISOString(),
+      })),
+      evidence: projection.evidence.map((entry) => ({
+        ...entry,
+        occurredAt: entry.occurredAt.toISOString(),
+      })),
+    });
+  };
+
   app.post('/v1/hq/commerce/stripe/initiation-control', async (request) => {
     const auth = await authenticate(
       request,
@@ -252,7 +253,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeInitiationControlRequestSchema.parse(request.body);
     const changed = await context.repositories.commerceRuntime.changeStripeInitiationControl({
       ...body,
@@ -280,7 +281,7 @@ export function registerCommerceRoutes(
       ['hq'],
       context.now(),
     );
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const query = stripeInitiationControlQuerySchema.parse(request.query);
     const projection = await context.repositories.commerceRuntime.stripeInitiationControlProjection(
       {
@@ -311,7 +312,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeCohortControlRequestSchema.parse(request.body);
     const changed = await context.repositories.commerceRuntime.changeStripeCohortPolicy({
       environment: body.environment,
@@ -347,7 +348,7 @@ export function registerCommerceRoutes(
       ['hq'],
       context.now(),
     );
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const query = stripeCohortControlQuerySchema.parse(request.query);
     const projection = await context.repositories.commerceRuntime.stripeCohortControlProjection({
       environment: query.environment,
@@ -376,7 +377,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeHouseholdEligibilityRequestSchema.parse(request.body);
     const state = await context.repositories.commerceRuntime.changeStripeHouseholdEligibility({
       ...body,
@@ -393,6 +394,41 @@ export function registerCommerceRoutes(
     });
   });
 
+  app.post('/v1/hq/commerce/stripe/preflight', async (request, reply) => {
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['hq'],
+      context.now(),
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
+    const body = stripeControlStatusQuerySchema.parse(request.body);
+    await stripeControlStatus(body.environment, auth);
+    if (
+      runtimeStripe === undefined ||
+      adapter === undefined ||
+      runtimeStripe.environment !== body.environment
+    ) {
+      return reply.code(503).send(unavailable(request.id));
+    }
+    try {
+      const preflight = await adapter.verifyConfiguredResources();
+      await context.repositories.commerceRuntime.recordStripePreflight({
+        evidence: preflight,
+        evidenceLevel,
+        transportKind,
+        runtimeRunId,
+        authenticityKind,
+        now: context.now(),
+      });
+    } catch (error) {
+      throw safeProviderFailure(error);
+    }
+    return stripeControlStatus(body.environment, auth);
+  });
+
   app.get('/v1/hq/commerce/stripe/status', async (request) => {
     const auth = await authenticate(
       request,
@@ -401,32 +437,9 @@ export function registerCommerceRoutes(
       ['hq'],
       context.now(),
     );
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const query = stripeControlStatusQuerySchema.parse(request.query);
-    const projection = await context.repositories.commerceRuntime.stripeControlStatusProjection({
-      environment: query.environment,
-      actorPersonId: auth.principal.personId,
-      ...(context.config.identity.founderPersonId === undefined
-        ? {}
-        : { configuredFounderPersonId: context.config.identity.founderPersonId }),
-      now: context.now(),
-    });
-    return stripeControlStatusProjectionSchema.parse({
-      ...projection,
-      preflight:
-        projection.preflight.state === 'unknown'
-          ? projection.preflight
-          : { ...projection.preflight, checkedAt: projection.preflight.checkedAt.toISOString() },
-      eligibleHouseholds: projection.eligibleHouseholds.map((household) => ({
-        ...household,
-        eligibilityExpiresAt: household.eligibilityExpiresAt.toISOString(),
-        occurredAt: household.occurredAt.toISOString(),
-      })),
-      evidence: projection.evidence.map((entry) => ({
-        ...entry,
-        occurredAt: entry.occurredAt.toISOString(),
-      })),
-    });
+    return stripeControlStatus(query.environment, auth);
   });
 
   app.get('/v1/hq/commerce/stripe/reconciliation-repair', async (request) => {
@@ -457,7 +470,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeReconciliationRepairRequestSchema.parse(request.body);
     const repaired = await context.repositories.commerce.requestStripeReconciliationRepair({
       ...body,
@@ -506,7 +519,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
-    assertRecentHqMfa(auth, context);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeSessionRetryRepairRequestSchema.parse(request.body);
     const repaired = await context.repositories.commerceRuntime.requestStripeSessionRetryRepair({
       ...body,

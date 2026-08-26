@@ -15,6 +15,12 @@ export default function SupportPage() {
           details, safe words, or the full text of a suspicious message.
         </p>
         <p>
+          If the pricing page gives you an access-intent receipt, leave that code in the email
+          subject so an authorized HQ owner can correlate it with the content-free receipt. The code
+          expires after seven days. Creating it does not send an email or confirm that support
+          received your request.
+        </p>
+        <p>
           Support is monitored on a best-effort basis during the private beta. We do not promise
           24-hour coverage. For an immediate threat, contact local emergency services. For a bank or
           account problem, use a number from the organization&apos;s official website, statement, or

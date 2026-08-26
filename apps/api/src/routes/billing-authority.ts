@@ -10,7 +10,7 @@ import {
 import { DomainError } from '@boomerbuddy/domain';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import { assertMutationOrigin, authenticate, correlationId } from '../auth';
+import { assertMutationOrigin, assertRecentHqMfa, authenticate, correlationId } from '../auth';
 import type { ApiContext } from '../context';
 
 async function authorizeBillingAuthority(
@@ -25,6 +25,9 @@ async function authorizeBillingAuthority(
     ['hq'],
     context.now(),
   );
+  if (action === 'hq:billing_authority:manage') {
+    assertRecentHqMfa(auth, context.config);
+  }
   assertAuthorized({
     principal: auth.principal,
     action,

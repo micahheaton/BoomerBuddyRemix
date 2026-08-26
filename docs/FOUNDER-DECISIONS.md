@@ -2,6 +2,11 @@
 
 Last updated: 2026-08-16 after bounded Run 2 reconciliation. The deeper decision analysis remains in [Gauntlet Zero — Founder Decisions](./gauntlet-zero/42-founder-decisions.md).
 
+Current offer amendment: 2026-08-25. Family at USD 14.99 per month is the only public or live
+offer. [OFFER-HYPOTHESIS-REGISTRY.md](./post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md) controls all
+annual, Individual, and referral hypotheses and limits them to synthetic or Stripe sandbox
+evaluation. Older recommendations in this register remain historical research inputs only.
+
 Build Run 1 used reversible local hypotheses, so none of these decisions blocked it. They do govern research, spending, or external commitments; the implementation does not decide them by default.
 
 ## 1. Brand commitment

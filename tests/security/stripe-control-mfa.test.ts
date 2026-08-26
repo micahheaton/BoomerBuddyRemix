@@ -1,6 +1,6 @@
 import type { AuthContext } from '../../apps/api/src/auth';
 import type { ApiContext } from '../../apps/api/src/context';
-import { assertRecentHqMfa } from '../../apps/api/src/routes/commerce';
+import { assertRecentHqMfa } from '../../apps/api/src/auth';
 import { describe, expect, it } from 'vitest';
 import { testConfig } from '../integration/support';
 
@@ -35,7 +35,7 @@ describe('HQ Stripe control MFA', () => {
             secondFactorAgeSeconds: 599,
           },
         }),
-        context('production'),
+        context('production').config,
       ),
     ).not.toThrow();
     for (const rejected of [
@@ -57,7 +57,7 @@ describe('HQ Stripe control MFA', () => {
         },
       }),
     ]) {
-      expect(() => assertRecentHqMfa(rejected, context('production'))).toThrow(
+      expect(() => assertRecentHqMfa(rejected, context('production').config)).toThrow(
         expect.objectContaining({ code: 'not_authorized' }),
       );
     }
@@ -67,7 +67,7 @@ describe('HQ Stripe control MFA', () => {
     expect(() =>
       assertRecentHqMfa(
         auth({ audience: 'hq', assurance: { kind: 'development' } }),
-        context('test'),
+        context('test').config,
       ),
     ).not.toThrow();
   });

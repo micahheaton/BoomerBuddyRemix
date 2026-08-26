@@ -29,10 +29,17 @@ export class ApiError extends Error {
   }
 }
 
+function serviceName(): string {
+  return process.env.NODE_ENV === 'production' ? 'BoomerBuddy' : 'The local service';
+}
+
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const anonymousPublicCheck = path === '/v1/public/check-contexts' || path === '/v1/public/checks';
+  const anonymousPublicRequest =
+    path === '/v1/public/check-contexts' ||
+    path === '/v1/public/checks' ||
+    path === '/v1/public/access-intents';
   const selectedHouseholdId =
-    path === '/v1/me' || anonymousPublicCheck ? '' : readSelectedHouseholdId();
+    path === '/v1/me' || anonymousPublicRequest ? '' : readSelectedHouseholdId();
   const callerSignal = init.signal ?? undefined;
   const timeoutController = callerSignal ? undefined : new AbortController();
   const timeout = timeoutController
@@ -42,7 +49,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       ...init,
-      credentials: anonymousPublicCheck ? 'omit' : 'include',
+      credentials: anonymousPublicRequest ? 'omit' : 'include',
       signal: requestSignal,
       headers: {
         Accept: 'application/json',
@@ -60,7 +67,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
         // The fallback below remains safe when a proxy returns non-JSON.
       }
       throw new ApiError(
-        envelope?.error.message ?? 'The local service could not complete that request.',
+        envelope?.error.message ?? `${serviceName()} could not complete that request.`,
         envelope?.error.code ?? 'request_failed',
         response.status,
       );
@@ -70,7 +77,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
     return (await response.json()) as T;
   } catch (error) {
     if (timeoutController?.signal.aborted) {
-      throw new ApiError('The local service did not respond in time.', 'request_timeout', 408);
+      throw new ApiError(`${serviceName()} did not respond in time.`, 'request_timeout', 408);
     }
     throw error;
   } finally {

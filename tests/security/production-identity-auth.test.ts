@@ -92,6 +92,28 @@ function verified(
   };
 }
 
+function verifiedHqFactors(input: {
+  readonly providerSessionId: string;
+  readonly firstFactorAgeSeconds?: number;
+  readonly secondFactorAgeSeconds?: number;
+}): VerifiedIdentityToken {
+  return {
+    issuer: hqIssuer,
+    subject: 'user_production_founder',
+    providerSessionId: input.providerSessionId,
+    audience: 'hq',
+    issuedAt: new Date(now.getTime() - 30_000),
+    expiresAt: new Date(now.getTime() + 60_000),
+    authorizedParty: hqOrigin,
+    ...(input.firstFactorAgeSeconds === undefined
+      ? {}
+      : { firstFactorAgeSeconds: input.firstFactorAgeSeconds }),
+    ...(input.secondFactorAgeSeconds === undefined
+      ? {}
+      : { secondFactorAgeSeconds: input.secondFactorAgeSeconds }),
+  };
+}
+
 describe('production identity authentication boundary', () => {
   let database: Database;
   let app: FastifyInstance;
@@ -117,6 +139,34 @@ describe('production identity authentication boundary', () => {
             secondFactorAgeSeconds: 600,
           });
         }
+        if (input.token === 'missing-first-factor-hq-token')
+          return verifiedHqFactors({
+            providerSessionId: 'sess_hq_founder_missing_first',
+            secondFactorAgeSeconds: 60,
+          });
+        if (input.token === 'missing-second-factor-hq-token')
+          return verifiedHqFactors({
+            providerSessionId: 'sess_hq_founder_missing_second',
+            firstFactorAgeSeconds: 60,
+          });
+        if (input.token === 'future-factor-hq-token')
+          return verifiedHqFactors({
+            providerSessionId: 'sess_hq_founder_future_factor',
+            firstFactorAgeSeconds: 60,
+            secondFactorAgeSeconds: -1,
+          });
+        if (input.token === 'boundary-factor-hq-token')
+          return verifiedHqFactors({
+            providerSessionId: 'sess_hq_founder_boundary_factor',
+            firstFactorAgeSeconds: 599,
+            secondFactorAgeSeconds: 600,
+          });
+        if (input.token === 'inside-boundary-hq-token')
+          return verifiedHqFactors({
+            providerSessionId: 'sess_hq_founder_inside_boundary',
+            firstFactorAgeSeconds: 599,
+            secondFactorAgeSeconds: 599,
+          });
         if (input.token === 'valid-mobile-token') return verified('mobile');
         if (input.token === 'allowlisted-mobile-party-token')
           return verified('mobile', {
@@ -259,6 +309,76 @@ describe('production identity authentication boundary', () => {
       headers: { cookie: '__session=valid-hq-token' },
     });
     expect(missingTrustedOrigin.statusCode).toBe(401);
+  });
+
+  it('requires recent HQ MFA before grant or revoke can create durable side effects', async () => {
+    const durableSideEffectCounts = () =>
+      database.query<{
+        readonly authorities: number;
+        readonly events: number;
+        readonly audits: number;
+        readonly outbox: number;
+      }>(
+        `SELECT
+           (SELECT count(*)::int FROM household_billing_authorities) AS authorities,
+           (SELECT count(*)::int FROM household_billing_authority_events) AS events,
+           (SELECT count(*)::int FROM audit_events) AS audits,
+           (SELECT count(*)::int FROM outbox_events) AS outbox`,
+      );
+    const sideEffectsBefore = await durableSideEffectCounts();
+    const rejectedTokens = [
+      'missing-first-factor-hq-token',
+      'missing-second-factor-hq-token',
+      'future-factor-hq-token',
+      'boundary-factor-hq-token',
+      'stale-hq-token',
+    ];
+    let sequence = 1;
+    for (const token of rejectedTokens) {
+      for (const action of ['grant', 'revoke'] as const) {
+        const response = await app.inject({
+          method: 'POST',
+          url: '/v1/hq/billing-authorities/household-not-present/person-not-present/transitions',
+          headers: {
+            origin: hqOrigin,
+            cookie: `__session=${token}`,
+            'idempotency-key': `billing-authority:${action}:mfa-denied-${String(sequence).padStart(4, '0')}`,
+          },
+          payload: {
+            action,
+            reasonCode:
+              action === 'grant'
+                ? 'customer_billing_consent_verified'
+                : 'customer_billing_consent_withdrawn',
+          },
+        });
+        expect(response.statusCode, `${token}/${action}: ${response.body}`).toBe(403);
+        sequence += 1;
+      }
+    }
+
+    const malformedAfterStaleMfa = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/billing-authorities/not-a-valid-id/not-a-valid-id/transitions',
+      headers: { origin: hqOrigin, cookie: '__session=stale-hq-token' },
+      payload: { unexpected: 'content' },
+    });
+    expect(malformedAfterStaleMfa.statusCode).toBe(403);
+
+    const insideBoundary = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/billing-authorities/household-not-present/person-not-present/transitions',
+      headers: {
+        origin: hqOrigin,
+        cookie: '__session=inside-boundary-hq-token',
+        'idempotency-key': 'billing-authority:grant:mfa-inside-boundary-0001',
+      },
+      payload: { action: 'grant', reasonCode: 'customer_billing_consent_verified' },
+    });
+    expect(insideBoundary.statusCode, insideBoundary.body).toBe(404);
+
+    const sideEffectsAfter = await durableSideEffectCounts();
+    expect(sideEffectsAfter.rows).toEqual(sideEffectsBefore.rows);
   });
 
   it('keeps secret-free Stripe control reads owner-only and behind recent MFA', async () => {

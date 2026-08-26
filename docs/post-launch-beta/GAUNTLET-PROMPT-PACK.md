@@ -12,7 +12,7 @@ Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
 
 Run one prompt at a time in order unless a prompt explicitly opens parallel work. Start every phase from current repository evidence, not from an earlier phase's summary. A phase may use subagents for the named parallel workstreams, but one agent must own integration and the final evidence packet.
 
-The launch path is web-first. The only initial paid offer is Family at USD 14.99 per month for one household. The USD 149 annual option is deferred until renewal, refund, tax, accounting, and retention evidence exists. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A collision is a founder decision gate.
+The launch path is web-first. The only initial paid offer is Family at USD 14.99 per month for one household. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only. No phase may copy one into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A collision is a founder decision gate.
 
 Twilio remains disabled until a later, separate consent and compliance gate covers sender registration, opt-out, suppression, quiet hours, delivery evidence, privacy, and incident handling. No phase in this pack authorizes Twilio credentials or traffic.
 
@@ -52,7 +52,7 @@ Work only in C:\Dev\BoomerBuddy. Confirm that this is the Git root before readin
 
 Required reading
 
-Read AGENTS.md; package.json; .env.example; docs/post-launch-beta/EXECUTION-PLAN.md if present; docs/run-3/00-EXECUTIVE-VERDICT.md; docs/run-3/01-RUN-3-FIRST-DOLLAR-GAUNTLET.md; docs/run-3/03-BASELINE-EVIDENCE.md; docs/run-3/FIRST-CUSTOMER-7-DAY-PLAN.md; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/MOBILE-AND-STORE-READINESS.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; docs/run-3/TWILIO-CONSENT-AND-MESSAGING.md; docs/run-3-1/EXECUTIVE-VERDICT.md; docs/run-3-1/EXTERNAL-BETA-EVIDENCE.md; docs/run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md; docs/run-3-1/REPLIT-ENVIRONMENT-MANIFEST.md; the relevant ADRs for identity, consent, entitlements, commerce, no-URL-fetch, outbox, and production Clerk binding; and the actual web, API, worker, HQ, mobile, configuration, persistence, integration, and test files reached by those documents. Read any nested AGENTS.md before inspecting that subtree.
+Read AGENTS.md; package.json; .env.example; docs/post-launch-beta/EXECUTION-PLAN.md if present; docs/post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md as the controlling annual, Individual, and referral hypothesis index; docs/run-3/00-EXECUTIVE-VERDICT.md; docs/run-3/01-RUN-3-FIRST-DOLLAR-GAUNTLET.md; docs/run-3/03-BASELINE-EVIDENCE.md; docs/run-3/FIRST-CUSTOMER-7-DAY-PLAN.md; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/MOBILE-AND-STORE-READINESS.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; docs/run-3/TWILIO-CONSENT-AND-MESSAGING.md; docs/run-3-1/EXECUTIVE-VERDICT.md; docs/run-3-1/EXTERNAL-BETA-EVIDENCE.md; docs/run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md; docs/run-3-1/REPLIT-ENVIRONMENT-MANIFEST.md; the relevant ADRs for identity, consent, entitlements, commerce, no-URL-fetch, outbox, and production Clerk binding; and the actual web, API, worker, HQ, mobile, configuration, persistence, integration, and test files reached by those documents. Read any nested AGENTS.md before inspecting that subtree.
 
 Allowed actions
 
@@ -108,11 +108,11 @@ Work only in C:\Dev\BoomerBuddy. Read and, if explicitly authorized, edit only p
 
 Required reading
 
-Read AGENTS.md; the completed G0 evidence packet; docs/post-launch-beta/EXECUTION-PLAN.md and any supplement; docs/FOUNDER-DECISIONS.md; docs/run-3/FIRST-CUSTOMER-7-DAY-PLAN.md; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/FOUNDER-PROVISIONING.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; docs/run-3/MOBILE-AND-STORE-READINESS.md; docs/run-3/TWILIO-CONSENT-AND-MESSAGING.md; docs/gauntlet-zero/15-commercial-model-pricing.md; docs/gauntlet-zero/23-customer-success.md; and the G0 unknowns and founder-gate tables.
+Read AGENTS.md; the completed G0 evidence packet; docs/post-launch-beta/EXECUTION-PLAN.md and any supplement; docs/post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md as the controlling annual, Individual, and referral hypothesis index; docs/FOUNDER-DECISIONS.md; docs/run-3/FIRST-CUSTOMER-7-DAY-PLAN.md; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/FOUNDER-PROVISIONING.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; docs/run-3/MOBILE-AND-STORE-READINESS.md; docs/run-3/TWILIO-CONSENT-AND-MESSAGING.md; docs/gauntlet-zero/15-commercial-model-pricing.md; docs/gauntlet-zero/23-customer-success.md; and the G0 unknowns and founder-gate tables.
 
 Allowed actions
 
-Draft a decision record with explicit approve, reject, defer, owner, date, evidence, and review fields. Recommend one launch geography; Family at USD 14.99 monthly; no trial, coupon, promotion, referral credit, adaptive price, annual purchase, or mobile purchase; USD 149 annual deferred; one household; web-first checkout; mobile P0 in parallel; Twilio disabled; a maximum one live initiation window; and `net.boomerbuddy.app` unless collision. Draft plain recurring-charge, cancellation, refund, tax, receipt, support, privacy, and emergency-boundary language for professional/founder review. Keep candidate details in a founder-held system, not Git.
+Draft a decision record with explicit approve, reject, defer, owner, date, evidence, and review fields. Recommend one launch geography; Family at USD 14.99 monthly; no trial, coupon, promotion, referral credit, adaptive price, annual purchase, Individual purchase, or mobile purchase; one household; web-first checkout; mobile P0 in parallel; Twilio disabled; a maximum one live initiation window; and `net.boomerbuddy.app` unless collision. Annual, Individual, and referral entries remain registry-controlled sandbox hypotheses and cannot be promoted by this record. Draft plain recurring-charge, cancellation, refund, tax, receipt, support, privacy, and emergency-boundary language for professional/founder review. Keep candidate details in a founder-held system, not Git.
 
 Forbidden actions
 
@@ -124,7 +124,7 @@ Prepare separate decision cells for offer and geography; tax/accounting; cancell
 
 Evidence gates
 
-Every launch-critical decision has one accountable human, an approval state, an effective date, an exact downstream action it authorizes, and a revocation/expiry rule. The record states that Family USD 14.99 monthly is the only launch offer, USD 149 annual is absent, payment is web-first, mobile remains P0 in parallel, Twilio stays disabled, and no customer PII enters project evidence. Any undecided launch-critical cell remains a stop gate, not an assumption.
+Every launch-critical decision has one accountable human, an approval state, an effective date, an exact downstream action it authorizes, and a revocation/expiry rule. The record states that Family USD 14.99 monthly is the only launch offer, all annual, Individual, and referral hypotheses remain sandbox-only under the offer registry, payment is web-first, mobile remains P0 in parallel, Twilio stays disabled, and no customer PII enters project evidence. Any undecided launch-critical cell remains a stop gate, not an assumption.
 
 Tests
 
@@ -144,7 +144,7 @@ Revert only the unapproved decision draft or later documentation commit. There s
 
 Verifiable completion
 
-Complete only when one internally consistent control record has no blank launch-critical field, authorizes at most one household and one USD 14.99 monthly live initiation, explicitly defers annual/mobile purchase/Twilio, names all founder stops, and confirms no external action occurred.
+Complete only when one internally consistent control record has no blank launch-critical field, authorizes at most one household and one USD 14.99 monthly live initiation, keeps annual, Individual, and referral hypotheses sandbox-only, explicitly defers mobile purchase and Twilio, names all founder stops, and confirms no external action occurred.
 
 Durable goal
 
@@ -164,7 +164,7 @@ Work only in C:\Dev\BoomerBuddy on a dedicated codex/ branch created from a veri
 
 Required reading
 
-Read AGENTS.md; G0 and G1 outputs; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/FIRST-COHORT-AND-DISCOVERY-WORKFLOW.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; ADRs 0003, 0006, 0008, 0010, 0011, 0012, 0014, and 0030; apps/web/src/app/page.tsx; public Check, sign-in, member home, founding-household, orientation, family, Check, history, billing, feedback, and API proxy files; apps/api/src/auth.ts and relevant routes; packages/persistence/src/production-identity.ts; commerce and feedback repositories; and current integration/security/E2E tests.
+Read AGENTS.md; G0 and G1 outputs; docs/post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md as the controlling annual, Individual, and referral hypothesis index; docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md; docs/run-3/FIRST-COHORT-AND-DISCOVERY-WORKFLOW.md; docs/run-3/STRIPE-FIRST-DOLLAR-RUNBOOK.md; docs/run-3/OPERATIONS-PRIVACY-AND-RECOVERY.md; ADRs 0003, 0006, 0008, 0010, 0011, 0012, 0014, and 0030; apps/web/src/app/page.tsx; public Check, sign-in, member home, founding-household, orientation, family, Check, history, billing, feedback, and API proxy files; apps/api/src/auth.ts and relevant routes; packages/persistence/src/production-identity.ts; commerce and feedback repositories; and current integration/security/E2E tests.
 
 Allowed actions
 
@@ -220,7 +220,7 @@ Work only in C:\Dev\BoomerBuddy on a dedicated codex/ branch after verifying the
 
 Required reading
 
-Read AGENTS.md; G0-G2 evidence; docs/BOOMERBUDDY-2.0-MASTER-SPEC.md; docs/run-3/EDITORIAL-INTELLIGENCE-BOARD.md; docs/run-3/BRAND-PRICE-REFERRAL-RESEARCH.md; docs/gauntlet-zero/04-brand-assessment.md; docs/gauntlet-zero/34-accessibility-senior-ux.md; every rendered route/component/template in scope; and https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing only as a descriptive heuristic. Review the approved offer, legal, support, safety, and no-URL-fetch decisions before rewriting them.
+Read AGENTS.md; G0-G2 evidence; docs/post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md as the controlling annual, Individual, and referral hypothesis index; docs/BOOMERBUDDY-2.0-MASTER-SPEC.md; docs/run-3/EDITORIAL-INTELLIGENCE-BOARD.md; docs/run-3/BRAND-PRICE-REFERRAL-RESEARCH.md; docs/gauntlet-zero/04-brand-assessment.md; docs/gauntlet-zero/34-accessibility-senior-ux.md; every rendered route/component/template in scope; and https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing only as a descriptive heuristic. Review the approved offer, legal, support, safety, and no-URL-fetch decisions before rewriting them.
 
 Allowed actions
 
@@ -236,7 +236,7 @@ Run route-level streams for public/acquisition; member/onboarding/Check/history;
 
 Evidence gates
 
-The rendered production branch has one Family USD 14.99 monthly offer, no USD 149 annual purchase, no development persona or test-checkout instruction, and no contradiction between pricing and billing. Safety copy never implies proof, passive surveillance, URL fetching, or emergency response. Technical terms are explained or moved behind progressive disclosure. Every U+2013/U+2014 result is zero in both source and rendered states. Human reviewers can trace each material change to a policy or usability reason.
+The rendered production branch has one Family USD 14.99 monthly offer; no annual, Individual, or referral hypothesis; no development persona or test-checkout instruction; and no contradiction between pricing and billing. Safety copy never implies proof, passive surveillance, URL fetching, or emergency response. Technical terms are explained or moved behind progressive disclosure. Every U+2013/U+2014 result is zero in both source and rendered states. Human reviewers can trace each material change to a policy or usability reason.
 
 Tests
 

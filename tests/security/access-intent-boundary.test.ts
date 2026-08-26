@@ -46,7 +46,7 @@ describe('private-beta access-intent boundary', () => {
 
     expect(accessIntentMailbox).toBe('support@boomerbuddy.net');
     expect(mailto).toBe(
-      `mailto:support@boomerbuddy.net?subject=${encodeURIComponent(`Private beta access request ${receipt}`)}`,
+      `mailto:support@boomerbuddy.net?subject=${encodeURIComponent(`Early access request ${receipt}`)}`,
     );
     expect(mailto).not.toMatch(/[?&](?:body|cc|bcc)=/iu);
     for (const unsafe of [
@@ -83,7 +83,7 @@ describe('private-beta access-intent boundary', () => {
     expect(pricing).toContain("export const dynamic = 'force-dynamic'");
     expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED');
     expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED');
-    expect(pricing).toContain('Private-beta access requests are paused');
+    expect(pricing).toContain('Early-access requests are paused');
     expect(privacy).toMatch(
       /It does not contain your name,\s+email\s+address, phone number, message/iu,
     );

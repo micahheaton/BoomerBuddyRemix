@@ -97,7 +97,7 @@ export default function MessagingPage() {
         <section className="notice notice-warning" role="status">
           <h2>Messaging is not activated</h2>
           <p>
-            Messaging remains unavailable during this private beta. Return to member home to use the
+            Messaging remains unavailable during early access. Return to member home to use the
             available account features.
           </p>
           <Link href="/member">Return to member home</Link>

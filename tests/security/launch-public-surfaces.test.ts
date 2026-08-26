@@ -16,6 +16,12 @@ describe('launch public surfaces', () => {
     expect(pricing).not.toMatch(/No annual plan|free tier|coupon|referral credit/iu);
     expect(pricing).not.toContain('$149 annually');
     expect(pricing).not.toContain('$8.99 monthly');
+    expect(pricing).not.toMatch(/individual|group rate|referral bonus/iu);
+    expect(pricing).toContain('What Family is designed to support');
+    expect(pricing).toContain('Can anyone start a subscription?');
+    expect(pricing).toContain('Checkout is not public.');
+    expect(pricing).toContain('Does signing in activate access?');
+    expect(pricing).toContain('No. Signing in identifies an invited member.');
   });
 
   it('links every required support and policy route from the public footer', async () => {

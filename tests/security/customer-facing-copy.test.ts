@@ -139,7 +139,7 @@ describe('customer-facing production copy', () => {
 
     expect(memberHome).toContain("process.env.NODE_ENV !== 'production' ? (");
     expect(messaging).toContain("const localOnlyEnabled = process.env.NODE_ENV !== 'production';");
-    expect(messaging).toContain('Messaging remains unavailable during this private beta.');
+    expect(messaging).toContain('Messaging remains unavailable during early access.');
     expect(memberFamily).toContain('You cannot invite a new trusted person right now');
     expect(memberFamily).not.toContain('Exact invited Clerk customer subject');
     expect(memberFamily).not.toContain('Run 1 permission');

@@ -35,7 +35,7 @@ export function ProductionHqSignIn() {
   return (
     <main id="hq-main" className="sign-in-shell">
       <div className="sign-in-card">
-        <span className="seed-label">Founder-only private beta</span>
+        <span className="seed-label">Founder-only early access</span>
         <h1>BoomerBuddy HQ</h1>
         <p>
           Use the separately configured HQ Clerk identity. Customer identities and development

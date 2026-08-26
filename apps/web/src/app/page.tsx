@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { PublicFooter, PublicHeader } from '../components/public-shell';
+import { indexedCustomerPageMetadata } from '../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/'];
 
 export default function HomePage() {
   return (

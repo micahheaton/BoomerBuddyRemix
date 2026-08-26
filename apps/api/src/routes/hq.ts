@@ -48,7 +48,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
         ...metric,
         label:
           dataState === 'live_database'
-            ? metric.label.replace(/^Local /u, 'Private-beta ')
+            ? metric.label.replace(/^Local /u, 'Early-access ')
             : metric.label,
         updatedAt: metric.updatedAt.toISOString(),
         source: dataState,
@@ -61,7 +61,7 @@ export function registerHqRoutes(app: FastifyInstance, context: ApiContext): voi
                 key: 'private_beta_data',
                 severity: 'info' as const,
                 message:
-                  'Metrics summarize private-beta database records. Provider, deployed-observability, human, and efficacy evidence remain separately labeled.',
+                  'Metrics summarize early-access database records. Provider, deployed-observability, human, and efficacy evidence remain separately labeled.',
                 dataState,
               },
             ]

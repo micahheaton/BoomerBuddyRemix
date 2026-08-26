@@ -255,7 +255,7 @@ export function FeedbackForm({ mode }: { mode: 'anonymous' | 'authenticated' }) 
       </aside>
       {result ? (
         <section className="card full-span" aria-live="polite" data-testid="feedback-receipt">
-          <span className="dev-pill">Private beta</span>
+          <span className="dev-pill">Early access</span>
           <h2>Feedback recorded</h2>
           <p>Reference: {result.feedback.id}</p>
           <p>No media was accepted and no outside action was taken.</p>

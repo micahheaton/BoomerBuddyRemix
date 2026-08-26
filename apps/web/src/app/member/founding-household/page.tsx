@@ -230,7 +230,7 @@ function FoundingHousehold({
       setServiceConsent(false);
       setProtectedConsent(false);
       setNotice(
-        `Sponsored beta access is ${result.enrollment.state} through ${new Date(result.enrollment.effectiveEndsAt).toLocaleString()}. No card was used.`,
+        `Sponsored access is ${result.enrollment.state} through ${new Date(result.enrollment.effectiveEndsAt).toLocaleString()}. No card was used.`,
       );
       await refreshPrincipal(selectedHouseholdId);
       await load();
@@ -291,7 +291,7 @@ function FoundingHousehold({
     <main id="main-content" className="member-shell member-main">
       <span className="eyebrow">{allowEnrollment ? 'Founding Household' : 'Sponsored access'}</span>
       <h1 className="member-heading">
-        {allowEnrollment ? 'Review finite sponsored beta access' : 'Manage sponsored access'}
+        {allowEnrollment ? 'Review finite sponsored access' : 'Manage sponsored access'}
       </h1>
       <p className="lede">
         {allowEnrollment
@@ -491,7 +491,7 @@ function FoundingHousehold({
                   disabled={busy || !serviceConsent || !protectedConsent}
                   onClick={() => void accept()}
                 >
-                  Accept finite sponsored beta - no card
+                  Accept finite sponsored access - no card
                 </button>
                 <button
                   className="button button-secondary"

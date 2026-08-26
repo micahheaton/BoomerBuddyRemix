@@ -143,7 +143,6 @@ const productionSignInPaths = [
   '/sign-in/sso-callback',
   '/sign-in/oauth-callback',
 ];
-const productionAuthPaths = [...productionSignInPaths, '/unauthorized-sign-in'];
 const unauthorizedRewriteTarget = '/sign-in/unauthorized-sign-in';
 const productionAuthRoutesOnly = process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY === 'true';
 if (process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY !== undefined && !productionAuthRoutesOnly) {
@@ -301,20 +300,17 @@ async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
   return { combined, generatedBody: dynamicArtifact ? combined : generatedBody };
 }
 
-async function verifyProductionAuthRouteResolution() {
-  const routesManifest = JSON.parse(
-    await readFile(resolve('apps/web/.next/routes-manifest.json'), 'utf8'),
-  );
+function verifyProductionSignInRouteManifest(label, routesManifest) {
   const signInRoute = routesManifest.dynamicRoutes?.find(
     (route) => route.page === '/sign-in/[[...sign-in]]',
   );
   if (signInRoute === undefined || typeof signInRoute.regex !== 'string') {
-    throw new Error('The production sign-in catch-all is absent from the routes manifest');
+    throw new Error(`${label} production sign-in catch-all is absent from the routes manifest`);
   }
   const signInRegex = new RegExp(signInRoute.regex);
   for (const path of productionSignInPaths) {
     if (!signInRegex.test(path)) {
-      throw new Error(`The production sign-in catch-all does not resolve ${path}`);
+      throw new Error(`${label} production sign-in catch-all does not resolve ${path}`);
     }
   }
 
@@ -324,6 +320,35 @@ async function verifyProductionAuthRouteResolution() {
     ...(rewrites.afterFiles ?? []),
     ...(rewrites.fallback ?? []),
   ];
+  const redirectRules = routesManifest.redirects ?? [];
+  for (const path of productionSignInPaths) {
+    const redirect = redirectRules.find(
+      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
+    );
+    if (redirect !== undefined) {
+      throw new Error(`${label} production sign-in path ${path} unexpectedly matches a redirect`);
+    }
+    const rewrite = rewriteRules.find(
+      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
+    );
+    if (rewrite !== undefined) {
+      throw new Error(`${label} production sign-in path ${path} unexpectedly matches a rewrite`);
+    }
+  }
+  return { redirectRules, rewriteRules, signInRegex };
+}
+
+async function verifyProductionAuthRouteResolution() {
+  const [customerRoutesManifest, hqRoutesManifest] = await Promise.all([
+    readFile(resolve('apps/web/.next/routes-manifest.json'), 'utf8').then(JSON.parse),
+    readFile(resolve('apps/hq/.next/routes-manifest.json'), 'utf8').then(JSON.parse),
+  ]);
+  const { redirectRules, rewriteRules, signInRegex } = verifyProductionSignInRouteManifest(
+    'Customer',
+    customerRoutesManifest,
+  );
+  verifyProductionSignInRouteManifest('HQ', hqRoutesManifest);
+
   const unauthorizedRewrite = rewriteRules.find(
     (rule) =>
       rule.source === '/unauthorized-sign-in' && rule.destination === unauthorizedRewriteTarget,
@@ -338,22 +363,12 @@ async function verifyProductionAuthRouteResolution() {
     );
   }
 
-  const redirectRules = routesManifest.redirects ?? [];
-  for (const path of productionAuthPaths) {
-    const redirect = redirectRules.find(
-      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
-    );
-    if (redirect !== undefined) {
-      throw new Error(`Production auth path ${path} unexpectedly matches a redirect`);
-    }
-  }
-  for (const path of productionSignInPaths) {
-    const rewrite = rewriteRules.find(
-      (rule) => typeof rule.regex === 'string' && new RegExp(rule.regex).test(path),
-    );
-    if (rewrite !== undefined) {
-      throw new Error(`Production sign-in path ${path} unexpectedly matches a rewrite`);
-    }
+  const unauthorizedRedirect = redirectRules.find(
+    (rule) =>
+      typeof rule.regex === 'string' && new RegExp(rule.regex).test('/unauthorized-sign-in'),
+  );
+  if (unauthorizedRedirect !== undefined) {
+    throw new Error('Production auth path /unauthorized-sign-in unexpectedly matches a redirect');
   }
   const unauthorizedMatches = rewriteRules.filter(
     (rule) =>
@@ -379,7 +394,7 @@ async function verifyProductionAuthRouteResolution() {
 await verifyProductionAuthRouteResolution();
 if (productionAuthRoutesOnly) {
   process.stdout.write(
-    'Production auth paths resolve to compiled application routes without redirect/rewrite loops; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
+    'Customer and HQ production auth paths resolve to compiled application routes without redirect/rewrite loops; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
   );
   process.exit(0);
 }
@@ -466,6 +481,6 @@ for (const value of [
 
 process.stdout.write(
   productionUiExpectation === 'unconfigured_identity'
-    ? 'Production auth paths resolve to compiled application routes without redirect/rewrite loops, route bodies and dynamic artifacts fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
-    : 'Production auth paths resolve to compiled application routes without redirect/rewrite loops, configured production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
+    ? 'Customer and HQ production auth paths resolve to compiled application routes without redirect/rewrite loops, route bodies and dynamic artifacts fail closed when Clerk build configuration is absent, and the mobile bundle omits local actions; configured and hydrated production-browser proof remains unproved.\n'
+    : 'Customer and HQ production auth paths resolve to compiled application routes without redirect/rewrite loops, configured production route artifacts/payloads and the mobile bundle passed the local-action boundary checks; Clerk provider behavior and hydrated production-browser proof remain unproved.\n',
 );

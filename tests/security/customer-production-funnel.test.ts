@@ -49,7 +49,7 @@ describe('rendered production customer funnel', () => {
     expect(rendered).toContain('USD 14.99 monthly');
     expect(rendered).toContain('Results can be wrong');
     expect(rendered).not.toMatch(
-      /Founding Household|sponsored access|No annual plan|free tier|coupon|referral credit|evidence sufficiency|canonical server|provider state|ruleset|not calibrated|conversion payload|continuity proof|local development|development build/iu,
+      /private.?beta|Founding Household|sponsored access|No annual plan|free tier|coupon|referral credit|evidence sufficiency|canonical server|provider state|ruleset|not calibrated|conversion payload|continuity proof|local development|development build/iu,
     );
   });
 
@@ -73,18 +73,20 @@ describe('rendered production customer funnel', () => {
     expect(home).toContain('Access is invite-only');
   });
 
-  it('does not advertise self-service household capacity that the private beta cannot provide', () => {
+  it('does not advertise self-service household capacity that invited access cannot provide', () => {
     const pricing = renderedProductionRoutes().pricing;
 
     expect(pricing).toContain('For one invited household.');
     expect(pricing).toContain('You cannot create a new Trusted Circle invitation right now.');
+    expect(pricing).toContain('Checkout is not public.');
+    expect(pricing).toContain('Household invitation, consent, permissions, billing authority');
     expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
   });
 
   it('renders honest paused copy instead of an active access-intent control by default', () => {
     const pricing = renderedProductionRoutes().pricing;
 
-    expect(pricing).toContain('Private-beta access requests are paused');
+    expect(pricing).toContain('Early-access requests are paused');
     expect(pricing).toContain('no request or email has been sent');
     expect(pricing).not.toContain('Create receipt and open email');
   });
@@ -92,9 +94,9 @@ describe('rendered production customer funnel', () => {
   it('renders the active CTA only after both production enablement gates are true', () => {
     const pricing = renderedProductionRoutes(true).pricing;
 
-    expect(pricing).toContain('Ask about private-beta access');
+    expect(pricing).toContain('Ask about early access');
     expect(pricing).toContain('Create receipt and open email');
-    expect(pricing).not.toContain('Private-beta access requests are paused');
+    expect(pricing).not.toContain('Early-access requests are paused');
   });
 
   it('discloses bounded campaign attribution and aggregate conversion measurement', () => {

@@ -12,6 +12,7 @@ import type {
   PrivacyRequestDto,
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
+import { AccessIntentReceipts } from './access-intent-receipts';
 import { BusinessOsContent, type BusinessOsView } from './business-os';
 import { BillingAuthority } from './billing-authority';
 import { FeedbackLearning } from './feedback-learning';
@@ -28,6 +29,7 @@ export type HqView =
   | 'fraud'
   | 'support'
   | 'support-receipts'
+  | 'access-intents'
   | 'revenue'
   | 'system'
   | 'privacy'
@@ -86,13 +88,13 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   overview: {
     title: 'Owner operating view',
     subtitle: productionRuntime
-      ? 'Private-beta database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
+      ? 'Early-access database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
       : 'Local and explicitly imported evidence only. Nothing here is production evidence.',
   },
   customers: {
     title: 'Customers and access',
     subtitle: productionRuntime
-      ? 'Bounded household, orientation, and entitlement summaries from the private-beta database.'
+      ? 'Bounded household, orientation, and entitlement summaries from the early-access database.'
       : 'Household, orientation, and entitlement summaries from local development data.',
   },
   fraud: {
@@ -108,6 +110,11 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
     title: 'Support receipt queue',
     subtitle:
       'Owner-only category, impact, state, and timing evidence. Customer content is never submitted.',
+  },
+  'access-intents': {
+    title: 'Early-access intent receipts',
+    subtitle:
+      'Owner-only, content-free receipt metadata. A receipt is not a lead, contact, message, subscription, or payment.',
   },
   revenue: {
     title: 'Revenue workspace',
@@ -177,7 +184,7 @@ function DataLabel({
       {state === 'seeded'
         ? 'Seeded research data'
         : productionRuntime
-          ? 'Private-beta database evidence'
+          ? 'Early-access database evidence'
           : 'Local development data (seed + this run)'}
     </span>
   );
@@ -261,7 +268,7 @@ function Shell({
           <span>BoomerBuddy HQ</span>
         </Link>
         <span className="environment">
-          {process.env.NODE_ENV === 'production' ? 'Private beta' : 'Local development'}
+          {process.env.NODE_ENV === 'production' ? 'Early access' : 'Local development'}
         </span>
         <span>{me.principal.displayName}</span>
       </header>
@@ -284,6 +291,14 @@ function Shell({
               href="/support-receipts"
             >
               Support receipts
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'access-intents' ? 'page' : undefined}
+              href="/access-intents"
+            >
+              Intent receipts
             </Link>
           )}
           {(isOwner || canReview) && (
@@ -419,7 +434,7 @@ function Customers() {
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading private-beta customers…'
+          ? 'Loading early-access customers…'
           : 'Loading local development customers…'}
       </p>
     );
@@ -478,7 +493,7 @@ function OwnerFraud() {
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading the private-beta review queue…'
+          ? 'Loading the early-access review queue…'
           : 'Loading local development review queue…'}
       </p>
     );
@@ -760,7 +775,7 @@ function System() {
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading private-beta system data…'
+          ? 'Loading early-access system data…'
           : 'Loading local development system data…'}
       </p>
     );
@@ -1017,7 +1032,7 @@ export function HqScreen({ view }: { view: HqView }) {
     return (
       <main id="hq-main" className="sign-in-shell">
         <div className="sign-in-card">
-          <span className="seed-label">Founder-only private beta</span>
+          <span className="seed-label">Founder-only early access</span>
           <h1>BoomerBuddy HQ</h1>
           <p>Authenticate through the separately configured HQ identity realm.</p>
           <Link href="/sign-in">Open secure HQ sign in</Link>
@@ -1054,6 +1069,8 @@ export function HqScreen({ view }: { view: HqView }) {
         <SupportQueue />
       ) : view === 'support-receipts' ? (
         <SupportReceiptQueue />
+      ) : view === 'access-intents' ? (
+        <AccessIntentReceipts />
       ) : view === 'revenue' ? (
         <Revenue />
       ) : view === 'privacy' ? (

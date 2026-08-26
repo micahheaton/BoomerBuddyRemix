@@ -131,7 +131,7 @@ function ProductionSignIn() {
     <>
       <PublicHeader />
       <main id="main-content" className="page-shell narrow">
-        <span className="eyebrow">Private beta</span>
+        <span className="eyebrow">Invited member access</span>
         <h1 className="page-title">Sign in to BoomerBuddy</h1>
         <p className="lede">
           Use your invited member account. Signing in does not grant household access; an exact,

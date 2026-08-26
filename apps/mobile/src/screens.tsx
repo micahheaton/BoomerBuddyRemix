@@ -35,6 +35,7 @@ import {
   useMobileHousehold,
   useOptionalMobileHousehold,
 } from './household';
+import { startMobileHostedSignIn } from './hosted-auth';
 import type { NativeEntrySignal, RootStackParamList } from './navigation';
 import { appStyles as s } from './theme';
 
@@ -130,8 +131,8 @@ export function SignInScreen({
         await Linking.openURL(customerWebSignInUrl);
         return;
       }
-      const result = await startHostedAuth({ mode: 'sign-in' });
-      if (!result.createdSessionId) {
+      const outcome = await startMobileHostedSignIn(startHostedAuth);
+      if (outcome === 'not_completed') {
         setError('Sign-in was not completed. You can try again when you are ready.');
       }
     } catch (caught) {

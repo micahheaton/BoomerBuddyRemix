@@ -165,7 +165,7 @@ describe('private-beta access-intent receipts', () => {
     expect(rejected.json()).toMatchObject({
       error: {
         code: 'rate_limited',
-        message: 'Private-beta access requests are temporarily limited',
+        message: 'Early-access requests are temporarily limited',
       },
     });
     const receipts = await harness.database.query<{ readonly count: number }>(

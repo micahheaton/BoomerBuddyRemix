@@ -25,7 +25,7 @@ test('public landmark pages have zero serious or critical axe violations', async
   const pages = [
     ['/', /From suspicious to a safer next step/u],
     ['/how-it-works', 'A calmer way to handle something suspicious'],
-    ['/pricing', 'One plan for the private beta'],
+    ['/pricing', 'One plan for invited early access'],
     ['/trust', 'Designed to show its limits'],
     ['/sign-in', 'Choose a seeded person'],
   ] as const;
@@ -43,7 +43,7 @@ test('member landmark pages have zero serious or critical axe violations', async
     ['/member/history', 'Your check records'],
     ['/member/family', 'Your household and Trusted Circle'],
     ['/member/orientation', 'Orientation'],
-    ['/member/founding-household', 'Review finite sponsored beta access'],
+    ['/member/founding-household', 'Review finite sponsored access'],
   ] as const;
   for (const [path, heading] of pages) {
     await gotoReady(page, `${customerUrl}${path}`, heading);

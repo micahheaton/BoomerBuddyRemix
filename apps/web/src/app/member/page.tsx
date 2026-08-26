@@ -237,7 +237,7 @@ export default function MemberHomePage() {
               <span className="dev-pill">Local no-card path</span>
               <h2>Founding Household</h2>
               <p>
-                Review a one-time invitation and finite sponsored beta terms. No payment or
+                Review a one-time invitation and finite sponsored access terms. No payment or
                 automatic message is sent.
               </p>
               <Link href="/member/founding-household">Open Founding Household review</Link>

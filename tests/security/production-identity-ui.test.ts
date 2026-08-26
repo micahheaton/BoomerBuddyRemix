@@ -52,7 +52,7 @@ describe('production identity UI boundary', () => {
     expect(hqSignIn).toContain('required recent multi-factor verification');
   });
 
-  it('ships a public terminal recovery path and verifies every production sign-in route', async () => {
+  it('ships a public terminal recovery path and verifies Customer and HQ sign-in routes', async () => {
     const [rootPackage, webProxy, webConfig, customerSignIn, support, verifier] = await Promise.all(
       [
         source('package.json'),
@@ -90,8 +90,18 @@ describe('production identity UI boundary', () => {
       expect(verifier).toContain(`'${path}'`);
     }
     expect(verifier).toContain("resolve('apps/web/.next/routes-manifest.json')");
+    expect(verifier).toContain("resolve('apps/hq/.next/routes-manifest.json')");
     expect(verifier).toContain("process.env.BB_PRODUCTION_AUTH_ROUTES_ONLY === 'true'");
     expect(verifier).toContain("route.page === '/sign-in/[[...sign-in]]'");
+    expect(verifier).toContain("verifyProductionSignInRouteManifest(\n    'Customer'");
+    expect(verifier).toContain("verifyProductionSignInRouteManifest('HQ', hqRoutesManifest)");
+    expect(verifier).toContain(
+      '${label} production sign-in path ${path} unexpectedly matches a redirect',
+    );
+    expect(verifier).toContain(
+      '${label} production sign-in path ${path} unexpectedly matches a rewrite',
+    );
+    expect(verifier).toContain('Customer and HQ production auth paths resolve');
     expect(verifier).toContain("const unauthorizedRewriteTarget = '/sign-in/unauthorized-sign-in'");
     expect(verifier).toContain('The production unauthorized sign-in path has an ambiguous rewrite');
     expect(verifier).toContain(

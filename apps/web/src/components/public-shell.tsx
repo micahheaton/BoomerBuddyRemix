@@ -5,7 +5,7 @@ export function PublicHeader() {
   return (
     <>
       <p className="dev-banner">
-        Private beta - Public Check needs no account - Results can be wrong - Never enter passwords,
+        Early access - Public Check needs no account - Results can be wrong - Never enter passwords,
         access codes, or payment information
       </p>
       <header className="site-header">
@@ -31,7 +31,7 @@ export function PublicFooter() {
   return (
     <footer className="site-footer">
       <div className="page-shell" style={{ paddingBlock: '1.2rem' }}>
-        <strong>BoomerBuddy private beta</strong>
+        <strong>BoomerBuddy early access</strong>
         <p>
           Analysis can be wrong. If money, accounts, or safety are at risk, pause and contact the
           organization using an independently verified number.

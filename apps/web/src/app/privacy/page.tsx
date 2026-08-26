@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { PolicyPage, PolicySection } from '../../components/policy-page';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/privacy'];
 
 export default function PrivacyPage() {
   return (
     <PolicyPage
       eyebrow="Privacy"
       title="BoomerBuddy privacy notice"
-      summary="This notice explains the information used to provide the private beta and the choices available to members."
+      summary="This notice explains the information used to provide invited early access and the choices available to members."
     >
       <PolicySection title="Information we use">
         <p>
@@ -24,8 +27,8 @@ export default function PrivacyPage() {
         <p>
           We use information to authenticate members, enforce household and consent boundaries,
           provide Checks and history, operate subscriptions, answer support requests, prevent abuse,
-          investigate incidents, and improve the beta. BoomerBuddy does not fetch a URL contained in
-          submitted material and does not sell personal information.
+          investigate incidents, and improve the service. BoomerBuddy does not fetch a URL contained
+          in submitted material and does not sell personal information.
         </p>
       </PolicySection>
       <PolicySection title="Campaign and conversion measurement">
@@ -37,10 +40,10 @@ export default function PrivacyPage() {
           website addresses, and unrecognized address values are not used for campaign attribution.
         </p>
       </PolicySection>
-      <PolicySection title="Private-beta access receipts">
+      <PolicySection title="Early-access intent receipts">
         <p>
-          When you choose to ask about private-beta access from the pricing page, BoomerBuddy first
-          creates a temporary receipt containing only a server-issued code, the fixed purpose, and a
+          When you choose to ask about early access from the pricing page, BoomerBuddy first creates
+          a temporary receipt containing only a server-issued code, the fixed purpose, and a
           recognized source and campaign label. Protected one-way values prevent duplicate requests
           and enforce abuse limits without storing the request key or network address in the
           receipt. The receipt expires after seven days. It does not contain your name, email
@@ -80,7 +83,7 @@ export default function PrivacyPage() {
       </PolicySection>
       <PolicySection title="Age and contact">
         <p>
-          The private beta is for adults age 18 or older and is not directed to children. Privacy
+          Early access is for adults age 18 or older and is not directed to children. Privacy
           questions can be sent to{' '}
           <a href="mailto:support@boomerbuddy.net">support@boomerbuddy.net</a>.
         </p>

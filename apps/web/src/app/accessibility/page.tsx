@@ -1,4 +1,7 @@
 import { PolicyPage, PolicySection } from '../../components/policy-page';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/accessibility'];
 
 export default function AccessibilityPage() {
   return (
@@ -15,9 +18,9 @@ export default function AccessibilityPage() {
           usable when text is enlarged.
         </p>
       </PolicySection>
-      <PolicySection title="Beta limitations">
+      <PolicySection title="Early-access limitations">
         <p>
-          We continue to review the private beta across browsers, assistive technologies, mobile
+          We continue to review early access across browsers, assistive technologies, mobile
           devices, and zoom settings. This statement is a commitment and feedback channel, not a
           claim that every page has completed independent conformance review.
         </p>

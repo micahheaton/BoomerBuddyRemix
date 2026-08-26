@@ -1,11 +1,14 @@
 import Link from 'next/link';
 import { PolicyPage, PolicySection } from '../../components/policy-page';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/terms'];
 
 export default function TermsPage() {
   return (
     <PolicyPage
       eyebrow="Terms"
-      title="BoomerBuddy private beta terms"
+      title="BoomerBuddy early-access terms"
       summary="These terms govern access to the invite-only BoomerBuddy service provided by BoomerBuddy LLC."
     >
       <PolicySection title="Eligibility and accounts">
@@ -32,9 +35,9 @@ export default function TermsPage() {
           person.
         </p>
       </PolicySection>
-      <PolicySection title="Beta availability and changes">
+      <PolicySection title="Early-access availability and changes">
         <p>
-          The service is a private beta and may change, pause, or end. We may restrict or suspend
+          The service is in early access and may change, pause, or end. We may restrict or suspend
           access to protect people, data, payment integrity, or the service. Material changes to
           paid terms will be presented before they govern a later renewal.
         </p>
@@ -47,10 +50,10 @@ export default function TermsPage() {
       </PolicySection>
       <PolicySection title="Warranty and responsibility">
         <p>
-          The beta is provided as available to the extent permitted by law. You remain responsible
-          for verifying organizations through independent contact information and deciding what
-          action to take. Nothing in these terms limits rights that applicable law does not allow us
-          to limit.
+          The service is provided as available to the extent permitted by law. You remain
+          responsible for verifying organizations through independent contact information and
+          deciding what action to take. Nothing in these terms limits rights that applicable law
+          does not allow us to limit.
         </p>
       </PolicySection>
       <PolicySection title="Contact">

@@ -56,8 +56,8 @@ export function AccessIntentCta() {
   }
 
   return (
-    <section className="card" aria-labelledby="beta-access-heading">
-      <h2 id="beta-access-heading">Ask about private-beta access</h2>
+    <section className="card" aria-labelledby="early-access-heading">
+      <h2 id="early-access-heading">Ask about early access</h2>
       <p>
         First, BoomerBuddy creates a temporary, content-free receipt using only a fixed source and
         campaign label. Then your device opens its own email composer addressed to support. The

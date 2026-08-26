@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { PolicyPage, PolicySection } from '../../components/policy-page';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/billing-terms'];
 
 export default function BillingTermsPage() {
   return (
     <PolicyPage
       eyebrow="Billing terms"
       title="Family monthly subscription"
-      summary="The private beta has one paid offer: Family at USD 14.99 per month."
+      summary="Invited early access has one paid offer: Family at USD 14.99 per month."
     >
       <PolicySection title="Price and renewal">
         <p>

@@ -1,5 +1,8 @@
 import Link from 'next/link';
 import { PolicyPage, PolicySection } from '../../components/policy-page';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/support'];
 
 export default function SupportPage() {
   return (

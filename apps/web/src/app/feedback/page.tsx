@@ -1,4 +1,16 @@
+import type { Metadata } from 'next';
 import { PublicFooter, PublicHeader } from '../../components/public-shell';
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    noarchive: true,
+    noimageindex: true,
+    nosnippet: true,
+  },
+};
 
 export default async function AnonymousFeedbackPage() {
   const localOnlyEnabled = process.env.NODE_ENV !== 'production';

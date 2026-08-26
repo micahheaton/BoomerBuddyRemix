@@ -25,6 +25,6 @@ export function accessIntentAttributionFromSearch(search: string): AccessIntentA
 
 export function accessIntentMailto(receiptCode: string): string {
   const safeReceiptCode = accessIntentReceiptCodeSchema.parse(receiptCode);
-  const subject = encodeURIComponent(`Private beta access request ${safeReceiptCode}`);
+  const subject = encodeURIComponent(`Early access request ${safeReceiptCode}`);
   return `mailto:${accessIntentMailbox}?subject=${subject}`;
 }

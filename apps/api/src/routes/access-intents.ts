@@ -77,7 +77,7 @@ export function registerAccessIntentRoutes(
         return reply.code(429).send({
           error: {
             code: 'rate_limited',
-            message: 'Private-beta access requests are temporarily limited',
+            message: 'Early-access requests are temporarily limited',
             requestId: request.id,
           },
         });

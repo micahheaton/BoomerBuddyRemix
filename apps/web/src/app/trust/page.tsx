@@ -1,4 +1,7 @@
 import { PublicFooter, PublicHeader } from '../../components/public-shell';
+import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/trust'];
 
 export default function TrustPage() {
   return (

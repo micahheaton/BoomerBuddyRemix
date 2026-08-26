@@ -88,9 +88,7 @@ test('founder issues one local no-card credential and a household admin accepts 
   await signInCustomer(page, 'owner-bob');
   await page.getByRole('link', { name: 'Open Founding Household review' }).click();
   await expect(page).toHaveURL(`${customerUrl}/member/founding-household`);
-  await expect(
-    page.getByRole('heading', { name: 'Review finite sponsored beta access' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review finite sponsored access' })).toBeVisible();
   await page.getByLabel('Complete invitation credential').fill(credential as string);
   const previewResponsePromise = page.waitForResponse(
     (response) =>
@@ -164,7 +162,7 @@ test('founder issues one local no-card credential and a household admin accepts 
     });
   };
   await page.route(acceptPattern, authLossHandler);
-  await page.getByRole('button', { name: 'Accept finite sponsored beta - no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.locator('.error[role="alert"]')).toContainText(
     'Household authorization was lost',
   );
@@ -194,9 +192,9 @@ test('founder issues one local no-card credential and a household admin accepts 
     }
     await route.fulfill({ response });
   });
-  await page.getByRole('button', { name: 'Accept finite sponsored beta - no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.locator('.error[role="alert"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Accept finite sponsored beta - no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.getByRole('status')).toContainText('No card was used');
   expect(acceptKeys).toHaveLength(2);
   expect(acceptKeys[1]).toBe(acceptKeys[0]);

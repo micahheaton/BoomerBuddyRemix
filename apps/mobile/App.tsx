@@ -1,14 +1,18 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { ClerkProvider, useAuth } from '@clerk/expo';
+import { ClerkProvider, useAuth, useSession } from '@clerk/expo';
 import { tokenCache } from '@clerk/expo/token-cache';
 import { StatusBar } from 'expo-status-bar';
 import type { MeResponse, PrincipalDto } from '@boomerbuddy/contracts';
 import { designTokens } from '@boomerbuddy/design';
 import { mobileRequest, readableError } from './src/api';
-import { configureMobileAuthentication } from './src/authentication';
+import {
+  captureMobileAuthenticationContext,
+  configureMobileAuthentication,
+  isMobileAuthenticationContextCurrent,
+} from './src/authentication';
 import { MobileHouseholdProvider } from './src/household';
 import {
   classifyNativeEntryUrl,
@@ -23,11 +27,14 @@ import {
   TermsScreen,
 } from './src/policy-screens';
 import {
+  beginMobileHouseholdSession,
   clearLegacyDevelopmentSessionToken,
   clearMobileDeviceState,
-  readSelectedHouseholdId,
+  endMobileHouseholdSession,
+  isMobileHouseholdSessionCurrent,
   restoreSelectedHouseholdId,
   setSelectedHouseholdId,
+  type MobileHouseholdSession,
 } from './src/session';
 import { clearMobileDeviceStateSafely, completeMobileSignOut } from './src/sign-out';
 import { SupportScreen } from './src/support-screen';
@@ -39,6 +46,7 @@ import {
   HomeScreen,
   NativeProofScreen,
   OrientationScreen,
+  ProtectedAccessScreen,
   ResultScreen,
   SessionRecoveryScreen,
   SignInScreen,
@@ -63,13 +71,21 @@ function requirePublishableKey(): string {
 
 const publishableKey = requirePublishableKey();
 
+type RestoredMobileSession = {
+  identitySessionId: string;
+  householdSession: MobileHouseholdSession;
+  principal: PrincipalDto;
+};
+
 function MobileApplication(): React.ReactElement {
-  const { getToken, isLoaded, isSignedIn, sessionId, signOut: clerkSignOut } = useAuth();
-  const [principal, setPrincipal] = useState<PrincipalDto>();
+  const { isLoaded, isSignedIn, sessionId, signOut: clerkSignOut } = useAuth();
+  const { session: clerkSession } = useSession();
+  const [restoredSession, setRestoredSession] = useState<RestoredMobileSession>();
   const [restoring, setRestoring] = useState(true);
   const [sessionError, setSessionError] = useState('');
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [nativeEntry, setNativeEntry] = useState<NativeEntrySignal>('none');
+  const householdSessionRef = useRef<MobileHouseholdSession | undefined>(undefined);
 
   useEffect(() => {
     let active = true;
@@ -92,29 +108,12 @@ function MobileApplication(): React.ReactElement {
   }, []);
 
   useEffect(() => {
-    return configureMobileAuthentication({
-      getToken: (request) =>
-        getToken({
-          template: mobileJwtTemplate,
-          ...(request?.skipCache ? { skipCache: true } : {}),
-        }),
-      recoverUnauthorizedSession: async () => {
-        const outcome = await completeMobileSignOut({
-          clearDeviceState: clearMobileDeviceState,
-          signOutIdentitySession: clerkSignOut,
-        });
-        setPrincipal(undefined);
-        setSessionError(
-          outcome === 'complete'
-            ? ''
-            : 'Your session ended, but secure sign out did not finish. Check your connection and try again.',
-        );
-      },
-    });
-  }, [clerkSignOut, getToken]);
-
-  useEffect(() => {
     let active = true;
+    let householdSession: MobileHouseholdSession | undefined;
+    const restoreController = new AbortController();
+    const isCurrent = (): boolean =>
+      active && householdSession !== undefined && isMobileHouseholdSessionCurrent(householdSession);
+
     async function restoreSession() {
       if (!isLoaded) return;
       if (!isSignedIn) {
@@ -122,53 +121,139 @@ function MobileApplication(): React.ReactElement {
         // The in-memory household selection is cleared before persisted cleanup is attempted.
         await clearMobileDeviceStateSafely(clearMobileDeviceState);
         if (active) {
-          setPrincipal(undefined);
+          setRestoredSession(undefined);
           setSessionError('');
           setRestoring(false);
         }
         return;
       }
-      if (active) {
-        setRestoring(true);
-        setSessionError('');
+      if (!sessionId) {
+        endMobileHouseholdSession();
+        if (active) {
+          setRestoredSession(undefined);
+          setSessionError(
+            'Your identity session could not be verified. Sign in again to continue.',
+          );
+          setRestoring(false);
+        }
+        return;
       }
+      householdSession = beginMobileHouseholdSession(sessionId);
+      householdSessionRef.current = householdSession;
+      setRestoredSession(undefined);
+      setRestoring(true);
+      setSessionError('');
       try {
         await clearLegacyDevelopmentSessionToken();
-        await restoreSelectedHouseholdId();
-        const response = await mobileRequest<MeResponse>('/v1/me');
-        const stored = readSelectedHouseholdId();
+        if (!isCurrent()) return;
+        const response = await mobileRequest<MeResponse>('/v1/me', {
+          signal: restoreController.signal,
+        });
+        if (!isCurrent()) return;
+        const stored = await restoreSelectedHouseholdId(
+          householdSession,
+          response.principal.personId,
+        );
+        if (!isCurrent()) return;
         const selected =
           response.principal.households.find((scope) => scope.id === stored)?.id ??
           response.principal.households[0]?.id ??
           null;
-        await setSelectedHouseholdId(selected);
-        if (active) setPrincipal(response.principal);
+        await setSelectedHouseholdId(householdSession, response.principal.personId, selected);
+        if (!isCurrent()) return;
+        setRestoredSession({
+          identitySessionId: sessionId,
+          householdSession,
+          principal: response.principal,
+        });
       } catch (error) {
-        if (active) {
-          setPrincipal(undefined);
+        if (isCurrent()) {
+          setRestoredSession(undefined);
           setSessionError(readableError(error));
         }
       } finally {
-        if (active) setRestoring(false);
+        if (isCurrent()) setRestoring(false);
       }
     }
     void restoreSession();
     return () => {
       active = false;
+      restoreController.abort();
+      if (householdSession) {
+        if (householdSessionRef.current === householdSession) {
+          householdSessionRef.current = undefined;
+        }
+        endMobileHouseholdSession(householdSession);
+      }
     };
   }, [isLoaded, isSignedIn, restoreAttempt, sessionId]);
 
+  useEffect(() => {
+    const identitySessionId = isSignedIn && sessionId ? sessionId : undefined;
+    const identitySession =
+      identitySessionId && clerkSession?.id === identitySessionId ? clerkSession : undefined;
+    const householdSession =
+      identitySessionId &&
+      householdSessionRef.current?.identitySessionId === identitySessionId &&
+      isMobileHouseholdSessionCurrent(householdSessionRef.current)
+        ? householdSessionRef.current
+        : undefined;
+    return configureMobileAuthentication({
+      getToken: (request) => {
+        if (!identitySession || !householdSession) return Promise.resolve(null);
+        return identitySession.getToken({
+          template: mobileJwtTemplate,
+          ...(request?.skipCache ? { skipCache: true } : {}),
+        });
+      },
+      recoverUnauthorizedSession: async (guard) => {
+        if (!identitySessionId || !householdSession || !guard.isCurrent()) return;
+        const outcome = await completeMobileSignOut({
+          clearDeviceState: () =>
+            guard.isCurrent() ? clearMobileDeviceState(householdSession) : Promise.resolve(),
+          signOutIdentitySession: () =>
+            guard.isCurrent() ? clerkSignOut({ sessionId: identitySessionId }) : Promise.resolve(),
+        });
+        if (!guard.isCurrent()) return;
+        setRestoredSession(undefined);
+        setSessionError(
+          outcome === 'complete'
+            ? ''
+            : 'Your session ended, but secure sign out did not finish. Check your connection and try again.',
+        );
+      },
+    });
+  }, [clerkSession, clerkSignOut, isLoaded, isSignedIn, restoreAttempt, sessionId]);
+
+  const activeRestoredSession =
+    isSignedIn && sessionId && restoredSession?.identitySessionId === sessionId
+      ? restoredSession
+      : undefined;
+  const principal = activeRestoredSession?.principal;
+
   async function signOut() {
+    const identitySessionId = activeRestoredSession?.identitySessionId;
+    const householdSession = activeRestoredSession?.householdSession;
+    if (!identitySessionId || !householdSession) return;
+    const authenticationContext = captureMobileAuthenticationContext();
     try {
       await mobileRequest('/v1/sessions/current', { method: 'DELETE' });
     } catch {
       /* Clerk sign-out and local preference cleanup still complete. */
     }
+    if (!isMobileAuthenticationContextCurrent(authenticationContext)) return;
     const outcome = await completeMobileSignOut({
-      clearDeviceState: clearMobileDeviceState,
-      signOutIdentitySession: clerkSignOut,
+      clearDeviceState: () =>
+        isMobileAuthenticationContextCurrent(authenticationContext)
+          ? clearMobileDeviceState(householdSession)
+          : Promise.resolve(),
+      signOutIdentitySession: () =>
+        isMobileAuthenticationContextCurrent(authenticationContext)
+          ? clerkSignOut({ sessionId: identitySessionId })
+          : Promise.resolve(),
     });
-    setPrincipal(undefined);
+    if (!isMobileAuthenticationContextCurrent(authenticationContext)) return;
+    setRestoredSession(undefined);
     setSessionError(
       outcome === 'complete'
         ? ''
@@ -231,7 +316,7 @@ function MobileApplication(): React.ReactElement {
   return (
     <NavigationContainer>
       <StatusBar style="light" />
-      {!isSignedIn || !principal ? (
+      {!activeRestoredSession ? (
         <Stack.Navigator
           screenOptions={{
             headerBackTitle: 'Back',
@@ -261,7 +346,19 @@ function MobileApplication(): React.ReactElement {
           />
         </Stack.Navigator>
       ) : (
-        <MobileHouseholdProvider principal={principal} onPrincipalChanged={setPrincipal}>
+        <MobileHouseholdProvider
+          householdSession={activeRestoredSession.householdSession}
+          principal={activeRestoredSession.principal}
+          onPrincipalChanged={(nextPrincipal) => {
+            if (!isMobileHouseholdSessionCurrent(activeRestoredSession.householdSession)) return;
+            setRestoredSession((current) =>
+              current?.householdSession.generation ===
+              activeRestoredSession.householdSession.generation
+                ? { ...current, principal: nextPrincipal }
+                : current,
+            );
+          }}
+        >
           <Stack.Navigator
             screenOptions={{
               headerBackTitle: 'Back',
@@ -291,6 +388,11 @@ function MobileApplication(): React.ReactElement {
               <Stack.Screen name="Family" options={{ title: 'Family' }}>
                 {(props) => <FamilyScreen {...props} />}
               </Stack.Screen>
+              <Stack.Screen
+                name="ProtectedAccess"
+                component={ProtectedAccessScreen}
+                options={{ title: 'Protected access' }}
+              />
               <Stack.Screen
                 name="Orientation"
                 component={OrientationScreen}

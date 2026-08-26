@@ -84,4 +84,15 @@ describe('Next generated declaration normalization', () => {
     );
     await expect(readFile(fixture.declaration, 'utf8')).resolves.toBe(unexpected);
   });
+
+  it('is always invoked by the standalone resource-auth build verifier', async () => {
+    const verifier = await readFile(join(root, 'scripts', 'verify-next-resource-auth.mjs'), 'utf8');
+    expect(verifier).toContain(
+      "const normalizeNextEnvScript = resolve('scripts/normalize-next-env.mjs')",
+    );
+    expect(verifier).toContain('await normalizeNextEnv(application);');
+    expect(verifier.indexOf('await normalizeNextEnv(application);')).toBeGreaterThan(
+      verifier.indexOf('} finally {'),
+    );
+  });
 });

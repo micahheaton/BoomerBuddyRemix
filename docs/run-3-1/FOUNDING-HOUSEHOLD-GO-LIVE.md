@@ -82,7 +82,12 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    fine-grained token is acceptable only with `Contents: Read-only`, `Metadata: Read-only`, and no
    repository, organization, or user write permission. Store the private value only in the matching
    Replit credential store, keep the remote URL credential-free, and remove any write-capable Replit
-   GitHub connection.
+   GitHub connection. The checkout remote must use exactly
+   `https://github.com/micahheaton/BoomerBuddyRemix.git` for an HTTPS-compatible read-only
+   credential or exactly `git@github.com:micahheaton/BoomerBuddyRemix.git` for the preferred
+   read-only deploy key. The deployment wrapper rejects credentials embedded in a URL, forks, host
+   aliases, alternate URL spellings, multiple origin URLs, and noncanonical push metadata without
+   printing the observed URL.
 9. In each Replit project Shell, explicitly fetch the exact tag ref with
    `git fetch origin refs/tags/<tag>:refs/tags/<tag>` because Replit's Pull action does not fetch tags,
    then check out the candidate tag in detached mode. Verify that
@@ -211,10 +216,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     0033_run3_1_billing_recovery_evidence.sql
     0034_run3_1_support_receipts.sql
     0035_run3_1_paid_family_catalog.sql
+    0036_run3_1_protected_self_enrollment.sql
     ```
 
     Therefore, for an exact `0027` production prefix and a candidate whose manifest still ends at
-    `0035`, the pending suffix is exactly
+    `0036`, the pending suffix is exactly
     `0028_run3_1_billing_authority_workflow.sql`,
     `0029_run3_1_stripe_live_control_plane.sql`,
     `0030_run3_1_billing_reverification_binding.sql`,
@@ -222,11 +228,12 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `0032_run3_1_private_beta_access_intents.sql`,
     `0033_run3_1_billing_recovery_evidence.sql`,
     `0034_run3_1_support_receipts.sql`, and
-    `0035_run3_1_paid_family_catalog.sql`. For an exact `0032` prefix, it is exactly `0033` through
-    `0035`. A genuinely empty database receives the entire tagged `0001` through final-candidate
+    `0035_run3_1_paid_family_catalog.sql`, and
+    `0036_run3_1_protected_self_enrollment.sql`. For an exact `0032` prefix, it is exactly `0033`
+    through `0036`. A genuinely empty database receives the entire tagged `0001` through final-candidate
     manifest. If paid-entitlement repair requires a future forward migration, it must be the next
     contiguous entry in the exact tagged manifest and must appear in the external receipt. Do not
-    guess its filename, hardcode `0035` as the release ceiling, or run an untagged migration. The only
+    guess its filename, hardcode `0036` as the release ceiling, or run an untagged migration. The only
     allowed pending set is the tagged candidate manifest minus the exact database prefix.
 
     Use a one-off founder-controlled shell with the migration credential, direct TLS database URL,
@@ -237,8 +244,31 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     checksums equal the entire tagged manifest, then create a post-migration backup bound to the exact
     release commit. Restore it into a fresh disposable database and prove the same manifest plus
     billing authority, Stripe controls, reverification, mobile retention, privacy-minimized access
-    intent, billing recovery evidence, support receipts, paid Family catalogue, and any later tagged
+    intent, billing recovery evidence, support receipts, paid Family catalogue, protected-self
+    enrollment operation evidence, and any later tagged
     repair structures before publishing. Never enable per-startup migrations.
+
+    Migration `0036` keeps protected-self mutation receipts append-only for durable temporal
+    idempotency: replaying an old key must return its original result without repeating or undoing a
+    later mutation. Receipts contain only bounded identifiers, action/result facts, and a request
+    digest; never submitted Check content or PII. The exact household/member foreign key preserves
+    tenant and actor lineage, and the household-gate foreign key preserves the receipt's serialization
+    lineage. The repository resolves an existing key first, caps no-effect receipts at 16 per action
+    and actor/household, and caps state-changing general enrollments at 64. A genuinely enrolled
+    member's state-changing withdrawal is never blocked by those quotas; each such receipt requires a
+    prior accepted enrollment, so the successful-enrollment cap bounds public-route withdrawal cycles
+    and storage. Gate locks are household-scoped; unrelated households do not share a singleton lock.
+    Retain these rows with consent and audit history rather than deleting them and reopening stale-key
+    effects.
+
+    The same migration preserves the original exact Founding protected-consent acceptance as
+    historical evidence while allowing a later independently versioned general self-consent after
+    exact self-withdrawal, including after Founding offboarding when another effective entitlement
+    exists. If offboarding rebinds the original allocation, its append-only allowance transition
+    supplies the exact original enrollment/allocation/grant proof without rewriting history. It does
+    not weaken Founding service-consent termination or sponsor-chain evidence. The
+    automated protected-enrollment fixtures use only a synthetic local Family entitlement. Passing
+    them does not prove Stripe integration, a live payment, or production paid-entitlement readiness.
 
     After `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. Prefer a
     schema-compatible corrective tag with initiation and invitations disabled or a forward

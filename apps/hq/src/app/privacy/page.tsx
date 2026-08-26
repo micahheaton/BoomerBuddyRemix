@@ -1,5 +1,7 @@
 import { HqScreen } from '../../components/hq-screen';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
-export default function PrivacyPage() {
+export default async function PrivacyPage() {
+  await protectProductionHqResource();
   return <HqScreen view="privacy" />;
 }

@@ -53,21 +53,20 @@ describe('production identity UI boundary', () => {
   });
 
   it('ships a public terminal recovery path and verifies Customer and HQ sign-in routes', async () => {
-    const [rootPackage, webProxy, webConfig, customerSignIn, support, verifier] = await Promise.all(
-      [
+    const [rootPackage, webPolicy, webConfig, customerSignIn, support, verifier] =
+      await Promise.all([
         source('package.json'),
-        source('apps/web/src/proxy.ts'),
+        source('apps/web/src/lib/resource-auth-policy.ts'),
         source('apps/web/next.config.ts'),
         source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
         source('apps/web/src/app/support/page.tsx'),
         source('scripts/verify-founding-household-production-ui.mjs'),
-      ],
-    );
+      ]);
 
     expect(JSON.parse(rootPackage).scripts['verify:production-auth-routes']).toContain(
       'BB_PRODUCTION_AUTH_ROUTES_ONLY=true',
     );
-    expect(webProxy).toContain("'/unauthorized-sign-in'");
+    expect(webPolicy).toContain("'/unauthorized-sign-in'");
     expect(webConfig).toContain("source: '/unauthorized-sign-in'");
     expect(webConfig).toContain("destination: '/sign-in/unauthorized-sign-in'");
     expect(customerSignIn).toContain("pathname === '/unauthorized-sign-in'");
@@ -124,12 +123,17 @@ describe('production identity UI boundary', () => {
   });
 
   it('fails closed without Clerk and protects production member and HQ routes', async () => {
-    const [webProxy, hqProxy, webProvider, hqProvider] = await Promise.all([
-      source('apps/web/src/proxy.ts'),
-      source('apps/hq/src/proxy.ts'),
-      source('apps/web/src/components/identity-provider.tsx'),
-      source('apps/hq/src/components/identity-provider.tsx'),
-    ]);
+    const [webProxy, hqProxy, webProvider, hqProvider, webAuth, hqAuth, webPolicy, hqPolicy] =
+      await Promise.all([
+        source('apps/web/src/proxy.ts'),
+        source('apps/hq/src/proxy.ts'),
+        source('apps/web/src/components/identity-provider.tsx'),
+        source('apps/hq/src/components/identity-provider.tsx'),
+        source('apps/web/src/lib/resource-auth.ts'),
+        source('apps/hq/src/lib/resource-auth.ts'),
+        source('apps/web/src/lib/resource-auth-policy.ts'),
+        source('apps/hq/src/lib/resource-auth-policy.ts'),
+      ]);
 
     for (const proxy of [webProxy, hqProxy]) {
       expect(proxy).toContain("from '@boomerbuddy/config/exact-origin'");
@@ -156,8 +160,8 @@ describe('production identity UI boundary', () => {
       expect(proxy).toContain("request.headers.get('x-forwarded-host')");
       expect(proxy).toContain("request.headers.get('x-forwarded-port')");
       expect(proxy).toContain("request.headers.get('x-forwarded-proto')");
-      expect(proxy).toContain("'/sign-in(.*)'");
       expect(proxy).toContain('auth.protect');
+      expect(proxy).not.toContain('createRouteMatcher');
     }
     for (const provider of [webProvider, hqProvider]) {
       expect(provider).toContain("from '@boomerbuddy/config/exact-origin'");
@@ -175,24 +179,21 @@ describe('production identity UI boundary', () => {
     expect(webProxy.indexOf('!isCanonicalPublicRequestOrigin(')).toBeGreaterThan(
       webProxy.indexOf('isExactReplitLoopbackHealthCheck({'),
     );
-    for (const route of [
-      "'/accessibility'",
-      "'/account-deletion'",
-      "'/billing-terms'",
-      "'/check(.*)'",
-      "'/how-it-works'",
-      "'/pricing'",
-      "'/privacy'",
-      "'/support'",
-      "'/terms'",
-      "'/trust'",
-      "'/unauthorized-sign-in'",
-      "'/api(.*)'",
-    ]) {
-      expect(webProxy).toContain(route);
+    for (const resourceAuth of [webAuth, hqAuth]) {
+      expect(resourceAuth).toContain(
+        'enforceProductionResourceAuthentication(process.env.NODE_ENV',
+      );
+      expect(resourceAuth).toContain('await auth.protect');
+      expect(resourceAuth).toContain("unauthenticatedUrl: '/sign-in'");
     }
-    expect(webProxy).not.toContain("'/member(.*)'");
-    expect(webProxy).toContain('if (!isPublicRoute(request)) await auth.protect()');
+    expect(webProxy).toContain('isPublicCustomerResourcePath(request.nextUrl.pathname)');
+    expect(hqProxy).toContain('isPublicHqResourcePath(request.nextUrl.pathname)');
+    expect(webPolicy).toContain("'/robots.txt'");
+    expect(webPolicy).toContain("'/sitemap.xml'");
+    expect(hqPolicy).toContain("pathname === '/robots.txt'");
+    expect(webPolicy).not.toContain('/check(.*)');
+    expect(webPolicy).not.toContain('/api(.*)');
+    expect(hqPolicy).not.toContain('/sign-in(.*)');
   });
 
   it('denies framing and content-type sniffing on customer and HQ responses', async () => {

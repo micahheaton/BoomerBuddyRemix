@@ -1,5 +1,10 @@
 import { errorEnvelopeSchema } from '@boomerbuddy/contracts';
-import { readMobileAuthenticationToken, recoverUnauthorizedMobileSession } from './authentication';
+import {
+  captureMobileAuthenticationContext,
+  readMobileAuthenticationToken,
+  recoverUnauthorizedMobileSession,
+  requireMobileAuthenticationContextCurrent,
+} from './authentication';
 import { resolveMobileApiOrigin } from './api-origin';
 import { readSelectedHouseholdId } from './session';
 
@@ -22,8 +27,41 @@ export class MobileCustomerError extends Error {
   }
 }
 
+class MobileRequestAbortedError extends Error {
+  override readonly name = 'MobileRequestAbortedError';
+}
+
 function customerError(message: string, status?: number): MobileCustomerError {
   return new MobileCustomerError(message, status);
+}
+
+function awaitRequestStep<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const cleanup = (): void => signal.removeEventListener('abort', abort);
+    const abort = (): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new MobileRequestAbortedError());
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    operation.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }
 
 export async function mobileRequest<T>(
@@ -31,20 +69,43 @@ export async function mobileRequest<T>(
   init: RequestInit = {},
   includeAuth = true,
 ): Promise<T> {
-  const token = includeAuth ? await readMobileAuthenticationToken() : null;
-  if (includeAuth && !token) {
-    await recoverUnauthorizedMobileSession();
-    throw customerError('Your session ended. Sign in again to continue.');
-  }
+  // Bind the request to the household that was selected when the caller initiated it. Clerk token
+  // acquisition can yield long enough for navigation to select a different household.
   const selectedHouseholdId = includeAuth && path !== '/v1/me' ? readSelectedHouseholdId() : null;
+  const authenticationContext = includeAuth ? captureMobileAuthenticationContext() : undefined;
+  const requireCurrentAuthenticationContext = (): void => {
+    if (authenticationContext) {
+      requireMobileAuthenticationContextCurrent(authenticationContext);
+    }
+  };
   const callerSignal = init.signal ?? undefined;
-  const timeoutController = callerSignal ? undefined : new AbortController();
-  const timeout = timeoutController
-    ? setTimeout(() => timeoutController.abort(), 15_000)
-    : undefined;
-  const requestSignal = callerSignal ?? timeoutController!.signal;
+  const requestController = new AbortController();
+  let abortCause: 'caller' | 'timeout' | undefined;
+  const abortRequest = (cause: 'caller' | 'timeout'): void => {
+    if (abortCause !== undefined) return;
+    abortCause = cause;
+    requestController.abort();
+  };
+  const abortForCaller = (): void => abortRequest('caller');
+  if (callerSignal?.aborted) abortForCaller();
+  else callerSignal?.addEventListener('abort', abortForCaller, { once: true });
+  const timeout = setTimeout(() => abortRequest('timeout'), 15_000);
   try {
-    const send = async (requestToken: string | null) => {
+    const token = includeAuth
+      ? await awaitRequestStep(
+          readMobileAuthenticationToken({}, authenticationContext),
+          requestController.signal,
+        )
+      : null;
+    if (includeAuth && !token) {
+      await awaitRequestStep(
+        recoverUnauthorizedMobileSession(authenticationContext),
+        requestController.signal,
+      );
+      throw customerError('Your session ended. Sign in again to continue.');
+    }
+    const send = (requestToken: string | null) => {
+      requireCurrentAuthenticationContext();
       const headers = new Headers(init.headers);
       headers.set('Accept', 'application/json');
       if (init.body && !headers.has('Content-Type')) {
@@ -65,36 +126,52 @@ export async function mobileRequest<T>(
       return fetch(`${baseUrl}${path}`, {
         ...init,
         credentials: 'omit',
-        signal: requestSignal,
+        signal: requestController.signal,
         headers,
       });
     };
-    let response = await send(token);
+    let response = await awaitRequestStep(send(token), requestController.signal);
+    requireCurrentAuthenticationContext();
     if (response.status === 401 && includeAuth) {
       let refreshedToken: string | null;
       try {
-        refreshedToken = await readMobileAuthenticationToken({ skipCache: true });
+        refreshedToken = await awaitRequestStep(
+          readMobileAuthenticationToken({ skipCache: true }, authenticationContext),
+          requestController.signal,
+        );
       } catch {
+        if (requestController.signal.aborted) throw new MobileRequestAbortedError();
         throw customerError('BoomerBuddy could not refresh your session. Please try again.');
       }
       if (!refreshedToken) {
-        await recoverUnauthorizedMobileSession();
+        await awaitRequestStep(
+          recoverUnauthorizedMobileSession(authenticationContext),
+          requestController.signal,
+        );
         throw customerError('Your session ended. Sign in again to continue.');
       }
-      response = await send(refreshedToken);
+      response = await awaitRequestStep(send(refreshedToken), requestController.signal);
+      requireCurrentAuthenticationContext();
     }
     if (!response.ok) {
       if (response.status === 401 && includeAuth) {
-        await recoverUnauthorizedMobileSession();
+        await awaitRequestStep(
+          recoverUnauthorizedMobileSession(authenticationContext),
+          requestController.signal,
+        );
         throw customerError('Your session ended. Sign in again to continue.');
       }
       let errorMessage: string | undefined;
       try {
-        const parsed = errorEnvelopeSchema.safeParse(await response.json());
+        const parsed = errorEnvelopeSchema.safeParse(
+          await awaitRequestStep(response.json(), requestController.signal),
+        );
         if (parsed.success) errorMessage = parsed.data.error.message;
       } catch {
+        if (requestController.signal.aborted) throw new MobileRequestAbortedError();
         /* Use safe fallback. */
       }
+      requireCurrentAuthenticationContext();
       throw customerError(
         errorMessage ?? 'BoomerBuddy could not complete that request.',
         response.status,
@@ -102,21 +179,25 @@ export async function mobileRequest<T>(
     }
     if (response.status === 204) return undefined as T;
     try {
-      return (await response.json()) as T;
+      const body = (await awaitRequestStep(response.json(), requestController.signal)) as T;
+      requireCurrentAuthenticationContext();
+      return body;
     } catch {
+      if (requestController.signal.aborted) throw new MobileRequestAbortedError();
       throw customerError('BoomerBuddy received an unexpected response. Please try again.');
     }
   } catch (error) {
-    if (timeoutController?.signal.aborted) {
+    if (abortCause === 'timeout') {
       throw customerError(
         'BoomerBuddy did not respond in time. Check your connection and try again.',
       );
     }
     if (error instanceof MobileCustomerError) throw error;
-    if (callerSignal?.aborted) throw customerError('The request was canceled. Please try again.');
+    if (abortCause === 'caller') throw customerError('The request was canceled. Please try again.');
     throw customerError('BoomerBuddy could not connect. Check your connection and try again.');
   } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
+    clearTimeout(timeout);
+    callerSignal?.removeEventListener('abort', abortForCaller);
   }
 }
 

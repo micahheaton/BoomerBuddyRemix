@@ -17,7 +17,8 @@
   "overrides": {
     "metro": "0.84.5",
     "metro-config": "0.84.5",
-    "metro-transform-worker": "0.84.5"
+    "metro-transform-worker": "0.84.5",
+    "react-native": "0.86.3"
   },
   "scripts": {
     "dev": "concurrently -k -n api,web,hq -c blue,green,magenta \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:hq\"",
@@ -57,11 +58,12 @@
     "verify:run3-1-deps": "node scripts/verify-run3-1-dependencies.mjs",
     "verify:production-auth-routes": "cross-env BB_PRODUCTION_AUTH_ROUTES_ONLY=true node scripts/verify-founding-household-production-ui.mjs",
     "verify:production-ui": "node scripts/verify-founding-household-production-ui.mjs",
+    "verify:next-resource-auth": "node scripts/verify-next-resource-auth.mjs",
     "replit:build": "node scripts/replit-service.mjs build",
     "replit:start": "node scripts/replit-service.mjs start",
     "test": "npm run test:unit && npm run test:integration && npm run test:security && npm run test:eval",
     "audit:deps": "npm audit --audit-level=high",
-    "verify": "npm run verify:secrets && npm run verify:runtime-deps && npm run typecheck && npm run lint && npm run format:check && npm test && npm run build && npm run verify:production-ui"
+    "verify": "npm run verify:secrets && npm run verify:runtime-deps && npm run typecheck && npm run lint && npm run format:check && npm test && npm run build && npm run verify:production-ui && npm run verify:next-resource-auth"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
@@ -84,6 +86,7 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
     "vitest": "4.1.10",
-    "wait-on": "9.1.0"
+    "wait-on": "9.1.0",
+    "ws": "8.21.3"
   }
 }

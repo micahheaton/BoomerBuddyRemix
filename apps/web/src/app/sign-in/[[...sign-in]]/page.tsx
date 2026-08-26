@@ -8,6 +8,7 @@ import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contract
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
 import {
+  clearCustomerSessionState,
   clearClerkSessionWhenLoaded,
   createSessionRecoveryRetryController,
   productionSessionRecoveryPath,
@@ -63,6 +64,7 @@ function DevelopmentSignIn() {
         method: 'POST',
         body: JSON.stringify({ personaId }),
       });
+      clearCustomerSessionState(window.sessionStorage);
       setSelectedHouseholdId(response.principal.households[0]?.id ?? '');
       router.push('/member');
       router.refresh();
@@ -249,7 +251,10 @@ function ProductionSessionRecovery() {
       createSessionRecoveryRetryController({
         clearClerkSession: () =>
           clearClerkSessionWhenLoaded({
-            clearClerkSession: () => clerk.signOut(),
+            clearClerkSession: async () => {
+              clearCustomerSessionState(window.sessionStorage);
+              await clerk.signOut();
+            },
             isLoaded: () => clerk.loaded,
           }),
         confirmNavigation: () =>

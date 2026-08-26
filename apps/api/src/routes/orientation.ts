@@ -1,13 +1,20 @@
 import { assertAuthorized } from '@boomerbuddy/authorization';
 import {
   completeOrientationStepRequestSchema,
+  enrollProtectedSelfRequestSchema,
+  enrollProtectedSelfResponseSchema,
   entitlementResponseSchema,
   opaqueIdSchema,
   orientationResponseSchema,
   orientationStepSchema,
+  protectedSelfEnrollmentOperationKeySchema,
+  protectedSelfEnrollmentStatusResponseSchema,
   safeWordRequestSchema,
+  withdrawProtectedSelfRequestSchema,
+  withdrawProtectedSelfResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError, ids } from '@boomerbuddy/domain';
+import { protectedSelfEnrollmentConsent } from '@boomerbuddy/persistence';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
@@ -23,6 +30,33 @@ import { orientationDto } from '../mappers';
 
 const subjectQuerySchema = z.object({ subjectPersonId: opaqueIdSchema.optional() }).strict();
 const stepParamsSchema = z.object({ stepKey: orientationStepSchema });
+const noProtectedSelfTargetSchema = z.object({}).strict();
+
+function protectedSelfOperationKey(request: FastifyRequest, action: 'enroll' | 'withdraw'): string {
+  const raw = request.headers['idempotency-key'];
+  const parsed = protectedSelfEnrollmentOperationKeySchema.safeParse(raw);
+  if (!parsed.success || !parsed.data.startsWith(`protected-self-${action}:`)) {
+    throw new DomainError(
+      'invalid_input',
+      `One action-bound protected-self ${action} Idempotency-Key header is required`,
+    );
+  }
+  return parsed.data;
+}
+
+async function protectedSelfAuth(request: FastifyRequest, context: ApiContext) {
+  const auth = await authenticate(
+    request,
+    context.repositories.sessions,
+    context.config,
+    ['customer', 'mobile'],
+    context.now(),
+  );
+  if (auth.audience !== 'customer' && auth.audience !== 'mobile') {
+    throw new DomainError('not_authenticated', 'A customer or mobile session is required');
+  }
+  return { auth, audience: auth.audience, household: selectedHousehold(auth, request) };
+}
 
 async function orientationScope(request: FastifyRequest, context: ApiContext, auth: AuthContext) {
   const household = selectedHousehold(auth, request);
@@ -52,6 +86,101 @@ async function orientationAuth(request: FastifyRequest, context: ApiContext) {
 }
 
 export function registerOrientationRoutes(app: FastifyInstance, context: ApiContext): void {
+  app.get('/v1/protected-enrollment', async (request) => {
+    noProtectedSelfTargetSchema.parse(request.query);
+    const { auth, household } = await protectedSelfAuth(request, context);
+    const status = await context.repositories.entitlements.protectedSelfStatus({
+      householdId: household.householdId,
+      personId: auth.principal.personId,
+      now: context.now(),
+    });
+    const documents = protectedSelfEnrollmentConsent.documents;
+    return protectedSelfEnrollmentStatusResponseSchema.parse({
+      householdId: status.householdId,
+      personId: status.personId,
+      enrollment: {
+        state: status.state,
+        effectiveAccess: status.effectiveAccess,
+        ...(status.consentVersion === undefined ? {} : { consentVersion: status.consentVersion }),
+      },
+      eligibility: status.eligibility,
+      withdrawalAvailable: status.withdrawalAvailable,
+      consent: {
+        version: protectedSelfEnrollmentConsent.version,
+        disclosure: {
+          version: documents.disclosureVersion,
+          text: protectedSelfEnrollmentConsent.disclosureText,
+          digest: documents.disclosureDigest,
+        },
+        policy: {
+          version: documents.policyVersion,
+          text: protectedSelfEnrollmentConsent.policyText,
+          digest: documents.policyDigest,
+        },
+      },
+    });
+  });
+
+  app.post('/v1/protected-enrollment', async (request, reply) => {
+    noProtectedSelfTargetSchema.parse(request.query);
+    const { auth, audience, household } = await protectedSelfAuth(request, context);
+    assertMutationOrigin(request, context.config, auth);
+    const body = enrollProtectedSelfRequestSchema.parse(request.body);
+    const result = await context.repositories.entitlements.enrollProtectedSelfIdempotent({
+      householdId: household.householdId,
+      personId: auth.principal.personId,
+      actorPersonId: auth.principal.personId,
+      consentVersion: body.consentVersion,
+      disclosureVersion: body.disclosureVersion,
+      disclosureDigest: body.disclosureDigest,
+      policyVersion: body.policyVersion,
+      policyDigest: body.policyDigest,
+      operationKey: protectedSelfOperationKey(request, 'enroll'),
+      actorIdentityId: auth.resolved.identityId,
+      actorIssuer: auth.resolved.issuer,
+      actorIdentitySubject: auth.resolved.identitySubject,
+      sessionId: auth.principal.sessionId,
+      audience,
+      correlationId: correlationId(request),
+      now: context.now(),
+    });
+    return reply.code(result.changed ? 201 : 200).send(
+      enrollProtectedSelfResponseSchema.parse({
+        state: 'enrolled',
+        consentVersion: result.enrollment.consentVersion,
+        changed: result.changed,
+        reused: result.reused,
+      }),
+    );
+  });
+
+  app.post('/v1/protected-enrollment/withdraw', async (request, reply) => {
+    noProtectedSelfTargetSchema.parse(request.query);
+    const { auth, audience, household } = await protectedSelfAuth(request, context);
+    assertMutationOrigin(request, context.config, auth);
+    withdrawProtectedSelfRequestSchema.parse(request.body);
+    const result = await context.repositories.entitlements.withdrawProtectedSelfIdempotent({
+      householdId: household.householdId,
+      personId: auth.principal.personId,
+      actorPersonId: auth.principal.personId,
+      operationKey: protectedSelfOperationKey(request, 'withdraw'),
+      actorIdentityId: auth.resolved.identityId,
+      actorIssuer: auth.resolved.issuer,
+      actorIdentitySubject: auth.resolved.identitySubject,
+      sessionId: auth.principal.sessionId,
+      audience,
+      correlationId: correlationId(request),
+      now: context.now(),
+    });
+    return reply.send(
+      withdrawProtectedSelfResponseSchema.parse({
+        state: 'not_enrolled',
+        changed: result.changed,
+        reused: result.reused,
+      }),
+    );
+  });
+
   app.get('/v1/orientation', async (request) => {
     const { auth, household, subjectPersonId } = await orientationAuth(request, context);
     assertAuthorized({

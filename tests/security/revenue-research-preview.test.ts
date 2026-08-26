@@ -214,7 +214,7 @@ describe('local-only revenue research preview', () => {
           'apps/web/src/app/page.tsx',
           'apps/web/src/app/pricing/page.tsx',
           'apps/web/src/components/public-shell.tsx',
-          'apps/web/src/app/member/billing/page.tsx',
+          'apps/web/src/app/member/billing/page-client.tsx',
         ].map(source),
       )
     ).join('\n');

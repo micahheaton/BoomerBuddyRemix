@@ -14,6 +14,7 @@ export * from './hq';
 export * from './knowledge';
 export * from './orientation';
 export * from './public-checks';
+export * from './protected-enrollment';
 export * from './messaging';
 export * from './referral-credits';
 export * from './support-receipts';

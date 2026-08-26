@@ -1,8 +1,10 @@
 import Link from 'next/link';
 
 import { EditorialIntelligenceBoard } from '../../components/editorial-intelligence';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
-export default function EditorialPage() {
+export default async function EditorialPage() {
+  await protectProductionHqResource();
   const localOnlyEnabled = process.env.NODE_ENV !== 'production';
   return (
     <main className="hq-content" id="hq-main">

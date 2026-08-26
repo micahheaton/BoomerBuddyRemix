@@ -57,6 +57,8 @@ export interface BuildAppOptions {
 
 const retentionBatchSize = 100;
 const retentionMaxBatchesPerSweep = 10;
+const mobileBearerAuthorization = /^Bearer [A-Za-z0-9._~-]+$/u;
+const authenticatedPrivateCacheControl = 'private, no-store, max-age=0';
 
 function unrefTimer(timer: unknown): void {
   if (
@@ -341,6 +343,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.addHook('onRequest', (request, reply, done) => {
     void reply.header('x-request-id', request.id);
     done();
+  });
+  app.addHook('onSend', (request, reply, payload, done) => {
+    const authorization = request.headers.authorization;
+    if (typeof authorization === 'string' && mobileBearerAuthorization.test(authorization)) {
+      void reply.header('Cache-Control', authenticatedPrivateCacheControl);
+    }
+    done(null, payload);
   });
   app.addHook('onResponse', (request, reply, done) => {
     logger.info('api.request_completed', {

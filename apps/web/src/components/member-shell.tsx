@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { apiRequest, setSelectedHouseholdId } from '../lib/api';
+import { apiRequest } from '../lib/api';
+import { clearCustomerSessionState } from '../lib/auth-recovery';
 import { Brand } from './brand';
 import { householdScopeSummary, useHousehold } from './household-context';
 import { ProductionSignOut } from './production-sign-out';
@@ -34,7 +35,7 @@ export function MemberHeader() {
     try {
       await apiRequest('/v1/sessions/current', { method: 'DELETE' });
     } finally {
-      setSelectedHouseholdId('');
+      clearCustomerSessionState(window.sessionStorage);
       router.push('/sign-in');
       router.refresh();
     }
@@ -46,6 +47,7 @@ export function MemberHeader() {
         <Brand href="/member" />
         <nav className="member-nav" aria-label="Member navigation">
           <Link href="/member">Home</Link>
+          <Link href="/member/protection">Protected access</Link>
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}

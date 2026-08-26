@@ -30,6 +30,7 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
       - run: npm run verify:production-ui
+      - run: npm run verify:next-resource-auth
       - run: npm run build -w @boomerbuddy/worker
       - run: npm run verify:run3-1-deps
         env:

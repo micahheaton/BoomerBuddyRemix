@@ -38,6 +38,7 @@ export type RootStackParamList = {
   Result: { check: CheckResult };
   History: undefined;
   Family: undefined;
+  ProtectedAccess: undefined;
   Orientation: undefined;
   HelpPolicies: undefined;
   Support: undefined;

@@ -83,9 +83,12 @@ screenshots, or logs:
 ## Import the canonical source
 
 1. In the company-controlled Git host, verify the authorized annotated tag and commit from the
-   external receipt. Confirm the remote is exactly
-   `https://github.com/micahheaton/BoomerBuddyRemix.git`. Copy only that repository URL and tag name,
-   never a token. A planned tag is not evidence before the two-stage sequence above finishes.
+   external receipt. Confirm the canonical repository identity is exactly
+   `https://github.com/micahheaton/BoomerBuddyRemix.git`. For the checkout remote, use exactly that
+   credential-free HTTPS URL with an HTTPS-compatible read-only credential or exactly
+   `git@github.com:micahheaton/BoomerBuddyRemix.git` with the preferred read-only deploy key. Copy
+   only the repository URL and tag name, never a token. A planned tag is not evidence before the
+   two-stage sequence above finishes.
 2. Only when Replit import is the next authorized action, use **Import → GitHub**, connect the company
    organization with least repository scope, select only `micahheaton/BoomerBuddyRemix`, and import it
    into the exact 2.0 project named in the receipt. Never import, connect, or synchronize the legacy

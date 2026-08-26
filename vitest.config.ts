@@ -9,7 +9,7 @@ export default defineConfig({
       {
         test: {
           name: 'unit',
-          include: ['packages/**/*.test.ts'],
+          include: ['packages/**/*.test.ts', 'apps/**/*.test.ts'],
           exclude: ['packages/persistence/**/*.test.ts'],
         },
       },

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -15,6 +15,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useHostedAuth } from '@clerk/expo/hosted-auth';
+import * as Crypto from 'expo-crypto';
 import type {
   CheckKind,
   CheckListResponse,
@@ -26,17 +27,55 @@ import type {
   InvitationPreviewResponse,
   MeResponse,
   OrientationStateDto,
+  ProtectedSelfEnrollmentStatusResponse,
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
-import { buildUserInitiatedInvitationShareDraft } from '@boomerbuddy/contracts';
+import {
+  apiPaths,
+  buildUserInitiatedInvitationShareDraft,
+  meResponseSchema,
+} from '@boomerbuddy/contracts';
 import { MobileCustomerError, mobileRequest, readableError } from './api';
+import {
+  emptyHouseholdResource,
+  householdBoundDraftValue,
+  householdResourceIsVisible,
+  householdResourceReducer,
+  type HouseholdBoundDraft,
+} from './household-resource';
 import {
   mobileHouseholdScopeSummary,
   useMobileHousehold,
   useOptionalMobileHousehold,
 } from './household';
+import {
+  historyContinuationIsCurrent,
+  mergeHistoryContinuation,
+  type HistoryContinuation,
+} from './history-resource';
 import { startMobileHostedSignIn } from './hosted-auth';
+import {
+  emptyInvitationReview,
+  invitationAcceptanceBinding,
+  invitationReviewReducer,
+  type InvitationReviewState,
+} from './invitation-review';
 import type { NativeEntrySignal, RootStackParamList } from './navigation';
+import {
+  createProtectedAccessEnrollmentOperation,
+  createProtectedAccessWithdrawalOperation,
+  isDefinitiveProtectedAccessMutationFailure,
+  parseProtectedAccessEnrollment,
+  parseProtectedAccessStatus,
+  parseProtectedAccessWithdrawal,
+  protectedAccessAttemptIsCurrent,
+  protectedAccessEligibilityMessage,
+  protectedAccessOperationIsResolvedByStatus,
+  protectedAccessOperationSlot,
+  protectedAccessTruthAnnouncement,
+  type ProtectedAccessAttempt,
+  type ProtectedAccessOperation,
+} from './protected-access-resource';
 import { appStyles as s } from './theme';
 
 const customerWebSignInUrl = 'https://app.boomerbuddy.net/sign-in';
@@ -407,6 +446,14 @@ export function HomeScreen({
         ) : !isUnassigned ? (
           <Text style={s.muted}>History is unavailable for this household.</Text>
         ) : null}
+        {!isUnassigned ? (
+          <ActionButton
+            kind="secondary"
+            title="Protected access"
+            accessibilityHint="Review or change protected-adult access for yourself in the selected household"
+            onPress={() => navigation.navigate('ProtectedAccess')}
+          />
+        ) : null}
         {canUseFamily ? (
           <ActionButton
             kind="secondary"
@@ -494,6 +541,575 @@ export function HomeScreen({
           emergency services if someone is in immediate danger.
         </Text>
       </View>
+    </Screen>
+  );
+}
+
+export function ProtectedAccessScreen({
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'ProtectedAccess'>): React.ReactElement {
+  const { principal, selectedHouseholdId, selectedHouseholdName, selectedScope, replacePrincipal } =
+    useMobileHousehold();
+  const [statusState, dispatchStatus] = useReducer(
+    householdResourceReducer<ProtectedSelfEnrollmentStatusResponse>,
+    emptyHouseholdResource<ProtectedSelfEnrollmentStatusResponse>(),
+  );
+  const [operations, setOperations] = useState<Readonly<Record<string, ProtectedAccessOperation>>>(
+    {},
+  );
+  const [enrollmentAcceptance, setEnrollmentAcceptance] = useState<
+    Readonly<Record<string, boolean>>
+  >({});
+  const [withdrawalAcknowledgment, setWithdrawalAcknowledgment] = useState<
+    Readonly<Record<string, boolean>>
+  >({});
+  const [errorState, setErrorState] = useState<HouseholdBoundDraft<string>>();
+  const [announcementState, setAnnouncementState] = useState<HouseholdBoundDraft<string>>();
+  const [busyAttempt, setBusyAttempt] = useState<ProtectedAccessAttempt>();
+  const selectedHouseholdIdRef = useRef(selectedHouseholdId);
+  useLayoutEffect(() => {
+    selectedHouseholdIdRef.current = selectedHouseholdId;
+  }, [selectedHouseholdId]);
+  const householdGenerationRef = useRef(0);
+  const statusRequestIdRef = useRef(0);
+  const statusAbortRef = useRef<AbortController | undefined>(undefined);
+  const actionRequestIdRef = useRef(0);
+  const actionAbortRef = useRef<AbortController | undefined>(undefined);
+
+  const loadStatus = useCallback(
+    async (
+      householdId: string,
+      householdGeneration: number,
+      controller: AbortController,
+    ): Promise<ProtectedSelfEnrollmentStatusResponse | undefined> => {
+      const requestId = ++statusRequestIdRef.current;
+      dispatchStatus({ type: 'started', householdId, requestId });
+      const requestIsCurrent = (): boolean =>
+        !controller.signal.aborted &&
+        selectedHouseholdIdRef.current === householdId &&
+        householdGenerationRef.current === householdGeneration &&
+        statusRequestIdRef.current === requestId;
+      try {
+        const raw = await mobileRequest<unknown>(apiPaths.protectedEnrollment, {
+          headers: { 'X-BB-Household-Id': householdId },
+          signal: controller.signal,
+        });
+        const status = parseProtectedAccessStatus(raw, householdId, principal.personId);
+        if (!requestIsCurrent()) return undefined;
+        setOperations((current) => {
+          let changed = false;
+          const next = { ...current };
+          for (const action of ['enroll', 'withdraw'] as const) {
+            const slot = protectedAccessOperationSlot(householdId, action);
+            const operation = current[slot];
+            if (operation && protectedAccessOperationIsResolvedByStatus(operation, status)) {
+              delete next[slot];
+              changed = true;
+            }
+          }
+          return changed ? next : current;
+        });
+        dispatchStatus({ type: 'succeeded', householdId, requestId, value: status });
+        return status;
+      } catch (caught) {
+        if (!requestIsCurrent()) return undefined;
+        dispatchStatus({
+          type: 'failed',
+          householdId,
+          requestId,
+          message: readableError(caught),
+        });
+        return undefined;
+      } finally {
+        if (statusAbortRef.current === controller) statusAbortRef.current = undefined;
+      }
+    },
+    [principal.personId],
+  );
+
+  const beginStatusLoad = useCallback(
+    (householdId: string, householdGeneration: number): void => {
+      statusAbortRef.current?.abort();
+      const controller = new AbortController();
+      statusAbortRef.current = controller;
+      void loadStatus(householdId, householdGeneration, controller);
+    },
+    [loadStatus],
+  );
+
+  useEffect(() => {
+    const householdId = selectedHouseholdId;
+    const householdGeneration = ++householdGenerationRef.current;
+    statusRequestIdRef.current += 1;
+    statusAbortRef.current?.abort();
+    statusAbortRef.current = undefined;
+    actionRequestIdRef.current += 1;
+    actionAbortRef.current?.abort();
+    actionAbortRef.current = undefined;
+    void Promise.resolve().then(() => {
+      if (householdGenerationRef.current !== householdGeneration) return;
+      setBusyAttempt(undefined);
+      setErrorState(undefined);
+      setAnnouncementState(undefined);
+      if (!householdId) dispatchStatus({ type: 'reset' });
+      else beginStatusLoad(householdId, householdGeneration);
+    });
+    if (!householdId) {
+      return () => undefined;
+    }
+    return () => {
+      statusAbortRef.current?.abort();
+      statusAbortRef.current = undefined;
+      actionRequestIdRef.current += 1;
+      actionAbortRef.current?.abort();
+      actionAbortRef.current = undefined;
+      if (householdGenerationRef.current === householdGeneration) {
+        householdGenerationRef.current += 1;
+      }
+    };
+  }, [beginStatusLoad, selectedHouseholdId]);
+
+  const visibleStatusState = householdResourceIsVisible(statusState, selectedHouseholdId)
+    ? statusState
+    : undefined;
+  const status = visibleStatusState?.status === 'ready' ? visibleStatusState.value : undefined;
+  const enrollSlot = protectedAccessOperationSlot(selectedHouseholdId, 'enroll');
+  const withdrawSlot = protectedAccessOperationSlot(selectedHouseholdId, 'withdraw');
+  const pendingEnroll =
+    operations[enrollSlot]?.action === 'enroll' ? operations[enrollSlot] : undefined;
+  const pendingWithdraw =
+    operations[withdrawSlot]?.action === 'withdraw' ? operations[withdrawSlot] : undefined;
+  const enrollmentAccepted =
+    pendingEnroll !== undefined || enrollmentAcceptance[selectedHouseholdId] === true;
+  const withdrawalAcknowledged =
+    pendingWithdraw !== undefined || withdrawalAcknowledgment[selectedHouseholdId] === true;
+  const actionError = householdBoundDraftValue(errorState, selectedHouseholdId) ?? '';
+  const announcement = householdBoundDraftValue(announcementState, selectedHouseholdId) ?? '';
+  const busy = busyAttempt?.householdId === selectedHouseholdId ? busyAttempt.action : '';
+
+  function clearOperation(operation: ProtectedAccessOperation): void {
+    const slot = protectedAccessOperationSlot(operation.householdId, operation.action);
+    setOperations((current) => {
+      if (current[slot]?.key !== operation.key) return current;
+      const next = { ...current };
+      delete next[slot];
+      return next;
+    });
+  }
+
+  function attemptIsCurrent(attempt: ProtectedAccessAttempt): boolean {
+    return protectedAccessAttemptIsCurrent(attempt, {
+      householdId: selectedHouseholdIdRef.current,
+      householdGeneration: householdGenerationRef.current,
+      requestId: actionRequestIdRef.current,
+    });
+  }
+
+  async function refreshPrincipalAfterMutation(householdId: string): Promise<void> {
+    const refreshed = meResponseSchema.parse(await mobileRequest<unknown>('/v1/me'));
+    if (!refreshed.principal.households.some((scope) => scope.id === householdId)) {
+      throw new MobileCustomerError(
+        'The changed household is not available in the refreshed account session.',
+      );
+    }
+    const currentlySelected = selectedHouseholdIdRef.current;
+    const preferredHouseholdId = refreshed.principal.households.some(
+      (scope) => scope.id === currentlySelected,
+    )
+      ? currentlySelected
+      : householdId;
+    const nextHouseholdId = replacePrincipal(refreshed.principal, preferredHouseholdId);
+    if (currentlySelected === householdId && nextHouseholdId !== householdId) {
+      throw new MobileCustomerError('The changed household could not be selected safely.');
+    }
+  }
+
+  async function submitOperation(operation: ProtectedAccessOperation): Promise<void> {
+    if (busyAttempt !== undefined || actionAbortRef.current !== undefined) return;
+    const attempt: ProtectedAccessAttempt = {
+      householdId: operation.householdId,
+      householdGeneration: householdGenerationRef.current,
+      requestId: ++actionRequestIdRef.current,
+      action: operation.action,
+      operationKey: operation.key,
+    };
+    const controller = new AbortController();
+    actionAbortRef.current = controller;
+    setBusyAttempt(attempt);
+    setErrorState(undefined);
+    setAnnouncementState(undefined);
+    let mutationConfirmed = false;
+    try {
+      const raw = await mobileRequest<unknown>(
+        operation.action === 'enroll'
+          ? apiPaths.protectedEnrollment
+          : `${apiPaths.protectedEnrollment}/withdraw`,
+        {
+          method: 'POST',
+          headers: {
+            'Idempotency-Key': operation.key,
+            'X-BB-Household-Id': operation.householdId,
+          },
+          body: JSON.stringify(operation.request),
+          signal: controller.signal,
+        },
+      );
+      if (operation.action === 'enroll') parseProtectedAccessEnrollment(raw);
+      else parseProtectedAccessWithdrawal(raw);
+      mutationConfirmed = true;
+      clearOperation(operation);
+      if (operation.action === 'enroll') {
+        setEnrollmentAcceptance((current) => ({
+          ...current,
+          [operation.householdId]: false,
+        }));
+      } else {
+        setWithdrawalAcknowledgment((current) => ({
+          ...current,
+          [operation.householdId]: false,
+        }));
+      }
+      let refreshedStatus: ProtectedSelfEnrollmentStatusResponse | undefined;
+      if (attemptIsCurrent(attempt)) {
+        statusAbortRef.current?.abort();
+        const statusController = new AbortController();
+        statusAbortRef.current = statusController;
+        refreshedStatus = await loadStatus(
+          operation.householdId,
+          attempt.householdGeneration,
+          statusController,
+        );
+      }
+      let principalRefreshFailed = false;
+      try {
+        await refreshPrincipalAfterMutation(operation.householdId);
+      } catch {
+        principalRefreshFailed = true;
+      }
+      if (attemptIsCurrent(attempt)) {
+        if (refreshedStatus) {
+          setAnnouncementState({
+            householdId: operation.householdId,
+            value: protectedAccessTruthAnnouncement(operation.action, refreshedStatus),
+          });
+        }
+        if (!refreshedStatus) {
+          setErrorState({
+            householdId: operation.householdId,
+            value:
+              'The request returned, but current protected-adult access could not be confirmed. Refresh status before continuing.',
+          });
+        } else if (principalRefreshFailed) {
+          setErrorState({
+            householdId: operation.householdId,
+            value:
+              'Current protected-adult status is confirmed, but account access could not be refreshed. Refresh status before continuing.',
+          });
+        }
+      }
+    } catch (caught) {
+      if (mutationConfirmed) return;
+      const definitive =
+        caught instanceof MobileCustomerError &&
+        isDefinitiveProtectedAccessMutationFailure(caught.status);
+      if (definitive) clearOperation(operation);
+      if (!attemptIsCurrent(attempt)) return;
+      setErrorState({
+        householdId: operation.householdId,
+        value: definitive
+          ? readableError(caught)
+          : `${readableError(caught)} The outcome is uncertain. Retry the exact same request safely.`,
+      });
+      if (definitive) {
+        beginStatusLoad(operation.householdId, attempt.householdGeneration);
+      }
+    } finally {
+      if (actionAbortRef.current === controller) actionAbortRef.current = undefined;
+      setBusyAttempt((current) =>
+        current?.operationKey === attempt.operationKey ? undefined : current,
+      );
+    }
+  }
+
+  function enrollSelf(): void {
+    if (!selectedHouseholdId || !status || actionAbortRef.current !== undefined) return;
+    if (!pendingEnroll && !enrollmentAccepted) return;
+    try {
+      const operation =
+        pendingEnroll ??
+        createProtectedAccessEnrollmentOperation(selectedHouseholdId, status, Crypto.randomUUID());
+      setOperations((current) => ({
+        ...current,
+        [protectedAccessOperationSlot(selectedHouseholdId, 'enroll')]: operation,
+      }));
+      void submitOperation(operation);
+    } catch (caught) {
+      setErrorState({ householdId: selectedHouseholdId, value: readableError(caught) });
+    }
+  }
+
+  function withdrawSelf(): void {
+    if (!selectedHouseholdId || !status || actionAbortRef.current !== undefined) return;
+    if (!pendingWithdraw && !withdrawalAcknowledged) return;
+    try {
+      const operation =
+        pendingWithdraw ??
+        createProtectedAccessWithdrawalOperation(selectedHouseholdId, status, Crypto.randomUUID());
+      setOperations((current) => ({
+        ...current,
+        [protectedAccessOperationSlot(selectedHouseholdId, 'withdraw')]: operation,
+      }));
+      void submitOperation(operation);
+    } catch (caught) {
+      setErrorState({ householdId: selectedHouseholdId, value: readableError(caught) });
+    }
+  }
+
+  const reviewedConsent = pendingEnroll?.reviewedConsent ?? status?.consent;
+  const canContinueOrientation =
+    status?.enrollment.effectiveAccess === true &&
+    selectedScope?.isProtectedMember === true &&
+    selectedScope.capabilities.includes('orientation:use');
+  const canOpenCheck =
+    status?.enrollment.effectiveAccess === true &&
+    selectedScope?.isProtectedMember === true &&
+    (selectedScope.capabilities.includes('check:text') ||
+      selectedScope.capabilities.includes('check:url'));
+
+  return (
+    <Screen>
+      <Text style={s.pill}>Your consent</Text>
+      <Text accessibilityRole="header" style={s.title}>
+        Protected-adult access
+      </Text>
+      <Text style={s.body}>
+        Review and choose protected-adult access for yourself in{' '}
+        <Text style={s.label}>{selectedHouseholdName || 'the selected household'}</Text>. Paying for
+        or managing a household never lets someone make this choice for another adult.
+      </Text>
+      <View style={s.banner}>
+        <Text style={s.label}>No purchase or message</Text>
+        <Text style={s.muted}>
+          This screen does not charge a card, buy or change a plan, invite anyone, or send a
+          message. It changes only your own protected-adult consent in the selected household.
+        </Text>
+      </View>
+      {announcement ? (
+        <Text accessibilityLiveRegion="polite" style={s.body}>
+          {announcement}
+        </Text>
+      ) : null}
+      {actionError ? <ErrorText message={actionError} /> : null}
+
+      {!selectedHouseholdId ? (
+        <View style={s.card}>
+          <Text style={s.heading}>A household is required</Text>
+          <Text style={s.body}>
+            Join a household before choosing protected-adult access for yourself.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Return home"
+            onPress={() => navigation.navigate('Home')}
+          />
+        </View>
+      ) : visibleStatusState?.status === 'error' ? (
+        <View style={s.card}>
+          <ErrorText message={visibleStatusState.message} />
+          <ActionButton
+            kind="secondary"
+            title="Try loading protected access again"
+            onPress={() => {
+              setErrorState(undefined);
+              beginStatusLoad(selectedHouseholdId, householdGenerationRef.current);
+            }}
+          />
+        </View>
+      ) : !status ? (
+        <Loading label="Checking your protected-adult access..." />
+      ) : (
+        <>
+          <View style={s.card} accessibilityLiveRegion="polite">
+            <Text style={s.heading}>Current status</Text>
+            {status.enrollment.state === 'enrolled' ? (
+              <>
+                <Text style={s.body}>
+                  <Text style={s.label}>Enrolled for this household. </Text>
+                  {status.enrollment.effectiveAccess
+                    ? "Protected-adult features are available under the household's current access."
+                    : 'Your enrollment remains recorded, but protected-adult features are unavailable while household access is inactive.'}
+                </Text>
+                <Text style={s.muted}>
+                  Recorded consent version: {status.enrollment.consentVersion}
+                </Text>
+              </>
+            ) : (
+              <Text style={s.body}>
+                <Text style={s.label}>Not enrolled. </Text>
+                {protectedAccessEligibilityMessage[status.eligibility]}
+              </Text>
+            )}
+            <ActionButton
+              kind="secondary"
+              title="Refresh status"
+              disabled={busy !== ''}
+              onPress={() => {
+                setErrorState(undefined);
+                beginStatusLoad(selectedHouseholdId, householdGenerationRef.current);
+              }}
+            />
+          </View>
+
+          {status.enrollment.state === 'not_enrolled' && reviewedConsent ? (
+            <View style={s.card}>
+              <Text style={s.heading}>Review before enrolling</Text>
+              <Text style={s.muted}>Consent version: {reviewedConsent.version}</Text>
+              <View
+                accessibilityLabel={`Protected-adult disclosure ${reviewedConsent.disclosure.version}`}
+                style={s.banner}
+              >
+                <Text style={s.label}>What enrollment does</Text>
+                <Text style={s.body}>{reviewedConsent.disclosure.text}</Text>
+                <Text style={s.muted}>
+                  Disclosure version: {reviewedConsent.disclosure.version}
+                </Text>
+              </View>
+              <View
+                accessibilityLabel={`Protected-adult policy ${reviewedConsent.policy.version}`}
+                style={s.banner}
+              >
+                <Text style={s.label}>Consent and withdrawal policy</Text>
+                <Text style={s.body}>{reviewedConsent.policy.text}</Text>
+                <Text style={s.muted}>Policy version: {reviewedConsent.policy.version}</Text>
+              </View>
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityLabel="I choose protected-adult access for myself in this exact household and accept the disclosure and policy shown"
+                accessibilityState={{
+                  checked: enrollmentAccepted,
+                  disabled: busy !== '' || pendingEnroll !== undefined,
+                }}
+                disabled={busy !== '' || pendingEnroll !== undefined}
+                onPress={() =>
+                  setEnrollmentAcceptance((current) => ({
+                    ...current,
+                    [selectedHouseholdId]: !enrollmentAccepted,
+                  }))
+                }
+                style={[s.choice, enrollmentAccepted && s.choiceSelected]}
+              >
+                <View style={[s.radio, enrollmentAccepted && s.radioSelected]} />
+                <Text style={s.body}>
+                  I am choosing protected-adult access for myself in this exact household, and I
+                  accept the disclosure and policy shown above.
+                </Text>
+              </Pressable>
+              {pendingEnroll ? (
+                <Text accessibilityLiveRegion="polite" style={s.muted}>
+                  The previous result was uncertain. Retry reuses the exact household, consent
+                  versions, evidence fingerprints, request body, and idempotency key you already
+                  reviewed.
+                </Text>
+              ) : null}
+              <ActionButton
+                title={
+                  busy === 'enroll'
+                    ? 'Recording consent...'
+                    : pendingEnroll
+                      ? 'Retry exact enrollment request'
+                      : 'Enroll myself'
+                }
+                disabled={
+                  busy !== '' ||
+                  (!pendingEnroll && (!enrollmentAccepted || status.eligibility !== 'available'))
+                }
+                accessibilityHint="Records protected-adult consent only for your account in the selected household"
+                onPress={enrollSelf}
+              />
+              <Text style={s.muted}>
+                This does not charge a card, change the subscription, invite anyone, or enroll
+                another person.
+              </Text>
+            </View>
+          ) : status.enrollment.state === 'enrolled' ? (
+            <>
+              <View style={s.card}>
+                <Text style={s.heading}>Continue your safety setup</Text>
+                {status.enrollment.effectiveAccess ? (
+                  <View style={s.navGrid}>
+                    {canContinueOrientation ? (
+                      <ActionButton
+                        title="Continue orientation"
+                        onPress={() => navigation.navigate('Orientation')}
+                      />
+                    ) : null}
+                    {canOpenCheck ? (
+                      <ActionButton
+                        kind="secondary"
+                        title="Open Check"
+                        onPress={() => navigation.navigate('Check')}
+                      />
+                    ) : null}
+                  </View>
+                ) : (
+                  <Text style={s.body}>
+                    Protected features remain unavailable until this household has effective access.
+                    Your recorded consent can still be withdrawn below.
+                  </Text>
+                )}
+              </View>
+              <View style={s.card}>
+                <Text style={s.heading}>Withdraw protected-adult consent</Text>
+                <Text style={s.body}>
+                  Withdrawal ends your own protected-adult access in this household and releases
+                  your seat. It does not cancel billing, remove your household membership, delete
+                  Check records, or change another person&apos;s consent.
+                </Text>
+                <Pressable
+                  accessibilityRole="checkbox"
+                  accessibilityLabel="I understand the effects and want to withdraw my own protected-adult consent"
+                  accessibilityState={{
+                    checked: withdrawalAcknowledged,
+                    disabled: busy !== '' || pendingWithdraw !== undefined,
+                  }}
+                  disabled={busy !== '' || pendingWithdraw !== undefined}
+                  onPress={() =>
+                    setWithdrawalAcknowledgment((current) => ({
+                      ...current,
+                      [selectedHouseholdId]: !withdrawalAcknowledged,
+                    }))
+                  }
+                  style={[s.choice, withdrawalAcknowledged && s.choiceSelected]}
+                >
+                  <View style={[s.radio, withdrawalAcknowledged && s.radioSelected]} />
+                  <Text style={s.body}>
+                    I understand these effects and want to withdraw my own protected-adult consent.
+                  </Text>
+                </Pressable>
+                {pendingWithdraw ? (
+                  <Text accessibilityLiveRegion="polite" style={s.muted}>
+                    The previous result was uncertain. Retry reuses the exact household,
+                    acknowledgment, request body, and idempotency key.
+                  </Text>
+                ) : null}
+                <ActionButton
+                  kind="danger"
+                  title={
+                    busy === 'withdraw'
+                      ? 'Withdrawing consent...'
+                      : pendingWithdraw
+                        ? 'Retry exact withdrawal request'
+                        : 'Withdraw my consent'
+                  }
+                  disabled={busy !== '' || (!pendingWithdraw && !withdrawalAcknowledged)}
+                  accessibilityHint="Withdraws only your protected-adult consent in the selected household"
+                  onPress={withdrawSelf}
+                />
+              </View>
+            </>
+          ) : null}
+        </>
+      )}
     </Screen>
   );
 }
@@ -934,6 +1550,13 @@ export function HistoryScreen({
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const selectedHistoryHouseholdIdRef = useRef(selectedHouseholdId);
+  useLayoutEffect(() => {
+    selectedHistoryHouseholdIdRef.current = selectedHouseholdId;
+  }, [selectedHouseholdId]);
+  const historyHouseholdGenerationRef = useRef(0);
+  const historyContinuationRequestIdRef = useRef(0);
+  const historyContinuationAbortRef = useRef<AbortController | undefined>(undefined);
   const canReadHistory =
     selectedScope?.capabilities.includes('history:read') === true &&
     (selectedScope.isProtectedMember ||
@@ -943,67 +1566,124 @@ export function HistoryScreen({
   useFocusEffect(
     useCallback(() => {
       let active = true;
+      const householdId = selectedHouseholdId;
+      const householdGeneration = ++historyHouseholdGenerationRef.current;
+      historyContinuationRequestIdRef.current += 1;
+      historyContinuationAbortRef.current?.abort();
+      historyContinuationAbortRef.current = undefined;
+      setLoadingMore(false);
+      setAnnouncement('');
+      setConfirming('');
+      const generationIsCurrent = (): boolean =>
+        active &&
+        selectedHistoryHouseholdIdRef.current === householdId &&
+        historyHouseholdGenerationRef.current === householdGeneration;
       if (!canReadHistory) {
         setChecks([]);
         setHasMore(false);
         setNextOffset(0);
         setTotal(0);
-        setLoadedHouseholdId(selectedHouseholdId);
+        setLoadedHouseholdId(householdId);
         setLoading(false);
         setError('History is unavailable for this household.');
         return () => {
           active = false;
+          if (historyHouseholdGenerationRef.current === householdGeneration) {
+            historyHouseholdGenerationRef.current += 1;
+          }
         };
       }
+      const controller = new AbortController();
       setLoading(true);
       setError('');
       void mobileRequest<CheckListResponse>('/v1/checks?limit=50&offset=0', {
-        headers: { 'X-BB-Household-Id': selectedHouseholdId },
+        headers: { 'X-BB-Household-Id': householdId },
+        signal: controller.signal,
       })
         .then((response) => {
-          if (!active) return;
+          if (!generationIsCurrent()) return;
           setChecks(response.checks);
           setHasMore(response.page.hasMore);
           setNextOffset(response.page.offset + response.checks.length);
           setTotal(response.total);
-          setLoadedHouseholdId(selectedHouseholdId);
+          setLoadedHouseholdId(householdId);
         })
         .catch((caught) => {
-          if (!active) return;
+          if (controller.signal.aborted || !generationIsCurrent()) return;
           setChecks([]);
           setHasMore(false);
-          setLoadedHouseholdId(selectedHouseholdId);
+          setLoadedHouseholdId(householdId);
           setError(readableError(caught));
         })
         .finally(() => {
-          if (active) setLoading(false);
+          if (generationIsCurrent()) setLoading(false);
         });
       return () => {
         active = false;
+        controller.abort();
+        if (historyHouseholdGenerationRef.current === householdGeneration) {
+          historyHouseholdGenerationRef.current += 1;
+        }
+        historyContinuationRequestIdRef.current += 1;
+        historyContinuationAbortRef.current?.abort();
+        historyContinuationAbortRef.current = undefined;
       };
     }, [canReadHistory, selectedHouseholdId]),
   );
   async function loadMore() {
     if (loadingMore || !hasMore || loadedHouseholdId !== selectedHouseholdId) return;
+    const continuation: HistoryContinuation = {
+      householdId: selectedHouseholdId,
+      householdGeneration: historyHouseholdGenerationRef.current,
+      requestId: ++historyContinuationRequestIdRef.current,
+      offset: nextOffset,
+    };
+    historyContinuationAbortRef.current?.abort();
+    const controller = new AbortController();
+    historyContinuationAbortRef.current = controller;
+    const continuationIsCurrent = (): boolean =>
+      historyContinuationIsCurrent(continuation, {
+        householdId: selectedHistoryHouseholdIdRef.current,
+        householdGeneration: historyHouseholdGenerationRef.current,
+        requestId: historyContinuationRequestIdRef.current,
+      });
     setLoadingMore(true);
     setError('');
     try {
       const response = await mobileRequest<CheckListResponse>(
-        `/v1/checks?limit=50&offset=${nextOffset}`,
+        `/v1/checks?limit=50&offset=${continuation.offset}`,
+        {
+          headers: { 'X-BB-Household-Id': continuation.householdId },
+          signal: controller.signal,
+        },
       );
-      setChecks((current) => {
-        const byId = new Map(current.map((check) => [check.id, check]));
-        for (const check of response.checks) byId.set(check.id, check);
-        return [...byId.values()];
-      });
-      setHasMore(response.page.hasMore);
-      setNextOffset(response.page.offset + response.checks.length);
-      setTotal(response.total);
-      setAnnouncement(`Loaded ${response.checks.length} more check records.`);
+      if (!continuationIsCurrent()) return;
+      if (response.page.offset !== continuation.offset) {
+        throw new MobileCustomerError('History changed while loading. Please try again.');
+      }
+      setChecks((current) =>
+        mergeHistoryContinuation(current, response.checks, response.page.offset, continuation, {
+          householdId: selectedHistoryHouseholdIdRef.current,
+          householdGeneration: historyHouseholdGenerationRef.current,
+          requestId: historyContinuationRequestIdRef.current,
+        }),
+      );
+      setHasMore((current) => (continuationIsCurrent() ? response.page.hasMore : current));
+      setNextOffset((current) =>
+        continuationIsCurrent() ? response.page.offset + response.checks.length : current,
+      );
+      setTotal((current) => (continuationIsCurrent() ? response.total : current));
+      setAnnouncement((current) =>
+        continuationIsCurrent() ? `Loaded ${response.checks.length} more check records.` : current,
+      );
     } catch (caught) {
+      if (controller.signal.aborted || !continuationIsCurrent()) return;
       setError(readableError(caught));
     } finally {
-      setLoadingMore(false);
+      if (continuationIsCurrent()) {
+        historyContinuationAbortRef.current = undefined;
+        setLoadingMore(false);
+      }
     }
   }
   async function remove(id: string) {
@@ -1114,36 +1794,111 @@ const trustedPermissionLabels: Record<TrustedCirclePermissionDto, string> = {
   help_with_orientation: 'Guided orientation help is unavailable',
 };
 type AcceptedInvitation = { relationship: { id: string }; householdId: string };
+type FamilyScreenStatus =
+  | { readonly scope: 'invitation'; readonly message: string }
+  | { readonly scope: 'household'; readonly householdId: string; readonly message: string };
 
 export function FamilyScreen({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Family'>): React.ReactElement {
   const { principal, selectedHouseholdId, selectedScope, replacePrincipal } = useMobileHousehold();
-  const [family, setFamily] = useState<FamilyResponse>();
-  const [error, setError] = useState('');
+  const [familyState, dispatchFamily] = useReducer(
+    householdResourceReducer<FamilyResponse>,
+    emptyHouseholdResource<FamilyResponse>(),
+  );
+  const selectedHouseholdIdRef = useRef(selectedHouseholdId);
+  useLayoutEffect(() => {
+    selectedHouseholdIdRef.current = selectedHouseholdId;
+  }, [selectedHouseholdId]);
+  const familyRequestIdRef = useRef(0);
+  const [errorState, setErrorState] = useState<HouseholdBoundDraft<string>>();
   const [busy, setBusy] = useState(false);
-  const [inviteeName, setInviteeName] = useState('');
-  const [created, setCreated] = useState<CreateInvitationResponse>();
+  const [inviteeNameDraft, setInviteeNameDraft] = useState<HouseholdBoundDraft<string>>();
+  const [createdForHousehold, setCreatedForHousehold] = useState<{
+    readonly householdId: string;
+    readonly value: CreateInvitationResponse;
+  }>();
   const [invitationId, setInvitationId] = useState('');
   const [inviteCode, setInviteCode] = useState('');
-  const [preview, setPreview] = useState<InvitationPreviewResponse>();
+  const [invitationReviewState, dispatchInvitationReview] = useReducer(
+    invitationReviewReducer<InvitationPreviewResponse>,
+    emptyInvitationReview<InvitationPreviewResponse>(),
+  );
+  const invitationReviewRequestIdRef = useRef(0);
+  const invitationReviewAbortRef = useRef<AbortController | undefined>(undefined);
   const [consentConfirmed, setConsentConfirmed] = useState(false);
-  const [confirmingInvitationId, setConfirmingInvitationId] = useState('');
-  const [status, setStatus] = useState('');
-  const load = useCallback(async (householdId: string) => {
-    if (!householdId) return;
-    const familyResponse = await mobileRequest<FamilyResponse>('/v1/family', {
-      headers: { 'X-BB-Household-Id': householdId },
-    });
-    setFamily(familyResponse);
+  const [confirmingInvitation, setConfirmingInvitation] = useState<{
+    readonly householdId: string;
+    readonly invitationId: string;
+  }>();
+  const [statusState, setStatusState] = useState<FamilyScreenStatus>();
+  const error = householdBoundDraftValue(errorState, selectedHouseholdId) ?? '';
+  const setError = (message: string): void => {
+    setErrorState(message ? { householdId: selectedHouseholdId, value: message } : undefined);
+  };
+  const inviteeName = householdBoundDraftValue(inviteeNameDraft, selectedHouseholdId) ?? '';
+  const reviewedInvitation: Extract<
+    InvitationReviewState<InvitationPreviewResponse>,
+    { status: 'ready' }
+  > | null = invitationReviewState.status === 'ready' ? invitationReviewState : null;
+  const preview = reviewedInvitation?.value;
+  const created =
+    createdForHousehold?.householdId === selectedHouseholdId
+      ? createdForHousehold.value
+      : undefined;
+  const confirmingInvitationId =
+    confirmingInvitation?.householdId === selectedHouseholdId
+      ? confirmingInvitation.invitationId
+      : '';
+  const status =
+    statusState?.scope === 'invitation' || statusState?.householdId === selectedHouseholdId
+      ? statusState.message
+      : '';
+  useEffect(
+    () => () => {
+      invitationReviewRequestIdRef.current += 1;
+      invitationReviewAbortRef.current?.abort();
+      invitationReviewAbortRef.current = undefined;
+    },
+    [],
+  );
+  const load = useCallback(async (householdId: string, signal?: AbortSignal) => {
+    if (!householdId || selectedHouseholdIdRef.current !== householdId) return false;
+    const requestId = ++familyRequestIdRef.current;
+    dispatchFamily({ type: 'started', householdId, requestId });
+    try {
+      const familyResponse = await mobileRequest<FamilyResponse>('/v1/family', {
+        headers: { 'X-BB-Household-Id': householdId },
+        ...(signal === undefined ? {} : { signal }),
+      });
+      if (selectedHouseholdIdRef.current !== householdId) return false;
+      dispatchFamily({ type: 'succeeded', householdId, requestId, value: familyResponse });
+      return true;
+    } catch (caught) {
+      if (signal?.aborted || selectedHouseholdIdRef.current !== householdId) return false;
+      dispatchFamily({
+        type: 'failed',
+        householdId,
+        requestId,
+        message: readableError(caught),
+      });
+      return false;
+    }
   }, []);
   useEffect(() => {
-    if (!selectedHouseholdId) return;
-    const timer = setTimeout(() => {
-      void load(selectedHouseholdId).catch((caught) => setError(readableError(caught)));
-    }, 0);
-    return () => clearTimeout(timer);
+    if (!selectedHouseholdId) {
+      familyRequestIdRef.current += 1;
+      dispatchFamily({ type: 'reset' });
+      return;
+    }
+    const controller = new AbortController();
+    void load(selectedHouseholdId, controller.signal);
+    return () => controller.abort();
   }, [load, selectedHouseholdId]);
+  const visibleFamilyState = householdResourceIsVisible(familyState, selectedHouseholdId)
+    ? familyState
+    : undefined;
+  const family = visibleFamilyState?.status === 'ready' ? visibleFamilyState.value : undefined;
   const currentHouseholdScope =
     selectedScope?.id === family?.household.id ? selectedScope : undefined;
   const isHouseholdAdministrator = currentHouseholdScope?.isAdministrator === true;
@@ -1151,50 +1906,93 @@ export function FamilyScreen({
     currentHouseholdScope?.isProtectedMember === true &&
     currentHouseholdScope.capabilities.includes('family:manage');
   async function createInvite() {
+    const householdId = selectedHouseholdId;
+    if (!householdId) return;
     setBusy(true);
     setError('');
-    setCreated(undefined);
+    setCreatedForHousehold(undefined);
     try {
       const response = await mobileRequest<CreateInvitationResponse>('/v1/family/invitations', {
         method: 'POST',
-        headers: { 'X-BB-Household-Id': selectedHouseholdId },
+        headers: { 'X-BB-Household-Id': householdId },
         body: JSON.stringify({
           inviteeDisplayName: inviteeName,
           permissions: ['view_shared_checks'],
         }),
       });
-      setCreated(response);
-      setInviteeName('');
-      await load(selectedHouseholdId);
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      setCreatedForHousehold({ householdId, value: response });
+      setInviteeNameDraft(undefined);
+      await load(householdId);
     } catch (caught) {
-      setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
     } finally {
       setBusy(false);
     }
   }
+  function invalidateInvitationReview() {
+    invitationReviewAbortRef.current?.abort();
+    dispatchInvitationReview({ type: 'clear' });
+    setConsentConfirmed(false);
+    setStatusState(undefined);
+  }
   async function reviewInvite() {
+    const reviewedInvitationId = invitationId;
+    const reviewedInviteCode = inviteCode;
+    const requestId = ++invitationReviewRequestIdRef.current;
+    invitationReviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    invitationReviewAbortRef.current = controller;
     setBusy(true);
     setError('');
-    setPreview(undefined);
+    setStatusState(undefined);
+    dispatchInvitationReview({
+      type: 'started',
+      requestId,
+      invitationId: reviewedInvitationId,
+      localInviteCode: reviewedInviteCode,
+    });
     setConsentConfirmed(false);
     try {
       const response = await mobileRequest<InvitationPreviewResponse>(
-        `/v1/family/invitations/${encodeURIComponent(invitationId)}/preview`,
+        `/v1/family/invitations/${encodeURIComponent(reviewedInvitationId)}/preview`,
         {
           method: 'POST',
-          body: JSON.stringify({ localInviteCode: inviteCode }),
+          body: JSON.stringify({ localInviteCode: reviewedInviteCode }),
+          signal: controller.signal,
         },
       );
-      setPreview(response);
-      setStatus('Invitation ready to review. No access has been granted.');
+      if (controller.signal.aborted || invitationReviewRequestIdRef.current !== requestId) return;
+      if (response.invitation.id !== reviewedInvitationId) {
+        throw new MobileCustomerError(
+          'The invitation review did not match the credentials you entered. Please try again.',
+        );
+      }
+      dispatchInvitationReview({
+        type: 'succeeded',
+        requestId,
+        invitationId: reviewedInvitationId,
+        localInviteCode: reviewedInviteCode,
+        value: response,
+      });
+      setStatusState({
+        scope: 'invitation',
+        message: 'Invitation ready to review. No access has been granted.',
+      });
     } catch (caught) {
+      if (controller.signal.aborted || invitationReviewRequestIdRef.current !== requestId) return;
+      dispatchInvitationReview({ type: 'clear' });
       setError(readableError(caught));
     } finally {
-      setBusy(false);
+      if (invitationReviewRequestIdRef.current === requestId) {
+        invitationReviewAbortRef.current = undefined;
+        setBusy(false);
+      }
     }
   }
   async function shareCreatedInvitation() {
     if (!__DEV__ || created === undefined) return;
+    const householdId = selectedHouseholdId;
     try {
       const draft = buildUserInitiatedInvitationShareDraft({
         invitationId: created.invitation.id,
@@ -1203,28 +2001,37 @@ export function FamilyScreen({
         surface: 'native_share_sheet',
       });
       const outcome = await Share.share({ message: draft.draftText });
-      setStatus(
-        outcome.action === Share.sharedAction
-          ? 'Your device share sheet completed. BoomerBuddy did not select a contact or send a message.'
-          : 'Share sheet closed. BoomerBuddy did not send anything.',
-      );
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message:
+          outcome.action === Share.sharedAction
+            ? 'Your device share sheet completed. BoomerBuddy did not select a contact or send a message.'
+            : 'Share sheet closed. BoomerBuddy did not send anything.',
+      });
     } catch (caught) {
-      setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
     }
   }
   async function acceptInvite() {
-    if (!preview || !consentConfirmed) return;
-    const acceptedHouseholdId = preview.invitation.household.id;
+    if (!reviewedInvitation || !consentConfirmed) return;
+    const acceptance = invitationAcceptanceBinding(reviewedInvitation);
+    if (acceptance === null) {
+      setError('The reviewed invitation no longer matches. Review it again before accepting.');
+      return;
+    }
+    const acceptedHouseholdId = reviewedInvitation.value.invitation.household.id;
     setBusy(true);
     setError('');
     try {
       const accepted = await mobileRequest<AcceptedInvitation>(
-        `/v1/family/invitations/${encodeURIComponent(invitationId)}/accept`,
+        `/v1/family/invitations/${encodeURIComponent(acceptance.invitationId)}/accept`,
         {
           method: 'POST',
           body: JSON.stringify({
-            localInviteCode: inviteCode,
-            previewVersion: preview.invitation.previewVersion,
+            localInviteCode: acceptance.localInviteCode,
+            previewVersion: acceptance.previewVersion,
           }),
         },
       );
@@ -1233,11 +2040,14 @@ export function FamilyScreen({
           'The accepted household did not match the invitation you reviewed.',
         );
       }
-      setPreview(undefined);
+      dispatchInvitationReview({ type: 'clear' });
       setConsentConfirmed(false);
       setInvitationId('');
       setInviteCode('');
-      setStatus('Invitation accepted with permission to view deliberately shared checks.');
+      setStatusState({
+        scope: 'invitation',
+        message: 'Invitation accepted with permission to view deliberately shared checks.',
+      });
       const refreshedMe = await mobileRequest<MeResponse>('/v1/me');
       if (!refreshedMe.principal.households.some((scope) => scope.id === acceptedHouseholdId)) {
         throw new MobileCustomerError(
@@ -1256,49 +2066,67 @@ export function FamilyScreen({
     }
   }
   function cancelReview() {
-    setPreview(undefined);
-    setConsentConfirmed(false);
+    invalidateInvitationReview();
     setInvitationId('');
     setInviteCode('');
-    setStatus('Invitation review cancelled. No household access was granted.');
+    setStatusState({
+      scope: 'invitation',
+      message: 'Invitation review cancelled. No household access was granted.',
+    });
   }
   async function cancelPendingInvitation(id: string) {
+    const householdId = selectedHouseholdId;
+    if (!householdId) return;
     setBusy(true);
     setError('');
     try {
       await mobileRequest(`/v1/family/invitations/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { 'X-BB-Household-Id': selectedHouseholdId },
+        headers: { 'X-BB-Household-Id': householdId },
       });
-      setConfirmingInvitationId('');
-      if (created?.invitation.id === id) setCreated(undefined);
-      setStatus('Pending invitation cancelled. Its one-time code no longer works.');
-      await load(selectedHouseholdId);
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      setConfirmingInvitation(undefined);
+      if (created?.invitation.id === id) setCreatedForHousehold(undefined);
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message: 'Pending invitation cancelled. Its one-time code no longer works.',
+      });
+      await load(householdId);
     } catch (caught) {
-      setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
     } finally {
       setBusy(false);
     }
   }
   async function revoke(id: string) {
+    const householdId = selectedHouseholdId;
+    if (!householdId) return;
     setBusy(true);
     try {
       await mobileRequest(`/v1/family/relationships/${encodeURIComponent(id)}`, {
         method: 'DELETE',
-        headers: { 'X-BB-Household-Id': selectedHouseholdId },
+        headers: { 'X-BB-Household-Id': householdId },
       });
-      setStatus('Trusted Circle access revoked.');
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message: 'Trusted Circle access revoked.',
+      });
       const refreshedMe = await mobileRequest<MeResponse>('/v1/me');
-      if (refreshedMe.principal.households.some((scope) => scope.id === selectedHouseholdId)) {
-        replacePrincipal(refreshedMe.principal, selectedHouseholdId);
-        await load(selectedHouseholdId);
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      if (refreshedMe.principal.households.some((scope) => scope.id === householdId)) {
+        replacePrincipal(refreshedMe.principal, householdId);
+        await load(householdId);
       } else {
-        setFamily(undefined);
+        familyRequestIdRef.current += 1;
+        dispatchFamily({ type: 'reset' });
         replacePrincipal(refreshedMe.principal);
         navigation.navigate('Home');
       }
     } catch (caught) {
-      setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
     } finally {
       setBusy(false);
     }
@@ -1328,9 +2156,9 @@ export function FamilyScreen({
           autoCapitalize="none"
           onChangeText={(value) => {
             setInvitationId(value);
-            setPreview(undefined);
-            setConsentConfirmed(false);
+            invalidateInvitationReview();
           }}
+          editable={!busy}
           style={s.input}
           value={invitationId}
         />
@@ -1340,9 +2168,9 @@ export function FamilyScreen({
           autoCapitalize="none"
           onChangeText={(value) => {
             setInviteCode(value);
-            setPreview(undefined);
-            setConsentConfirmed(false);
+            invalidateInvitationReview();
           }}
+          editable={!busy}
           secureTextEntry
           style={s.input}
           value={inviteCode}
@@ -1473,7 +2301,7 @@ export function FamilyScreen({
                             kind="secondary"
                             title="Keep invitation"
                             disabled={busy}
-                            onPress={() => setConfirmingInvitationId('')}
+                            onPress={() => setConfirmingInvitation(undefined)}
                           />
                         </>
                       ) : (
@@ -1481,7 +2309,12 @@ export function FamilyScreen({
                           kind="danger"
                           title="Cancel invitation"
                           disabled={busy}
-                          onPress={() => setConfirmingInvitationId(invitation.id)}
+                          onPress={() =>
+                            setConfirmingInvitation({
+                              householdId: selectedHouseholdId,
+                              invitationId: invitation.id,
+                            })
+                          }
                         />
                       )
                     ) : null}
@@ -1502,7 +2335,9 @@ export function FamilyScreen({
               <Text style={s.label}>Trusted person’s display name</Text>
               <TextInput
                 accessibilityLabel="Trusted person’s display name"
-                onChangeText={setInviteeName}
+                onChangeText={(value) =>
+                  setInviteeNameDraft({ householdId: selectedHouseholdId, value })
+                }
                 style={s.input}
                 value={inviteeName}
               />
@@ -1542,6 +2377,16 @@ export function FamilyScreen({
             </View>
           ) : null}
         </>
+      ) : visibleFamilyState?.status === 'error' ? (
+        <View style={s.card}>
+          <ErrorText message={visibleFamilyState.message} />
+          <ActionButton
+            kind="secondary"
+            title="Retry Family"
+            disabled={busy}
+            onPress={() => void load(selectedHouseholdId)}
+          />
+        </View>
       ) : selectedHouseholdId ? (
         <Loading label="Loading Family..." />
       ) : (

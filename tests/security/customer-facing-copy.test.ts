@@ -5,6 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { checkDto, decisionFromAssessment } from '../../apps/api/src/mappers';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
+const excludedProductionSourceDirectories = new Set([
+  '.expo',
+  '.next',
+  'coverage',
+  'dist',
+  'node_modules',
+]);
 
 function source(path: string): string {
   return readFileSync(resolve(repositoryRoot, path), 'utf8');
@@ -15,6 +22,7 @@ function productionSourceFiles(path: string): string[] {
   return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = join(absolute, entry.name);
     if (entry.isDirectory()) {
+      if (excludedProductionSourceDirectories.has(entry.name)) return [];
       return productionSourceFiles(resolve(path, entry.name));
     }
     return /\.(?:ts|tsx)$/u.test(entry.name) ? [entryPath] : [];
@@ -77,9 +85,9 @@ describe('customer-facing production copy', () => {
 
   it('uses customer labels instead of development and internal analysis labels', () => {
     const publicCheck = source('apps/web/src/app/check/page.tsx');
-    const memberHome = source('apps/web/src/app/member/page.tsx');
-    const memberCheck = source('apps/web/src/app/member/check/page.tsx');
-    const memberHistory = source('apps/web/src/app/member/history/page.tsx');
+    const memberHome = source('apps/web/src/app/member/page-client.tsx');
+    const memberCheck = source('apps/web/src/app/member/check/page-client.tsx');
+    const memberHistory = source('apps/web/src/app/member/history/page-client.tsx');
     const mobile = source('apps/mobile/src/screens.tsx');
 
     expect(publicCheck).toContain('Anonymous result');
@@ -107,8 +115,8 @@ describe('customer-facing production copy', () => {
   });
 
   it('keeps new sponsored enrollment out while preserving historical withdrawal', () => {
-    const memberHome = source('apps/web/src/app/member/page.tsx');
-    const sponsoredRoute = source('apps/web/src/app/member/founding-household/page.tsx');
+    const memberHome = source('apps/web/src/app/member/page-client.tsx');
+    const sponsoredRoute = source('apps/web/src/app/member/founding-household/page-client.tsx');
 
     expect(memberHome).toContain(
       "process.env.NODE_ENV !== 'production' && selectedScope?.isAdministrator",
@@ -129,11 +137,11 @@ describe('customer-facing production copy', () => {
   });
 
   it('production-gates internal laboratories and uses customer-ready copy', () => {
-    const memberHome = source('apps/web/src/app/member/page.tsx');
-    const memberFamily = source('apps/web/src/app/member/family/page.tsx');
-    const memberCheck = source('apps/web/src/app/member/check/page.tsx');
-    const orientation = source('apps/web/src/app/member/orientation/page.tsx');
-    const messaging = source('apps/web/src/app/member/messaging/page.tsx');
+    const memberHome = source('apps/web/src/app/member/page-client.tsx');
+    const memberFamily = source('apps/web/src/app/member/family/page-client.tsx');
+    const memberCheck = source('apps/web/src/app/member/check/page-client.tsx');
+    const orientation = source('apps/web/src/app/member/orientation/page-client.tsx');
+    const messaging = source('apps/web/src/app/member/messaging/page-client.tsx');
     const mobile = source('apps/mobile/src/screens.tsx');
     const hqSponsoredAccess = source('apps/hq/src/components/founding-households.tsx');
 
@@ -156,8 +164,8 @@ describe('customer-facing production copy', () => {
   });
 
   it('shows plain billing disclosures and fallback help without raw state labels', () => {
-    const billing = source('apps/web/src/app/member/billing/page.tsx');
-    const success = source('apps/web/src/app/member/billing/success/page.tsx');
+    const billing = source('apps/web/src/app/member/billing/page-client.tsx');
+    const success = source('apps/web/src/app/member/billing/success/page-client.tsx');
 
     expect(billing).toContain('Family costs $14.99 USD and renews every');
     expect(billing).toContain('Access ordinarily continues through the paid');

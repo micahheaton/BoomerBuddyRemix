@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { MemberGate } from '../../components/member-gate';
+import { protectProductionMemberResource } from '../../lib/resource-auth';
 
 export const metadata: Metadata = {
   robots: {
@@ -12,7 +13,8 @@ export const metadata: Metadata = {
   },
 };
 
-export default function MemberLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function MemberLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  await protectProductionMemberResource();
   return (
     <MemberGate>
       <p className="dev-banner">

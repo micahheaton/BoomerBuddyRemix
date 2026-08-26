@@ -143,8 +143,9 @@ describe('Replit HQ Autoscale liveness boundary', () => {
     expect(source).toContain("'cache-control': 'no-store'");
     expect(clerkBoundary).toBeGreaterThan(canonicalOriginCheck);
     expect(clerkBoundary).toBeGreaterThan(livenessCheck);
-    expect(source).toContain("const isPublicRoute = createRouteMatcher(['/sign-in(.*)'])");
-    expect(source).toContain('if (!isPublicRoute(request)) await auth.protect()');
+    expect(source).toContain('isPublicHqResourcePath(request.nextUrl.pathname)');
+    expect(source).toContain('await auth.protect()');
+    expect(source).not.toContain('createRouteMatcher');
     expect(source).toContain("request.headers.get('host')");
     expect(source).toContain("request.headers.get('x-forwarded-for')");
   });

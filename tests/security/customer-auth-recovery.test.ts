@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  clearCustomerSessionState,
   clearClerkSessionAndNavigate,
   clearClerkSessionWhenLoaded,
   createAuthenticationRecoveryCoordinator,
@@ -12,6 +13,29 @@ import {
 const source = (path: string) => readFile(path, 'utf8');
 
 describe('customer production authentication recovery', () => {
+  it('clears household and protected-operation state without deleting unrelated session data', () => {
+    const keys = [
+      'boomerbuddy.selected-household',
+      'bb:protected-self:enroll:person-one:household-one',
+      'bb:protected-self:withdraw:person-one:household-one',
+      'unrelated.session-value',
+    ];
+    const storage = {
+      get length() {
+        return keys.length;
+      },
+      key: (index: number) => keys[index] ?? null,
+      removeItem: (key: string) => {
+        const index = keys.indexOf(key);
+        if (index >= 0) keys.splice(index, 1);
+      },
+    };
+
+    clearCustomerSessionState(storage);
+
+    expect(keys).toEqual(['unrelated.session-value']);
+  });
+
   it('coalesces concurrent unauthorized responses into one clear and one Clerk sign-out', async () => {
     const coordinator = createAuthenticationRecoveryCoordinator();
     const clearLocalState = vi.fn();
@@ -285,7 +309,8 @@ describe('customer production authentication recovery', () => {
     expect(signIn).toContain('pathname === productionSessionRecoveryPath');
     expect(signIn).toContain('createSessionRecoveryRetryController({');
     expect(signIn).toContain('clearClerkSessionWhenLoaded({');
-    expect(signIn).toContain('clearClerkSession: () => clerk.signOut()');
+    expect(signIn).toContain('clearCustomerSessionState(window.sessionStorage);');
+    expect(signIn).toContain('await clerk.signOut();');
     expect(signIn).toContain('isLoaded: () => clerk.loaded');
     expect(signIn).toContain("window.location.replace('/sign-in')");
     expect(signIn).toMatch(/This page does\s+not continue automatically\./u);

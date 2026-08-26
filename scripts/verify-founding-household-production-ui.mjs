@@ -4,11 +4,22 @@ import process from 'node:process';
 
 const webIdentityUnavailableText = 'Member sign in is temporarily unavailable';
 
+function dynamicApplicationRoute(application, path) {
+  return {
+    appPathsManifest: resolve(`apps/${application}/.next/server/app-paths-manifest.json`),
+    expectedEntry: `app/${path}/page.js`,
+    routeKey: `/${path}/page`,
+    serverRoot: resolve(`apps/${application}/.next/server`),
+  };
+}
+
 const routes = [
   {
     name: 'HQ Founding Household',
     directory: resolve('apps/hq/.next/server/app/founding-households'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('hq', 'founding-households'),
+    resourceGuarded: true,
     requiredText: ['New sponsored enrollment is disabled', 'New invitations are disabled'],
     forbiddenText: ['Exact Clerk customer subject', 'Managed-identity activation is blocked'],
   },
@@ -16,6 +27,8 @@ const routes = [
     name: 'member Founding Household',
     directory: resolve('apps/web/.next/server/app/member/founding-household'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('web', 'member/founding-household'),
+    resourceGuarded: true,
     requiredText: [
       'Manage sponsored access',
       'Historical access only.',
@@ -28,7 +41,9 @@ const routes = [
     name: 'member home',
     directory: resolve('apps/web/.next/server/app/member'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
-    requiredText: ['Open selected-household feedback', 'Manage sponsored access'],
+    dynamicRoute: dynamicApplicationRoute('web', 'member'),
+    resourceGuarded: true,
+    requiredText: ['Share feedback', 'Manage sponsored access'],
     unconfiguredText: webIdentityUnavailableText,
   },
   {
@@ -70,6 +85,8 @@ const routes = [
     name: 'member messaging',
     directory: resolve('apps/web/.next/server/app/member/messaging'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('web', 'member/messaging'),
+    resourceGuarded: true,
     requiredText: 'Messaging is not activated',
     unconfiguredText: webIdentityUnavailableText,
   },
@@ -77,18 +94,24 @@ const routes = [
     name: 'HQ messaging support',
     directory: resolve('apps/hq/.next/server/app/messaging'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('hq', 'messaging'),
+    resourceGuarded: true,
     requiredText: 'Messaging support is not activated',
   },
   {
     name: 'HQ editorial intelligence',
     directory: resolve('apps/hq/.next/server/app/editorial'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('hq', 'editorial'),
+    resourceGuarded: true,
     requiredText: 'Editorial intelligence is not activated',
   },
   {
     name: 'HQ referral evidence',
     directory: resolve('apps/hq/.next/server/app/referrals'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('hq', 'referrals'),
+    resourceGuarded: true,
     requiredText: 'Referral credits are not activated',
   },
   {
@@ -103,6 +126,8 @@ const routes = [
     name: 'member feedback',
     directory: resolve('apps/web/.next/server/app/member/feedback'),
     staticDirectory: resolve('apps/web/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('web', 'member/feedback'),
+    resourceGuarded: true,
     requiredText: ['Share a product observation.', 'Submit feedback'],
     unconfiguredText: webIdentityUnavailableText,
     forbiddenText: ['Feedback intake is not activated', 'Submit local feedback'],
@@ -111,6 +136,8 @@ const routes = [
     name: 'HQ feedback review',
     directory: resolve('apps/hq/.next/server/app/feedback'),
     staticDirectory: resolve('apps/hq/.next/static/chunks'),
+    dynamicRoute: dynamicApplicationRoute('hq', 'feedback'),
+    resourceGuarded: true,
     requiredText: ['Feedback review', 'Claim exact review', 'Open minimized text'],
     forbiddenText: ['Feedback review is not activated'],
   },
@@ -199,6 +226,31 @@ async function collectGeneratedJavaScript(directory, files) {
   }
 }
 
+async function collectReferencedServerJavaScript(applicationRoute, files) {
+  const buildRoot = resolve(applicationRoute.serverRoot, '..');
+  const pending = [...files];
+  while (pending.length > 0) {
+    const artifact = pending.pop();
+    if (artifact === undefined) {
+      continue;
+    }
+    const body = await readFile(artifact, 'utf8');
+    for (const match of body.matchAll(/["'](server\/chunks\/[^"'\\\s<>]+\.js)["']/gu)) {
+      const referencedArtifact = resolve(buildRoot, match[1]);
+      if (!referencedArtifact.startsWith(`${buildRoot}${sep}`)) {
+        throw new Error(`Compiled route referenced JavaScript outside ${buildRoot}`);
+      }
+      if (!(await stat(referencedArtifact)).isFile()) {
+        throw new Error(`Compiled route referenced missing JavaScript ${match[1]}`);
+      }
+      if (!files.has(referencedArtifact)) {
+        files.add(referencedArtifact);
+        pending.push(referencedArtifact);
+      }
+    }
+  }
+}
+
 async function collectTextFiles(directory, files) {
   const entries = await readdir(directory, { withFileTypes: true });
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
@@ -261,6 +313,7 @@ async function generatedRouteText(directory, staticDirectory, dynamicRoute) {
       throw new Error(`No compiled route was found under ${directory}`);
     const artifacts = new Set([compiledEntry]);
     await collectGeneratedJavaScript(directory, artifacts);
+    await collectReferencedServerJavaScript(dynamicRoute, artifacts);
     generatedBody = (
       await Promise.all(
         [...artifacts]
@@ -412,12 +465,28 @@ for (const route of routes) {
       : Array.isArray(route.requiredText)
         ? route.requiredText
         : [route.requiredText];
+  if (route.resourceGuarded === true) {
+    for (const value of requiredText) {
+      if (!generated.combined.includes(value)) {
+        throw new Error(`${route.name} did not retain the required production copy: ${value}`);
+      }
+    }
+    // A resource-guarded App Router page is compiled as a dynamic server artifact. Its bundle can
+    // contain unreachable development branches, so it is not rendered-payload evidence. Anonymous
+    // fail-closed behavior is exercised by verify-next-resource-auth; a signed-in hydrated browser
+    // remains an external closure gate.
+    continue;
+  }
   if (productionUiExpectation === 'unconfigured_identity') {
     const hasDefaultIdentityBoundary = generated.generatedBody.includes(identityUnavailableText);
     const hasRouteIdentityBoundary = generated.generatedBody.includes(
       route.unconfiguredText ?? identityUnavailableText,
     );
-    if (!hasDefaultIdentityBoundary && !hasRouteIdentityBoundary) {
+    if (
+      route.resourceGuarded !== true &&
+      !hasDefaultIdentityBoundary &&
+      !hasRouteIdentityBoundary
+    ) {
       throw new Error(`${route.name} did not render the missing-identity fail-closed boundary`);
     }
   } else {

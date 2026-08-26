@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-native', () => ({ Platform: { OS: 'web' } }));
-vi.mock('expo-secure-store', () => ({
+vi.mock('../../apps/mobile/src/secure-store', () => ({
   isAvailableAsync: async () => false,
 }));
 
@@ -10,8 +10,9 @@ async function mobileModules() {
   vi.stubGlobal('__DEV__', true);
   process.env.EXPO_PUBLIC_API_URL = 'http://127.0.0.1:4000';
   const authentication = await import('../../apps/mobile/src/authentication');
+  const session = await import('../../apps/mobile/src/session');
   const api = await import('../../apps/mobile/src/api');
-  return { api, authentication };
+  return { api, authentication, session };
 }
 
 function response(status: number, body: unknown = { error: { message: 'denied' } }): Response {
@@ -23,6 +24,7 @@ function response(status: number, body: unknown = { error: { message: 'denied' }
 
 describe('mobile API session retry', () => {
   afterEach(() => {
+    vi.useRealTimers();
     delete process.env.EXPO_PUBLIC_API_URL;
     vi.unstubAllGlobals();
   });
@@ -85,6 +87,44 @@ describe('mobile API session retry', () => {
     dispose();
   });
 
+  it('does not retry or recover a stale request through a replacement authentication session', async () => {
+    const { api, authentication } = await mobileModules();
+    const oldGetToken = vi.fn(async () => 'old-session-token');
+    const oldRecover = vi.fn(async () => undefined);
+    const disposeOld = authentication.configureMobileAuthentication({
+      getToken: oldGetToken,
+      recoverUnauthorizedSession: oldRecover,
+    });
+    let releaseOldResponse!: (response: Response) => void;
+    const oldResponse = new Promise<Response>((resolve) => {
+      releaseOldResponse = resolve;
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementationOnce(() => oldResponse);
+    vi.stubGlobal('fetch', fetchMock);
+    const staleRequest = api.mobileRequest('/v1/retry-proof', { method: 'POST' });
+    const staleRejection = expect(staleRequest).rejects.toThrow(
+      'BoomerBuddy could not connect. Check your connection and try again.',
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+
+    disposeOld();
+    const newGetToken = vi.fn(async () => 'new-session-token');
+    const newRecover = vi.fn(async () => undefined);
+    const disposeNew = authentication.configureMobileAuthentication({
+      getToken: newGetToken,
+      recoverUnauthorizedSession: newRecover,
+    });
+    releaseOldResponse(response(401));
+
+    await staleRejection;
+    expect(oldGetToken).toHaveBeenCalledOnce();
+    expect(newGetToken).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(oldRecover).not.toHaveBeenCalled();
+    expect(newRecover).not.toHaveBeenCalled();
+    disposeNew();
+  });
+
   it('preserves an explicit authorized household scope while replacing caller authentication', async () => {
     const { api, authentication } = await mobileModules();
     const dispose = authentication.configureMobileAuthentication({
@@ -104,6 +144,32 @@ describe('mobile API session retry', () => {
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
     expect(headers.get('Authorization')).toBe('Bearer clerk-mobile-token');
     expect(headers.get('X-BB-Household-Id')).toBe('household-secondary');
+    dispose();
+  });
+
+  it('binds an implicit household scope before asynchronous token acquisition', async () => {
+    const { api, authentication, session } = await mobileModules();
+    const householdSession = session.beginMobileHouseholdSession('identity-session-a');
+    await session.setSelectedHouseholdId(householdSession, 'person-household-test', 'household-a');
+    let resolveToken!: (token: string) => void;
+    const token = new Promise<string>((resolve) => {
+      resolveToken = resolve;
+    });
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: () => token,
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(200, { ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = api.mobileRequest('/v1/orientation/start', { method: 'POST' });
+    await session.setSelectedHouseholdId(householdSession, 'person-household-test', 'household-b');
+    resolveToken('clerk-mobile-token');
+
+    await expect(request).resolves.toEqual({ ok: true });
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('X-BB-Household-Id')).toBe(
+      'household-a',
+    );
     dispose();
   });
 
@@ -174,6 +240,214 @@ describe('mobile API session retry', () => {
       message: 'This feature is not available right now.',
       status: 404,
     });
+    dispose();
+  });
+
+  it('cancels independently when the caller aborts a composed request signal', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const caller = new AbortController();
+    const request = api.mobileRequest('/v1/family', { signal: caller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(fetchMock.mock.calls[0]?.[1]?.signal).not.toBe(caller.signal);
+
+    caller.abort();
+
+    await expect(request).rejects.toThrow('The request was canceled. Please try again.');
+    dispose();
+  });
+
+  it('keeps the bounded timeout active when a caller signal is also present', async () => {
+    vi.useFakeTimers();
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(
+      async (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const caller = new AbortController();
+    const request = api.mobileRequest('/v1/family', { signal: caller.signal });
+    const rejection = expect(request).rejects.toThrow(
+      'BoomerBuddy did not respond in time. Check your connection and try again.',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(caller.signal.aborted).toBe(false);
+    dispose();
+  });
+
+  it('applies caller cancellation before initial token acquisition completes', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: () => new Promise<string | null>(() => undefined),
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+    const caller = new AbortController();
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const request = api.mobileRequest('/v1/family', { signal: caller.signal });
+
+    caller.abort();
+
+    await expect(request).rejects.toThrow('The request was canceled. Please try again.');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    dispose();
+  });
+
+  it('bounds initial token acquisition within the total request timeout', async () => {
+    vi.useFakeTimers();
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: () => new Promise<string | null>(() => undefined),
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+    const request = api.mobileRequest('/v1/family');
+    const rejection = expect(request).rejects.toThrow(
+      'BoomerBuddy did not respond in time. Check your connection and try again.',
+    );
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    dispose();
+  });
+
+  it('bounds forced token refresh within the original total request timeout', async () => {
+    vi.useFakeTimers();
+    const { api, authentication } = await mobileModules();
+    const getToken = vi.fn((request?: { skipCache?: boolean }) =>
+      request?.skipCache
+        ? new Promise<string | null>(() => undefined)
+        : Promise.resolve('cached-mobile-token'),
+    );
+    const dispose = authentication.configureMobileAuthentication({
+      getToken,
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response(401));
+    vi.stubGlobal('fetch', fetchMock);
+    const request = api.mobileRequest('/v1/family');
+    const rejection = expect(request).rejects.toThrow(
+      'BoomerBuddy did not respond in time. Check your connection and try again.',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(getToken).toHaveBeenCalledWith({ skipCache: true });
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
+    dispose();
+  });
+
+  it('bounds session recovery when no authentication token is available', async () => {
+    vi.useFakeTimers();
+    const { api, authentication } = await mobileModules();
+    const recoverUnauthorizedSession = vi.fn(() => new Promise<void>(() => undefined));
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => null,
+      recoverUnauthorizedSession,
+    });
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>());
+    const request = api.mobileRequest('/v1/family');
+    const rejection = expect(request).rejects.toThrow(
+      'BoomerBuddy did not respond in time. Check your connection and try again.',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recoverUnauthorizedSession).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
+    dispose();
+  });
+
+  it('bounds successful-response parsing within the total request timeout', async () => {
+    vi.useFakeTimers();
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const parse = vi.fn(() => new Promise<unknown>(() => undefined));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue({ status: 200, ok: true, json: parse } as unknown as Response),
+    );
+    const request = api.mobileRequest('/v1/family');
+    const rejection = expect(request).rejects.toThrow(
+      'BoomerBuddy did not respond in time. Check your connection and try again.',
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(parse).toHaveBeenCalledOnce();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+
+    await rejection;
+    expect(vi.getTimerCount()).toBe(0);
+    dispose();
+  });
+
+  it('preserves caller cancellation while parsing an error response', async () => {
+    const { api, authentication } = await mobileModules();
+    const dispose = authentication.configureMobileAuthentication({
+      getToken: async () => 'clerk-mobile-token',
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const parse = vi.fn(() => new Promise<unknown>(() => undefined));
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue({ status: 409, ok: false, json: parse } as unknown as Response),
+    );
+    const caller = new AbortController();
+    const request = api.mobileRequest('/v1/family', { signal: caller.signal });
+    await vi.waitFor(() => expect(parse).toHaveBeenCalledOnce());
+
+    caller.abort();
+
+    await expect(request).rejects.toThrow('The request was canceled. Please try again.');
     dispose();
   });
 });

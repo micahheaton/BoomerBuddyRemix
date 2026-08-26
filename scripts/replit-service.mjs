@@ -11,6 +11,12 @@ const services = {
   web: '@boomerbuddy/web',
   worker: '@boomerbuddy/worker',
 };
+const canonicalGitHubHttpsOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git';
+const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git';
+const canonicalGitHubOrigins = new Set([
+  canonicalGitHubHttpsOrigin,
+  canonicalGitHubDeployKeyOrigin,
+]);
 const service = process.env.BB_REPLIT_SERVICE;
 const mode = process.argv[2];
 
@@ -76,6 +82,26 @@ function captureGit(args) {
   }
   return result.stdout.trim();
 }
+
+function assertCanonicalGitHubOrigin() {
+  let fetchOrigin;
+  let pushOrigin;
+  try {
+    fetchOrigin = captureGit(['remote', 'get-url', '--all', 'origin']);
+    pushOrigin = captureGit(['remote', 'get-url', '--push', '--all', 'origin']);
+  } catch {
+    throw new TypeError(
+      'The Replit checkout must have the exact canonical BoomerBuddyRemix GitHub origin',
+    );
+  }
+  if (!canonicalGitHubOrigins.has(fetchOrigin) || !canonicalGitHubOrigins.has(pushOrigin)) {
+    throw new TypeError(
+      'The Replit checkout must have the exact canonical BoomerBuddyRemix GitHub origin',
+    );
+  }
+}
+
+assertCanonicalGitHubOrigin();
 
 const provenanceDiagnosticMaxBuffer = 1024 * 1024;
 const provenanceDiagnosticMaxEntries = 50;
@@ -294,6 +320,9 @@ function assertReleaseProvenance({ verifyCheckout }) {
       );
     }
     throw new TypeError('The Replit checkout tree does not match the tagged Run 3.1 candidate');
+  }
+  if (headCommit !== expectedCommit) {
+    throw new TypeError('The Replit checkout HEAD does not match the configured release commit');
   }
   let checkoutStatus = captureGit(['status', '--porcelain=v1', '--untracked-files=all']);
   if (checkoutStatus !== '') {

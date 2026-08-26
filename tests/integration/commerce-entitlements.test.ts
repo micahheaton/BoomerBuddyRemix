@@ -15,6 +15,41 @@ describe('provider-neutral commerce and household allowances', () => {
     harness = undefined;
   });
 
+  it('rejects the test-only protected enrollment seam outside the local runtime', async () => {
+    harness = await createApiHarness();
+    const productionRepository = new EntitlementRepository(harness.database);
+    const now = harness.clock.now();
+    expect(() =>
+      productionRepository.testOnlyEnrollProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-trusted-terry',
+        actorPersonId: 'person-trusted-terry',
+        consentVersion: 'must-not-enroll-outside-local',
+        now,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'not_authorized' }));
+    expect(() =>
+      productionRepository.testOnlyRevokeProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-owner-alice',
+        actorPersonId: 'person-owner-alice',
+        now,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'not_authorized' }));
+    const state = await harness.database.query<
+      { readonly terry: number; readonly alice_status: string } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM protected_members
+          WHERE household_id = 'household-sunrise'
+            AND person_id = 'person-trusted-terry') AS terry,
+         (SELECT status FROM protected_members
+          WHERE household_id = 'household-sunrise'
+            AND person_id = 'person-owner-alice') AS alice_status`,
+    );
+    expect(state.rows[0]).toEqual({ terry: 0, alice_status: 'accepted' });
+  });
+
   it('resolves billing authority and payer facts independently and refuses admin-only actors', async () => {
     harness = await createApiHarness();
     const aliceAuthority = await resolveActiveBillingAuthority(
@@ -491,9 +526,9 @@ describe('provider-neutral commerce and household allowances', () => {
 
   it('enforces exact participant limits at acceptance and reuses a released seat', async () => {
     harness = await createApiHarness();
-    const entitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
     await expect(
-      entitlements.enrollProtectedSelf({
+      entitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-harbor',
         personId: 'person-owner-bob',
         actorPersonId: 'person-owner-bob',
@@ -613,7 +648,7 @@ describe('provider-neutral commerce and household allowances', () => {
 
   it('reuses one active Trusted Circle membership across separately consented protected pairs', async () => {
     harness = await createApiHarness();
-    const entitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
     await harness.database.query(
       `INSERT INTO household_memberships(
          household_id, id, person_id, membership_kind, status, created_at
@@ -621,7 +656,7 @@ describe('provider-neutral commerce and household allowances', () => {
          'member','active',$1)`,
       [harness.clock.now().toISOString()],
     );
-    await entitlements.enrollProtectedSelf({
+    await entitlements.testOnlyEnrollProtectedSelf({
       householdId: 'household-sunrise',
       personId: 'person-protected-olivia',
       actorPersonId: 'person-protected-olivia',
@@ -794,6 +829,7 @@ describe('provider-neutral commerce and household allowances', () => {
     );
 
     const entitlements = new EntitlementRepository(harness.database);
+    const testOnlyEntitlements = new EntitlementRepository(harness.database, undefined, 'local');
     const overlapped = await entitlements.forHousehold('household-sunrise', now);
     expect(overlapped.portfolio.primarySource?.planKey).toBe('family');
     expect(
@@ -908,7 +944,7 @@ describe('provider-neutral commerce and household allowances', () => {
     });
 
     await expect(
-      entitlements.enrollProtectedSelf({
+      testOnlyEntitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-sunrise',
         personId: 'person-owner-alice',
         actorPersonId: 'person-owner-alice',
@@ -926,7 +962,7 @@ describe('provider-neutral commerce and household allowances', () => {
       isProtectedMember: true,
     });
     await expect(
-      entitlements.enrollProtectedSelf({
+      testOnlyEntitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-sunrise',
         personId: 'person-protected-pat',
         actorPersonId: 'person-protected-pat',

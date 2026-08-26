@@ -2,11 +2,11 @@ import {
   canonicalPublicOrigin,
   isCanonicalPublicRequestOrigin,
 } from '@boomerbuddy/config/exact-origin';
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextFetchEvent, type NextRequest } from 'next/server';
 import { isExactReplitHqHealthCheck, replitHqLivenessResponse } from './lib/replit-health-check';
+import { isPublicHqResourcePath } from './lib/resource-auth-policy';
 
-const isPublicRoute = createRouteMatcher(['/sign-in(.*)']);
 const productionClerkSignInUrl = '/sign-in';
 const configuredClerkSignInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
 const configuredPublicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true);
@@ -15,7 +15,7 @@ const productionClerkMiddleware =
     ? undefined
     : clerkMiddleware(
         async (auth, request) => {
-          if (!isPublicRoute(request)) await auth.protect();
+          if (!isPublicHqResourcePath(request.nextUrl.pathname)) await auth.protect();
         },
         {
           signInUrl: productionClerkSignInUrl,

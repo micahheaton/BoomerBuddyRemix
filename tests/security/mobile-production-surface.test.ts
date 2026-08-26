@@ -234,8 +234,14 @@ describe('mobile production surface', () => {
     expect(apiOrigin).toContain(
       "export const productionMobileApiOrigin = 'https://api.boomerbuddy.net';",
     );
-    expect(api).toContain('readMobileAuthenticationToken({ skipCache: true })');
+    expect(api).toContain(
+      'readMobileAuthenticationToken({ skipCache: true }, authenticationContext)',
+    );
     expect(app).toContain('completeMobileSignOut({');
+    expect(app).toContain('clerkSession?.id === identitySessionId');
+    expect(app).toContain('clearMobileDeviceState(householdSession)');
+    expect(app).toContain('clerkSignOut({ sessionId: identitySessionId })');
+    expect(app).toContain('isMobileAuthenticationContextCurrent(authenticationContext)');
     expect(app).toContain('secure sign out did not finish');
     expect(combined).not.toContain('/v1/dev/sessions/mobile');
     expect(combined).not.toContain('writeSessionToken');

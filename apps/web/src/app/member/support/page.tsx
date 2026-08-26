@@ -1,6 +1,8 @@
 import { SupportReceipts } from '../../../components/support-receipts';
+import { protectProductionMemberResource } from '../../../lib/resource-auth';
 
-export default function MemberSupportPage() {
+export default async function MemberSupportPage() {
+  await protectProductionMemberResource();
   return (
     <main id="main-content" className="member-shell member-main">
       <span className="eyebrow">Member support</span>

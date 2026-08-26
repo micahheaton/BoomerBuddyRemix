@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
 export default async function FeedbackPage() {
+  await protectProductionHqResource();
   if (process.env.NODE_ENV !== 'production') {
     const { HqScreen } = await import('../../components/hq-screen');
     return <HqScreen view="feedback" />;

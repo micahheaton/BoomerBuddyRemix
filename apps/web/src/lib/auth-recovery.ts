@@ -1,4 +1,5 @@
 export const selectedHouseholdStorageKey = 'boomerbuddy.selected-household';
+export const protectedSelfOperationStoragePrefix = 'bb:protected-self:';
 export const productionSessionRecoveryPath = '/sign-in/session-recovery';
 export const clerkRecoveryLoadTimeoutMs = 2_000;
 
@@ -21,6 +22,20 @@ const cleanupFailureMessage =
   'BoomerBuddy could not confirm that the session was cleared. This page has not continued. Try again or email support.';
 const navigationFailureMessage =
   'BoomerBuddy cleared the session but could not open a fresh sign-in page. This page has not continued. Try again or email support.';
+
+type CustomerSessionStorage = Pick<Storage, 'key' | 'length' | 'removeItem'>;
+
+export function clearCustomerSessionState(storage: CustomerSessionStorage): void {
+  const protectedOperationKeys: string[] = [];
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (key?.startsWith(protectedSelfOperationStoragePrefix)) {
+      protectedOperationKeys.push(key);
+    }
+  }
+  storage.removeItem(selectedHouseholdStorageKey);
+  for (const key of protectedOperationKeys) storage.removeItem(key);
+}
 
 export interface AuthenticationRecoveryCoordinator {
   begin(input: {
@@ -205,7 +220,7 @@ export function createSessionRecoveryRetryController(input: {
 export function beginProductionAuthenticationRecovery(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
   return productionAuthenticationRecovery.begin({
-    clearLocalState: () => window.sessionStorage.removeItem(selectedHouseholdStorageKey),
+    clearLocalState: () => clearCustomerSessionState(window.sessionStorage),
     fallbackNavigation: () => window.location.replace(productionSessionRecoveryPath),
     hasReachedRecoveryDestination: () => window.location.pathname === productionSessionRecoveryPath,
     scheduleRearm: (callback) => window.setTimeout(callback, 1_000),

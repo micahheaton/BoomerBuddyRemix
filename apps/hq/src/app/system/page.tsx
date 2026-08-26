@@ -1,4 +1,7 @@
 import { HqScreen } from '../../components/hq-screen';
-export default function Page() {
+import { protectProductionHqResource } from '../../lib/resource-auth';
+
+export default async function Page() {
+  await protectProductionHqResource();
   return <HqScreen view="system" />;
 }

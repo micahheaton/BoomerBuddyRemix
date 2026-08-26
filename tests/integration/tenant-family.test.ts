@@ -152,8 +152,8 @@ describe('tenant and pairwise family boundaries', () => {
 
   it('returns only explicit shares after protected enrollment lapses and preserves delete-own', async () => {
     harness = await createApiHarness();
-    const entitlements = new EntitlementRepository(harness.database);
-    await entitlements.enrollProtectedSelf({
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
+    await entitlements.testOnlyEnrollProtectedSelf({
       householdId: 'household-sunrise',
       personId: 'person-trusted-terry',
       actorPersonId: 'person-trusted-terry',
@@ -170,7 +170,7 @@ describe('tenant and pairwise family boundaries', () => {
     expect(created.statusCode).toBe(201);
     const ownedCheckId = String(created.json().check.id);
     await expect(
-      entitlements.revokeProtectedSelf({
+      entitlements.testOnlyRevokeProtectedSelf({
         householdId: 'household-sunrise',
         personId: 'person-trusted-terry',
         actorPersonId: 'person-trusted-terry',

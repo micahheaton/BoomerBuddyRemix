@@ -1,7 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { FamilyResponse, PrincipalDto } from '@boomerbuddy/contracts';
 import { mobileRequest } from './api';
-import { readSelectedHouseholdId, setSelectedHouseholdId } from './session';
+import {
+  isMobileHouseholdSessionCurrent,
+  readSelectedHouseholdId,
+  setSelectedHouseholdId,
+  type MobileHouseholdSession,
+} from './session';
 
 type HouseholdScope = PrincipalDto['households'][number];
 
@@ -35,10 +40,12 @@ export function mobileHouseholdScopeSummary(scope: HouseholdScope): string {
 
 export function MobileHouseholdProvider({
   children,
+  householdSession,
   principal,
   onPrincipalChanged,
 }: {
   children: React.ReactNode;
+  householdSession: MobileHouseholdSession;
   principal: PrincipalDto;
   onPrincipalChanged: (principal: PrincipalDto) => void;
 }) {
@@ -72,25 +79,31 @@ export function MobileHouseholdProvider({
   }, [principal]);
 
   function selectHousehold(householdId: string) {
+    if (!isMobileHouseholdSessionCurrent(householdSession)) return;
     if (!principal.households.some((scope) => scope.id === householdId)) return;
-    void setSelectedHouseholdId(householdId).catch(() => undefined);
+    void setSelectedHouseholdId(householdSession, principal.personId, householdId).catch(
+      () => undefined,
+    );
     setSelectedId(householdId);
   }
 
   const replacePrincipal = useCallback(
     (nextPrincipal: PrincipalDto, preferredHouseholdId?: string): string => {
+      if (!isMobileHouseholdSessionCurrent(householdSession)) return selectedHouseholdId;
       const stored = readSelectedHouseholdId();
       const selected =
         nextPrincipal.households.find((scope) => scope.id === preferredHouseholdId)?.id ??
         nextPrincipal.households.find((scope) => scope.id === stored)?.id ??
         nextPrincipal.households[0]?.id ??
         '';
-      void setSelectedHouseholdId(selected || null).catch(() => undefined);
+      void setSelectedHouseholdId(householdSession, nextPrincipal.personId, selected || null).catch(
+        () => undefined,
+      );
       setSelectedId(selected);
       onPrincipalChanged(nextPrincipal);
       return selected;
     },
-    [onPrincipalChanged],
+    [householdSession, onPrincipalChanged, selectedHouseholdId],
   );
 
   const selectedScope = principal.households.find((scope) => scope.id === selectedHouseholdId);

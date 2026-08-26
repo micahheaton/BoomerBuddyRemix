@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   allowanceKinds,
   billingIntervals,
@@ -10,6 +11,7 @@ import {
   entitlementSources,
   ids,
   priceHypothesisKinds,
+  protectedSelfEnrollmentConsentVersion,
   resolveCommercePortfolio,
   assertPortfolioAllowanceAvailable,
   type AllowanceKind,
@@ -26,7 +28,12 @@ import {
   type NormalizedSubscription,
 } from '@boomerbuddy/domain';
 import type { Database, SqlExecutor } from './database';
-import { appendConsentEvidence, identityEvidenceForPerson } from './consent';
+import {
+  appendConsentEvidence,
+  identityEvidenceForPerson,
+  type ConsentDocuments,
+  type ConsentIdentityEvidence,
+} from './consent';
 import { asDate, jsonValue, randomIdFactory, stringArray, type IdFactory } from './values';
 
 interface CommerceRow extends Record<string, unknown> {
@@ -90,6 +97,49 @@ interface AllowanceAllocationRow extends Record<string, unknown> {
   readonly id: string;
   readonly entitlement_grant_id: string;
 }
+
+interface ProtectedSelfStateRow extends Record<string, unknown> {
+  readonly status: 'accepted' | 'deferred' | 'revoked';
+  readonly consent_version: string;
+}
+
+interface ProtectedSelfOperationRow extends Record<string, unknown> {
+  readonly household_id: string;
+  readonly actor_person_id: string;
+  readonly operation_kind: 'enroll' | 'withdraw';
+  readonly request_digest: string;
+  readonly result_state: 'enrolled' | 'already_enrolled' | 'withdrawn' | 'already_withdrawn';
+  readonly result_consent_version: string | null;
+  readonly result_allowance_allocation_id: string | null;
+  readonly changed: boolean;
+}
+
+const protectedSelfEnrollmentDisclosureText =
+  'By enrolling, I confirm that I am choosing protected-adult access for myself in the selected household. This lets my account use Check, orientation, my history, and Family features only while the household has effective access and an available protected-adult seat. BoomerBuddy does not verify my identity, monitor messages, contact my Trusted Circle, or guarantee results. A household administrator, payer, or billing manager cannot accept this consent for me.';
+const protectedSelfEnrollmentPolicyText =
+  'BoomerBuddy records versioned consent evidence tied to my authenticated identity, session, selected household, and time. I may withdraw at any time. Withdrawal ends my protected-adult access and releases its seat; it does not cancel billing, remove me from the household, erase required security or consent evidence, or end separate sponsored-program participation. Check retention and deletion controls remain separate.';
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+export const protectedSelfEnrollmentConsent = Object.freeze({
+  version: protectedSelfEnrollmentConsentVersion,
+  disclosureText: protectedSelfEnrollmentDisclosureText,
+  policyText: protectedSelfEnrollmentPolicyText,
+  documents: Object.freeze({
+    disclosureVersion: 'protected-self-enrollment-disclosure-v1',
+    disclosureDigest: sha256Hex(protectedSelfEnrollmentDisclosureText),
+    policyVersion: 'protected-self-enrollment-policy-v1',
+    policyDigest: sha256Hex(protectedSelfEnrollmentPolicyText),
+  } satisfies ConsentDocuments),
+});
+
+const protectedSelfOperationKeyPattern =
+  /^protected-self-(?:enroll|withdraw):[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+export const protectedSelfEnrollmentMutationQuota = 64;
+export const protectedSelfNoopMutationQuota = 16;
 
 export interface CommerceSourceRecord {
   readonly subscription: NormalizedSubscription;
@@ -198,6 +248,32 @@ export interface ProtectedMemberEnrollment {
   readonly status: 'accepted' | 'deferred' | 'revoked';
   readonly consentVersion: string;
   readonly allowanceAllocationId: string | null;
+}
+
+export interface ProtectedSelfEnrollmentStatus {
+  readonly householdId: string;
+  readonly personId: string;
+  readonly state: 'not_enrolled' | 'enrolled';
+  readonly effectiveAccess: boolean;
+  readonly consentVersion?: string;
+  readonly eligibility:
+    | 'available'
+    | 'already_enrolled'
+    | 'entitlement_inactive'
+    | 'allowance_exhausted'
+    | 'allowance_usage_unknown';
+  readonly withdrawalAvailable: boolean;
+}
+
+export interface ProtectedSelfEnrollmentMutationResult {
+  readonly enrollment: ProtectedMemberEnrollment;
+  readonly changed: boolean;
+  readonly reused: boolean;
+}
+
+export interface ProtectedSelfWithdrawalMutationResult {
+  readonly changed: boolean;
+  readonly reused: boolean;
 }
 
 function objects(value: unknown, label: string): readonly Record<string, unknown>[] {
@@ -1044,7 +1120,657 @@ export class EntitlementRepository {
     );
   }
 
-  enrollProtectedSelf(input: {
+  private async assertActiveProtectedSelfMembership(
+    executor: SqlExecutor,
+    householdId: string,
+    personId: string,
+    lock: boolean,
+  ): Promise<void> {
+    const membership = await executor.query<Record<string, unknown>>(
+      `SELECT 1 FROM household_memberships
+       WHERE household_id = $1 AND person_id = $2 AND status = 'active'${
+         lock ? ' FOR UPDATE' : ''
+       }`,
+      [householdId, personId],
+    );
+    if (membership.rows.length !== 1) {
+      throw new DomainError('not_authorized', 'An active household membership is required');
+    }
+  }
+
+  private async lockProtectedSelfOperations(
+    executor: SqlExecutor,
+    householdId: string,
+    now: Date,
+  ): Promise<void> {
+    await executor.query(
+      `INSERT INTO protected_self_enrollment_household_gates(household_id, created_at)
+       VALUES ($1,$2) ON CONFLICT (household_id) DO NOTHING`,
+      [householdId, now.toISOString()],
+    );
+    const gate = await executor.query<Record<string, unknown>>(
+      `SELECT household_id FROM protected_self_enrollment_household_gates
+       WHERE household_id = $1 FOR UPDATE`,
+      [householdId],
+    );
+    if (gate.rows.length !== 1) {
+      throw new TypeError('Protected-self household serialization gate is unavailable');
+    }
+  }
+
+  private async exactProtectedSelfActor(
+    executor: SqlExecutor,
+    input: {
+      readonly personId: string;
+      readonly identityId: string;
+      readonly issuer: string;
+      readonly subject: string;
+      readonly sessionId: string;
+      readonly audience: 'customer' | 'mobile';
+      readonly now: Date;
+    },
+  ): Promise<ConsentIdentityEvidence> {
+    const result = await executor.query<
+      { readonly id: string; readonly issuer: string; readonly subject: string } & Record<
+        string,
+        unknown
+      >
+    >(
+      `SELECT identity.id, identity.issuer, identity.subject
+       FROM identities identity
+       JOIN sessions session
+         ON session.identity_id = identity.id
+        AND session.person_id = identity.person_id
+        AND session.issuer = identity.issuer
+        AND session.identity_subject = identity.subject
+       WHERE identity.id = $1 AND identity.person_id = $2
+         AND identity.issuer = $3 AND identity.subject = $4
+         AND identity.status = 'active'
+         AND session.id = $5 AND session.audience = $6
+         AND session.revoked_at IS NULL
+         AND session.issued_at <= $7 AND session.expires_at > $7
+         AND NOT EXISTS (
+           SELECT 1 FROM provider_session_revocations revoked
+           WHERE revoked.issuer = session.issuer
+             AND revoked.provider_session_id = session.provider_session_id
+         )`,
+      [
+        input.identityId,
+        input.personId,
+        input.issuer,
+        input.subject,
+        input.sessionId,
+        input.audience,
+        input.now.toISOString(),
+      ],
+    );
+    const identity = result.rows[0];
+    if (result.rows.length !== 1 || identity === undefined) {
+      throw new DomainError(
+        'not_authenticated',
+        'The exact active identity and session are required',
+      );
+    }
+    return {
+      id: identity.id,
+      issuer: identity.issuer,
+      subject: identity.subject,
+      assurance: identity.issuer === 'boomerbuddy-dev' ? 'development' : 'verified',
+    };
+  }
+
+  private async assertProtectedSelfMutationQuota(
+    executor: SqlExecutor,
+    householdId: string,
+    actorPersonId: string,
+    action: 'enroll' | 'withdraw',
+    changed: boolean,
+  ): Promise<void> {
+    if (action === 'withdraw' && changed) return;
+    const quota = changed ? protectedSelfEnrollmentMutationQuota : protectedSelfNoopMutationQuota;
+    const result = await executor.query<{ readonly count: number } & Record<string, unknown>>(
+      `SELECT count(*)::int AS count FROM protected_self_enrollment_operations
+       WHERE household_id = $1 AND actor_person_id = $2
+         AND operation_kind = $3 AND changed = $4`,
+      [householdId, actorPersonId, action, changed],
+    );
+    if ((result.rows[0]?.count ?? 0) >= quota) {
+      throw new DomainError(
+        'conflict',
+        'Protected-self enrollment history limit reached; contact support before another change',
+      );
+    }
+  }
+
+  private async priorProtectedSelfOperation(
+    executor: SqlExecutor,
+    input: {
+      readonly operationKey: string;
+      readonly householdId: string;
+      readonly actorPersonId: string;
+      readonly action: 'enroll' | 'withdraw';
+      readonly requestDigest: string;
+    },
+  ): Promise<ProtectedSelfOperationRow | undefined> {
+    const result = await executor.query<ProtectedSelfOperationRow>(
+      `SELECT household_id, actor_person_id, operation_kind, request_digest,
+              result_state, result_consent_version, result_allowance_allocation_id,
+              changed
+       FROM protected_self_enrollment_operations WHERE operation_key = $1`,
+      [input.operationKey],
+    );
+    const prior = result.rows[0];
+    if (prior === undefined) return undefined;
+    if (
+      prior.household_id !== input.householdId ||
+      prior.actor_person_id !== input.actorPersonId ||
+      prior.operation_kind !== input.action ||
+      prior.request_digest !== input.requestDigest
+    ) {
+      throw new DomainError(
+        'conflict',
+        'Protected-self idempotency key was used for a different request',
+      );
+    }
+    return prior;
+  }
+
+  private async recordProtectedSelfOperation(
+    executor: SqlExecutor,
+    input: {
+      readonly operationKey: string;
+      readonly householdId: string;
+      readonly actorPersonId: string;
+      readonly action: 'enroll' | 'withdraw';
+      readonly requestDigest: string;
+      readonly resultState: ProtectedSelfOperationRow['result_state'];
+      readonly consentVersion?: string;
+      readonly allowanceAllocationId?: string;
+      readonly changed: boolean;
+      readonly now: Date;
+    },
+  ): Promise<void> {
+    await executor.query(
+      `INSERT INTO protected_self_enrollment_operations(
+         operation_key, household_id, actor_person_id, operation_kind, request_digest,
+         result_state, result_consent_version, result_allowance_allocation_id,
+         changed, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [
+        input.operationKey,
+        input.householdId,
+        input.actorPersonId,
+        input.action,
+        input.requestDigest,
+        input.resultState,
+        input.consentVersion ?? null,
+        input.allowanceAllocationId ?? null,
+        input.changed,
+        input.now.toISOString(),
+      ],
+    );
+  }
+
+  private async writeProtectedSelfAudit(
+    executor: SqlExecutor,
+    input: {
+      readonly householdId: string;
+      readonly actorPersonId: string;
+      readonly audience: 'customer' | 'mobile';
+      readonly action: 'enroll' | 'withdraw';
+      readonly changed: boolean;
+      readonly correlationId: string;
+      readonly now: Date;
+    },
+  ): Promise<void> {
+    await executor.query(
+      `INSERT INTO audit_events(
+         id, household_id, actor_person_id, session_audience, action, resource_type,
+         resource_id, outcome, metadata, correlation_id, occurred_at
+       ) VALUES ($1,$2,$3,$4,$5,'protected_member',$3,'completed',$6::jsonb,$7,$8)`,
+      [
+        this.idFactory.next('audit'),
+        input.householdId,
+        input.actorPersonId,
+        input.audience,
+        `protected_enrollment.${input.action}`,
+        JSON.stringify(
+          input.action === 'enroll'
+            ? {
+                changed: input.changed,
+                consentVersion: protectedSelfEnrollmentConsent.version,
+              }
+            : { changed: input.changed, withdrawalVersion: 'protected-self-withdrawal-v1' },
+        ),
+        input.correlationId,
+        input.now.toISOString(),
+      ],
+    );
+  }
+
+  async protectedSelfStatus(input: {
+    readonly householdId: string;
+    readonly personId: string;
+    readonly now: Date;
+  }): Promise<ProtectedSelfEnrollmentStatus> {
+    return this.database.transaction(async (transaction) => {
+      await transaction.exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      await this.assertActiveProtectedSelfMembership(
+        transaction,
+        input.householdId,
+        input.personId,
+        false,
+      );
+      const stateResult = await transaction.query<ProtectedSelfStateRow>(
+        `SELECT status, consent_version FROM protected_members
+         WHERE household_id = $1 AND person_id = $2`,
+        [input.householdId, input.personId],
+      );
+      const entitlements = await loadHouseholdEntitlements(
+        transaction,
+        input.householdId,
+        input.now,
+        false,
+        this.runtimeEnvironment,
+      );
+      const current = stateResult.rows[0];
+      const enrolled = current?.status === 'accepted';
+      const activeEnrollment = enrolled
+        ? await protectedEnrollment(transaction, input.householdId, input.personId)
+        : null;
+      const effectiveAccess =
+        activeEnrollment !== null &&
+        entitlements.portfolio.contributingGrantIds.includes(
+          ids.entitlementGrant(activeEnrollment.entitlement_grant_id),
+        );
+      const allowance = entitlements.portfolio.allowances.find(
+        (candidate) => candidate.kind === 'protected_members',
+      );
+      const eligibility: ProtectedSelfEnrollmentStatus['eligibility'] = enrolled
+        ? 'already_enrolled'
+        : entitlements.portfolio.accessState !== 'effective' ||
+            allowance?.state === 'entitlement_inactive'
+          ? 'entitlement_inactive'
+          : allowance?.state === 'exhausted'
+            ? 'allowance_exhausted'
+            : allowance?.state === 'available'
+              ? 'available'
+              : 'allowance_usage_unknown';
+      return {
+        householdId: input.householdId,
+        personId: input.personId,
+        state: enrolled ? 'enrolled' : 'not_enrolled',
+        effectiveAccess,
+        ...(enrolled ? { consentVersion: current.consent_version } : {}),
+        eligibility,
+        withdrawalAvailable: enrolled,
+      };
+    });
+  }
+
+  enrollProtectedSelfIdempotent(input: {
+    readonly householdId: string;
+    readonly personId: string;
+    readonly actorPersonId: string;
+    readonly consentVersion: string;
+    readonly disclosureVersion: string;
+    readonly disclosureDigest: string;
+    readonly policyVersion: string;
+    readonly policyDigest: string;
+    readonly operationKey: string;
+    readonly actorIdentityId: string;
+    readonly actorIssuer: string;
+    readonly actorIdentitySubject: string;
+    readonly sessionId: string;
+    readonly audience: 'customer' | 'mobile';
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<ProtectedSelfEnrollmentMutationResult> {
+    if (input.actorPersonId !== input.personId) {
+      throw new DomainError('not_authorized', 'Protected enrollment requires self-consent');
+    }
+    const documents = protectedSelfEnrollmentConsent.documents;
+    if (
+      input.consentVersion !== protectedSelfEnrollmentConsent.version ||
+      input.disclosureVersion !== documents.disclosureVersion ||
+      input.disclosureDigest !== documents.disclosureDigest ||
+      input.policyVersion !== documents.policyVersion ||
+      input.policyDigest !== documents.policyDigest
+    ) {
+      throw new DomainError('invalid_input', 'Protected-self consent evidence is not current');
+    }
+    if (
+      !protectedSelfOperationKeyPattern.test(input.operationKey) ||
+      !input.operationKey.startsWith('protected-self-enroll:')
+    ) {
+      throw new DomainError('invalid_input', 'A valid protected-self enroll key is required');
+    }
+    const requestDigest = sha256Hex(
+      JSON.stringify([
+        input.householdId,
+        input.personId,
+        input.consentVersion,
+        input.disclosureVersion,
+        input.disclosureDigest,
+        input.policyVersion,
+        input.policyDigest,
+        input.actorIdentityId,
+        input.actorIssuer,
+        input.actorIdentitySubject,
+        input.sessionId,
+        input.audience,
+      ]),
+    );
+    return this.database.transaction(async (transaction) => {
+      await this.lockProtectedSelfOperations(transaction, input.householdId, input.now);
+      await this.assertActiveProtectedSelfMembership(
+        transaction,
+        input.householdId,
+        input.personId,
+        true,
+      );
+      const actorIdentity = await this.exactProtectedSelfActor(transaction, {
+        personId: input.actorPersonId,
+        identityId: input.actorIdentityId,
+        issuer: input.actorIssuer,
+        subject: input.actorIdentitySubject,
+        sessionId: input.sessionId,
+        audience: input.audience,
+        now: input.now,
+      });
+      const prior = await this.priorProtectedSelfOperation(transaction, {
+        operationKey: input.operationKey,
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        action: 'enroll',
+        requestDigest,
+      });
+      if (prior !== undefined) {
+        if (
+          prior.result_consent_version === null ||
+          prior.result_allowance_allocation_id === null
+        ) {
+          throw new TypeError('Protected-self enroll replay evidence is incomplete');
+        }
+        return {
+          enrollment: {
+            householdId: input.householdId,
+            personId: input.personId,
+            status: 'accepted',
+            consentVersion: prior.result_consent_version,
+            allowanceAllocationId: prior.result_allowance_allocation_id,
+          },
+          changed: prior.changed,
+          reused: true,
+        };
+      }
+      await loadHouseholdEntitlements(
+        transaction,
+        input.householdId,
+        input.now,
+        true,
+        this.runtimeEnvironment,
+      );
+      const current = await protectedEnrollment(
+        transaction,
+        input.householdId,
+        input.personId,
+        true,
+      );
+      await this.assertProtectedSelfMutationQuota(
+        transaction,
+        input.householdId,
+        input.actorPersonId,
+        'enroll',
+        current === null,
+      );
+      let enrollment: ProtectedMemberEnrollment;
+      let changed: boolean;
+      if (current !== null) {
+        await rebindCommerceAllowanceToEffectiveGrant(transaction, {
+          householdId: input.householdId,
+          kind: 'protected_members',
+          subjectKind: 'protected_member',
+          subjectId: input.personId,
+          now: input.now,
+          runtimeEnvironment: this.runtimeEnvironment,
+        });
+        enrollment = {
+          householdId: input.householdId,
+          personId: input.personId,
+          status: 'accepted',
+          consentVersion: current.consent_version,
+          allowanceAllocationId: current.allowance_allocation_id,
+        };
+        changed = false;
+      } else {
+        const allocationId = this.idFactory.next('allocation');
+        const consentId = this.idFactory.next('consent');
+        await allocateCommerceAllowance(transaction, {
+          householdId: input.householdId,
+          allocationId,
+          kind: 'protected_members',
+          subjectKind: 'protected_member',
+          subjectId: input.personId,
+          now: input.now,
+          runtimeEnvironment: this.runtimeEnvironment,
+        });
+        await transaction.query(
+          `INSERT INTO consents(
+             household_id, id, protected_person_id, granted_by_person_id, purpose,
+             consent_version, state, granted_at
+           ) VALUES ($1,$2,$3,$3,'protected_enrollment',$4,'active',$5)`,
+          [
+            input.householdId,
+            consentId,
+            input.personId,
+            input.consentVersion,
+            input.now.toISOString(),
+          ],
+        );
+        const consentEvidenceId = await appendConsentEvidence(transaction, this.idFactory, {
+          householdId: input.householdId,
+          consentId,
+          actorPersonId: input.actorPersonId,
+          subjectPersonId: input.personId,
+          purpose: 'protected_enrollment',
+          scope: { protectedEnrollment: true },
+          action: 'accept',
+          sourceInteraction: 'protected_enrollment_accept',
+          actorIdentity,
+          sessionId: input.sessionId,
+          correlationId: input.correlationId,
+          effectiveAt: input.now,
+          documents,
+        });
+        await transaction.query(
+          `INSERT INTO protected_members(
+             household_id, person_id, status, consented_by_person_id, consent_version,
+             allowance_allocation_id, accepted_at, created_at, updated_at,
+             consent_id, latest_consent_evidence_id
+           ) VALUES ($1,$2,'accepted',$2,$3,$4,$5,$5,$5,$6,$7)
+           ON CONFLICT (household_id, person_id) DO UPDATE SET
+             status = 'accepted', consented_by_person_id = EXCLUDED.consented_by_person_id,
+             consent_version = EXCLUDED.consent_version,
+             allowance_allocation_id = EXCLUDED.allowance_allocation_id,
+             accepted_at = EXCLUDED.accepted_at, deferred_at = NULL, revoked_at = NULL,
+             consent_id = EXCLUDED.consent_id,
+             latest_consent_evidence_id = EXCLUDED.latest_consent_evidence_id,
+             updated_at = EXCLUDED.updated_at`,
+          [
+            input.householdId,
+            input.personId,
+            input.consentVersion,
+            allocationId,
+            input.now.toISOString(),
+            consentId,
+            consentEvidenceId,
+          ],
+        );
+        enrollment = {
+          householdId: input.householdId,
+          personId: input.personId,
+          status: 'accepted',
+          consentVersion: input.consentVersion,
+          allowanceAllocationId: allocationId,
+        };
+        changed = true;
+      }
+      if (enrollment.allowanceAllocationId === null) {
+        throw new TypeError('Protected-self enrollment requires an allowance allocation');
+      }
+      await this.recordProtectedSelfOperation(transaction, {
+        operationKey: input.operationKey,
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        action: 'enroll',
+        requestDigest,
+        resultState: changed ? 'enrolled' : 'already_enrolled',
+        consentVersion: enrollment.consentVersion,
+        allowanceAllocationId: enrollment.allowanceAllocationId,
+        changed,
+        now: input.now,
+      });
+      await this.writeProtectedSelfAudit(transaction, {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        audience: input.audience,
+        action: 'enroll',
+        changed,
+        correlationId: input.correlationId,
+        now: input.now,
+      });
+      return { enrollment, changed, reused: false };
+    });
+  }
+
+  withdrawProtectedSelfIdempotent(input: {
+    readonly householdId: string;
+    readonly personId: string;
+    readonly actorPersonId: string;
+    readonly operationKey: string;
+    readonly actorIdentityId: string;
+    readonly actorIssuer: string;
+    readonly actorIdentitySubject: string;
+    readonly sessionId: string;
+    readonly audience: 'customer' | 'mobile';
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<ProtectedSelfWithdrawalMutationResult> {
+    if (input.actorPersonId !== input.personId) {
+      throw new DomainError('not_authorized', 'Only the protected member may withdraw consent');
+    }
+    if (
+      !protectedSelfOperationKeyPattern.test(input.operationKey) ||
+      !input.operationKey.startsWith('protected-self-withdraw:')
+    ) {
+      throw new DomainError('invalid_input', 'A valid protected-self withdraw key is required');
+    }
+    const requestDigest = sha256Hex(
+      JSON.stringify([
+        input.householdId,
+        input.personId,
+        'protected-self-withdrawal-v1',
+        input.actorIdentityId,
+        input.actorIssuer,
+        input.actorIdentitySubject,
+        input.sessionId,
+        input.audience,
+      ]),
+    );
+    return this.database.transaction(async (transaction) => {
+      await this.lockProtectedSelfOperations(transaction, input.householdId, input.now);
+      await this.assertActiveProtectedSelfMembership(
+        transaction,
+        input.householdId,
+        input.personId,
+        true,
+      );
+      const actorIdentity = await this.exactProtectedSelfActor(transaction, {
+        personId: input.actorPersonId,
+        identityId: input.actorIdentityId,
+        issuer: input.actorIssuer,
+        subject: input.actorIdentitySubject,
+        sessionId: input.sessionId,
+        audience: input.audience,
+        now: input.now,
+      });
+      const prior = await this.priorProtectedSelfOperation(transaction, {
+        operationKey: input.operationKey,
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        action: 'withdraw',
+        requestDigest,
+      });
+      if (prior !== undefined) return { changed: prior.changed, reused: true };
+      const current = await protectedConsentForWithdrawal(
+        transaction,
+        input.householdId,
+        input.personId,
+      );
+      const changed = current !== null;
+      await this.assertProtectedSelfMutationQuota(
+        transaction,
+        input.householdId,
+        input.actorPersonId,
+        'withdraw',
+        changed,
+      );
+      if (current !== null) {
+        const consentEvidenceId = await appendConsentEvidence(transaction, this.idFactory, {
+          householdId: input.householdId,
+          consentId: current.consent_id,
+          actorPersonId: input.actorPersonId,
+          subjectPersonId: input.personId,
+          purpose: 'protected_enrollment',
+          scope: { protectedEnrollment: true },
+          action: 'withdraw',
+          sourceInteraction: 'protected_enrollment_withdraw',
+          actorIdentity,
+          sessionId: input.sessionId,
+          correlationId: input.correlationId,
+          effectiveAt: input.now,
+          documents: protectedSelfEnrollmentConsent.documents,
+        });
+        await transaction.query(
+          `UPDATE protected_members
+           SET status = 'revoked', revoked_at = $3, updated_at = $3,
+               latest_consent_evidence_id = $4
+           WHERE household_id = $1 AND person_id = $2 AND status = 'accepted'`,
+          [input.householdId, input.personId, input.now.toISOString(), consentEvidenceId],
+        );
+        await releaseCommerceAllowance(transaction, {
+          householdId: input.householdId,
+          kind: 'protected_members',
+          subjectKind: 'protected_member',
+          subjectId: input.personId,
+          now: input.now,
+        });
+      }
+      await this.recordProtectedSelfOperation(transaction, {
+        operationKey: input.operationKey,
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        action: 'withdraw',
+        requestDigest,
+        resultState: changed ? 'withdrawn' : 'already_withdrawn',
+        changed,
+        now: input.now,
+      });
+      await this.writeProtectedSelfAudit(transaction, {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        audience: input.audience,
+        action: 'withdraw',
+        changed,
+        correlationId: input.correlationId,
+        now: input.now,
+      });
+      return { changed, reused: false };
+    });
+  }
+
+  testOnlyEnrollProtectedSelf(input: {
     readonly householdId: string;
     readonly personId: string;
     readonly actorPersonId: string;
@@ -1054,6 +1780,12 @@ export class EntitlementRepository {
     readonly correlationId?: string;
     readonly now: Date;
   }): Promise<ProtectedMemberEnrollment> {
+    if (this.runtimeEnvironment !== 'local') {
+      throw new DomainError(
+        'not_authorized',
+        'Test-only protected enrollment is unavailable outside the local runtime',
+      );
+    }
     if (input.actorPersonId !== input.personId) {
       throw new DomainError('not_authorized', 'Protected enrollment requires self-consent');
     }
@@ -1176,7 +1908,7 @@ export class EntitlementRepository {
     });
   }
 
-  revokeProtectedSelf(input: {
+  testOnlyRevokeProtectedSelf(input: {
     readonly householdId: string;
     readonly personId: string;
     readonly actorPersonId: string;
@@ -1185,6 +1917,12 @@ export class EntitlementRepository {
     readonly correlationId?: string;
     readonly now: Date;
   }): Promise<boolean> {
+    if (this.runtimeEnvironment !== 'local') {
+      throw new DomainError(
+        'not_authorized',
+        'Test-only protected withdrawal is unavailable outside the local runtime',
+      );
+    }
     if (input.actorPersonId !== input.personId) {
       throw new DomainError('not_authorized', 'Only the protected member may withdraw consent');
     }

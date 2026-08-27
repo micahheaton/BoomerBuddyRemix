@@ -645,7 +645,7 @@ export function registerCommerceRoutes(
       }
     }
     const preflight = await adapter.verifyConfiguredResources();
-    await context.repositories.commerceRuntime.recordStripePreflight({
+    const preflightReceipt = await context.repositories.commerceRuntime.recordStripePreflight({
       evidence: preflight,
       evidenceLevel,
       transportKind,
@@ -686,6 +686,7 @@ export function registerCommerceRoutes(
       environment: runtimeStripe.environment,
       serverOperationId,
       providerIdempotencyKey,
+      preflightRecordId: preflightReceipt.id,
       actorPersonId: actor.personId,
       requestedExpiresAt: prepared.providerExpiresAt,
       canonicalSubscriptionId: prepared.subscriptionId,
@@ -849,7 +850,7 @@ export function registerCommerceRoutes(
       throw new DomainError('not_found', 'No verified Stripe customer is available');
     }
     const preflight = await adapter.verifyConfiguredResources();
-    await context.repositories.commerceRuntime.recordStripePreflight({
+    const preflightReceipt = await context.repositories.commerceRuntime.recordStripePreflight({
       evidence: preflight,
       evidenceLevel,
       transportKind,
@@ -872,6 +873,7 @@ export function registerCommerceRoutes(
       environment: runtimeStripe.environment,
       serverOperationId,
       providerIdempotencyKey,
+      preflightRecordId: preflightReceipt.id,
       actorPersonId: actor.personId,
       providerCustomerId: customerId,
       providerConfigurationId: runtimeStripe.cancelOnlyPortalConfigurationId,

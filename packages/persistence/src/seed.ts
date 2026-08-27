@@ -258,10 +258,7 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
       { interval: 'month', amountMinor: 899, currency: 'USD', kind: 'list' },
       { interval: 'year', amountMinor: 8_900, currency: 'USD', kind: 'list' },
     ],
-    family: [
-      { interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' },
-      { interval: 'year', amountMinor: 14_900, currency: 'USD', kind: 'list' },
-    ],
+    family: [{ interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' }],
   } as const;
   const planEffectiveAt = '2026-08-15T00:00:00.000Z';
   await transaction.query(
@@ -630,7 +627,7 @@ export async function seedDemoData(
     await seedHouseholdData(transaction, now);
     await seedHqData(transaction, now);
     const scopedDatabase = transactionDatabase(database, transaction);
-    const checks = new CheckRepository(scopedDatabase, protection);
+    const checks = new CheckRepository(scopedDatabase, protection, undefined, 'local');
     await seedCheckIfMissing(scopedDatabase, checks, {
       householdId: 'household-sunrise',
       actorPersonId: 'person-protected-pat',

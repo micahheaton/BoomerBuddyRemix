@@ -103,9 +103,10 @@ export function createStripeSessionRetryHandler(input: {
       throw new JobExecutionError(`stripe_session_retry_${retry.reason}`, false);
     }
     const context = retry.context;
+    let preflightRecordId: string | undefined;
     try {
       const preflight = await input.provider.verifyConfiguredResources();
-      await input.commerceRuntime.recordStripePreflight({
+      const receipt = await input.commerceRuntime.recordStripePreflight({
         evidence: preflight,
         evidenceLevel: input.evidenceLevel,
         transportKind: input.transportKind,
@@ -113,6 +114,7 @@ export function createStripeSessionRetryHandler(input: {
         authenticityKind: input.authenticityKind,
         now,
       });
+      preflightRecordId = receipt.id;
     } catch (error) {
       const errorCode =
         error instanceof StripeWebhookError ? error.code : 'stripe.preflight_read_failed';
@@ -155,6 +157,7 @@ export function createStripeSessionRetryHandler(input: {
         environment,
         serverOperationId,
         providerIdempotencyKey: context.providerIdempotencyKey,
+        ...(preflightRecordId === undefined ? {} : { preflightRecordId }),
         actorPersonId: context.actor.personId,
         allowDueRetry: true,
         now,

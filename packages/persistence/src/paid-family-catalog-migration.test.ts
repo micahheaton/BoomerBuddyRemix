@@ -41,6 +41,22 @@ async function insertFamilyMonthlyPlan(
   `);
 }
 
+async function insertLegacyAnnualFamilyPlan(database: Database): Promise<void> {
+  await database.exec(`
+    INSERT INTO commerce_plan_versions(
+      id, product_version_id, plan_key, version, display_name, state,
+      capabilities, allowances, prices, available_from, created_at
+    ) VALUES (
+      'family_v1', 'consumer_household_v1', 'family', 1, 'Family', 'hypothesis',
+      '["check:text","check:url","history:read","family:manage","orientation:use"]'::jsonb,
+      '[{"kind":"protected_members","limit":3},{"kind":"trusted_circle_participants","limit":6}]'::jsonb,
+      '[{"interval":"month","amountMinor":1499,"currency":"USD","kind":"list"},
+        {"interval":"year","amountMinor":14900,"currency":"USD","kind":"list"}]'::jsonb,
+      '2026-08-15T00:00:00.000Z', '2026-08-17T12:00:00.000Z'
+    );
+  `);
+}
+
 describe('paid Family catalogue forward migration', () => {
   let database: Database | undefined;
   let temporaryDirectory: string | undefined;
@@ -177,5 +193,39 @@ describe('paid Family catalogue forward migration', () => {
        FROM schema_migrations WHERE version = '0035_run3_1_paid_family_catalog.sql'`,
     );
     expect(recorded.rows).toEqual([{ count: 0 }]);
+  }, 60_000);
+
+  it('stops before 0035 when an older database contains the deferred annual Family row', async () => {
+    const sourceDirectory = await migrateThrough0034();
+    if (database === undefined || temporaryDirectory === undefined) {
+      throw new Error('Paid Family migration fixture is unavailable');
+    }
+    await insertLegacyAnnualFamilyPlan(database);
+    for (const file of [
+      '0035_run3_1_paid_family_catalog.sql',
+      '0036_run3_1_protected_self_enrollment.sql',
+      '0037_run3_1_paid_family_entitlement_repair.sql',
+    ]) {
+      await copyFile(join(sourceDirectory, file), join(temporaryDirectory, file));
+    }
+
+    await expect(runMigrations(database, temporaryDirectory)).rejects.toThrow(
+      /Paid Family plan catalogue conflict/u,
+    );
+    const recorded = await database.query<
+      { readonly migration_count: number; readonly repair_column_count: number } & Record<
+        string,
+        unknown
+      >
+    >(
+      `SELECT
+         (SELECT count(*)::integer FROM schema_migrations
+          WHERE version >= '0035_run3_1_paid_family_catalog.sql') AS migration_count,
+         (SELECT count(*)::integer FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'commerce_stripe_session_operations'
+            AND column_name = 'preflight_record_id') AS repair_column_count`,
+    );
+    expect(recorded.rows).toEqual([{ migration_count: 0, repair_column_count: 0 }]);
   }, 60_000);
 });

@@ -77,12 +77,17 @@ describe('content-destroying Check retention', () => {
     expect(hiddenList.json().checks.map((check: { id: string }) => check.id)).not.toContain(dueId);
 
     const config = testConfig();
-    const repository = new CheckRepository(harness.database, {
-      encryptionKey: config.secrets.artifactEncryptionKey,
-      encryptionKeyVersion: 1,
-      fingerprintKey: config.secrets.fingerprintKey,
-      fingerprintKeyVersion: 1,
-    });
+    const repository = new CheckRepository(
+      harness.database,
+      {
+        encryptionKey: config.secrets.artifactEncryptionKey,
+        encryptionKeyVersion: 1,
+        fingerprintKey: config.secrets.fingerprintKey,
+        fingerprintKeyVersion: 1,
+      },
+      undefined,
+      'local',
+    );
     await expect(
       repository.share({
         checkId: dueId,

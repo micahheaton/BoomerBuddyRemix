@@ -377,10 +377,11 @@ describe('provider-neutral commerce and household allowances', () => {
           'plus_v1','subscription-web-hypothesis')`,
       [harness.clock.now().toISOString()],
     );
-    const entitlements = await new EntitlementRepository(harness.database).forHousehold(
-      'household-sunrise',
-      harness.clock.now(),
-    );
+    const entitlements = await new EntitlementRepository(
+      harness.database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', harness.clock.now());
     expect(entitlements.portfolio.primarySource?.subscriptionId).toBe('subscription-local-sunrise');
     expect(
       entitlements.portfolio.sources
@@ -392,7 +393,13 @@ describe('provider-neutral commerce and household allowances', () => {
         .every((source) => source.accessState !== 'effective'),
     ).toBe(true);
 
-    const commerce = new CommerceOperationsRepository(harness.database, Buffer.alloc(32, 11), 1);
+    const commerce = new CommerceOperationsRepository(
+      harness.database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     const first = await commerce.captureLocalEvent({
       environment: 'test',
       externalEventId: 'event-local-1',
@@ -828,8 +835,14 @@ describe('provider-neutral commerce and household allowances', () => {
       [now.toISOString()],
     );
 
-    const entitlements = new EntitlementRepository(harness.database);
-    const testOnlyEntitlements = new EntitlementRepository(harness.database, undefined, 'local');
+    const productionEntitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
+    const testOnlyEntitlements = entitlements;
+    const productionOverlapped = await productionEntitlements.forHousehold(
+      'household-sunrise',
+      now,
+    );
+    expect(productionOverlapped.portfolio.primarySource).toBeNull();
     const overlapped = await entitlements.forHousehold('household-sunrise', now);
     expect(overlapped.portfolio.primarySource?.planKey).toBe('family');
     expect(
@@ -844,7 +857,13 @@ describe('provider-neutral commerce and household allowances', () => {
     const alice = await login(harness.app, 'owner-alice');
     const pat = await login(harness.app, 'protected-pat');
     const terry = await login(harness.app, 'trusted-terry');
-    const commerce = new CommerceOperationsRepository(harness.database, Buffer.alloc(32, 17), 1);
+    const commerce = new CommerceOperationsRepository(
+      harness.database,
+      Buffer.alloc(32, 17),
+      1,
+      undefined,
+      'local',
+    );
     const eventCreatedAt = new Date(now.getTime() + 1_000);
     const captured = await commerce.captureVerifiedProviderEvent({
       provider: 'stripe',

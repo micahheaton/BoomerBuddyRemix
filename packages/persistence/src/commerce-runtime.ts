@@ -1718,7 +1718,7 @@ export class CommerceRuntimeRepository {
     readonly runtimeRunId: string;
     readonly authenticityKind: 'fixture_assertion' | 'provider_read';
     readonly now: Date;
-  }): Promise<string> {
+  }): Promise<{ readonly id: string; readonly digest: string }> {
     const canonical = JSON.stringify({
       environment: input.evidence.environment,
       accountId: input.evidence.accountId,
@@ -1803,7 +1803,7 @@ export class CommerceRuntimeRepository {
         input.evidence.accountBusinessType,
       ],
     );
-    return digest;
+    return { id, digest };
   }
 
   async prepareStripeCheckout(input: {
@@ -2288,6 +2288,7 @@ export class CommerceRuntimeRepository {
     readonly environment: 'test' | 'production';
     readonly serverOperationId: string;
     readonly providerIdempotencyKey: string;
+    readonly preflightRecordId?: string;
     readonly actorPersonId: string;
     readonly requestedExpiresAt?: Date;
     readonly canonicalSubscriptionId?: string;
@@ -2303,6 +2304,12 @@ export class CommerceRuntimeRepository {
     return this.database.transaction(async (transaction) => {
       if (input.action === 'checkout' && input.checkoutIntentId === undefined) {
         throw new DomainError('invalid_input', 'Checkout dispatch requires an intent');
+      }
+      if (input.environment === 'production' && input.preflightRecordId === undefined) {
+        throw new DomainError(
+          'invalid_input',
+          'Production Stripe dispatch requires an exact preflight receipt',
+        );
       }
       const household = await transaction.query(
         'SELECT id FROM households WHERE id = $1 FOR UPDATE',
@@ -2457,19 +2464,24 @@ export class CommerceRuntimeRepository {
            server_operation_id, provider_idempotency_key, state, attempt_count,
            requested_expires_at, created_at, updated_at, lease_expires_at, next_retry_at,
            actor_person_id, canonical_subscription_id, provider_price_id, provider_customer_id,
-           provider_configuration_id, success_url, cancel_url, return_url
+           provider_configuration_id, success_url, cancel_url, return_url,
+           preflight_record_id
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,'dispatching',1,$8,$9,$9,$10,$10,
-                   $11,$12,$13,$14,$15,$16,$17,$18)
+                   $11,$12,$13,$14,$15,$16,$17,$18,$19)
          ON CONFLICT (environment, action, household_id, server_operation_id)
          DO UPDATE SET state = 'dispatching',
            attempt_count = commerce_stripe_session_operations.attempt_count + 1,
            lease_expires_at = EXCLUDED.lease_expires_at,
            next_retry_at = EXCLUDED.next_retry_at,
            updated_at = EXCLUDED.updated_at,
+           preflight_record_id = COALESCE(
+             EXCLUDED.preflight_record_id,
+             commerce_stripe_session_operations.preflight_record_id
+           ),
            last_error_code = NULL
          WHERE commerce_stripe_session_operations.provider_idempotency_key = EXCLUDED.provider_idempotency_key
            AND commerce_stripe_session_operations.checkout_intent_id IS NOT DISTINCT FROM EXCLUDED.checkout_intent_id
-           AND $19::boolean
+           AND $20::boolean
          RETURNING id`,
         [
           operationId,
@@ -2490,6 +2502,7 @@ export class CommerceRuntimeRepository {
           input.successUrl ?? null,
           input.cancelUrl ?? null,
           input.returnUrl ?? null,
+          input.preflightRecordId ?? null,
           prior !== undefined,
         ],
       );

@@ -142,7 +142,12 @@ describe('operational durable worker handlers', () => {
          WHERE processed_at IS NULL`,
         [fixedTestNow.toISOString()],
       );
-      const orientations = new OrientationRepository(database, new Uint8Array(32).fill(4));
+      const orientations = new OrientationRepository(
+        database,
+        new Uint8Array(32).fill(4),
+        undefined,
+        'local',
+      );
       await orientations.start({
         householdId: 'household-sunrise',
         subjectPersonId: 'person-owner-alice',
@@ -189,7 +194,12 @@ describe('operational durable worker handlers', () => {
       const startedAt = fixedTestNow;
       let workerNow = new Date(startedAt.getTime() + 25 * 60 * 60 * 1_000);
       const clock = (): Date => workerNow;
-      const orientations = new OrientationRepository(database, new Uint8Array(32).fill(8));
+      const orientations = new OrientationRepository(
+        database,
+        new Uint8Array(32).fill(8),
+        undefined,
+        'local',
+      );
       await orientations.start({
         householdId: 'household-sunrise',
         subjectPersonId: 'person-protected-pat',

@@ -161,7 +161,12 @@ describe('one-shot local demo bootstrap', () => {
        WHERE id = 'artifact-seed-sunrise-private'`,
       [new Date(clock.now().getTime() - 1_000).toISOString()],
     );
-    const checks = new CheckRepository(first.database, testArtifactProtection());
+    const checks = new CheckRepository(
+      first.database,
+      testArtifactProtection(),
+      undefined,
+      'local',
+    );
     await expect(checks.purgeDue({ now: clock.now() })).resolves.toContain(
       'analysis-seed-sunrise-private',
     );

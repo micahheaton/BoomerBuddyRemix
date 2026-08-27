@@ -200,7 +200,13 @@ describe('authority and consent persistence', () => {
           'identity-jordan-verified','jordan-verified','session-jordan-verified',$1,$1,$2,$1)`,
       [now.toISOString(), expiresAt.toISOString()],
     );
-    const family = new FamilyRepository(harness.database, Buffer.alloc(32, 11), 1);
+    const family = new FamilyRepository(
+      harness.database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     const base = {
       householdId: 'household-sunrise',
       invitedByPersonId: 'person-protected-pat',

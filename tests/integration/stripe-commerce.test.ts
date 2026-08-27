@@ -699,7 +699,13 @@ async function runReconciliation(
     {
       'commerce.reconcile': createStripeReconciliationHandler({
         businessOs: new BusinessOsRepository(database),
-        commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+        commerce: new CommerceOperationsRepository(
+          database,
+          Buffer.alloc(32, 11),
+          1,
+          undefined,
+          'local',
+        ),
         commerceRuntime: new CommerceRuntimeRepository(database),
         jobs,
         provider: new StripeTestAdapter(
@@ -1220,6 +1226,43 @@ describe('Stripe test-mode transaction path', () => {
        WHERE household_id = 'household-sunrise'`,
     );
     expect(intents.rows[0]?.count).toBe(1);
+    const preflightBinding = await database.query<
+      {
+        readonly preflight_record_id: string;
+        readonly operation_environment: string;
+        readonly preflight_environment: string;
+        readonly offer_id: string;
+        readonly operation_price_id: string;
+        readonly preflight_price_id: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT operation.preflight_record_id,
+              operation.environment AS operation_environment,
+              preflight.environment AS preflight_environment,
+              preflight.offer_id,
+              operation.provider_price_id AS operation_price_id,
+              preflight.provider_price_id AS preflight_price_id
+       FROM commerce_stripe_session_operations operation
+       JOIN commerce_stripe_preflight_records preflight
+         ON preflight.id = operation.preflight_record_id
+        AND preflight.environment = operation.environment
+       WHERE operation.checkout_intent_id = (
+         SELECT intent.id FROM commerce_checkout_intents intent
+         WHERE intent.household_id = 'household-sunrise'
+           AND intent.subscription_id = $1
+       )`,
+      [checkoutBody.checkout.canonicalSubscriptionId],
+    );
+    expect(preflightBinding.rows).toEqual([
+      {
+        preflight_record_id: expect.any(String),
+        operation_environment: 'test',
+        preflight_environment: 'test',
+        offer_id: 'founding_family_monthly_v1',
+        operation_price_id: 'price_family_month_fixture',
+        preflight_price_id: 'price_family_month_fixture',
+      },
+    ]);
 
     const parallelCheckout = await app.inject({
       method: 'POST',
@@ -1959,10 +2002,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterStatus.rows[0]?.current_period_ends_at))).toEqual(
       new Date(initialEnd * 1_000),
     );
-    const accessAfterStatus = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterStatus = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterStatus.portfolio.sources.find((source) => source.subscriptionId === subscriptionId)
         ?.accessState,
@@ -1993,10 +2037,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterOldInvoice.rows[0]?.current_period_ends_at))).toEqual(
       new Date(initialEnd * 1_000),
     );
-    const accessAfterOldInvoice = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterOldInvoice = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterOldInvoice.portfolio.sources.find(
         (source) => source.subscriptionId === subscriptionId,
@@ -2020,10 +2065,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterCurrentInvoice.rows[0]?.current_period_ends_at))).toEqual(
       new Date(renewalEnd * 1_000),
     );
-    const accessAfterCurrentInvoice = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterCurrentInvoice = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterCurrentInvoice.portfolio.sources.find(
         (source) => source.subscriptionId === subscriptionId,
@@ -3833,6 +3879,8 @@ describe('Stripe test-mode transaction path', () => {
         database,
         Buffer.alloc(32, 11),
         1,
+        undefined,
+        'local',
       ).claimProviderReconciliationAutomaticAttempt({
         id: terminalAttentionRun.rows[0]?.id ?? 'missing-run',
         inboxId: terminalAttentionRun.rows[0]?.trigger_event_id ?? 'missing-inbox',
@@ -3919,7 +3967,13 @@ describe('Stripe test-mode transaction path', () => {
     ).resolves.toBe('acquired');
     const crashedHandler = createStripeReconciliationHandler({
       businessOs: new BusinessOsRepository(database),
-      commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+      commerce: new CommerceOperationsRepository(
+        database,
+        Buffer.alloc(32, 11),
+        1,
+        undefined,
+        'local',
+      ),
       commerceRuntime: new CommerceRuntimeRepository(database),
       jobs: crashedJobs,
       provider: new StripeTestAdapter(
@@ -3973,7 +4027,13 @@ describe('Stripe test-mode transaction path', () => {
       {
         'commerce.reconcile': createStripeReconciliationHandler({
           businessOs: new BusinessOsRepository(database),
-          commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+          commerce: new CommerceOperationsRepository(
+            database,
+            Buffer.alloc(32, 11),
+            1,
+            undefined,
+            'local',
+          ),
           commerceRuntime: new CommerceRuntimeRepository(database),
           jobs: restartedJobs,
           provider: new StripeTestAdapter(
@@ -4533,7 +4593,13 @@ describe('Stripe test-mode transaction path', () => {
       currentPeriodStartsAt: new Date(created * 1_000),
       currentPeriodEndsAt: new Date((created + 30 * 86_400) * 1_000),
     };
-    const recoveryClosure = new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1);
+    const recoveryClosure = new CommerceOperationsRepository(
+      database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     for (const staleState of ['snoozed', 'open'] as const) {
       await database.query(
         `INSERT INTO owner_attention_items(
@@ -4630,7 +4696,13 @@ describe('Stripe test-mode transaction path', () => {
       periodEnd: created + 30 * 86_400,
     });
 
-    const commerce = new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1);
+    const commerce = new CommerceOperationsRepository(
+      database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     let eventSequence = 0;
     const captureSource = async (
       eventType: 'invoice.paid' | 'invoice.payment_failed',

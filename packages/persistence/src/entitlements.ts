@@ -46,7 +46,7 @@ interface CommerceRow extends Record<string, unknown> {
   readonly current_period_ends_at: unknown;
   readonly reconciliation_state: 'not_required' | 'pending' | 'reconciled' | 'attention';
   readonly sponsor_backing_verified: boolean;
-  readonly local_backing: boolean;
+  readonly hypothesis_backing_verified: boolean;
   readonly plan_id: string;
   readonly plan_key: CommercePlanVersion['key'];
   readonly plan_version: number;
@@ -597,19 +597,12 @@ async function loadHouseholdEntitlements(
              AND o.verification_state IN ('local_fixture','verified')
          )
        END AS sponsor_backing_verified,
-       CASE WHEN s.source = 'sponsor' THEN EXISTS (
-         SELECT 1 FROM entitlement_grants lg
-         JOIN commerce_sponsorship_allocations la
-           ON la.household_id = lg.household_id AND la.id = lg.sponsorship_id
-         JOIN commerce_sponsorships ls ON ls.id = la.sponsorship_id
-         JOIN organizations lo ON lo.id = ls.organization_id
-         WHERE lg.household_id = s.household_id AND lg.subscription_id = s.id
-           AND lo.verification_state = 'local_fixture'
-       ) ELSE EXISTS (
-         SELECT 1 FROM commerce_provider_subscription_records pr
-         WHERE pr.household_id = s.household_id AND pr.subscription_id = s.id
-           AND pr.environment IN ('local','test') AND pr.verified_at IS NOT NULL
-       ) END AS local_backing,
+       commerce_hypothesis_subscription_backing_supports(
+         s.household_id,
+         s.id,
+         $3,
+         $2
+       ) AS hypothesis_backing_verified,
        pv.id AS plan_id, pv.plan_key, pv.version AS plan_version,
        pv.display_name AS plan_display_name, pv.state AS plan_state,
        pv.capabilities AS plan_capabilities, pv.allowances AS plan_allowances,
@@ -769,7 +762,8 @@ async function loadHouseholdEntitlements(
       sourceVerified:
         row.source_verified &&
         row.sponsor_backing_verified &&
-        (row.plan_state === 'active' || (row.plan_state === 'hypothesis' && row.local_backing)),
+        (row.plan_state === 'active' ||
+          (row.plan_state === 'hypothesis' && row.hypothesis_backing_verified)),
       precedence: row.precedence,
       startsAt: asDate(row.current_period_starts_at, 'subscription.starts_at'),
       ...(row.current_period_ends_at === null

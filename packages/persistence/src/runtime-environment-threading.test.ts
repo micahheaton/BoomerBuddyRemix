@@ -284,7 +284,7 @@ describe('runtime-environment entitlement threading', () => {
     expect(unrelatedGrant.rows).toEqual([{ id: 'grant-local-sunrise', revoked_at: null }]);
   });
 
-  it('keeps the local Founding allocation locally and restores it to an unrelated eligible grant in production reconciliation', async () => {
+  it('keeps Founding allocation bound when production sees only test-backed Family evidence', async () => {
     await enrollSunriseInLocalFoundingHousehold();
     const periodEndsAt = new Date(now.getTime() + 365 * 86_400_000);
     await database.query(
@@ -383,11 +383,7 @@ describe('runtime-environment entitlement threading', () => {
       ),
       2,
     );
-    await expect(allocationGrantIds()).resolves.toEqual([
-      'grant-local-sunrise',
-      'grant-local-sunrise',
-      'grant-local-sunrise',
-    ]);
+    await expect(allocationGrantIds()).resolves.toEqual(foundingGrantIds);
     const unrelatedGrant = await database.query<
       { readonly source: string; readonly revoked_at: unknown } & Record<string, unknown>
     >(

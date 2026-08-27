@@ -101,6 +101,7 @@ describe('verified provider commerce inbox', () => {
       Buffer.alloc(32, 23),
       1,
       sequentialIds(),
+      'local',
     );
     await database.query(
       `INSERT INTO commerce_subscriptions(

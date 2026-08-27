@@ -3055,7 +3055,7 @@ describe('FoundingHouseholdRepository', () => {
         AND grant_record.id = enrollment.entitlement_grant_id
        WHERE enrollment.household_id = 'household-harbor'`,
     );
-    const entitlements = await new EntitlementRepository(database).forHousehold(
+    const entitlements = await new EntitlementRepository(database, undefined, 'local').forHousehold(
       'household-harbor',
       afterExpiry,
     );

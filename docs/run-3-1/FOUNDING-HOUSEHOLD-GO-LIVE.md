@@ -236,10 +236,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     0034_run3_1_support_receipts.sql
     0035_run3_1_paid_family_catalog.sql
     0036_run3_1_protected_self_enrollment.sql
+    0037_run3_1_paid_family_entitlement_repair.sql
     ```
 
-    Therefore, for an exact `0027` production prefix and a candidate whose manifest still ends at
-    `0036`, the pending suffix is exactly
+    Therefore, for an exact `0027` production prefix and a candidate whose manifest ends at
+    `0037`, the pending suffix is exactly
     `0028_run3_1_billing_authority_workflow.sql`,
     `0029_run3_1_stripe_live_control_plane.sql`,
     `0030_run3_1_billing_reverification_binding.sql`,
@@ -247,13 +248,33 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `0032_run3_1_private_beta_access_intents.sql`,
     `0033_run3_1_billing_recovery_evidence.sql`,
     `0034_run3_1_support_receipts.sql`, and
-    `0035_run3_1_paid_family_catalog.sql`, and
-    `0036_run3_1_protected_self_enrollment.sql`. For an exact `0032` prefix, it is exactly `0033`
-    through `0036`. A genuinely empty database receives the entire tagged `0001` through final-candidate
-    manifest. If paid-entitlement repair requires a future forward migration, it must be the next
-    contiguous entry in the exact tagged manifest and must appear in the external receipt. Do not
-    guess its filename, hardcode `0036` as the release ceiling, or run an untagged migration. The only
+    `0035_run3_1_paid_family_catalog.sql`,
+    `0036_run3_1_protected_self_enrollment.sql`, and
+    `0037_run3_1_paid_family_entitlement_repair.sql`. For an exact `0032` prefix, it is exactly `0033`
+    through `0037`. A genuinely empty database receives the entire tagged `0001` through final-candidate
+    manifest. A future forward migration must be the next contiguous entry in the exact tagged
+    manifest and must appear in the external receipt. Do not guess its filename, hardcode `0037` as
+    the release ceiling, or run an untagged migration. The only
     allowed pending set is the tagged candidate manifest minus the exact database prefix.
+
+    Before applying a suffix that includes `0035`, perform a read-only inventory of the exact
+    `family_v1` row in `commerce_plan_versions`. At a pre-`0035` prefix, only absence or the exact
+    immutable monthly hypothesis accepted by
+    `packages/persistence/migrations/0035_run3_1_paid_family_catalog.sql` may proceed. Any annual,
+    mixed monthly/annual, active, differently priced, differently entitled, or otherwise divergent
+    row is a hard stop. Do not update or delete the row to make migration pass. A disposable database
+    may be recreated from the verified source; a durable database requires a separately reviewed
+    lineage and data-portability repair. At a `0035` or later prefix, require the exact monthly USD
+    14.99 hypothesis and `founding_family_monthly_v1` offer contract.
+
+    Before applying a suffix that includes `0037`, count production rows in
+    `commerce_stripe_session_operations`. A pre-`0037` database must contain zero such rows because
+    they cannot name the exact preflight receipt introduced by `0037`; any row is a hard stop for a
+    separately reviewed evidence migration. At a `0037` or later prefix, require zero production
+    rows with `preflight_record_id IS NULL`. The live Stripe audit reported zero live products,
+    prices, subscriptions, and webhooks, but that provider fact does not replace this database
+    inventory. Migration `0037` deliberately performs no historical backfill and its production
+    preflight check makes an unexpected pre-existing row stop the migration transactionally.
 
     Use a one-off founder-controlled shell with the migration credential, direct TLS database URL,
     `BB_POSTGRES_POOL_MAX=1`, and the complete production configuration. Run
@@ -289,14 +310,23 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     automated protected-enrollment fixtures use only a synthetic local Family entitlement. Passing
     them does not prove Stripe integration, a live payment, or production paid-entitlement readiness.
 
-    After `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. Prefer a
-    schema-compatible corrective tag with initiation and invitations disabled or a forward
-    corrective migration. A database rollback is allowed only before any post-migration durable
-    write and must be coordinated: stop and drain all services, prove the pre-migration backup in
-    disposable infrastructure, restore the complete database at the verified zero-write point,
-    deploy the matching pre-`0029` API, worker, web, and HQ set, and only then reopen traffic. Never
-    destructively down-migrate or discard consent, billing, audit, webhook, refund, dispute, job, or
-    reconciliation evidence.
+    Migration `0037` preserves local/test fixtures only for a local runtime. In production it grants
+    the immutable Family hypothesis only from one exact live USD 14.99 monthly chain: provider and
+    customer binding, Checkout operation and completion, operation-bound preflight receipt, paid
+    invoice authority, current lifecycle, and any bounded dunning grace with signed failure lineage.
+    It also makes every production Stripe operation require its environment-matched preflight
+    receipt. Passing local fixtures or serializer mocks is not production paid-entitlement evidence.
+
+    After `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. After
+    `0037`, do not deploy a pre-`0037` API or worker: it cannot attach the required preflight receipt,
+    and the database will reject every production Stripe operation before provider dispatch. Keep
+    Stripe initiation disabled and use a `0037`-compatible corrective tag or a forward corrective
+    migration. A database rollback is allowed only before any post-migration durable write and must
+    be coordinated: stop and drain all services, prove the pre-migration backup in disposable
+    infrastructure, restore the complete database at the verified zero-write point, deploy the
+    matching API, worker, web, and HQ set, and only then reopen traffic. Never destructively
+    down-migrate or discard consent, billing, audit, webhook, refund, dispute, job, or reconciliation
+    evidence.
 
     **NONCHARGING AUTHORITY ENDS BEFORE STEP 19.** The receipt and phrase from step 2 authorize only
     the exact noncharging manifest. They do not authorize a production founder-identity bootstrap, a

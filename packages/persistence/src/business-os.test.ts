@@ -1,3 +1,4 @@
+import { createSeededTestDatabase } from '@boomerbuddy/testkit';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { BusinessOsRepository } from './business-os';
@@ -242,16 +243,54 @@ describe('Business OS persistence', () => {
           kind: 'export_manifest',
           dataCategories: expect.arrayContaining([
             'account_identity',
+            'check_share_lifecycle_evidence',
+            'check_share_records',
             'commerce_and_entitlements',
             'feedback_learning_evidence',
+            'household_member_invitation_evidence',
+            'member_in_app_feed_receipts',
+            'member_learning_operation_evidence',
+            'member_learning_preferences',
+            'member_learning_progress',
             'messaging_evidence',
             'referral_evidence',
+            'trusted_circle_invitation_evidence',
+            'trusted_circle_rate_limit_evidence',
+            'trusted_circle_recipient_code_evidence',
+          ]),
+          categoryGuidanceVersion: 'privacy-category-guidance-v1',
+          categoryGuidance: expect.arrayContaining([
+            expect.objectContaining({
+              category: 'member_learning_progress',
+              sourceStores: ['member_learning_progress'],
+              deletionHandling: 'review_delete_or_deidentify_subject_data',
+            }),
+            expect.objectContaining({
+              category: 'member_learning_operation_evidence',
+              sourceStores: ['member_learning_operation_receipts'],
+              deletionHandling: 'review_retain_minimum_required_evidence',
+            }),
+            expect.objectContaining({
+              category: 'check_share_lifecycle_evidence',
+              sourceStores: ['check_share_lifecycle_events'],
+              deletionHandling: 'review_retain_minimum_required_evidence',
+            }),
           ]),
           requiresProfessionalReview: true,
           recordCounts: expect.objectContaining({
             account_identity: expect.any(Number),
             audit_and_outbox_evidence: expect.any(Number),
+            check_share_lifecycle_evidence: 0,
+            check_share_records: 0,
+            household_member_invitation_evidence: 0,
+            member_in_app_feed_receipts: 0,
+            member_learning_operation_evidence: 0,
+            member_learning_preferences: 0,
+            member_learning_progress: 0,
             privacy_request_evidence: 1,
+            trusted_circle_invitation_evidence: 0,
+            trusted_circle_rate_limit_evidence: 0,
+            trusted_circle_recipient_code_evidence: 0,
           }),
         }),
       }),
@@ -600,4 +639,163 @@ describe('Business OS persistence', () => {
       ),
     );
   });
+
+  it('covers Run 3 learning, invitation security, and Check share lifecycle stores in privacy plans', async () => {
+    const now = new Date('2026-08-27T12:00:00.000Z');
+    const expiresAt = new Date('2026-09-03T12:00:00.000Z');
+    database = await createSeededTestDatabase(now);
+    const repository = new BusinessOsRepository(database, deterministicIds(), 'person-hq-heidi');
+
+    await database.query(
+      `INSERT INTO member_learning_progress(
+         household_id, person_id, lesson_key, lesson_version, state,
+         attempt_count, review_count, started_at, updated_at
+       ) VALUES (
+         'household-sunrise','person-protected-pat','pause_under_pressure',1,
+         'in_progress',0,0,$1,$1
+       )`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO member_learning_preferences(
+         household_id, person_id, coarse_region, weekly_rehearsal_enabled, updated_at
+       ) VALUES ('household-sunrise','person-protected-pat','US',false,$1)`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO member_in_app_feed_receipts(
+         household_id, person_id, item_key, item_version, state,
+         read_at, dismissed_at, updated_at
+       ) VALUES (
+         'household-sunrise','person-protected-pat','lesson:pause_under_pressure',1,
+         'read',$1,NULL,$1
+       )`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO member_learning_operation_receipts(
+         household_id, person_id, operation_key_hash, action_kind,
+         request_fingerprint, canonical_result, contains_customer_content,
+         created_at, completed_at
+       ) VALUES (
+         'household-sunrise','person-protected-pat',repeat('c',64),'lesson_start',
+         repeat('d',64),$1::jsonb,false,$2,$2
+       )`,
+      [JSON.stringify({ schemaVersion: 1, appliedAt: now.toISOString() }), now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO trusted_circle_recipient_codes(
+         id, identity_id, person_id, code_fingerprint, fingerprint_key_version,
+         state, expires_at, created_at
+       ) VALUES (
+         'recipient-code-privacy-pat','identity-protected-pat','person-protected-pat',
+         repeat('a',64),1,'active',$1,$2
+       )`,
+      [expiresAt.toISOString(), now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO trusted_circle_authenticated_rate_buckets(
+         person_id, action_kind, bucket_starts_at, used_count, updated_at
+       ) VALUES (
+         'person-protected-pat','recipient_code_generation',$1,1,$1
+       )`,
+      [now.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO household_member_invitations(
+         household_id, id, invited_by_person_id, intended_identity_id,
+         intended_person_id, intended_identity_issuer, intended_identity_subject,
+         invitee_display_name, recipient_code_id, invitation_code_fingerprint,
+         fingerprint_key_version, preview_version, state, expires_at, created_at
+       ) VALUES (
+         'household-sunrise','member-invitation-privacy-pat','person-owner-alice',
+         'identity-protected-pat','person-protected-pat','boomerbuddy-dev','protected-pat',
+         'Synthetic recipient','recipient-code-privacy-pat',repeat('b',64),1,
+         'neutral-member-preview-v1','pending',$1,$2
+       )`,
+      [expiresAt.toISOString(), now.toISOString()],
+    );
+
+    const expectedPlanKinds = {
+      access: 'access_summary',
+      export: 'export_manifest',
+      delete: 'deletion_plan',
+    } as const;
+    for (const requestKind of ['access', 'export', 'delete'] as const) {
+      const requestId = await repository.createPrivacyRequest({
+        dueAt: new Date('2026-09-26T12:00:00.000Z'),
+        personId: 'person-protected-pat',
+        householdId: 'household-sunrise',
+        now,
+        requestKind,
+        context: {
+          householdId: 'household-sunrise',
+          actorPersonId: 'person-hq-heidi',
+          audience: 'hq',
+          correlationId: `correlation-privacy-${requestKind}-coverage`,
+          now,
+        },
+      });
+      for (const [action, evidenceReference] of [
+        ['verify_identity', `identity:privacy-${requestKind}-coverage`],
+        ['begin_review', `review:privacy-${requestKind}-coverage`],
+        ['record_plan', `plan:privacy-${requestKind}-coverage`],
+      ] as const) {
+        await repository.advancePrivacyRequest({
+          requestId,
+          action,
+          evidenceReference,
+          context: {
+            householdId: 'household-sunrise',
+            actorPersonId: 'person-hq-heidi',
+            audience: 'hq',
+            correlationId: `correlation-privacy-${requestKind}-${action}`,
+            now,
+          },
+        });
+      }
+      const planned = await repository.getPrivacyRequest(requestId);
+      expect(planned?.plan).toMatchObject({
+        kind: expectedPlanKinds[requestKind],
+        requiresProfessionalReview: true,
+        recordCounts: {
+          member_learning_progress: 1,
+          member_learning_preferences: 1,
+          member_in_app_feed_receipts: 1,
+          member_learning_operation_evidence: 1,
+          trusted_circle_recipient_code_evidence: 1,
+          trusted_circle_rate_limit_evidence: 1,
+          household_member_invitation_evidence: 1,
+          check_share_records: 1,
+          check_share_lifecycle_evidence: 1,
+        },
+      });
+      expect(planned?.plan?.categoryGuidanceVersion).toBe('privacy-category-guidance-v1');
+      const guidance = new Map(
+        planned?.plan?.categoryGuidance.map((item) => [item.category, item]),
+      );
+      expect(guidance.get('member_learning_progress')).toMatchObject({
+        sourceStores: ['member_learning_progress'],
+        accessExportHandling: 'content_free_inventory_pending_verified_fulfillment',
+        deletionHandling: 'review_delete_or_deidentify_subject_data',
+        retentionHandling: 'apply_approved_subject_data_schedule',
+      });
+      expect(guidance.get('member_learning_operation_evidence')).toMatchObject({
+        sourceStores: ['member_learning_operation_receipts'],
+        deletionHandling: 'review_retain_minimum_required_evidence',
+        retentionHandling: 'apply_security_legal_or_accounting_schedule',
+      });
+      expect(guidance.get('trusted_circle_recipient_code_evidence')).toMatchObject({
+        sourceStores: ['trusted_circle_recipient_codes'],
+        deletionHandling: 'review_retain_minimum_required_evidence',
+        retentionHandling: 'apply_security_legal_or_accounting_schedule',
+      });
+      expect(guidance.get('check_share_lifecycle_evidence')).toMatchObject({
+        sourceStores: ['check_share_lifecycle_events'],
+        deletionHandling: 'review_retain_minimum_required_evidence',
+      });
+      expect(JSON.stringify(planned?.plan)).not.toContain('code_fingerprint');
+      expect(JSON.stringify(planned?.plan)).not.toContain('invitation_code_fingerprint');
+    }
+  }, 60_000);
 });

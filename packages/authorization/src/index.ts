@@ -23,7 +23,10 @@ export const actions = [
   'check:share',
   'family:view',
   'family:invite',
+  'family:invite_member',
   'family:revoke_invitation',
+  'family:revoke_member_invitation',
+  'family:revoke_member',
   'family:accept_invitation',
   'family:revoke',
   'orientation:view',
@@ -81,7 +84,14 @@ export type Resource =
       readonly scope:
         | { readonly kind: 'roster' }
         | { readonly kind: 'subject_relationships'; readonly subjectPersonId: PersonId }
+        | { readonly kind: 'self_membership'; readonly memberPersonId: PersonId }
         | { readonly kind: 'subject_invitation'; readonly protectedPersonId: PersonId }
+        | { readonly kind: 'member_invitation' }
+        | {
+            readonly kind: 'member_membership';
+            readonly membershipId: string;
+            readonly memberPersonId: PersonId;
+          }
         | {
             readonly kind: 'pairwise_relationship';
             readonly relationshipId: RelationshipId;
@@ -232,7 +242,7 @@ function requiredCapability(action: Action, resource: Resource): Capability | un
       : 'check:text';
   }
   if (action === 'check:list' || action === 'check:read') return 'history:read';
-  if (action === 'family:invite') return 'family:manage';
+  if (action === 'family:invite' || action === 'family:invite_member') return 'family:manage';
   if (action.startsWith('orientation:')) return 'orientation:use';
   return undefined;
 }
@@ -473,6 +483,12 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
         return { allowed: true, reason: 'allowed_by_policy' };
       }
       if (
+        resource.scope.kind === 'self_membership' &&
+        resource.scope.memberPersonId === principal.personId
+      ) {
+        return { allowed: true, reason: 'allowed_by_policy' };
+      }
+      if (
         resource.scope.kind === 'pairwise_relationship' &&
         (resource.scope.protectedPersonId === principal.personId ||
           resource.scope.trustedPersonId === principal.personId)
@@ -492,6 +508,11 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
               : 'insufficient_role',
           );
     }
+    if (action === 'family:invite_member') {
+      return relationship.isAdministrator && resource.scope.kind === 'member_invitation'
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('insufficient_role');
+    }
     if (action === 'family:revoke_invitation') {
       if (resource.scope.kind !== 'subject_invitation') {
         return deny('unsupported_action_resource');
@@ -500,6 +521,19 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       // Withdrawal remains available after protected enrollment or entitlement lapses.
       const protectedSubjectMayCancel = resource.scope.protectedPersonId === principal.personId;
       return relationship.isAdministrator || protectedSubjectMayCancel
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('not_owner_or_shared');
+    }
+    if (action === 'family:revoke_member_invitation') {
+      return relationship.isAdministrator && resource.scope.kind === 'member_invitation'
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('insufficient_role');
+    }
+    if (action === 'family:revoke_member') {
+      if (resource.scope.kind !== 'member_membership') {
+        return deny('unsupported_action_resource');
+      }
+      return relationship.isAdministrator || resource.scope.memberPersonId === principal.personId
         ? { allowed: true, reason: 'allowed_by_policy' }
         : deny('not_owner_or_shared');
     }

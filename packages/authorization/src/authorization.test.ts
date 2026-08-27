@@ -150,6 +150,17 @@ describe('deny-by-default authorization', () => {
     expect(
       authorize({
         principal: administratorAndProtected,
+        action: 'family:invite_member',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administratorAndProtected,
         action: 'check:create',
         resource: {
           kind: 'check_collection',
@@ -194,6 +205,37 @@ describe('deny-by-default authorization', () => {
         },
       }).reason,
     ).toBe('insufficient_role');
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'family:invite_member',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: principal({
+          roles: ['household_administrator'],
+          households: [
+            householdScope({
+              isAdministrator: true,
+              isProtectedMember: false,
+              capabilities: [],
+            }),
+          ],
+        }),
+        action: 'family:revoke_member_invitation',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
   });
 
   it('limits Trusted Circle reads and orientation help to the exact protected pair', () => {

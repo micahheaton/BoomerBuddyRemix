@@ -112,9 +112,9 @@ test('sharing state is scoped to one result and resets for the next check', asyn
   await page.getByLabel('Suspicious message').fill('First local sharing-state check');
   await page.getByRole('button', { name: 'Check it' }).click();
   const firstResult = page.getByTestId('check-result');
-  await firstResult.getByRole('button', { name: 'Share with Terry Trusted' }).click();
+  await firstResult.getByRole('button', { name: 'Ask Terry Trusted to review' }).click();
   await expect(
-    firstResult.getByRole('button', { name: 'Shared with Terry Trusted' }),
+    firstResult.getByRole('button', { name: 'Help requested from Terry Trusted' }),
   ).toBeDisabled();
   await expect(firstResult).toContainText('No notification was sent');
 
@@ -122,7 +122,7 @@ test('sharing state is scoped to one result and resets for the next check', asyn
   await page.getByRole('button', { name: 'Check it' }).click();
   const secondResult = page.getByTestId('check-result');
   await expect(
-    secondResult.getByRole('button', { name: 'Share with Terry Trusted' }),
+    secondResult.getByRole('button', { name: 'Ask Terry Trusted to review' }),
   ).toBeEnabled();
-  await expect(secondResult).not.toContainText('Redacted result shared with');
+  await expect(secondResult).not.toContainText('Help requested from Terry Trusted in BoomerBuddy');
 });

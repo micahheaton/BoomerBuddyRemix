@@ -96,6 +96,15 @@ const launchCriticalEvidenceTables = [
   'support_receipt_rate_buckets',
   'protected_self_enrollment_household_gates',
   'protected_self_enrollment_operations',
+  'check_share_lifecycle_events',
+  'trusted_circle_recipient_codes',
+  'trusted_circle_authenticated_rate_buckets',
+  'household_member_invitations',
+  'member_learning_progress',
+  'member_learning_preferences',
+  'member_in_app_feed_receipts',
+  'member_learning_operation_receipts',
+  'member_scam_guidance_briefs',
 ] as const;
 
 function criticalCounts(offset = 0): CriticalTableCounts {
@@ -185,6 +194,7 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         'artifacts',
         'analyses',
         'check_shares',
+        'check_share_lifecycle_events',
         'public_check_attribution_aggregates',
         'acquisition_touchpoints',
         'entitlement_grants',
@@ -196,6 +206,14 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         'feedback_processing_jobs',
         'feedback_authenticated_quota_buckets',
         'feedback_authenticated_quota_charges',
+        'trusted_circle_recipient_codes',
+        'trusted_circle_authenticated_rate_buckets',
+        'household_member_invitations',
+        'member_learning_progress',
+        'member_learning_preferences',
+        'member_in_app_feed_receipts',
+        'member_learning_operation_receipts',
+        'member_scam_guidance_briefs',
       ]),
     );
   });

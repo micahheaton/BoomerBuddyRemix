@@ -45,6 +45,13 @@
       "@clerk/expo",
       "expo-web-browser",
       [
+        "expo-notifications",
+        {
+          "color": "#255B57",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

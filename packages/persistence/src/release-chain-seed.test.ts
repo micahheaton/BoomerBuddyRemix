@@ -51,6 +51,10 @@ const releaseMigrations = [
   '0035_run3_1_paid_family_catalog.sql',
   '0036_run3_1_protected_self_enrollment.sql',
   '0037_run3_1_paid_family_entitlement_repair.sql',
+  '0038_run3_1_member_learning_feed.sql',
+  '0039_trusted_circle_customer_journey.sql',
+  '0040_run3_1_member_learning_idempotency.sql',
+  '0041_run3_1_family_safe_word_lifecycle.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -122,7 +126,7 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0037 and seeds stable local Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0041 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);

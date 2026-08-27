@@ -24,11 +24,8 @@ export function MemberHeader() {
       selectedScope?.trustedCircleGrants.some((grant) =>
         grant.permissions.includes('view_shared_checks'),
       ) === true);
-  const canUseFamily =
-    me.principal.households.length === 0 ||
-    selectedScope?.isAdministrator === true ||
-    selectedScope?.isProtectedMember === true ||
-    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
+  const canUseFamily = me.principal.households.length === 0 || selectedScope !== undefined;
+  const canUseLearning = isProtectedMember && capabilities.includes('orientation:use');
 
   async function signOut() {
     setBusy(true);
@@ -48,6 +45,9 @@ export function MemberHeader() {
         <nav className="member-nav" aria-label="Member navigation">
           <Link href="/member">Home</Link>
           <Link href="/member/protection">Protected access</Link>
+          {canUseLearning ? (
+            <Link href="/member/orientation#learn-updates">Learn &amp; updates</Link>
+          ) : null}
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}

@@ -110,6 +110,229 @@ interface AttentionRow extends Record<string, unknown> {
 export type PrivacyPlanKind =
   'access_summary' | 'export_manifest' | 'deletion_plan' | 'correction_plan' | 'restriction_plan';
 
+export interface PrivacyDataCategoryGuidance {
+  readonly category: string;
+  readonly description: string;
+  readonly sourceStores: readonly string[];
+  readonly accessExportHandling: 'content_free_inventory_pending_verified_fulfillment';
+  readonly deletionHandling:
+    'review_delete_or_deidentify_subject_data' | 'review_retain_minimum_required_evidence';
+  readonly retentionHandling:
+    'apply_approved_subject_data_schedule' | 'apply_security_legal_or_accounting_schedule';
+}
+
+const accessExportHandling = 'content_free_inventory_pending_verified_fulfillment' as const;
+
+function subjectDataGuidance(
+  category: string,
+  description: string,
+  sourceStores: readonly string[],
+): PrivacyDataCategoryGuidance {
+  return {
+    category,
+    description,
+    sourceStores,
+    accessExportHandling,
+    deletionHandling: 'review_delete_or_deidentify_subject_data',
+    retentionHandling: 'apply_approved_subject_data_schedule',
+  };
+}
+
+function retainedEvidenceGuidance(
+  category: string,
+  description: string,
+  sourceStores: readonly string[],
+): PrivacyDataCategoryGuidance {
+  return {
+    category,
+    description,
+    sourceStores,
+    accessExportHandling,
+    deletionHandling: 'review_retain_minimum_required_evidence',
+    retentionHandling: 'apply_security_legal_or_accounting_schedule',
+  };
+}
+
+const privacyDataCategoryGuidance: Readonly<Record<string, PrivacyDataCategoryGuidance>> = {
+  account_identity: retainedEvidenceGuidance(
+    'account_identity',
+    'Account identity, session, and household membership records.',
+    ['identities', 'sessions', 'household_memberships'],
+  ),
+  submitted_artifacts: subjectDataGuidance(
+    'submitted_artifacts',
+    'Submitted Check artifact records; this plan includes counts only, never artifact content.',
+    ['artifacts'],
+  ),
+  analysis_results: subjectDataGuidance(
+    'analysis_results',
+    'Check analysis result records; this plan includes counts only.',
+    ['analyses'],
+  ),
+  consent_evidence: retainedEvidenceGuidance(
+    'consent_evidence',
+    'Consent evidence associated with the person or household.',
+    ['consent_evidence'],
+  ),
+  trusted_circle_relationships: retainedEvidenceGuidance(
+    'trusted_circle_relationships',
+    'Trusted Circle relationship and revocation records.',
+    ['trusted_circle_relationships'],
+  ),
+  trusted_circle_invitation_evidence: retainedEvidenceGuidance(
+    'trusted_circle_invitation_evidence',
+    'Trusted Circle invitation and recipient-binding security records.',
+    ['invitations'],
+  ),
+  trusted_circle_recipient_code_evidence: retainedEvidenceGuidance(
+    'trusted_circle_recipient_code_evidence',
+    'Recipient connection-code lifecycle records; raw codes are never stored or included.',
+    ['trusted_circle_recipient_codes'],
+  ),
+  trusted_circle_rate_limit_evidence: retainedEvidenceGuidance(
+    'trusted_circle_rate_limit_evidence',
+    'Authenticated recipient-code abuse-prevention counters.',
+    ['trusted_circle_authenticated_rate_buckets'],
+  ),
+  household_member_invitation_evidence: retainedEvidenceGuidance(
+    'household_member_invitation_evidence',
+    'Neutral household-member invitation and identity-binding security records.',
+    ['household_member_invitations'],
+  ),
+  check_share_records: retainedEvidenceGuidance(
+    'check_share_records',
+    'Check sharing participant and lifecycle state records; submitted artifacts are excluded.',
+    ['check_shares'],
+  ),
+  check_share_lifecycle_evidence: retainedEvidenceGuidance(
+    'check_share_lifecycle_evidence',
+    'Append-only Check share acknowledgement and closure evidence.',
+    ['check_share_lifecycle_events'],
+  ),
+  orientation_state: subjectDataGuidance(
+    'orientation_state',
+    'Protected-member orientation progress and disposition records.',
+    ['orientation_states'],
+  ),
+  family_safe_word_state: subjectDataGuidance(
+    'family_safe_word_state',
+    'Derived Family verification-aid state; submitted phrases are never stored or included.',
+    ['safe_word_verifiers'],
+  ),
+  family_safe_word_security_evidence: retainedEvidenceGuidance(
+    'family_safe_word_security_evidence',
+    'Content-free verification attempt counters and append-only lifecycle evidence.',
+    ['family_safe_word_rate_buckets', 'family_safe_word_lifecycle_events'],
+  ),
+  member_learning_progress: subjectDataGuidance(
+    'member_learning_progress',
+    'Versioned lesson progress, answers, review timing, and completion state.',
+    ['member_learning_progress'],
+  ),
+  member_learning_preferences: subjectDataGuidance(
+    'member_learning_preferences',
+    'Coarse US region and in-app weekly rehearsal preferences.',
+    ['member_learning_preferences'],
+  ),
+  member_in_app_feed_receipts: subjectDataGuidance(
+    'member_in_app_feed_receipts',
+    'Read and dismissal state for in-app learning and guidance items.',
+    ['member_in_app_feed_receipts'],
+  ),
+  member_learning_operation_evidence: retainedEvidenceGuidance(
+    'member_learning_operation_evidence',
+    'Content-free member learning idempotency and canonical mutation-result evidence.',
+    ['member_learning_operation_receipts'],
+  ),
+  public_check_conversion_evidence: retainedEvidenceGuidance(
+    'public_check_conversion_evidence',
+    'Public Check conversion and abuse-boundary evidence.',
+    ['public_check_conversions'],
+  ),
+  support_evidence: subjectDataGuidance(
+    'support_evidence',
+    'Household support-case records; this plan includes counts only.',
+    ['support_cases'],
+  ),
+  commerce_and_entitlements: retainedEvidenceGuidance(
+    'commerce_and_entitlements',
+    'Subscription, entitlement, sponsorship, and allowance records.',
+    [
+      'commerce_subscriptions',
+      'entitlement_grants',
+      'commerce_sponsorship_allocations',
+      'commerce_allowance_allocations',
+    ],
+  ),
+  commerce_provider_evidence: retainedEvidenceGuidance(
+    'commerce_provider_evidence',
+    'Provider reconciliation and payment-operation evidence.',
+    [
+      'commerce_provider_subscription_records',
+      'commerce_stripe_session_operations',
+      'commerce_stripe_paid_invoice_evidence',
+      'commerce_stripe_failed_invoice_evidence',
+    ],
+  ),
+  founding_household_evidence: retainedEvidenceGuidance(
+    'founding_household_evidence',
+    'Founding-household enrollment and sponsor evidence.',
+    ['founding_household_enrollments'],
+  ),
+  feedback_learning_evidence: subjectDataGuidance(
+    'feedback_learning_evidence',
+    'Customer feedback records used for approved product learning.',
+    ['feedback_records'],
+  ),
+  messaging_evidence: retainedEvidenceGuidance(
+    'messaging_evidence',
+    'Messaging destination, consent, suppression, inbound, and intent evidence.',
+    [
+      'messaging_destinations',
+      'messaging_consent_evidence',
+      'messaging_suppression_evidence',
+      'messaging_inbound_events',
+      'messaging_intents',
+    ],
+  ),
+  editorial_preferences: subjectDataGuidance(
+    'editorial_preferences',
+    'Editorial preference event records.',
+    ['editorial_preference_events'],
+  ),
+  referral_evidence: retainedEvidenceGuidance(
+    'referral_evidence',
+    'Referral attribution, recipient, and credit evidence.',
+    [
+      'run3_referral_attributions',
+      'run3_referral_recipient_events',
+      'run3_referral_credit_entries',
+    ],
+  ),
+  privacy_request_evidence: retainedEvidenceGuidance(
+    'privacy_request_evidence',
+    'Privacy request, review, and fulfillment-plan evidence.',
+    ['privacy_requests'],
+  ),
+  audit_and_outbox_evidence: retainedEvidenceGuidance(
+    'audit_and_outbox_evidence',
+    'Security audit and durable event-delivery evidence.',
+    ['audit_events', 'outbox_events'],
+  ),
+};
+
+function guidanceForPrivacyCategories(
+  categories: readonly string[],
+): readonly PrivacyDataCategoryGuidance[] {
+  return categories.map((category) => {
+    const guidance = privacyDataCategoryGuidance[category];
+    if (guidance === undefined) {
+      throw new TypeError(`Missing privacy data-category guidance for ${category}`);
+    }
+    return guidance;
+  });
+}
+
 export interface PrivacyRequestRecord {
   readonly id: string;
   readonly personId?: string;
@@ -124,6 +347,12 @@ export interface PrivacyRequestRecord {
   readonly plan?: {
     readonly kind: PrivacyPlanKind;
     readonly dataCategories: readonly string[];
+    /**
+     * Current, versioned operator guidance reconstructed from the immutable category inventory.
+     * This is not historical plan evidence; dataCategories and recordCounts are the stored evidence.
+     */
+    readonly categoryGuidanceVersion: 'privacy-category-guidance-v1';
+    readonly categoryGuidance: readonly PrivacyDataCategoryGuidance[];
     readonly recordCounts: Readonly<Record<string, number>>;
     readonly requiresProfessionalReview: boolean;
     readonly createdAt: Date;
@@ -263,14 +492,17 @@ function mapPrivacyRequest(row: PrivacyRequestRow): PrivacyRequestRecord {
   ) {
     return base;
   }
+  const dataCategories = stringArray(
+    jsonValue(row.data_categories),
+    'privacy_request_plans.data_categories',
+  );
   return {
     ...base,
     plan: {
       kind: row.plan_kind,
-      dataCategories: stringArray(
-        jsonValue(row.data_categories),
-        'privacy_request_plans.data_categories',
-      ),
+      dataCategories,
+      categoryGuidanceVersion: 'privacy-category-guidance-v1',
+      categoryGuidance: guidanceForPrivacyCategories(dataCategories),
       recordCounts: numericRecord(row.record_counts, 'privacy_request_plans.record_counts'),
       requiresProfessionalReview: row.requires_professional_review,
       createdAt: asDate(row.plan_created_at, 'privacy_request_plans.created_at'),
@@ -1708,10 +1940,86 @@ export class BusinessOsRepository {
              WHERE ($1::text IS NULL OR $1 IN (
                relationship.protected_person_id, relationship.trusted_person_id
              )) AND ($2::text IS NULL OR relationship.household_id = $2)),
+         'trusted_circle_invitation_evidence',
+           (SELECT count(*)::int FROM invitations invitation
+             WHERE ($1::text IS NULL
+               OR $1 IN (
+                 invitation.invited_by_person_id,
+                 invitation.protected_person_id,
+                 COALESCE(invitation.accepted_by_person_id, ''),
+                 COALESCE(invitation.ended_by_person_id, '')
+               )
+               OR EXISTS (
+                 SELECT 1 FROM identities intended_identity
+                 WHERE intended_identity.person_id = $1
+                   AND intended_identity.issuer = invitation.intended_identity_issuer
+                   AND intended_identity.subject = invitation.intended_identity_subject
+               ))
+               AND ($2::text IS NULL OR invitation.household_id = $2)),
+         'trusted_circle_recipient_code_evidence',
+           (SELECT count(*)::int FROM trusted_circle_recipient_codes recipient_code
+             WHERE $1::text IS NOT NULL AND recipient_code.person_id = $1),
+         'trusted_circle_rate_limit_evidence',
+           (SELECT count(*)::int FROM trusted_circle_authenticated_rate_buckets rate_bucket
+             WHERE $1::text IS NOT NULL AND rate_bucket.person_id = $1),
+         'household_member_invitation_evidence',
+           (SELECT count(*)::int FROM household_member_invitations member_invitation
+             WHERE ($1::text IS NULL OR $1 IN (
+               member_invitation.invited_by_person_id,
+               member_invitation.intended_person_id,
+               COALESCE(member_invitation.accepted_by_person_id, ''),
+               COALESCE(member_invitation.revoked_by_person_id, '')
+             )) AND ($2::text IS NULL OR member_invitation.household_id = $2)),
+         'check_share_records',
+           (SELECT count(*)::int FROM check_shares share
+             WHERE ($1::text IS NULL OR $1 IN (
+               share.shared_by_person_id, share.shared_with_person_id
+             )) AND ($2::text IS NULL OR share.household_id = $2)),
+         'check_share_lifecycle_evidence',
+           (SELECT count(*)::int
+              FROM check_share_lifecycle_events share_event
+              JOIN check_shares share
+                ON share.household_id = share_event.household_id
+               AND share.analysis_id = share_event.analysis_id
+               AND share.shared_with_person_id = share_event.shared_with_person_id
+             WHERE ($1::text IS NULL OR $1 IN (
+               share.shared_by_person_id,
+               share.shared_with_person_id,
+               share_event.actor_person_id
+             )) AND ($2::text IS NULL OR share_event.household_id = $2)),
          'orientation_state',
            (SELECT count(*)::int FROM orientation_states orientation
              WHERE ($1::text IS NULL OR orientation.person_id = $1)
                AND ($2::text IS NULL OR orientation.household_id = $2)),
+         'family_safe_word_state',
+           (SELECT count(*)::int FROM safe_word_verifiers verification_aid
+             WHERE ($1::text IS NULL OR verification_aid.protected_person_id = $1)
+               AND ($2::text IS NULL OR verification_aid.household_id = $2)),
+         'family_safe_word_security_evidence',
+           (SELECT count(*)::int FROM family_safe_word_rate_buckets rate_bucket
+             WHERE ($1::text IS NULL OR $1 IN (
+               rate_bucket.protected_person_id, rate_bucket.actor_person_id
+             )) AND ($2::text IS NULL OR rate_bucket.household_id = $2))
+           + (SELECT count(*)::int FROM family_safe_word_lifecycle_events lifecycle_event
+             WHERE ($1::text IS NULL OR $1 IN (
+               lifecycle_event.protected_person_id, lifecycle_event.actor_person_id
+             )) AND ($2::text IS NULL OR lifecycle_event.household_id = $2)),
+         'member_learning_progress',
+           (SELECT count(*)::int FROM member_learning_progress learning_progress
+             WHERE ($1::text IS NULL OR learning_progress.person_id = $1)
+               AND ($2::text IS NULL OR learning_progress.household_id = $2)),
+         'member_learning_preferences',
+           (SELECT count(*)::int FROM member_learning_preferences learning_preference
+             WHERE ($1::text IS NULL OR learning_preference.person_id = $1)
+               AND ($2::text IS NULL OR learning_preference.household_id = $2)),
+         'member_in_app_feed_receipts',
+           (SELECT count(*)::int FROM member_in_app_feed_receipts feed_receipt
+             WHERE ($1::text IS NULL OR feed_receipt.person_id = $1)
+               AND ($2::text IS NULL OR feed_receipt.household_id = $2)),
+         'member_learning_operation_evidence',
+           (SELECT count(*)::int FROM member_learning_operation_receipts learning_operation
+             WHERE ($1::text IS NULL OR learning_operation.person_id = $1)
+               AND ($2::text IS NULL OR learning_operation.household_id = $2)),
          'public_check_conversion_evidence',
            (SELECT count(*)::int FROM public_check_conversions conversion
              WHERE ($1::text IS NULL OR conversion.actor_person_id = $1)

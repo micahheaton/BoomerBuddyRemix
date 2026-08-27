@@ -20,6 +20,7 @@ describe('customer production authentication recovery', () => {
       'boomerbuddy.selected-household',
       'bb:protected-self:enroll:person-one:household-one',
       'bb:protected-self:withdraw:person-one:household-one',
+      'bb:member-learning:pending:household-one:lesson-answer',
       'unrelated.session-value',
     ];
     const storage = {

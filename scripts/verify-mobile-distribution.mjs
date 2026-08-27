@@ -111,10 +111,23 @@ const eas = await readJson(join(mobileRoot, 'eas.json'));
 const mobilePackage = await readJson(join(mobileRoot, 'package.json'));
 const metadata = await readJson(join(mobileRoot, 'store-metadata.json'));
 const appConfig = app.expo;
+const notificationPluginEntries = (appConfig.plugins ?? []).filter(
+  (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications',
+);
 
 assertAscii(metadata);
 assertRelease(metadata.schemaVersion === 1, 'store metadata schemaVersion must be 1');
 assertRelease(metadata.appName === appConfig.name, 'store app name must match Expo config');
+assertRelease(
+  notificationPluginEntries.length === 1 &&
+    JSON.stringify(notificationPluginEntries[0][1]) ===
+      JSON.stringify({ color: '#255B57', enableBackgroundRemoteNotifications: false }),
+  'expo-notifications must keep the reviewed local-only config with remote background mode disabled',
+);
+assertRelease(
+  mobilePackage.dependencies?.['expo-notifications'] === '~57.0.14',
+  'expo-notifications must remain on the reviewed Expo SDK 57-compatible range',
+);
 assertRelease(
   metadata.bundleIdentifier === exactApplicationId &&
     metadata.androidPackage === exactApplicationId &&
@@ -283,6 +296,7 @@ const requiredPrivacyCategories = [
   'check_results_and_private_history',
   'support_receipt_state',
   'orientation_privacy_and_deletion_state',
+  'learning_progress_coarse_region_and_in_app_feed',
   'subscription_access_status',
 ];
 assertExactStringSet(
@@ -324,6 +338,7 @@ assertExactStringSet(
     'payment_card_or_bank_data',
     'clipboard_reads',
     'background_message_monitoring',
+    'remote_push_tokens_or_provider_registration',
     'third_party_analytics_or_advertising_sdk_events',
   ],
   'data classes not observed in product code',
@@ -337,14 +352,23 @@ assertRelease(
 
 assertExactStringSet(
   metadata.permissions?.expectedActiveAndroidPermissions,
-  ['android.permission.INTERNET'],
+  [
+    'android.permission.INTERNET',
+    'android.permission.POST_NOTIFICATIONS',
+    'android.permission.RECEIVE_BOOT_COMPLETED',
+  ],
   'expected Android permissions',
 );
 assertRelease(
-  metadata.permissions?.sensitivePermissionPromptsExpected === false &&
+  metadata.permissions?.notificationPermissionPromptExpected === true &&
+    metadata.permissions?.notificationPromptReason ===
+      'optional_on_device_weekly_rehearsal_reminder' &&
+    metadata.permissions?.otherSensitivePermissionPromptsExpected === false &&
+    metadata.permissions?.remoteNotificationRegistrationExpected === false &&
+    metadata.permissions?.sensitivePermissionPromptsExpected === undefined &&
     metadata.permissions?.contactsCameraMicrophonePhotosLocationNotificationsTrackingExpected ===
-      false,
-  'store permission declaration must match the least-privilege mobile surface',
+      undefined,
+  'store permission declaration must isolate the optional local-notification prompt',
 );
 
 const expectedRuntimeDependencyPrivacyClassifications = {
@@ -358,6 +382,7 @@ const expectedRuntimeDependencyPrivacyClassifications = {
   'expo-auth-session': 'hosted_auth_session_bridge',
   'expo-constants': 'runtime_configuration_reader',
   'expo-crypto': 'local_cryptography_utility',
+  'expo-notifications': 'on_device_local_notification_scheduler_no_remote_tokens',
   'expo-secure-store': 'secure_local_storage',
   'expo-splash-screen': 'static_startup_ui',
   'expo-status-bar': 'static_status_ui',
@@ -653,6 +678,16 @@ assertRelease(
 );
 const appSource = await readFile(join(mobileRoot, 'App.tsx'), 'utf8');
 const supportScreenSource = await readFile(join(mobileRoot, 'src/support-screen.tsx'), 'utf8');
+const householdSource = await readFile(join(mobileRoot, 'src/household.tsx'), 'utf8');
+const memberLearningScreenSource = await readFile(
+  join(mobileRoot, 'src/member-learning-screen.tsx'),
+  'utf8',
+);
+const officialSourceBoundary = await readFile(join(mobileRoot, 'src/official-source.ts'), 'utf8');
+const weeklyReminderSource = await readFile(
+  join(mobileRoot, 'src/weekly-rehearsal-reminder.ts'),
+  'utf8',
+);
 assertRelease(
   appSource.includes("value.startsWith('pk_live_')"),
   'production authentication must reject non-live Clerk publishable keys',
@@ -666,10 +701,44 @@ for (const dependencyName of Object.keys(mobilePackage.dependencies ?? {})) {
     `native commerce dependency ${dependencyName} is not allowed`,
   );
 }
-const productionSources = await listFiles(mobileRoot, (path) => /\.(?:ts|tsx)$/u.test(path));
+const productionSources = await listFiles(
+  mobileRoot,
+  (path) => /\.(?:ts|tsx)$/u.test(path) && !/\.test\.(?:ts|tsx)$/u.test(path),
+);
 const combinedProductionSource = (
   await Promise.all(productionSources.map((path) => readFile(path, 'utf8')))
 ).join('\n');
+assertRelease(
+  weeklyReminderSource.includes("weeklyRehearsalReminderMarker = 'weekly_rehearsal'") &&
+    weeklyReminderSource.includes("title: 'A quick safety practice is ready'") &&
+    weeklyReminderSource.includes("body: 'Open BoomerBuddy when you are ready.'") &&
+    weeklyReminderSource.includes('data: { kind: weeklyRehearsalReminderMarker }') &&
+    weeklyReminderSource.includes('sound: false') &&
+    weeklyReminderSource.includes('AndroidImportance.LOW') &&
+    weeklyReminderSource.includes('setAutoServerRegistrationEnabledAsync(false)') &&
+    weeklyReminderSource.includes('.filter(isWeeklyRehearsalReminder)') &&
+    weeklyReminderSource.includes('SchedulableTriggerInputTypes.TIME_INTERVAL') &&
+    !/householdId|personId|checkId|submitted|artifact/iu.test(weeklyReminderSource),
+  'weekly rehearsal notification must remain generic, quiet, local, and marker-scoped',
+);
+assertRelease(
+  !/getExpoPushTokenAsync|getDevicePushTokenAsync|registerTaskAsync|SCHEDULE_EXACT_ALARM/iu.test(
+    combinedProductionSource,
+  ),
+  'mobile must not request push tokens, background notification tasks, or exact alarms',
+);
+assertRelease(
+  appSource.includes('await disableWeeklyRehearsalReminder();') &&
+    householdSource.includes('previousSelectedHouseholdId.current === selectedHouseholdId') &&
+    householdSource.includes('void disableWeeklyRehearsalReminder();'),
+  'weekly rehearsal notification must cancel on sign-out and household switch',
+);
+assertRelease(
+  memberLearningScreenSource.includes("deviceProof: 'pending'") ||
+    (memberLearningScreenSource.includes('Device reminder delivery has not yet been verified') &&
+      weeklyReminderSource.includes("deviceProof: 'pending'")),
+  'mobile must keep local-notification device proof explicitly pending',
+);
 assertRelease(
   !combinedProductionSource.includes('Support is monitored') &&
     combinedProductionSource.includes('does not promise 24-hour or real-time support coverage'),
@@ -724,11 +793,17 @@ assertRelease(
   'mobile support must not send or share outbound content automatically',
 );
 assertRelease(
-  (combinedProductionSource.match(/Linking\.openURL\(/gu) ?? []).length === 3 &&
+  (combinedProductionSource.match(/Linking\.openURL\(/gu) ?? []).length === 4 &&
     combinedProductionSource.includes('Linking.openURL(customerWebSignInUrl)') &&
     combinedProductionSource.includes('Linking.openURL(`mailto:${supportEmail}`)') &&
-    combinedProductionSource.includes('Linking.openURL(supportReceiptEmailDraftUrl(receiptCode))'),
-  'outbound mobile links must remain limited to web-preview sign-in and user-initiated support email',
+    combinedProductionSource.includes(
+      'Linking.openURL(supportReceiptEmailDraftUrl(receiptCode))',
+    ) &&
+    memberLearningScreenSource.includes('Linking.openURL(validatedUrl)') &&
+    memberLearningScreenSource.includes('validatedOfficialSourceUrl(url)') &&
+    officialSourceBoundary.includes("source.protocol !== 'https:'") &&
+    officialSourceBoundary.includes("!source.hostname.endsWith('.gov')"),
+  'outbound mobile links must remain limited to sign-in, support email, and validated user-initiated government sources',
 );
 for (const [label, pattern] of [
   ['authenticated web billing route', /\/member\/billing/iu],

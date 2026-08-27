@@ -1,4 +1,4 @@
-import { errorEnvelopeSchema } from '@boomerbuddy/contracts';
+import { errorEnvelopeSchema, type ErrorEnvelope } from '@boomerbuddy/contracts';
 import {
   captureMobileAuthenticationContext,
   readMobileAuthenticationToken,
@@ -6,7 +6,10 @@ import {
   requireMobileAuthenticationContextCurrent,
 } from './authentication';
 import { resolveMobileApiOrigin } from './api-origin';
+import { MobileCustomerError } from './customer-error';
 import { readSelectedHouseholdId } from './session';
+
+export { MobileCustomerError, requiresRecentAuthentication } from './customer-error';
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 declare const __DEV__: boolean;
@@ -16,17 +19,6 @@ const baseUrl = resolveMobileApiOrigin({
   development: __DEV__,
 });
 
-export class MobileCustomerError extends Error {
-  override readonly name = 'MobileCustomerError';
-
-  constructor(
-    message: string,
-    readonly status?: number,
-  ) {
-    super(message);
-  }
-}
-
 export type MobileRequestInit = RequestInit & {
   readonly authenticationPurpose?: 'session_sign_out';
 };
@@ -35,8 +27,13 @@ class MobileRequestAbortedError extends Error {
   override readonly name = 'MobileRequestAbortedError';
 }
 
-function customerError(message: string, status?: number): MobileCustomerError {
-  return new MobileCustomerError(message, status);
+function customerError(
+  message: string,
+  status?: number,
+  code?: string,
+  details?: ErrorEnvelope['error']['details'],
+): MobileCustomerError {
+  return new MobileCustomerError(message, status, code, details);
 }
 
 function awaitRequestStep<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -184,20 +181,22 @@ export async function mobileRequest<T>(
         );
         throw customerError('Your session ended. Sign in again to continue.');
       }
-      let errorMessage: string | undefined;
+      let parsedError: ErrorEnvelope['error'] | undefined;
       try {
         const parsed = errorEnvelopeSchema.safeParse(
           await awaitRequestStep(response.json(), requestController.signal),
         );
-        if (parsed.success) errorMessage = parsed.data.error.message;
+        if (parsed.success) parsedError = parsed.data.error;
       } catch {
         if (requestController.signal.aborted) throw new MobileRequestAbortedError();
         /* Use safe fallback. */
       }
       requireCurrentAuthenticationContext();
       throw customerError(
-        errorMessage ?? 'BoomerBuddy could not complete that request.',
+        parsedError?.message ?? 'BoomerBuddy could not complete that request.',
         response.status,
+        parsedError?.code,
+        parsedError?.details,
       );
     }
     if (response.status === 204) return undefined as T;

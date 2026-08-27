@@ -16,6 +16,7 @@ import {
   foundingHouseholdProductionServiceDocuments,
   foundingHouseholdProtectedDocuments,
   FounderProvisioningRepository,
+  MemberLearningRepository,
   OutboxDeliveryRepository,
   ProductionIdentityRepository,
   runMigrations,
@@ -1606,8 +1607,218 @@ try {
     )}`,
   );
 
+  const memberLearning = new MemberLearningRepository(database, undefined, 'production');
+  const memberLearningIdempotencyKey = `member-learning:lesson-answer:${randomUUID()}`;
+  const memberLearningCorrelationId = `postgres-member-learning-${suffix}`;
+  const memberLearningAnswer = {
+    householdId: run31Customer.householdId,
+    personId: run31Customer.personId,
+    lessonKey: 'pause_under_pressure' as const,
+    lessonVersion: 1,
+    optionKey: 'pause',
+    idempotencyKey: memberLearningIdempotencyKey,
+    audience: 'customer' as const,
+    correlationId: memberLearningCorrelationId,
+    now: at(95_000),
+  };
+  const concurrentMemberLearningResults = await Promise.all([
+    memberLearning.answerLesson(memberLearningAnswer),
+    memberLearning.answerLesson(memberLearningAnswer),
+  ]);
+  let memberLearningMismatchRejected = false;
+  try {
+    await memberLearning.answerLesson({ ...memberLearningAnswer, optionKey: 'tap_now' });
+  } catch (error) {
+    memberLearningMismatchRejected = error instanceof DomainError && error.code === 'conflict';
+  }
+  let memberLearningReceiptMutationRejected = false;
+  try {
+    await database.query(
+      `UPDATE member_learning_operation_receipts
+       SET canonical_result = canonical_result
+       WHERE household_id = $1 AND person_id = $2`,
+      [run31Customer.householdId, run31Customer.personId],
+    );
+  } catch (error) {
+    memberLearningReceiptMutationRejected =
+      error instanceof Error && error.message.includes('operation receipts are immutable');
+  }
+  const memberLearningIdempotencyEvidence = await database.query<
+    {
+      readonly answer_audits: number;
+      readonly answer_outbox: number;
+      readonly attempt_count: number;
+      readonly content_bearing_receipts: number;
+      readonly receipts: number;
+    } & Record<string, unknown>
+  >(
+    `SELECT
+       (SELECT count(*)::integer FROM member_learning_operation_receipts
+        WHERE household_id = $1 AND person_id = $2) AS receipts,
+       (SELECT count(*)::integer FROM member_learning_operation_receipts
+        WHERE household_id = $1 AND person_id = $2
+          AND (contains_customer_content = true OR canonical_result ? 'snapshot'))
+          AS content_bearing_receipts,
+       (SELECT attempt_count FROM member_learning_progress
+        WHERE household_id = $1 AND person_id = $2
+          AND lesson_key = 'pause_under_pressure' AND lesson_version = 1) AS attempt_count,
+       (SELECT count(*)::integer FROM audit_events
+        WHERE household_id = $1 AND actor_person_id = $2
+          AND action = 'member_learning.lesson_answered'
+          AND resource_id = 'pause_under_pressure'
+          AND correlation_id = $3) AS answer_audits,
+       (SELECT count(*)::integer FROM outbox_events
+        WHERE household_id = $1 AND actor_person_id = $2
+          AND event_type = 'member_learning.lesson_answered.v1'
+          AND aggregate_id = $2 AND correlation_id = $3) AS answer_outbox`,
+    [run31Customer.householdId, run31Customer.personId, memberLearningCorrelationId],
+  );
+  invariant(
+    concurrentMemberLearningResults.length === 2 &&
+      concurrentMemberLearningResults.every(
+        (result) =>
+          result.correct && result.feedback === concurrentMemberLearningResults[0]?.feedback,
+      ) &&
+      memberLearningMismatchRejected &&
+      memberLearningReceiptMutationRejected &&
+      memberLearningIdempotencyEvidence.rows[0]?.receipts === 1 &&
+      memberLearningIdempotencyEvidence.rows[0]?.content_bearing_receipts === 0 &&
+      memberLearningIdempotencyEvidence.rows[0]?.attempt_count === 1 &&
+      memberLearningIdempotencyEvidence.rows[0]?.answer_audits === 1 &&
+      memberLearningIdempotencyEvidence.rows[0]?.answer_outbox === 1,
+    `Run 3.1 member-learning idempotency failed under real PostgreSQL concurrency: ${JSON.stringify(
+      {
+        memberLearningMismatchRejected,
+        memberLearningReceiptMutationRejected,
+        evidence: memberLearningIdempotencyEvidence.rows[0],
+      },
+    )}`,
+  );
+
+  const productValuePersonId = `person-postgres-product-value-${suffix}`;
+  const productValueIdentityId = `identity-postgres-product-value-${suffix}`;
+  const productValueHouseholdId = `household-postgres-product-value-${suffix}`;
+  const productValueMembershipId = `membership-postgres-product-value-${suffix}`;
+  const productValueRecipientCodeId = `recipient-code-postgres-product-value-${suffix}`;
+  await database.query(`INSERT INTO persons(id, display_name, created_at) VALUES ($1,$2,$3)`, [
+    productValuePersonId,
+    'PostgreSQL product value member',
+    base.toISOString(),
+  ]);
+  await database.query(
+    `INSERT INTO identities(id, person_id, issuer, subject, status, created_at)
+     VALUES ($1,$2,$3,$4,'active',$5)`,
+    [
+      productValueIdentityId,
+      productValuePersonId,
+      'https://identity.postgres.test',
+      `product-value-${suffix}`,
+      base.toISOString(),
+    ],
+  );
+  await database.query(`INSERT INTO households(id, name, created_at) VALUES ($1,$2,$3)`, [
+    productValueHouseholdId,
+    'PostgreSQL product value household',
+    base.toISOString(),
+  ]);
+  await database.query(
+    `INSERT INTO household_memberships(
+       household_id, id, person_id, membership_kind, status, created_at
+     ) VALUES ($1,$2,$3,'member','active',$4)`,
+    [productValueHouseholdId, productValueMembershipId, productValuePersonId, base.toISOString()],
+  );
+  await database.query(
+    `INSERT INTO member_learning_progress(
+       household_id, person_id, lesson_key, lesson_version, state,
+       attempt_count, review_count, started_at, updated_at
+     ) VALUES ($1,$2,'pause_under_pressure',1,'in_progress',0,0,$3,$3)`,
+    [productValueHouseholdId, productValuePersonId, base.toISOString()],
+  );
+  await database.query(
+    `INSERT INTO trusted_circle_recipient_codes(
+       id, identity_id, person_id, code_fingerprint, fingerprint_key_version,
+       state, expires_at, created_at, ended_at
+     ) VALUES ($1,$2,$3,$4,1,'active',$5,$6,NULL)`,
+    [
+      productValueRecipientCodeId,
+      productValueIdentityId,
+      productValuePersonId,
+      `postgres-product-value-fingerprint-${suffix}`,
+      at(60 * 60_000).toISOString(),
+      base.toISOString(),
+    ],
+  );
+  await database.query(
+    `UPDATE trusted_circle_recipient_codes
+     SET state = 'consumed', ended_at = $2
+     WHERE id = $1 AND state = 'active'`,
+    [productValueRecipientCodeId, at(1_000).toISOString()],
+  );
+  let recipientCodeRegressionRejected = false;
+  try {
+    await database.query(
+      `UPDATE trusted_circle_recipient_codes
+       SET state = 'active', ended_at = NULL
+       WHERE id = $1`,
+      [productValueRecipientCodeId],
+    );
+  } catch (error) {
+    recipientCodeRegressionRejected =
+      error instanceof Error && error.message.includes('lifecycle cannot regress');
+  }
+  await database.query(
+    `UPDATE household_memberships
+     SET status = 'revoked', revoked_at = $3
+     WHERE household_id = $1 AND person_id = $2`,
+    [productValueHouseholdId, productValuePersonId, at(2_000).toISOString()],
+  );
+  let inactiveLearningMutationRejected = false;
+  try {
+    await database.query(
+      `UPDATE member_learning_progress
+       SET attempt_count = attempt_count + 1, updated_at = $3
+       WHERE household_id = $1 AND person_id = $2`,
+      [productValueHouseholdId, productValuePersonId, at(3_000).toISOString()],
+    );
+  } catch (error) {
+    inactiveLearningMutationRejected =
+      error instanceof Error && error.message.includes('active household membership');
+  }
+  const productValuePostgresEvidence = await database.query<
+    {
+      readonly guidance_briefs: number;
+      readonly learning_attempt_count: number;
+      readonly recipient_code_state: string;
+    } & Record<string, unknown>
+  >(
+    `SELECT
+       (SELECT count(*)::integer FROM member_scam_guidance_briefs
+        WHERE review_state = 'approved' AND publication_state = 'in_app_only'
+          AND automation_generated = false AND external_delivery_permitted = false)
+          AS guidance_briefs,
+       (SELECT attempt_count FROM member_learning_progress
+        WHERE household_id = $1 AND person_id = $2
+          AND lesson_key = 'pause_under_pressure' AND lesson_version = 1)
+          AS learning_attempt_count,
+       (SELECT state FROM trusted_circle_recipient_codes WHERE id = $3)
+          AS recipient_code_state`,
+    [productValueHouseholdId, productValuePersonId, productValueRecipientCodeId],
+  );
+  invariant(
+    recipientCodeRegressionRejected &&
+      inactiveLearningMutationRejected &&
+      productValuePostgresEvidence.rows[0]?.guidance_briefs === 2 &&
+      productValuePostgresEvidence.rows[0]?.learning_attempt_count === 0 &&
+      productValuePostgresEvidence.rows[0]?.recipient_code_state === 'consumed',
+    `Run 3.1 PostgreSQL product-value lifecycle controls failed: ${JSON.stringify({
+      recipientCodeRegressionRejected,
+      inactiveLearningMutationRejected,
+      evidence: productValuePostgresEvidence.rows[0],
+    })}`,
+  );
+
   process.stdout.write(
-    'Real PostgreSQL migrations, founder provisioning, budget and Stripe dispatch concurrency, locking, lease/reclaim/heartbeat ownership, duplicate receipts, ordering, retry/dead-letter/audited replay, shutdown, outbox, reconciliation-intent persistence, and Run 3.1 production-schema identity/bootstrap, Founding enrollment/grant, and authenticated feedback quota semantics passed.\n',
+    'Real PostgreSQL migrations, founder provisioning, budget and Stripe dispatch concurrency, locking, lease/reclaim/heartbeat ownership, duplicate receipts, ordering, retry/dead-letter/audited replay, shutdown, outbox, reconciliation-intent persistence, and Run 3.1 production-schema identity/bootstrap, Founding enrollment/grant, authenticated feedback quota, member-learning idempotency, and product-value lifecycle semantics passed.\n',
   );
 } finally {
   await database.close();

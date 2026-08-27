@@ -118,6 +118,13 @@
         "usedForTracking": false
       },
       {
+        "category": "learning_progress_coarse_region_and_in_app_feed",
+        "examples": "Versioned lesson progress, a US or state-level guidance choice, weekly rehearsal preference, and content-free in-app feed state.",
+        "purposes": ["app_functionality"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
         "category": "subscription_access_status",
         "examples": "Canonical plan access, allowance, renewal, cancellation, or restoration status without payment-card or bank data.",
         "purposes": ["app_functionality"],
@@ -135,19 +142,26 @@
       "payment_card_or_bank_data",
       "clipboard_reads",
       "background_message_monitoring",
+      "remote_push_tokens_or_provider_registration",
       "third_party_analytics_or_advertising_sdk_events"
     ],
     "sdkDueDiligence": [
-      "Reconcile current Clerk and Expo SDK disclosures and generated privacy manifests against the signed artifacts before answering provider questionnaires.",
+      "Reconcile current Clerk, Expo, and expo-notifications SDK disclosures, generated permissions, and privacy manifests against the signed artifacts before answering provider questionnaires.",
       "Reconcile live API logs, retention, processors, deletion, and support operations before professional approval."
     ],
     "deletionPath": "In-app account deletion request plus the canonical public account deletion URL.",
     "transport": "Production mobile requests are HTTPS bearer-token requests to api.boomerbuddy.net with browser cookies omitted."
   },
   "permissions": {
-    "expectedActiveAndroidPermissions": ["android.permission.INTERNET"],
-    "sensitivePermissionPromptsExpected": false,
-    "contactsCameraMicrophonePhotosLocationNotificationsTrackingExpected": false
+    "expectedActiveAndroidPermissions": [
+      "android.permission.INTERNET",
+      "android.permission.POST_NOTIFICATIONS",
+      "android.permission.RECEIVE_BOOT_COMPLETED"
+    ],
+    "notificationPermissionPromptExpected": true,
+    "notificationPromptReason": "optional_on_device_weekly_rehearsal_reminder",
+    "otherSensitivePermissionPromptsExpected": false,
+    "remoteNotificationRegistrationExpected": false
   },
   "runtimeDependencyPrivacyClassification": {
     "status": "approved_repository_allowlist_requires_current_sdk_and_signed_artifact_reconciliation",
@@ -166,6 +180,7 @@
       "expo-auth-session": "hosted_auth_session_bridge",
       "expo-constants": "runtime_configuration_reader",
       "expo-crypto": "local_cryptography_utility",
+      "expo-notifications": "on_device_local_notification_scheduler_no_remote_tokens",
       "expo-secure-store": "secure_local_storage",
       "expo-splash-screen": "static_startup_ui",
       "expo-status-bar": "static_status_ui",

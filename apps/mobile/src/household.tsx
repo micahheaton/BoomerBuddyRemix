@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { FamilyResponse, PrincipalDto } from '@boomerbuddy/contracts';
 import { mobileRequest } from './api';
 import {
@@ -7,6 +7,7 @@ import {
   setSelectedHouseholdId,
   type MobileHouseholdSession,
 } from './session';
+import { disableWeeklyRehearsalReminder } from './weekly-rehearsal-reminder';
 
 type HouseholdScope = PrincipalDto['households'][number];
 
@@ -55,7 +56,14 @@ export function MobileHouseholdProvider({
     principal.households[0]?.id ??
     '';
   const [selectedHouseholdId, setSelectedId] = useState(initialSelected);
+  const previousSelectedHouseholdId = useRef(initialSelected);
   const [householdNames, setHouseholdNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (previousSelectedHouseholdId.current === selectedHouseholdId) return;
+    previousSelectedHouseholdId.current = selectedHouseholdId;
+    void disableWeeklyRehearsalReminder();
+  }, [selectedHouseholdId]);
 
   useEffect(() => {
     let active = true;

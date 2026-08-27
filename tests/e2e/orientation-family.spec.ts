@@ -107,14 +107,23 @@ test('invitation review can be declined and a cancelled code cannot be reused', 
   await signInCustomer(page, 'protected-pat');
   await page.getByRole('link', { name: 'Family', exact: true }).click();
   await page.getByLabel('Trusted person’s display name').fill('Jordan cancelled invitation');
-  await page.getByRole('button', { name: 'Create local invitation' }).click();
+  await page.getByRole('checkbox', { name: /I choose to invite this exact person/u }).check();
+  await page.getByRole('button', { name: 'Create invitation' }).click();
   const created = page.getByTestId('invite-created');
   const invitationId = (await created.locator('.invite-id').textContent())!.trim();
   const inviteCode = (await created.locator('.invite-code').textContent())!.trim();
 
   await signOutCustomer(page);
   await signInCustomer(page, 'trusted-jordan');
+  await expect(page.getByText(/For this local test, ask the protected member/u)).toBeVisible();
+  await expect(
+    page.getByText(/Create and keep your own temporary connection code in Family/u),
+  ).toHaveCount(0);
   await page.getByRole('link', { name: 'Family', exact: true }).click();
+  await expect(
+    page.getByText(/Enter the invitation ID and separate one-time credential/u),
+  ).toBeVisible();
+  await expect(page.getByText(/In production, use/u)).toHaveCount(0);
   await page.getByLabel('Invitation ID').fill(invitationId);
   await page.getByLabel('One-time invitation credential').fill(inviteCode);
   await page.getByRole('button', { name: 'Review invitation' }).click();
@@ -146,10 +155,12 @@ test('invitation review can be declined and a cancelled code cannot be reused', 
   await page.getByLabel('Invitation ID').fill(invitationId);
   await page.getByLabel('One-time invitation credential').fill(inviteCode);
   await page.getByRole('button', { name: 'Review invitation' }).click();
-  await expect(page.locator('p.error[role="alert"]')).toContainText('invalid or unavailable');
+  await expect(
+    page.getByRole('alert').filter({ hasText: 'Invitation is invalid or unavailable' }),
+  ).toBeVisible();
 });
 
-test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke, then denial', async ({
+test('Trusted Circle lifecycle revokes sharing while retaining a discoverable neutral membership exit', async ({
   page,
 }) => {
   await signInCustomer(page, 'protected-pat');
@@ -166,7 +177,8 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
     .getByRole('link', { name: 'Family', exact: true })
     .click();
   await page.getByLabel('Trusted person’s display name').fill('Jordan E2E');
-  await page.getByRole('button', { name: 'Create local invitation' }).click();
+  await page.getByRole('checkbox', { name: /I choose to invite this exact person/u }).check();
+  await page.getByRole('button', { name: 'Create invitation' }).click();
   const created = page.getByTestId('invite-created');
   await expect(created).toBeVisible();
   const invitationId = (await created.locator('.invite-id').textContent())?.trim();
@@ -202,12 +214,14 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
     .getByLabel('Suspicious message')
     .fill('JORDAN-SHARE-PROOF: urgent payment request for local sharing test');
   await page.getByRole('button', { name: 'Check it' }).click();
-  await page.getByRole('button', { name: /Share with Jordan/ }).click();
+  await page.getByRole('button', { name: /Ask Jordan.* to review/u }).click();
   await expect(page.getByRole('status')).toContainText('No notification was sent');
 
   await signOutCustomer(page);
   await signInCustomer(page, 'trusted-jordan');
-  await page.getByRole('link', { name: 'History', exact: true }).click();
+  await expect(page.getByText('1 shared result needs your acknowledgement.')).toBeVisible();
+  await expect(page.getByText(/does not send a text, email, or push alert/u)).toBeVisible();
+  await page.getByRole('link', { name: 'Open shared History' }).click();
   const sharedHistory = page.getByTestId('check-history');
   await expect(sharedHistory).toContainText('Message text');
   await expect(sharedHistory).toContainText('Shared with you');
@@ -237,15 +251,68 @@ test('Trusted Circle lifecycle is create, separate consent, scoped view, revoke,
   await expect(jordanRelationship.getByRole('button', { name: 'Revoke access' })).toBeVisible();
   await jordanRelationship.getByRole('button', { name: 'Revoke access' }).click();
   await expect(page).toHaveURL(/\/member$/);
-  await expect(page.getByRole('link', { name: 'Family', exact: true })).toHaveCount(0);
-  const denied = await page.request.get(`${apiUrl}/v1/family`, {
+  await expect(page.getByRole('link', { name: 'Family', exact: true })).toBeVisible();
+  const boundedSelfMembership = await page.request.get(`${apiUrl}/v1/family`, {
     headers: { Origin: customerUrl, 'X-BB-Household-Id': sunriseId! },
   });
-  expect([403, 404]).toContain(denied.status());
+  expect(boundedSelfMembership.status()).toBe(200);
+  const boundedFamily = (await boundedSelfMembership.json()) as {
+    relationships: Array<{ state: string }>;
+    invitations: unknown[];
+    memberInvitations: unknown[];
+  };
+  expect(boundedFamily.relationships.every((relationship) => relationship.state !== 'active')).toBe(
+    true,
+  );
+  expect(boundedFamily.invitations).toHaveLength(0);
+  expect(boundedFamily.memberInvitations).toHaveLength(0);
   const sharedCheckDenied = await page.request.get(`${apiUrl}/v1/checks`, {
     headers: { Origin: customerUrl, 'X-BB-Household-Id': sunriseId! },
   });
   expect([403, 404]).toContain(sharedCheckDenied.status());
+  await page.getByRole('link', { name: 'Family', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Leave household' })).toBeVisible();
+});
+
+test('Family safe word can be replaced, privately verified, and disabled', async ({ page }) => {
+  const syntheticPhrase = 'violet canoe e2e';
+
+  await signInCustomer(page, 'protected-pat');
+  await page.getByRole('link', { name: 'Family', exact: true }).click();
+  await page.getByRole('link', { name: 'Open family verification aid' }).click();
+  await expect(page.getByRole('heading', { name: 'Family verification aid' })).toBeVisible();
+  await page.getByLabel('New family safe word').fill(syntheticPhrase);
+  await page.getByLabel('Enter the new safe word again').fill(syntheticPhrase);
+  await page.getByRole('button', { name: 'Replace family safe word' }).click();
+  await expect(page.getByText(/Family verification aid replaced/u)).toBeVisible();
+  await expect(page.getByLabel('New family safe word')).toHaveValue('');
+  await expect(page.getByLabel('Enter the new safe word again')).toHaveValue('');
+
+  await signOutCustomer(page);
+  await signInCustomer(page, 'trusted-terry');
+  await page.getByRole('link', { name: 'Family', exact: true }).click();
+  await page.getByRole('link', { name: 'Open family verification aid' }).click();
+  await page
+    .getByLabel('Protected person', { exact: true })
+    .selectOption({ label: 'Pat Protected' });
+  const verificationInput = page.getByLabel('Phrase shared by that person');
+  await verificationInput.fill(syntheticPhrase);
+  await page.getByRole('button', { name: 'Check phrase' }).click();
+  await expect(page.getByText(/Verified: the phrase matched the stored verifier/u)).toBeVisible();
+  await expect(verificationInput).toHaveValue('');
+  await verificationInput.fill('incorrect phrase e2e');
+  await page.getByRole('button', { name: 'Check phrase' }).click();
+  const nonMatchStatus = page.getByRole('status').filter({ hasText: 'Not verified' });
+  await expect(nonMatchStatus).toBeVisible();
+  await expect(nonMatchStatus).toContainText('not identity proof');
+
+  await signOutCustomer(page);
+  await signInCustomer(page, 'protected-pat');
+  await page.getByRole('link', { name: 'Family', exact: true }).click();
+  await page.getByRole('link', { name: 'Open family verification aid' }).click();
+  await page.getByRole('button', { name: 'Disable family safe word' }).click();
+  await page.getByRole('button', { name: 'Yes, disable verification' }).click();
+  await expect(page.getByText(/Family verification aid disabled/u)).toBeVisible();
 });
 
 test('a multi-household actor keeps protected and Trusted Circle scopes separate', async ({

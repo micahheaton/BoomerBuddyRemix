@@ -13,11 +13,13 @@ import {
   EditorialIntelligenceRepository,
   EntitlementRepository,
   FamilyRepository,
+  FamilySafeWordRepository,
   FeedbackRepository,
   FounderProvisioningRepository,
   FoundingHouseholdRepository,
   HqRepository,
   KnowledgeRepository,
+  MemberLearningRepository,
   MessagingRepository,
   OrientationRepository,
   PublicCheckRepository,
@@ -25,6 +27,7 @@ import {
   ReferralCreditRepository,
   SessionRepository,
   SupportReceiptRepository,
+  TrustedCircleAttentionRepository,
   type Database,
 } from '@boomerbuddy/persistence';
 
@@ -40,17 +43,20 @@ export interface ApiRepositories {
   readonly entitlements: EntitlementRepository;
   readonly editorial: EditorialIntelligenceRepository;
   readonly family: FamilyRepository;
+  readonly familySafeWords: FamilySafeWordRepository;
   readonly feedback: FeedbackRepository;
   readonly founderProvisioning: FounderProvisioningRepository;
   readonly foundingHouseholds: FoundingHouseholdRepository;
   readonly hq: HqRepository;
   readonly knowledge: KnowledgeRepository;
+  readonly memberLearning: MemberLearningRepository;
   readonly messaging: MessagingRepository;
   readonly orientation: OrientationRepository;
   readonly publicChecks: PublicCheckRepository;
   readonly referrals: ReferralCreditRepository;
   readonly sessions: SessionRepository;
   readonly supportReceipts: SupportReceiptRepository;
+  readonly trustedCircleAttention: TrustedCircleAttentionRepository;
   readonly productionIdentities: ProductionIdentityRepository;
 }
 
@@ -119,6 +125,12 @@ export function createRepositories(
       undefined,
       entitlementRuntimeEnvironment,
     ),
+    familySafeWords: new FamilySafeWordRepository(
+      database,
+      config.secrets.safeWordPepper,
+      undefined,
+      entitlementRuntimeEnvironment,
+    ),
     feedback: new FeedbackRepository(database, {
       encryptionKey: config.secrets.artifactEncryptionKey,
       encryptionKeyVersion: 1,
@@ -138,6 +150,11 @@ export function createRepositories(
     ),
     hq: new HqRepository(database, undefined, entitlementRuntimeEnvironment),
     knowledge: new KnowledgeRepository(database),
+    memberLearning: new MemberLearningRepository(
+      database,
+      undefined,
+      entitlementRuntimeEnvironment,
+    ),
     messaging: new MessagingRepository(
       database,
       {
@@ -173,5 +190,6 @@ export function createRepositories(
       identityTokenVerifier,
     ),
     supportReceipts: new SupportReceiptRepository(database, config.secrets.fingerprintKey),
+    trustedCircleAttention: new TrustedCircleAttentionRepository(database),
   };
 }

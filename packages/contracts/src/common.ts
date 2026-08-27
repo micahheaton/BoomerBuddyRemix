@@ -53,6 +53,8 @@ export const apiPaths = {
   me: '/v1/me',
   checks: '/v1/checks',
   family: '/v1/family',
+  familySafeWord: '/v1/family/safe-word',
+  memberLearning: '/v1/member-learning',
   orientation: '/v1/orientation',
   protectedEnrollment: '/v1/protected-enrollment',
   entitlements: '/v1/entitlements',

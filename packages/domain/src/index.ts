@@ -7,6 +7,7 @@ export * from './founding-households';
 export * from './feedback';
 export * from './messaging';
 export * from './identifiers';
+export * from './member-learning';
 export * from './model';
 export * from './orientation';
 export * from './referral-credits';

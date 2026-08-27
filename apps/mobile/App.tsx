@@ -15,6 +15,9 @@ import {
   readCurrentMobileAuthenticationToken,
 } from './src/authentication';
 import { MobileHouseholdProvider } from './src/household';
+import { FamilySafeWordScreen } from './src/family-safe-word-screen';
+import { MemberLearningScreen } from './src/member-learning-screen';
+import { clearMobileMemberLearningPendingOperations } from './src/member-learning-idempotency';
 import {
   classifyNativeEntryUrl,
   type NativeEntrySignal,
@@ -44,7 +47,7 @@ import {
 import {
   beginMobileSignOutAttempt,
   classifyMobileSignOutInspection,
-  clearMobileDeviceStateSafely,
+  clearMobilePrivateDeviceState,
   completeMobileSignOut,
   createMobileSignOutAttemptGate,
   mobileProviderStateSettleTimeoutMs,
@@ -54,6 +57,10 @@ import {
 } from './src/sign-out';
 import { SupportScreen } from './src/support-screen';
 import { appStyles } from './src/theme';
+import {
+  disableWeeklyRehearsalReminder,
+  prepareWeeklyReminderBoundary,
+} from './src/weekly-rehearsal-reminder';
 import {
   CheckScreen,
   FamilyScreen,
@@ -85,6 +92,19 @@ function requirePublishableKey(): string {
 }
 
 const publishableKey = requirePublishableKey();
+
+async function clearPrivateDeviceState(
+  householdSession?: MobileHouseholdSession,
+): Promise<boolean> {
+  return clearMobilePrivateDeviceState({
+    clearWeeklyReminder: async () => {
+      const reminder = await disableWeeklyRehearsalReminder();
+      if (reminder.state === 'error') throw new Error('Weekly reminder cleanup failed');
+    },
+    clearPendingLearningOperations: clearMobileMemberLearningPendingOperations,
+    clearHouseholdState: () => clearMobileDeviceState(householdSession),
+  });
+}
 
 type RestoredMobileSession = {
   identitySessionId: string;
@@ -122,6 +142,10 @@ function MobileApplication(): React.ReactElement {
   const signOutStateRef = useRef<MobileSignOutState | undefined>(undefined);
   const [signOutAttemptGate] = useState(createMobileSignOutAttemptGate);
   const authenticationKey = `${isSignedIn ? 'signed-in' : 'signed-out'}:${sessionId ?? ''}`;
+
+  useEffect(() => {
+    void prepareWeeklyReminderBoundary().catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -233,8 +257,9 @@ function MobileApplication(): React.ReactElement {
       }
       if (!isSignedIn) {
         // A device-keystore failure must not strand a signed-out user on the restore screen.
-        // The in-memory household selection is cleared before persisted cleanup is attempted.
-        await clearMobileDeviceStateSafely(clearMobileDeviceState);
+        // Every private device-state category is retried, and the in-memory household selection
+        // is cleared before persisted household cleanup is attempted.
+        await clearPrivateDeviceState();
         if (active) {
           setRestoredSession(undefined);
           setSessionError('');
@@ -356,11 +381,13 @@ function MobileApplication(): React.ReactElement {
             }
           }
           const outcome = await completeMobileSignOut({
-            clearDeviceState: () => {
-              if (householdSession && isMobileHouseholdSessionCurrent(householdSession)) {
-                return clearMobileDeviceState(householdSession);
-              }
-              return Promise.resolve();
+            clearDeviceState: async () => {
+              const cleared = await clearPrivateDeviceState(
+                householdSession && isMobileHouseholdSessionCurrent(householdSession)
+                  ? householdSession
+                  : undefined,
+              );
+              if (!cleared) throw new Error('Private device-state cleanup failed');
             },
             signOutIdentitySession: () =>
               providerWideSignOut || !identitySessionId
@@ -614,6 +641,11 @@ function MobileApplication(): React.ReactElement {
                 {(props) => <FamilyScreen {...props} />}
               </Stack.Screen>
               <Stack.Screen
+                name="FamilySafeWord"
+                component={FamilySafeWordScreen}
+                options={{ title: 'Family verification aid' }}
+              />
+              <Stack.Screen
                 name="ProtectedAccess"
                 component={ProtectedAccessScreen}
                 options={{ title: 'Protected access' }}
@@ -622,6 +654,11 @@ function MobileApplication(): React.ReactElement {
                 name="Orientation"
                 component={OrientationScreen}
                 options={{ title: 'Orientation' }}
+              />
+              <Stack.Screen
+                name="LearnUpdates"
+                component={MemberLearningScreen}
+                options={{ title: 'Learn and updates' }}
               />
               <Stack.Screen
                 name="HelpPolicies"

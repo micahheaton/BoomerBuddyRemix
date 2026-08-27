@@ -124,6 +124,11 @@ export function familyDto(
       expiresAt: invitation.expiresAt.toISOString(),
       createdAt: invitation.createdAt.toISOString(),
     })),
+    memberInvitations: family.memberInvitations.map((invitation) => ({
+      ...invitation,
+      expiresAt: invitation.expiresAt.toISOString(),
+      createdAt: invitation.createdAt.toISOString(),
+    })),
   };
 }
 

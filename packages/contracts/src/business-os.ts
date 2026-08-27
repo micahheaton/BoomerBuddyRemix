@@ -324,6 +324,21 @@ export const createPrivacyRequestResponseSchema = z.object({
   dueAt: isoDateTimeSchema,
 });
 
+export const privacyDataCategoryGuidanceSchema = z.object({
+  category: attributionTokenSchema,
+  description: z.string().min(1).max(240),
+  sourceStores: z.array(attributionTokenSchema).min(1).max(20),
+  accessExportHandling: z.literal('content_free_inventory_pending_verified_fulfillment'),
+  deletionHandling: z.enum([
+    'review_delete_or_deidentify_subject_data',
+    'review_retain_minimum_required_evidence',
+  ]),
+  retentionHandling: z.enum([
+    'apply_approved_subject_data_schedule',
+    'apply_security_legal_or_accounting_schedule',
+  ]),
+});
+
 export const privacyRequestSchema = z.object({
   id: opaqueIdSchema,
   personId: opaqueIdSchema.optional(),
@@ -345,6 +360,8 @@ export const privacyRequestSchema = z.object({
         'restriction_plan',
       ]),
       dataCategories: z.array(attributionTokenSchema).max(50),
+      categoryGuidanceVersion: z.literal('privacy-category-guidance-v1'),
+      categoryGuidance: z.array(privacyDataCategoryGuidanceSchema).max(50),
       recordCounts: z.record(z.string(), z.number().int().nonnegative()),
       containsCustomerContent: z.literal(false),
       requiresProfessionalReview: z.boolean(),

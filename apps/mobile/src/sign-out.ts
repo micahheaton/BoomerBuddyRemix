@@ -108,3 +108,16 @@ export async function clearMobileDeviceStateSafely(
     return false;
   }
 }
+
+export async function clearMobilePrivateDeviceState(input: {
+  readonly clearWeeklyReminder: () => Promise<void>;
+  readonly clearPendingLearningOperations: () => Promise<void>;
+  readonly clearHouseholdState: () => Promise<void>;
+}): Promise<boolean> {
+  const outcomes = await Promise.allSettled([
+    Promise.resolve().then(input.clearWeeklyReminder),
+    Promise.resolve().then(input.clearPendingLearningOperations),
+    Promise.resolve().then(input.clearHouseholdState),
+  ]);
+  return outcomes.every((outcome) => outcome.status === 'fulfilled');
+}

@@ -35,6 +35,26 @@ export interface AuthContext {
 }
 
 export const customerBillingSecondFactorMaximumAgeSeconds = 10 * 60;
+export const customerSensitiveChangeMaximumAgeSeconds = 10 * 60;
+
+export function assertRecentCustomerAuthentication(auth: AuthContext): void {
+  if (auth.audience !== 'customer' && auth.audience !== 'mobile') {
+    throw new DomainError('not_authorized', 'A customer identity confirmation is required');
+  }
+  if (auth.assurance.kind === 'development') return;
+  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
+  if (
+    firstFactorAge === undefined ||
+    !Number.isSafeInteger(firstFactorAge) ||
+    firstFactorAge < 0 ||
+    firstFactorAge >= customerSensitiveChangeMaximumAgeSeconds
+  ) {
+    throw new DomainError('not_authorized', 'Sign in again before changing household access', {
+      action: 'sign_in_again',
+      reason: 'recent_authentication_required',
+    });
+  }
+}
 
 export function assertRecentHqMfa(auth: AuthContext, config: AppConfig): void {
   if (auth.audience !== 'hq') {

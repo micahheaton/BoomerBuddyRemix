@@ -1,25 +1,53 @@
 import { assertAuthorized } from '@boomerbuddy/authorization';
 import {
+  acceptHouseholdMemberInvitationRequestSchema,
+  acceptHouseholdMemberInvitationResponseSchema,
   acceptInvitationRequestSchema,
   acceptInvitationResponseSchema,
+  createHouseholdMemberInvitationRequestSchema,
+  createHouseholdMemberInvitationResponseSchema,
   createInvitationRequestSchema,
   createInvitationResponseSchema,
+  createRecipientConnectionCodeResponseSchema,
   familyResponseSchema,
+  householdMemberInvitationCredentialRequestSchema,
+  householdMemberInvitationPreviewResponseSchema,
   invitationCredentialRequestSchema,
   invitationPreviewResponseSchema,
   opaqueIdSchema,
+  revokeHouseholdMemberInvitationResponseSchema,
+  revokeHouseholdMemberResponseSchema,
   revokeInvitationResponseSchema,
   revokeRelationshipResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError, ids } from '@boomerbuddy/domain';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { assertMutationOrigin, authenticate, correlationId, selectedHousehold } from '../auth';
+import {
+  assertMutationOrigin,
+  assertRecentCustomerAuthentication,
+  authenticate,
+  correlationId,
+  selectedHousehold,
+} from '../auth';
 import type { ApiContext } from '../context';
 import { familyDto, relationshipDto } from '../mappers';
 
 const invitationParamsSchema = z.object({ invitationId: opaqueIdSchema });
+const membershipParamsSchema = z.object({ membershipId: opaqueIdSchema });
 const relationshipParamsSchema = z.object({ relationshipId: opaqueIdSchema });
+
+function rateLimited(reply: FastifyReply, requestId: string, now: Date, message: string) {
+  const nextHour = (Math.floor(now.getTime() / 3_600_000) + 1) * 3_600_000;
+  void reply.header('Cache-Control', 'private, no-store, max-age=0');
+  void reply.header(
+    'Retry-After',
+    String(Math.max(1, Math.ceil((nextHour - now.getTime()) / 1_000))),
+  );
+  return reply.code(429).send({
+    error: { code: 'rate_limited', message, requestId },
+  });
+}
 
 export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext): void {
   app.get('/v1/family', async (request) => {
@@ -39,7 +67,9 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
         householdId: household.householdId,
         scope: household.isAdministrator
           ? { kind: 'roster' }
-          : { kind: 'subject_relationships', subjectPersonId: auth.principal.personId },
+          : household.isProtectedMember || household.trustedCircleGrants.length > 0
+            ? { kind: 'subject_relationships', subjectPersonId: auth.principal.personId }
+            : { kind: 'self_membership', memberPersonId: auth.principal.personId },
       },
     });
     const family = await context.repositories.family.list(
@@ -49,6 +79,345 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
     );
     if (family === null) throw new DomainError('not_found', 'Family information is unavailable');
     return familyResponseSchema.parse(familyDto(family));
+  });
+
+  app.post('/v1/family/recipient-connection-codes', async (request, reply) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
+    z.object({})
+      .strict()
+      .parse(request.body ?? {});
+    if (context.config.environment !== 'production') {
+      throw new DomainError(
+        'invalid_input',
+        'Recipient connection codes are unavailable in local development',
+      );
+    }
+    const allowed = await context.repositories.family.consumeRecipientCodeRateLimit({
+      personId: auth.principal.personId,
+      action: 'recipient_code_generation',
+      maximumPerHour: 5,
+      now,
+    });
+    if (!allowed) {
+      return rateLimited(
+        reply,
+        request.id,
+        now,
+        'Trusted Circle connection-code requests are temporarily limited',
+      );
+    }
+    const result = await context.repositories.family.createRecipientConnectionCode({
+      identityId: auth.resolved.identityId,
+      personId: auth.principal.personId,
+      actorIssuer: auth.resolved.issuer,
+      actorSubject: auth.resolved.identitySubject,
+      audience: auth.audience,
+      correlationId: correlationId(request),
+      now,
+    });
+    return reply.code(201).send(
+      createRecipientConnectionCodeResponseSchema.parse({
+        recipientConnectionCode: result.recipientConnectionCode,
+        expiresAt: result.expiresAt.toISOString(),
+        delivery: 'manual_only',
+      }),
+    );
+  });
+
+  app.post('/v1/family/member-invitations', async (request, reply) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
+    const household = selectedHousehold(auth, request);
+    const body = createHouseholdMemberInvitationRequestSchema.parse(request.body);
+    if (context.config.environment !== 'production') {
+      throw new DomainError(
+        'invalid_input',
+        'Household member invitations require verified production identities',
+      );
+    }
+    assertAuthorized({
+      principal: auth.principal,
+      action: 'family:invite_member',
+      resource: {
+        kind: 'family',
+        householdId: household.householdId,
+        scope: { kind: 'member_invitation' },
+      },
+    });
+    const allowed = await context.repositories.family.consumeRecipientCodeRateLimit({
+      personId: auth.principal.personId,
+      action: 'recipient_code_lookup',
+      maximumPerHour: 20,
+      now,
+    });
+    if (!allowed) {
+      return rateLimited(
+        reply,
+        request.id,
+        now,
+        'Household member invitation requests are temporarily limited',
+      );
+    }
+    const result = await context.repositories.family.createHouseholdMemberInvitation({
+      householdId: household.householdId,
+      invitedByPersonId: auth.principal.personId,
+      actorIdentityId: auth.resolved.identityId,
+      actorIssuer: auth.resolved.issuer,
+      actorSubject: auth.resolved.identitySubject,
+      recipientConnectionCode: body.recipientConnectionCode,
+      audience: auth.audience,
+      correlationId: correlationId(request),
+      now,
+    });
+    return reply.code(result.reused ? 200 : 201).send(
+      createHouseholdMemberInvitationResponseSchema.parse({
+        invitation: {
+          ...result.invitation,
+          expiresAt: result.invitation.expiresAt.toISOString(),
+          createdAt: result.invitation.createdAt.toISOString(),
+        },
+        credential: 'invitee_connection_code',
+        delivery: 'recipient_manual_only',
+        reused: result.reused,
+      }),
+    );
+  });
+
+  app.post('/v1/family/member-invitations/:invitationId/preview', async (request) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    const { invitationId } = invitationParamsSchema.parse(request.params);
+    const body = householdMemberInvitationCredentialRequestSchema.parse(request.body);
+    const preview = await context.repositories.family.previewHouseholdMemberInvitationCredential(
+      invitationId,
+      body.invitationCredential,
+      now,
+    );
+    if (preview === null) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    if (preview.intendedPersonId !== auth.principal.personId) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    assertAuthorized({
+      principal: auth.principal,
+      action: 'family:accept_invitation',
+      resource: {
+        kind: 'invitation',
+        householdId: ids.household(preview.household.id),
+        identityBindingState: 'verified_identity',
+        invitedPersonId: ids.person(preview.intendedPersonId),
+        credentialPresented: true,
+      },
+    });
+    return householdMemberInvitationPreviewResponseSchema.parse({
+      invitation: {
+        id: preview.id,
+        household: preview.household,
+        invitedBy: preview.invitedBy,
+        inviteeDisplayName: preview.inviteeDisplayName,
+        access: preview.access,
+        state: preview.state,
+        identityBindingState: preview.identityBindingState,
+        expiresAt: preview.expiresAt.toISOString(),
+        previewVersion: preview.previewVersion,
+      },
+    });
+  });
+
+  app.post('/v1/family/member-invitations/:invitationId/accept', async (request, reply) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
+    const { invitationId } = invitationParamsSchema.parse(request.params);
+    const body = acceptHouseholdMemberInvitationRequestSchema.parse(request.body);
+    const invitation =
+      await context.repositories.family.validateHouseholdMemberInvitationCredential(
+        invitationId,
+        body.invitationCredential,
+        now,
+      );
+    if (invitation === null) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    if (invitation.intendedPersonId !== auth.principal.personId) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    assertAuthorized({
+      principal: auth.principal,
+      action: 'family:accept_invitation',
+      resource: {
+        kind: 'invitation',
+        householdId: ids.household(invitation.householdId),
+        identityBindingState: 'verified_identity',
+        invitedPersonId: ids.person(invitation.intendedPersonId),
+        credentialPresented: true,
+      },
+    });
+    const result = await context.repositories.family.acceptHouseholdMemberInvitation({
+      invitationId,
+      invitationCredential: body.invitationCredential,
+      previewVersion: body.previewVersion,
+      acceptingIdentityId: auth.resolved.identityId,
+      acceptingPersonId: auth.principal.personId,
+      actorIssuer: auth.resolved.issuer,
+      actorSubject: auth.resolved.identitySubject,
+      audience: auth.audience,
+      correlationId: correlationId(request),
+      now,
+    });
+    return reply.code(result.reused ? 200 : 201).send(
+      acceptHouseholdMemberInvitationResponseSchema.parse({
+        membership: {
+          membershipId: result.membershipId,
+          householdId: result.householdId,
+          membershipKind: result.membershipKind,
+          status: result.status,
+        },
+        reused: result.reused,
+      }),
+    );
+  });
+
+  app.delete('/v1/family/member-invitations/:invitationId', async (request, reply) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
+    const household = selectedHousehold(auth, request);
+    const { invitationId } = invitationParamsSchema.parse(request.params);
+    const invitation = await context.repositories.family.householdMemberInvitationForCancellation(
+      household.householdId,
+      invitationId,
+      now,
+    );
+    if (invitation === null) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    assertAuthorized({
+      principal: auth.principal,
+      action: 'family:revoke_member_invitation',
+      resource: {
+        kind: 'family',
+        householdId: household.householdId,
+        scope: { kind: 'member_invitation' },
+      },
+    });
+    const state = await context.repositories.family.revokeHouseholdMemberInvitation({
+      invitationId,
+      householdId: household.householdId,
+      actorPersonId: auth.principal.personId,
+      actorIdentityId: auth.resolved.identityId,
+      actorIssuer: auth.resolved.issuer,
+      actorSubject: auth.resolved.identitySubject,
+      audience: auth.audience,
+      correlationId: correlationId(request),
+      now,
+    });
+    if (state === null) {
+      throw new DomainError('not_found', 'Household invitation is invalid or unavailable');
+    }
+    return reply.send(
+      revokeHouseholdMemberInvitationResponseSchema.parse({
+        id: invitation.id,
+        state,
+        endedAt: now.toISOString(),
+      }),
+    );
+  });
+
+  app.delete('/v1/family/members/:membershipId', async (request, reply) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer', 'mobile'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
+    const household = selectedHousehold(auth, request);
+    const { membershipId } = membershipParamsSchema.parse(request.params);
+    const membership = await context.repositories.family.neutralMembershipForRevocation(
+      household.householdId,
+      membershipId,
+    );
+    if (membership === null) {
+      throw new DomainError('not_found', 'Household membership is unavailable');
+    }
+    assertAuthorized({
+      principal: auth.principal,
+      action: 'family:revoke_member',
+      resource: {
+        kind: 'family',
+        householdId: household.householdId,
+        scope: {
+          kind: 'member_membership',
+          membershipId: membership.membershipId,
+          memberPersonId: ids.person(membership.memberPersonId),
+        },
+      },
+    });
+    const state = await context.repositories.family.revokeNeutralMembership({
+      membershipId: membership.membershipId,
+      householdId: household.householdId,
+      memberPersonId: membership.memberPersonId,
+      actorPersonId: auth.principal.personId,
+      actorIdentityId: auth.resolved.identityId,
+      actorIssuer: auth.resolved.issuer,
+      actorSubject: auth.resolved.identitySubject,
+      audience: auth.audience,
+      correlationId: correlationId(request),
+      now,
+    });
+    if (state === null) {
+      throw new DomainError('not_found', 'Household membership is unavailable');
+    }
+    return reply.send(
+      revokeHouseholdMemberResponseSchema.parse({
+        membershipId: membership.membershipId,
+        state,
+        endedAt: now.toISOString(),
+      }),
+    );
   });
 
   app.post('/v1/family/invitations', async (request, reply) => {
@@ -61,40 +430,9 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       now,
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
     const household = selectedHousehold(auth, request);
     const body = createInvitationRequestSchema.parse(request.body);
-    let intendedIdentity;
-    let inviteeDisplayName = body.inviteeDisplayName;
-    if (context.config.environment === 'production') {
-      const customerRealm = context.config.identity.clerk?.customer;
-      if (customerRealm === undefined || body.intendedCustomerSubject === undefined) {
-        throw new DomainError(
-          'invalid_input',
-          'An exact configured customer identity subject is required',
-        );
-      }
-      const bootstrap =
-        await context.repositories.productionIdentities.findCustomerBootstrapBySubject({
-          issuer: customerRealm.issuer,
-          subject: body.intendedCustomerSubject,
-        });
-      if (bootstrap === null) {
-        throw new DomainError('not_found', 'The intended customer identity is unavailable');
-      }
-      if (bootstrap.personId === auth.principal.personId) {
-        throw new DomainError(
-          'invalid_input',
-          'A protected member cannot invite their own identity',
-        );
-      }
-      intendedIdentity = { issuer: bootstrap.issuer, subject: bootstrap.subject };
-      inviteeDisplayName = bootstrap.displayName;
-    } else if (body.intendedCustomerSubject !== undefined) {
-      throw new DomainError(
-        'invalid_input',
-        'Local invitations do not accept a production identity subject',
-      );
-    }
     assertAuthorized({
       principal: auth.principal,
       action: 'family:invite',
@@ -107,20 +445,40 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
         },
       },
     });
+    if (context.config.environment === 'production') {
+      const allowed = await context.repositories.family.consumeRecipientCodeRateLimit({
+        personId: auth.principal.personId,
+        action: 'recipient_code_lookup',
+        maximumPerHour: 20,
+        now,
+      });
+      if (!allowed) {
+        return rateLimited(
+          reply,
+          request.id,
+          now,
+          'Trusted Circle invitation requests are temporarily limited',
+        );
+      }
+    }
     const result = await context.repositories.family.createInvitation({
       householdId: household.householdId,
       invitedByPersonId: auth.principal.personId,
       protectedPersonId: auth.principal.personId,
-      inviteeDisplayName,
+      ...(body.inviteeDisplayName === undefined
+        ? {}
+        : { inviteeDisplayName: body.inviteeDisplayName }),
+      ...(body.recipientConnectionCode === undefined
+        ? {}
+        : { recipientConnectionCode: body.recipientConnectionCode }),
       permissions: body.permissions,
       audience: auth.audience,
       actorIssuer: auth.resolved.principal.issuer,
-      ...(intendedIdentity === undefined ? {} : { intendedIdentity }),
       sessionId: auth.principal.sessionId,
       correlationId: correlationId(request),
       now,
     });
-    return reply.code(201).send(
+    return reply.code(result.reused ? 200 : 201).send(
       createInvitationResponseSchema.parse({
         invitation: {
           ...result.invitation,
@@ -128,9 +486,18 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
           expiresAt: result.invitation.expiresAt.toISOString(),
           createdAt: result.invitation.createdAt.toISOString(),
         },
-        localInviteCode: result.localInviteCode,
-        delivery:
-          context.config.environment === 'production' ? 'recipient_manual_only' : 'local_only',
+        ...(result.delivery === 'local_only'
+          ? {
+              localInviteCode: result.localInviteCode,
+              credential: 'local_invite_code' as const,
+              delivery: 'local_only' as const,
+              reused: false as const,
+            }
+          : {
+              credential: 'invitee_connection_code' as const,
+              delivery: 'recipient_manual_only' as const,
+              reused: result.reused,
+            }),
       }),
     );
   });
@@ -186,6 +553,7 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       now,
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
     const { invitationId } = invitationParamsSchema.parse(request.params);
     const body = acceptInvitationRequestSchema.parse(request.body);
     const invitation = await context.repositories.family.validateInvitationCredential(
@@ -208,7 +576,7 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
         credentialPresented: true,
       },
     });
-    const relationship = await context.repositories.family.acceptInvitation({
+    const result = await context.repositories.family.acceptInvitation({
       invitationId,
       localInviteCode: body.localInviteCode,
       previewVersion: body.previewVersion,
@@ -219,10 +587,11 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       correlationId: correlationId(request),
       now,
     });
-    return reply.code(201).send(
+    return reply.code(result.reused ? 200 : 201).send(
       acceptInvitationResponseSchema.parse({
-        relationship: relationshipDto(relationship),
+        relationship: relationshipDto(result.relationship),
         householdId: invitation.householdId,
+        reused: result.reused,
       }),
     );
   });
@@ -237,6 +606,7 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       now,
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
     const household = selectedHousehold(auth, request);
     const { invitationId } = invitationParamsSchema.parse(request.params);
     const invitation = await context.repositories.family.invitationForCancellation(
@@ -289,6 +659,7 @@ export function registerFamilyRoutes(app: FastifyInstance, context: ApiContext):
       now,
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentCustomerAuthentication(auth);
     const household = selectedHousehold(auth, request);
     const { relationshipId } = relationshipParamsSchema.parse(request.params);
     const relationship = await context.repositories.family.relationshipForRevocation(

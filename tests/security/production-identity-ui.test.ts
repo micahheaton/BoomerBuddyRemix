@@ -52,16 +52,76 @@ describe('production identity UI boundary', () => {
     expect(hqSignIn).toContain('required recent multi-factor verification');
   });
 
+  it('keeps production invitation recovery copy aligned with recipient-created codes', async () => {
+    const [home, family, mobile] = await Promise.all([
+      source('apps/web/src/app/member/page-client.tsx'),
+      source('apps/web/src/app/member/family/page-client.tsx'),
+      source('apps/mobile/src/screens.tsx'),
+    ]);
+    const normalizedHome = home.replace(/\s+/gu, ' ');
+    const normalizedFamily = family.replace(/\s+/gu, ' ');
+    const normalizedMobile = mobile.replace(/\s+/gu, ' ');
+
+    expect(normalizedHome).toContain(
+      'Create and keep your own temporary connection code in Family',
+    );
+    expect(normalizedHome).toContain('They give you only the invitation ID');
+    expect(normalizedHome).not.toContain('invitation ID and your one-time connection code');
+
+    expect(normalizedFamily).toContain('the connection code you created and kept');
+    expect(normalizedFamily).toContain('the invitation ID the protected member gave you');
+    expect(normalizedFamily).toContain('the temporary connection code you created and kept');
+    expect(family).not.toContain('In production, use');
+    expect(family).not.toContain('local development uses');
+
+    expect(normalizedMobile).toContain('the connection code you created and kept');
+    expect(mobile).toContain('__DEV__');
+    expect(mobile).toContain("'Your connection code'");
+    expect(mobile).not.toContain('both one-time values given by the protected');
+  });
+
+  it('keeps Family discoverable so every active neutral member can leave', async () => {
+    const [memberShell, home, family, mobile] = await Promise.all([
+      source('apps/web/src/components/member-shell.tsx'),
+      source('apps/web/src/app/member/page-client.tsx'),
+      source('apps/web/src/app/member/family/page-client.tsx'),
+      source('apps/mobile/src/screens.tsx'),
+    ]);
+
+    expect(memberShell).toContain(
+      'const canUseFamily = me.principal.households.length === 0 || selectedScope !== undefined;',
+    );
+    expect(home).toContain('const canUseFamily = isUnassigned || selectedScope !== undefined;');
+    expect(mobile).toContain('const canUseFamily = isUnassigned || selectedScope !== undefined;');
+    expect(memberShell).toContain(
+      '{canUseFamily ? <Link href="/member/family">Family</Link> : null}',
+    );
+    expect(home).toContain('<Link href="/member/family">Open Family</Link>');
+    expect(mobile).toContain('title="Open Family"');
+    expect(family).toContain("? 'Leave household' : 'Remove member'");
+    expect(family).toContain("? 'Yes, leave household'");
+    expect(mobile).toContain("title={removingSelf ? 'Leave household' : 'Remove member'}");
+    expect(mobile).toContain("? 'Yes, leave household'");
+  });
+
   it('ships a public terminal recovery path and verifies Customer and HQ sign-in routes', async () => {
-    const [rootPackage, webPolicy, webConfig, customerSignIn, support, verifier] =
-      await Promise.all([
-        source('package.json'),
-        source('apps/web/src/lib/resource-auth-policy.ts'),
-        source('apps/web/next.config.ts'),
-        source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
-        source('apps/web/src/app/support/page.tsx'),
-        source('scripts/verify-founding-household-production-ui.mjs'),
-      ]);
+    const [
+      rootPackage,
+      webPolicy,
+      webConfig,
+      customerSignIn,
+      customerClientTrust,
+      support,
+      verifier,
+    ] = await Promise.all([
+      source('package.json'),
+      source('apps/web/src/lib/resource-auth-policy.ts'),
+      source('apps/web/next.config.ts'),
+      source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
+      source('apps/web/src/app/sign-in/client-trust/page.tsx'),
+      source('apps/web/src/app/support/page.tsx'),
+      source('scripts/verify-founding-household-production-ui.mjs'),
+    ]);
 
     expect(JSON.parse(rootPackage).scripts['verify:production-auth-routes']).toContain(
       'BB_PRODUCTION_AUTH_ROUTES_ONLY=true',
@@ -76,6 +136,8 @@ describe('production identity UI boundary', () => {
     );
     expect(customerSignIn).toContain('href="/sign-in"');
     expect(customerSignIn).not.toContain('redirect(');
+    expect(customerClientTrust).toContain("export { default } from '../[[...sign-in]]/page'");
+    expect(customerClientTrust).not.toContain('redirect(');
     expect(support).not.toContain('searchParams');
     expect(support).not.toContain('async function SupportPage');
 

@@ -237,10 +237,14 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     0035_run3_1_paid_family_catalog.sql
     0036_run3_1_protected_self_enrollment.sql
     0037_run3_1_paid_family_entitlement_repair.sql
+    0038_run3_1_member_learning_feed.sql
+    0039_trusted_circle_customer_journey.sql
+    0040_run3_1_member_learning_idempotency.sql
+    0041_run3_1_family_safe_word_lifecycle.sql
     ```
 
     Therefore, for an exact `0027` production prefix and a candidate whose manifest ends at
-    `0037`, the pending suffix is exactly
+    `0041`, the pending suffix is exactly
     `0028_run3_1_billing_authority_workflow.sql`,
     `0029_run3_1_stripe_live_control_plane.sql`,
     `0030_run3_1_billing_reverification_binding.sql`,
@@ -250,11 +254,15 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `0034_run3_1_support_receipts.sql`, and
     `0035_run3_1_paid_family_catalog.sql`,
     `0036_run3_1_protected_self_enrollment.sql`, and
-    `0037_run3_1_paid_family_entitlement_repair.sql`. For an exact `0032` prefix, it is exactly `0033`
-    through `0037`. A genuinely empty database receives the entire tagged `0001` through final-candidate
+    `0037_run3_1_paid_family_entitlement_repair.sql`,
+    `0038_run3_1_member_learning_feed.sql`,
+    `0039_trusted_circle_customer_journey.sql`, and
+    `0040_run3_1_member_learning_idempotency.sql`, and
+    `0041_run3_1_family_safe_word_lifecycle.sql`. For an exact `0032` prefix, it is exactly `0033`
+    through `0041`. A genuinely empty database receives the entire tagged `0001` through final-candidate
     manifest. A future forward migration must be the next contiguous entry in the exact tagged
-    manifest and must appear in the external receipt. Do not guess its filename, hardcode `0037` as
-    the release ceiling, or run an untagged migration. The only
+    manifest and must appear in the external receipt. Do not guess its filename, treat this documented
+    `0041` snapshot as a future release ceiling, or run an untagged migration. The only
     allowed pending set is the tagged candidate manifest minus the exact database prefix.
 
     Before applying a suffix that includes `0035`, perform a read-only inventory of the exact
@@ -285,8 +293,9 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     release commit. Restore it into a fresh disposable database and prove the same manifest plus
     billing authority, Stripe controls, reverification, mobile retention, privacy-minimized access
     intent, billing recovery evidence, support receipts, paid Family catalogue, protected-self
-    enrollment operation evidence, and any later tagged
-    repair structures before publishing. Never enable per-startup migrations.
+    enrollment operation evidence, member learning feed, Trusted Circle customer journey,
+    member-learning operation receipts, and any later tagged repair structures before publishing.
+    Never enable per-startup migrations.
 
     Migration `0036` keeps protected-self mutation receipts append-only for durable temporal
     idempotency: replaying an old key must return its original result without repeating or undoing a

@@ -633,6 +633,7 @@ describe('growth runtime projection', () => {
       correlationId: 'growth-referral-create',
       now: invitedAt,
     });
+    if (created.delivery !== 'local_only') throw new TypeError('Expected a local invitation');
     const credential = await family.validateInvitationCredential(
       created.invitation.id,
       created.localInviteCode,

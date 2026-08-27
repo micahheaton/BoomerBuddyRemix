@@ -146,9 +146,21 @@ describe('customer-facing production copy', () => {
     const hqSponsoredAccess = source('apps/hq/src/components/founding-households.tsx');
 
     expect(memberHome).toContain("process.env.NODE_ENV !== 'production' ? (");
+    expect(memberHome).toContain("'/v1/trusted-circle/attention'");
+    expect(memberHome).toContain('Trusted Circle attention');
+    expect(memberHome).toContain('No shared results are waiting for your acknowledgement.');
+    expect(memberHome).toContain('does not send a text, email, or push alert');
     expect(messaging).toContain("const localOnlyEnabled = process.env.NODE_ENV !== 'production';");
     expect(messaging).toContain('Messaging remains unavailable during early access.');
-    expect(memberFamily).toContain('You cannot invite a new trusted person right now');
+    expect(memberFamily).toContain('Trusted person&apos;s temporary connection code');
+    expect(memberFamily).toMatch(
+      /Ask the intended person to sign in, open Family, and create this code\. Do not\s+use an email address, account-provider ID, or another person&apos;s code\./u,
+    );
+    expect(memberFamily).toMatch(
+      /I choose to invite this exact person to view only the Check results I deliberately\s+share\./u,
+    );
+    expect(memberFamily).toContain('BoomerBuddy does not send anything automatically.');
+    expect(memberFamily).not.toContain('You cannot invite a new trusted person right now');
     expect(memberFamily).not.toContain('Exact invited Clerk customer subject');
     expect(memberFamily).not.toContain('Run 1 permission');
     expect(memberFamily).not.toContain('client-supplied');

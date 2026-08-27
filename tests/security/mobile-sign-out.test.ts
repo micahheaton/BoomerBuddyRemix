@@ -3,6 +3,7 @@ import {
   beginMobileSignOutAttempt,
   classifyMobileSignOutInspection,
   clearMobileDeviceStateSafely,
+  clearMobilePrivateDeviceState,
   completeMobileSignOut,
   createMobileSignOutAttemptGate,
   mobileIdentitySignOutTimeoutMs,
@@ -142,6 +143,25 @@ describe('mobile sign-out recovery', () => {
       }),
     ).resolves.toBe(false);
     await expect(clearMobileDeviceStateSafely(async () => undefined)).resolves.toBe(true);
+  });
+
+  it('attempts every private-state cleanup category when passive sign-out cleanup partially fails', async () => {
+    const events: string[] = [];
+    await expect(
+      clearMobilePrivateDeviceState({
+        clearWeeklyReminder: async () => {
+          events.push('reminder');
+        },
+        clearPendingLearningOperations: async () => {
+          events.push('pending-learning');
+          throw new Error('fixture secure storage unavailable');
+        },
+        clearHouseholdState: async () => {
+          events.push('household');
+        },
+      }),
+    ).resolves.toBe(false);
+    expect(events).toEqual(expect.arrayContaining(['reminder', 'pending-learning', 'household']));
   });
 
   it('attempts identity sign out and reports retry when secure-storage cleanup fails', async () => {

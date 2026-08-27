@@ -166,6 +166,7 @@ describe('provider-free mobile distribution verifier', () => {
       'check_results_and_private_history',
       'support_receipt_state',
       'orientation_privacy_and_deletion_state',
+      'learning_progress_coarse_region_and_in_app_feed',
       'subscription_access_status',
     ]);
     expect(privacy.dataItems.every((item) => item.linkedToAccount && !item.usedForTracking)).toBe(
@@ -177,6 +178,7 @@ describe('provider-free mobile distribution verifier', () => {
         'precise_or_coarse_location',
         'payment_card_or_bank_data',
         'background_message_monitoring',
+        'remote_push_tokens_or_provider_registration',
       ]),
     );
     expect(reviewerFlow.prerequisites).toHaveLength(4);
@@ -301,6 +303,7 @@ describe('provider-free mobile distribution verifier', () => {
       'expo-auth-session': 'hosted_auth_session_bridge',
       'expo-constants': 'runtime_configuration_reader',
       'expo-crypto': 'local_cryptography_utility',
+      'expo-notifications': 'on_device_local_notification_scheduler_no_remote_tokens',
       'expo-secure-store': 'secure_local_storage',
       'expo-splash-screen': 'static_startup_ui',
       'expo-status-bar': 'static_status_ui',
@@ -312,6 +315,46 @@ describe('provider-free mobile distribution verifier', () => {
       'react-native-screens': 'native_navigation_runtime',
       'react-native-web': 'web_preview_native_compatibility',
     });
+  });
+
+  it('fails closed around the optional local-only weekly reminder', () => {
+    const metadata = json('apps/mobile/store-metadata.json');
+    const app = json('apps/mobile/app.json') as {
+      expo: { plugins: Array<string | [string, Record<string, unknown>]> };
+    };
+    const permissions = metadata.permissions as Record<string, unknown>;
+    const verifier = readFileSync(
+      resolve(repositoryRoot, 'scripts/verify-mobile-distribution.mjs'),
+      'utf8',
+    );
+    const reminder = readFileSync(
+      resolve(repositoryRoot, 'apps/mobile/src/weekly-rehearsal-reminder.ts'),
+      'utf8',
+    );
+
+    expect(app.expo.plugins).toContainEqual([
+      'expo-notifications',
+      { color: '#255B57', enableBackgroundRemoteNotifications: false },
+    ]);
+    expect(permissions).toEqual({
+      expectedActiveAndroidPermissions: [
+        'android.permission.INTERNET',
+        'android.permission.POST_NOTIFICATIONS',
+        'android.permission.RECEIVE_BOOT_COMPLETED',
+      ],
+      notificationPermissionPromptExpected: true,
+      notificationPromptReason: 'optional_on_device_weekly_rehearsal_reminder',
+      otherSensitivePermissionPromptsExpected: false,
+      remoteNotificationRegistrationExpected: false,
+    });
+    expect(reminder).toContain('setAutoServerRegistrationEnabledAsync(false)');
+    expect(reminder).toContain('data: { kind: weeklyRehearsalReminderMarker }');
+    expect(reminder).toContain('.filter(isWeeklyRehearsalReminder)');
+    expect(reminder).not.toContain('getExpoPushTokenAsync');
+    expect(reminder).not.toContain('getDevicePushTokenAsync');
+    expect(verifier).toContain('weekly rehearsal notification must remain generic');
+    expect(verifier).toContain('weekly rehearsal notification must cancel on sign-out');
+    expect(verifier).toContain('device proof explicitly pending');
   });
 
   it('allows only explicit blank or validated receipt-code support email drafts', () => {

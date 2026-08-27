@@ -17,17 +17,24 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useHostedAuth } from '@clerk/expo/hosted-auth';
 import * as Crypto from 'expo-crypto';
 import type {
+  AcceptHouseholdMemberInvitationResponse,
   CheckKind,
   CheckListResponse,
   CheckResult,
+  CheckShareLifecycle,
+  CheckShareListResponse,
   CreateCheckResponse,
+  CreateHouseholdMemberInvitationResponse,
   CreateInvitationResponse,
+  CreateRecipientConnectionCodeResponse,
   EntitlementResponse,
   FamilyResponse,
+  HouseholdMemberInvitationPreviewResponse,
   InvitationPreviewResponse,
   MeResponse,
   OrientationStateDto,
   ProtectedSelfEnrollmentStatusResponse,
+  TrustedCircleAttentionResponse,
   TrustedCirclePermissionDto,
 } from '@boomerbuddy/contracts';
 import {
@@ -35,7 +42,12 @@ import {
   buildUserInitiatedInvitationShareDraft,
   meResponseSchema,
 } from '@boomerbuddy/contracts';
-import { MobileCustomerError, mobileRequest, readableError } from './api';
+import {
+  MobileCustomerError,
+  mobileRequest,
+  readableError,
+  requiresRecentAuthentication,
+} from './api';
 import {
   emptyHouseholdResource,
   householdBoundDraftValue,
@@ -76,6 +88,7 @@ import {
   type ProtectedAccessAttempt,
   type ProtectedAccessOperation,
 } from './protected-access-resource';
+import { canCloseSharedResult } from './share-lifecycle';
 import { appStyles as s } from './theme';
 
 const customerWebSignInUrl = 'https://app.boomerbuddy.net/sign-in';
@@ -271,6 +284,17 @@ export function HomeScreen({
   const [entitlementsUnavailableFor, setEntitlementsUnavailableFor] = useState('');
   const [entitlementsRefreshingFor, setEntitlementsRefreshingFor] = useState('');
   const [entitlementRefreshAttempt, setEntitlementRefreshAttempt] = useState(0);
+  const [attention, setAttention] = useState<{
+    householdId: string;
+    value: TrustedCircleAttentionResponse;
+  }>();
+  const [attentionUnavailableFor, setAttentionUnavailableFor] = useState('');
+  const [attentionRefreshAttempt, setAttentionRefreshAttempt] = useState(0);
+  const selectedHomeHouseholdIdRef = useRef(selectedHouseholdId);
+  useLayoutEffect(() => {
+    selectedHomeHouseholdIdRef.current = selectedHouseholdId;
+  }, [selectedHouseholdId]);
+  const attentionFocusGenerationRef = useRef(0);
   useEffect(() => {
     if (!selectedHouseholdId || !selectedScope?.isBillingManager) return;
     let active = true;
@@ -309,6 +333,56 @@ export function HomeScreen({
   ]);
   const isUnassigned = principal.households.length === 0;
   const isProtectedMember = selectedScope?.isProtectedMember === true;
+  const hasTrustedCircleGrant =
+    selectedScope?.trustedCircleGrants.some((grant) =>
+      grant.permissions.includes('view_shared_checks'),
+    ) === true;
+  useFocusEffect(
+    useCallback(() => {
+      void attentionRefreshAttempt;
+      const householdId = selectedHouseholdId;
+      const attentionFocusGeneration = ++attentionFocusGenerationRef.current;
+      let active = true;
+      const attentionRequestIsCurrent = (): boolean =>
+        active &&
+        selectedHomeHouseholdIdRef.current === householdId &&
+        attentionFocusGenerationRef.current === attentionFocusGeneration;
+      if (!householdId || !hasTrustedCircleGrant) {
+        setAttention(undefined);
+        setAttentionUnavailableFor('');
+        return () => {
+          active = false;
+          if (attentionFocusGenerationRef.current === attentionFocusGeneration) {
+            attentionFocusGenerationRef.current += 1;
+          }
+        };
+      }
+      const controller = new AbortController();
+      setAttention((current) => (current?.householdId === householdId ? undefined : current));
+      setAttentionUnavailableFor('');
+      void mobileRequest<TrustedCircleAttentionResponse>('/v1/trusted-circle/attention', {
+        headers: { 'X-BB-Household-Id': householdId },
+        signal: controller.signal,
+      })
+        .then((response) => {
+          if (!attentionRequestIsCurrent()) return;
+          setAttention({ householdId, value: response });
+          setAttentionUnavailableFor('');
+        })
+        .catch(() => {
+          if (controller.signal.aborted || !attentionRequestIsCurrent()) return;
+          setAttention((current) => (current?.householdId === householdId ? undefined : current));
+          setAttentionUnavailableFor(householdId);
+        });
+      return () => {
+        active = false;
+        controller.abort();
+        if (attentionFocusGenerationRef.current === attentionFocusGeneration) {
+          attentionFocusGenerationRef.current += 1;
+        }
+      };
+    }, [attentionRefreshAttempt, hasTrustedCircleGrant, selectedHouseholdId]),
+  );
   const canCheck =
     isProtectedMember &&
     (selectedScope?.capabilities.includes('check:text') ||
@@ -321,13 +395,11 @@ export function HomeScreen({
       ));
   const canUseOrientation =
     isProtectedMember && selectedScope?.capabilities.includes('orientation:use');
-  const canUseFamily =
-    isUnassigned ||
-    selectedScope?.isAdministrator === true ||
-    selectedScope?.isProtectedMember === true ||
-    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
+  const canUseFamily = isUnassigned || selectedScope !== undefined;
   const selectedEntitlements =
     entitlements?.householdId === selectedHouseholdId ? entitlements.value : undefined;
+  const selectedAttention =
+    attention?.householdId === selectedHouseholdId ? attention.value : undefined;
   const protectedAllowance = selectedEntitlements?.commerce.allowances.find(
     (allowance) => allowance.kind === 'protected_members',
   );
@@ -479,6 +551,57 @@ export function HomeScreen({
         />
         <ActionButton kind="secondary" title="Sign out" onPress={onSignOut} />
       </View>
+      {!isUnassigned && hasTrustedCircleGrant ? (
+        <View style={s.card}>
+          <Text style={s.pill}>Trusted Circle attention</Text>
+          <Text style={s.heading}>Review requests</Text>
+          <Text style={s.body} accessibilityLiveRegion="polite">
+            {attentionUnavailableFor === selectedHouseholdId
+              ? 'Trusted Circle requests are unavailable right now.'
+              : selectedAttention
+                ? selectedAttention.pendingAcknowledgementCount > 0
+                  ? `${selectedAttention.pendingAcknowledgementCount} shared ${
+                      selectedAttention.pendingAcknowledgementCount === 1
+                        ? 'result needs'
+                        : 'results need'
+                    } your acknowledgement.`
+                  : 'No shared results are waiting for your acknowledgement.'
+                : 'Checking for Trusted Circle requests...'}
+          </Text>
+          <Text style={s.muted}>
+            BoomerBuddy does not send a text, email, or push alert. Open History here when a trusted
+            person contacts you directly.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Open shared History"
+            onPress={() => navigation.navigate('History')}
+          />
+          {attentionUnavailableFor === selectedHouseholdId ? (
+            <ActionButton
+              kind="secondary"
+              title="Retry Trusted Circle requests"
+              onPress={() => setAttentionRefreshAttempt((current) => current + 1)}
+            />
+          ) : null}
+        </View>
+      ) : null}
+      {!isUnassigned && canUseOrientation ? (
+        <View style={s.card}>
+          <Text style={s.pill}>This week</Text>
+          <Text style={s.heading}>One short lesson and current updates</Text>
+          <Text style={s.body}>
+            Practice a safety skill, review source-linked guidance for your selected region, and
+            check your in-app reminder center. National guidance remains available when no reviewed
+            state item exists. Progress belongs to you and this household.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Open Learn and updates"
+            onPress={() => navigation.navigate('LearnUpdates')}
+          />
+        </View>
+      ) : null}
       {!isUnassigned ? (
         <View style={s.card} testID="account-access-summary">
           <Text style={s.pill}>Current access and plan</Text>
@@ -1199,10 +1322,19 @@ export function NativeProofScreen(): React.ReactElement {
           {isWebPreview ? 'Blocked in the web preview; use a native device build.' : shareStatus}
         </Text>
       </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Optional on-device weekly reminder</Text>
+        <Text style={s.body}>
+          The app can schedule generic weekly practice text on the device after a member opts in. It
+          does not request a push token or include a Check, person, household, message, or link.
+          Permission denial and cancellation are implemented, but lock-screen delivery is not yet
+          verified across supported iOS and Android devices.
+        </Text>
+      </View>
       <View style={s.banner}>
         <Text style={s.label}>Still outside this proof</Text>
         <Text style={s.muted}>
-          Push notifications, contacts, clipboard reads, background monitoring, and automatic
+          Remote push notifications, contacts, clipboard reads, background monitoring, and automatic
           artifact import are not implemented or represented as working.
         </Text>
       </View>
@@ -1357,12 +1489,27 @@ export function ResultScreen(props: ResultScreenProps): React.ReactElement {
 
 function ResultContent({ route, navigation }: ResultScreenProps) {
   const { check } = route.params;
-  const { selectedHouseholdId, selectedScope } = useMobileHousehold();
+  const { principal, selectedHouseholdId, selectedScope } = useMobileHousehold();
   const isProtectedMember = selectedScope?.isProtectedMember === true;
-  const [shareTargets, setShareTargets] = useState<FamilyResponse['relationships']>([]);
-  const [sharedWith, setSharedWith] = useState<string[]>([]);
+  const [shareTargetsState, setShareTargetsState] = useState<{
+    readonly householdId: string;
+    readonly checkId: string;
+    readonly status: 'ready' | 'error';
+    readonly targets?: FamilyResponse['relationships'];
+    readonly message?: string;
+  }>();
+  const [shareTargetsReloadVersion, setShareTargetsReloadVersion] = useState(0);
+  const [shareLifecycles, setShareLifecycles] = useState<CheckShareLifecycle[]>([]);
   const [sharingWith, setSharingWith] = useState('');
   const [shareStatus, setShareStatus] = useState('');
+  const [shareActionError, setShareActionError] = useState('');
+  const [shareLifecycleError, setShareLifecycleError] = useState('');
+  const [shareLifecycleLoading, setShareLifecycleLoading] = useState(false);
+  const visibleShareTargetsState =
+    shareTargetsState?.householdId === selectedHouseholdId && shareTargetsState.checkId === check.id
+      ? shareTargetsState
+      : undefined;
+  const shareTargets = visibleShareTargetsState?.targets;
   useEffect(() => {
     let active = true;
     if (!isProtectedMember || !check.access.canShare || check.householdId !== selectedHouseholdId)
@@ -1370,39 +1517,149 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
     Promise.all([mobileRequest<FamilyResponse>('/v1/family'), mobileRequest<MeResponse>('/v1/me')])
       .then(([family, me]) => {
         if (!active) return;
-        setShareTargets(
-          family.relationships.filter(
+        setShareTargetsState({
+          householdId: selectedHouseholdId,
+          checkId: check.id,
+          status: 'ready',
+          targets: family.relationships.filter(
             (relationship) =>
               relationship.state === 'active' &&
               relationship.permissions.includes('view_shared_checks') &&
               relationship.protectedPersonId === me.principal.personId,
           ),
-        );
+        });
       })
-      .catch(() => {
-        if (active) setShareTargets([]);
+      .catch((caught) => {
+        if (active) {
+          setShareTargetsState({
+            householdId: selectedHouseholdId,
+            checkId: check.id,
+            status: 'error',
+            message: readableError(caught),
+          });
+        }
       });
     return () => {
       active = false;
     };
-  }, [check.access.canShare, check.householdId, check.id, isProtectedMember, selectedHouseholdId]);
+  }, [
+    check.access.canShare,
+    check.householdId,
+    check.id,
+    isProtectedMember,
+    selectedHouseholdId,
+    shareTargetsReloadVersion,
+  ]);
+  const loadShareLifecycles = useCallback(async () => {
+    if (check.householdId !== selectedHouseholdId) return;
+    await Promise.resolve();
+    setShareLifecycleLoading(true);
+    setShareLifecycleError('');
+    try {
+      const response = await mobileRequest<CheckShareListResponse>(
+        `/v1/checks/${encodeURIComponent(check.id)}/shares`,
+      );
+      setShareLifecycles(response.shares);
+    } catch (caught) {
+      setShareLifecycles([]);
+      setShareLifecycleError(readableError(caught));
+    } finally {
+      setShareLifecycleLoading(false);
+    }
+  }, [check.householdId, check.id, selectedHouseholdId]);
+  useEffect(() => {
+    void Promise.resolve().then(loadShareLifecycles);
+  }, [loadShareLifecycles]);
+  function replaceShareLifecycle(next: CheckShareLifecycle) {
+    setShareLifecycles((current) => [
+      ...current.filter(
+        (share) =>
+          !(share.checkId === next.checkId && share.sharedWithPersonId === next.sharedWithPersonId),
+      ),
+      next,
+    ]);
+  }
   async function shareResult(personId: string, displayName: string) {
     setSharingWith(personId);
     setShareStatus('');
+    setShareActionError('');
     try {
-      await mobileRequest(`/v1/checks/${encodeURIComponent(check.id)}/shares`, {
-        method: 'POST',
-        body: JSON.stringify({ sharedWithPersonId: personId }),
-      });
-      setSharedWith((current) => [...new Set([...current, personId])]);
+      const response = await mobileRequest<{ lifecycle: CheckShareLifecycle }>(
+        `/v1/checks/${encodeURIComponent(check.id)}/shares`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ sharedWithPersonId: personId }),
+        },
+      );
+      replaceShareLifecycle(response.lifecycle);
       setShareStatus(
         `Redacted result shared with ${displayName} in BoomerBuddy. No notification was sent and submitted content was not included.`,
       );
     } catch (caught) {
-      setShareStatus(readableError(caught));
+      setShareActionError(readableError(caught));
     } finally {
       setSharingWith('');
     }
+  }
+  async function acknowledgeSharedResult() {
+    setSharingWith(principal.personId);
+    setShareStatus('');
+    setShareActionError('');
+    try {
+      const response = await mobileRequest<{ share: CheckShareLifecycle }>(
+        `/v1/checks/${encodeURIComponent(check.id)}/share-acknowledgement`,
+        { method: 'POST', body: '{}' },
+      );
+      replaceShareLifecycle(response.share);
+      setShareStatus(
+        'You confirmed that you reviewed this redacted result. No notification or message was sent.',
+      );
+    } catch (caught) {
+      setShareActionError(readableError(caught));
+    } finally {
+      setSharingWith('');
+    }
+  }
+  async function closeSharedResult(
+    personId: string,
+    resolution: 'safer_action_completed' | 'no_longer_needs_help',
+  ) {
+    setSharingWith(personId);
+    setShareStatus('');
+    setShareActionError('');
+    try {
+      const response = await mobileRequest<{ share: CheckShareLifecycle }>(
+        `/v1/checks/${encodeURIComponent(check.id)}/shares/${encodeURIComponent(personId)}/closure`,
+        { method: 'POST', body: JSON.stringify({ resolution }) },
+      );
+      replaceShareLifecycle(response.share);
+      setShareStatus(
+        resolution === 'safer_action_completed'
+          ? 'Shared-result follow-up closed after a safer action was completed.'
+          : 'Shared-result follow-up closed because help is no longer needed.',
+      );
+    } catch (caught) {
+      setShareActionError(readableError(caught));
+    } finally {
+      setSharingWith('');
+    }
+  }
+  const receivedShare = shareLifecycles.find(
+    (share) => share.sharedWithPersonId === principal.personId,
+  );
+  if (check.householdId !== selectedHouseholdId) {
+    return (
+      <Screen>
+        <Text accessibilityRole="header" style={s.title}>
+          Choose the result&apos;s household
+        </Text>
+        <Text style={s.body}>
+          This result belongs to a different household than the one currently selected. BoomerBuddy
+          hid it instead of showing one household&apos;s result under another household&apos;s name.
+        </Text>
+        <ActionButton title="Return Home" onPress={() => navigation.navigate('Home')} />
+      </Screen>
+    );
   }
   return (
     <Screen>
@@ -1469,6 +1726,51 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
           Pause and verify independently when money, credentials, accounts, or safety are involved.
         </Text>
       </View>
+      {shareStatus ? (
+        <Text accessibilityLiveRegion="polite" style={s.body}>
+          {shareStatus}
+        </Text>
+      ) : null}
+      {shareActionError ? <ErrorText message={shareActionError} /> : null}
+      {shareLifecycleError ? (
+        <View style={s.card}>
+          <ErrorText message={shareLifecycleError} />
+          <ActionButton
+            kind="secondary"
+            title="Retry shared-result status"
+            disabled={shareLifecycleLoading}
+            onPress={() => void loadShareLifecycles()}
+          />
+        </View>
+      ) : null}
+      {check.access.kind === 'shared' ? (
+        <View style={s.card}>
+          <Text style={s.heading}>Confirm you reviewed this result</Text>
+          <Text style={s.body}>
+            Acknowledgement records only that you reviewed this redacted result. It does not send a
+            message, reveal submitted content, or say that an action was completed.
+          </Text>
+          {shareLifecycleLoading ? (
+            <Loading label="Loading shared-result follow-up…" />
+          ) : receivedShare?.state === 'shared' ? (
+            <ActionButton
+              title={sharingWith ? 'Saving acknowledgement…' : 'I reviewed this result'}
+              disabled={Boolean(sharingWith)}
+              onPress={() => void acknowledgeSharedResult()}
+            />
+          ) : receivedShare?.state === 'acknowledged' ? (
+            <Text accessibilityLiveRegion="polite" style={s.body}>
+              Review acknowledged. The person who shared it can now close the follow-up.
+            </Text>
+          ) : receivedShare?.state === 'closed' ? (
+            <Text style={s.body}>This shared-result follow-up is closed.</Text>
+          ) : (
+            <Text style={s.muted}>
+              Acknowledgement is unavailable until current share permission is verified.
+            </Text>
+          )}
+        </View>
+      ) : null}
       {isProtectedMember && check.access.canShare && check.householdId === selectedHouseholdId ? (
         <View style={s.card}>
           <Text style={s.heading}>Share this redacted result</Text>
@@ -1476,35 +1778,85 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
             Eligible Trusted Circle people receive the summary, warning signs, and safer actions
             only. Submitted text or URLs are excluded, and no notification is sent.
           </Text>
-          {shareTargets.length ? (
-            shareTargets.map((target) => (
+          {!visibleShareTargetsState ? (
+            <Loading label="Loading eligible Trusted Circle people…" />
+          ) : visibleShareTargetsState.status === 'error' ? (
+            <View style={s.card}>
+              <ErrorText
+                message={
+                  visibleShareTargetsState.message ?? 'Trusted Circle people could not be loaded.'
+                }
+              />
               <ActionButton
                 kind="secondary"
-                key={target.id}
-                title={
-                  sharedWith.includes(target.trustedPersonId)
-                    ? `Shared with ${target.trustedDisplayName}`
-                    : sharingWith === target.trustedPersonId
-                      ? 'Sharing…'
-                      : `Share with ${target.trustedDisplayName}`
-                }
-                disabled={
-                  sharingWith === target.trustedPersonId ||
-                  sharedWith.includes(target.trustedPersonId)
-                }
-                onPress={() => void shareResult(target.trustedPersonId, target.trustedDisplayName)}
+                title="Retry Trusted Circle people"
+                onPress={() => {
+                  setShareTargetsState(undefined);
+                  setShareTargetsReloadVersion((current) => current + 1);
+                }}
               />
-            ))
+            </View>
+          ) : shareTargets?.length ? (
+            shareTargets.map((target) => {
+              const lifecycle = shareLifecycles.find(
+                (share) => share.sharedWithPersonId === target.trustedPersonId,
+              );
+              return (
+                <View key={target.id} style={s.card}>
+                  <Text style={s.label}>{target.trustedDisplayName}</Text>
+                  <Text style={s.muted}>
+                    {lifecycle?.state === 'acknowledged'
+                      ? 'They confirmed they reviewed this result.'
+                      : lifecycle?.state === 'closed'
+                        ? 'Follow-up is closed.'
+                        : lifecycle?.state === 'shared'
+                          ? 'Shared in BoomerBuddy; review has not been acknowledged.'
+                          : 'This result has not been shared with them.'}
+                  </Text>
+                  {!lifecycle ? (
+                    <ActionButton
+                      kind="secondary"
+                      title={
+                        sharingWith === target.trustedPersonId
+                          ? 'Sharing…'
+                          : `Share with ${target.trustedDisplayName}`
+                      }
+                      disabled={Boolean(sharingWith) || Boolean(shareLifecycleError)}
+                      onPress={() =>
+                        void shareResult(target.trustedPersonId, target.trustedDisplayName)
+                      }
+                    />
+                  ) : canCloseSharedResult(lifecycle) ? (
+                    <>
+                      <Text style={s.body}>
+                        Close this follow-up only after you have finished the next step together.
+                      </Text>
+                      <ActionButton
+                        kind="secondary"
+                        title="Close: safer action completed"
+                        disabled={Boolean(sharingWith)}
+                        onPress={() =>
+                          void closeSharedResult(target.trustedPersonId, 'safer_action_completed')
+                        }
+                      />
+                      <ActionButton
+                        kind="secondary"
+                        title="Close: help no longer needed"
+                        disabled={Boolean(sharingWith)}
+                        onPress={() =>
+                          void closeSharedResult(target.trustedPersonId, 'no_longer_needs_help')
+                        }
+                      />
+                    </>
+                  ) : null}
+                </View>
+              );
+            })
           ) : (
             <Text style={s.muted}>
               No one in your Trusted Circle currently has permission to view shared Checks.
             </Text>
           )}
-          {shareStatus ? (
-            <Text accessibilityLiveRegion="polite" style={s.body}>
-              {shareStatus}
-            </Text>
-          ) : null}
           <Text style={s.muted}>
             Sharing saves this result in the other person&apos;s BoomerBuddy account, but it does
             not notify them. Contact them directly if help is urgent.
@@ -1550,6 +1902,7 @@ export function HistoryScreen({
   const [error, setError] = useState('');
   const [confirming, setConfirming] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [retryVersion, setRetryVersion] = useState(0);
   const selectedHistoryHouseholdIdRef = useRef(selectedHouseholdId);
   useLayoutEffect(() => {
     selectedHistoryHouseholdIdRef.current = selectedHouseholdId;
@@ -1565,6 +1918,7 @@ export function HistoryScreen({
       ));
   useFocusEffect(
     useCallback(() => {
+      void retryVersion;
       let active = true;
       const householdId = selectedHouseholdId;
       const householdGeneration = ++historyHouseholdGenerationRef.current;
@@ -1628,7 +1982,7 @@ export function HistoryScreen({
         historyContinuationAbortRef.current?.abort();
         historyContinuationAbortRef.current = undefined;
       };
-    }, [canReadHistory, selectedHouseholdId]),
+    }, [canReadHistory, retryVersion, selectedHouseholdId]),
   );
   async function loadMore() {
     if (loadingMore || !hasMore || loadedHouseholdId !== selectedHouseholdId) return;
@@ -1698,6 +2052,19 @@ export function HistoryScreen({
       setError(readableError(caught));
     }
   }
+  if (!canReadHistory) {
+    return (
+      <Screen>
+        <Text accessibilityRole="header" style={s.title}>
+          History unavailable in this household
+        </Text>
+        <Text style={s.body}>
+          An enrolled protected adult can see their own History. A Trusted Circle person can see
+          only redacted results that were deliberately shared with them.
+        </Text>
+      </Screen>
+    );
+  }
   return (
     <Screen>
       <Text accessibilityRole="header" style={s.title}>
@@ -1712,9 +2079,22 @@ export function HistoryScreen({
           {announcement}
         </Text>
       ) : null}
-      {error ? <ErrorText message={error} /> : null}
+      {error && checks.length > 0 ? <ErrorText message={error} /> : null}
       {loading || loadedHouseholdId !== selectedHouseholdId ? (
         <Loading label="Loading history…" />
+      ) : error ? (
+        <View style={s.card}>
+          <ErrorText message={error} />
+          <ActionButton
+            kind="secondary"
+            title="Retry History"
+            onPress={() => {
+              setError('');
+              setLoading(true);
+              setRetryVersion((current) => current + 1);
+            }}
+          />
+        </View>
       ) : checks.length === 0 ? (
         <View style={s.card}>
           <Text style={s.heading}>No check records yet</Text>
@@ -1798,6 +2178,12 @@ type FamilyScreenStatus =
   | { readonly scope: 'invitation'; readonly message: string }
   | { readonly scope: 'household'; readonly householdId: string; readonly message: string };
 
+type NeutralMembershipAttempt = {
+  readonly householdId: string;
+  readonly householdGeneration: number;
+  readonly requestId: number;
+};
+
 export function FamilyScreen({
   navigation,
 }: NativeStackScreenProps<RootStackParamList, 'Family'>): React.ReactElement {
@@ -1807,17 +2193,41 @@ export function FamilyScreen({
     emptyHouseholdResource<FamilyResponse>(),
   );
   const selectedHouseholdIdRef = useRef(selectedHouseholdId);
+  const householdGenerationRef = useRef(0);
   useLayoutEffect(() => {
     selectedHouseholdIdRef.current = selectedHouseholdId;
+    householdGenerationRef.current += 1;
   }, [selectedHouseholdId]);
   const familyRequestIdRef = useRef(0);
   const [errorState, setErrorState] = useState<HouseholdBoundDraft<string>>();
   const [busy, setBusy] = useState(false);
   const [inviteeNameDraft, setInviteeNameDraft] = useState<HouseholdBoundDraft<string>>();
+  const [recipientConnectionCodeDraft, setRecipientConnectionCodeDraft] =
+    useState<HouseholdBoundDraft<string>>();
+  const [memberRecipientConnectionCodeDraft, setMemberRecipientConnectionCodeDraft] =
+    useState<HouseholdBoundDraft<string>>();
+  const [ownConnectionCode, setOwnConnectionCode] =
+    useState<CreateRecipientConnectionCodeResponse>();
   const [createdForHousehold, setCreatedForHousehold] = useState<{
     readonly householdId: string;
     readonly value: CreateInvitationResponse;
   }>();
+  const [createdMemberInvitationForHousehold, setCreatedMemberInvitationForHousehold] = useState<{
+    readonly householdId: string;
+    readonly value: CreateHouseholdMemberInvitationResponse;
+  }>();
+  const [memberInvitationId, setMemberInvitationId] = useState('');
+  const [memberInvitationCredential, setMemberInvitationCredential] = useState('');
+  const [memberInvitationReview, setMemberInvitationReview] = useState<{
+    readonly invitationId: string;
+    readonly invitationCredential: string;
+    readonly value: HouseholdMemberInvitationPreviewResponse;
+  }>();
+  const memberInvitationReviewRequestIdRef = useRef(0);
+  const memberInvitationReviewAbortRef = useRef<AbortController | undefined>(undefined);
+  const [memberConsentConfirmed, setMemberConsentConfirmed] = useState(false);
+  const [acceptedNeutralMembershipHouseholdId, setAcceptedNeutralMembershipHouseholdId] =
+    useState('');
   const [invitationId, setInvitationId] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [invitationReviewState, dispatchInvitationReview] = useReducer(
@@ -1831,12 +2241,45 @@ export function FamilyScreen({
     readonly householdId: string;
     readonly invitationId: string;
   }>();
+  const [confirmingMemberInvitation, setConfirmingMemberInvitation] = useState<{
+    readonly householdId: string;
+    readonly invitationId: string;
+  }>();
+  const [confirmingMembership, setConfirmingMembership] = useState<{
+    readonly householdId: string;
+    readonly familyRequestId: number;
+    readonly membershipId: string;
+  }>();
+  const membershipMutationRequestIdRef = useRef(0);
+  const membershipMutationAbortRef = useRef<AbortController | undefined>(undefined);
+  const [confirmingRelationship, setConfirmingRelationship] = useState<{
+    readonly householdId: string;
+    readonly relationshipId: string;
+  }>();
   const [statusState, setStatusState] = useState<FamilyScreenStatus>();
+  const [recentAuthenticationState, setRecentAuthenticationState] =
+    useState<HouseholdBoundDraft<boolean>>();
   const error = householdBoundDraftValue(errorState, selectedHouseholdId) ?? '';
   const setError = (message: string): void => {
     setErrorState(message ? { householdId: selectedHouseholdId, value: message } : undefined);
   };
+  const recentAuthenticationRequired =
+    householdBoundDraftValue(recentAuthenticationState, selectedHouseholdId) ?? false;
+  const clearMutationError = (): void => {
+    setError('');
+    setRecentAuthenticationState(undefined);
+  };
+  const setMutationError = (caught: unknown): void => {
+    setError(readableError(caught));
+    if (requiresRecentAuthentication(caught)) {
+      setRecentAuthenticationState({ householdId: selectedHouseholdId, value: true });
+    }
+  };
   const inviteeName = householdBoundDraftValue(inviteeNameDraft, selectedHouseholdId) ?? '';
+  const recipientConnectionCode =
+    householdBoundDraftValue(recipientConnectionCodeDraft, selectedHouseholdId) ?? '';
+  const memberRecipientConnectionCode =
+    householdBoundDraftValue(memberRecipientConnectionCodeDraft, selectedHouseholdId) ?? '';
   const reviewedInvitation: Extract<
     InvitationReviewState<InvitationPreviewResponse>,
     { status: 'ready' }
@@ -1846,9 +2289,28 @@ export function FamilyScreen({
     createdForHousehold?.householdId === selectedHouseholdId
       ? createdForHousehold.value
       : undefined;
+  const createdMemberInvitation =
+    createdMemberInvitationForHousehold?.householdId === selectedHouseholdId
+      ? createdMemberInvitationForHousehold.value
+      : undefined;
   const confirmingInvitationId =
     confirmingInvitation?.householdId === selectedHouseholdId
       ? confirmingInvitation.invitationId
+      : '';
+  const confirmingMemberInvitationId =
+    confirmingMemberInvitation?.householdId === selectedHouseholdId
+      ? confirmingMemberInvitation.invitationId
+      : '';
+  const confirmingMembershipId =
+    confirmingMembership?.householdId === selectedHouseholdId &&
+    familyState.status === 'ready' &&
+    familyState.householdId === selectedHouseholdId &&
+    confirmingMembership.familyRequestId === familyState.requestId
+      ? confirmingMembership.membershipId
+      : '';
+  const confirmingRelationshipId =
+    confirmingRelationship?.householdId === selectedHouseholdId
+      ? confirmingRelationship.relationshipId
       : '';
   const status =
     statusState?.scope === 'invitation' || statusState?.householdId === selectedHouseholdId
@@ -1859,9 +2321,20 @@ export function FamilyScreen({
       invitationReviewRequestIdRef.current += 1;
       invitationReviewAbortRef.current?.abort();
       invitationReviewAbortRef.current = undefined;
+      memberInvitationReviewRequestIdRef.current += 1;
+      memberInvitationReviewAbortRef.current?.abort();
+      memberInvitationReviewAbortRef.current = undefined;
+      membershipMutationRequestIdRef.current += 1;
+      membershipMutationAbortRef.current?.abort();
+      membershipMutationAbortRef.current = undefined;
     },
     [],
   );
+  useEffect(() => {
+    membershipMutationRequestIdRef.current += 1;
+    membershipMutationAbortRef.current?.abort();
+    membershipMutationAbortRef.current = undefined;
+  }, [selectedHouseholdId]);
   const load = useCallback(async (householdId: string, signal?: AbortSignal) => {
     if (!householdId || selectedHouseholdIdRef.current !== householdId) return false;
     const requestId = ++familyRequestIdRef.current;
@@ -1905,27 +2378,410 @@ export function FamilyScreen({
   const isProtectedMember =
     currentHouseholdScope?.isProtectedMember === true &&
     currentHouseholdScope.capabilities.includes('family:manage');
+  const protectedSelfCanUseSafeWord =
+    currentHouseholdScope?.isProtectedMember === true &&
+    family?.members.some(
+      (member) =>
+        member.status === 'active' &&
+        member.isProtectedMember &&
+        member.personId === principal.personId,
+    );
+  const trustedPersonCanUseSafeWord = family?.relationships.some(
+    (relationship) =>
+      relationship.state === 'active' &&
+      relationship.trustedPersonId === principal.personId &&
+      family.members.some(
+        (member) =>
+          member.status === 'active' &&
+          member.isProtectedMember &&
+          member.personId === relationship.protectedPersonId,
+      ),
+  );
+  function memberHasActiveTrustedRole(personId: string): boolean {
+    return (
+      family?.relationships.some(
+        (relationship) =>
+          relationship.state === 'active' &&
+          (relationship.protectedPersonId === personId ||
+            relationship.trustedPersonId === personId),
+      ) ?? false
+    );
+  }
+  function canRemoveNeutralMembership(member: FamilyResponse['members'][number]): boolean {
+    const removingSelf = member.personId === principal.personId;
+    const selectedSelfHasAnotherRole =
+      removingSelf &&
+      (currentHouseholdScope?.isPayer === true ||
+        currentHouseholdScope?.isBillingManager === true ||
+        (currentHouseholdScope?.trustedCircleGrants.length ?? 0) > 0);
+    return (
+      member.status === 'active' &&
+      !member.isAdministrator &&
+      !member.isProtectedMember &&
+      !memberHasActiveTrustedRole(member.personId) &&
+      !selectedSelfHasAnotherRole &&
+      (isHouseholdAdministrator || removingSelf)
+    );
+  }
+  async function generateRecipientConnectionCode() {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await mobileRequest<CreateRecipientConnectionCodeResponse>(
+        '/v1/family/recipient-connection-codes',
+        { method: 'POST', body: '{}' },
+      );
+      setOwnConnectionCode(response);
+      setStatusState({
+        scope: 'invitation',
+        message:
+          'One-time connection code created. It grants no access by itself and is not sent automatically.',
+      });
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function shareRecipientConnectionCode() {
+    if (!ownConnectionCode) return;
+    setError('');
+    try {
+      const outcome = await Share.share({
+        message: [
+          'Use this one-time BoomerBuddy connection code to invite this signed-in account:',
+          ownConnectionCode.recipientConnectionCode,
+          `Expires ${new Date(ownConnectionCode.expiresAt).toLocaleString()}.`,
+        ].join('\n'),
+      });
+      setStatusState({
+        scope: 'invitation',
+        message:
+          outcome.action === Share.sharedAction
+            ? 'Your device share sheet completed. BoomerBuddy did not choose a recipient or send a message.'
+            : 'Share sheet closed. BoomerBuddy did not send anything.',
+      });
+    } catch (caught) {
+      setError(readableError(caught));
+    }
+  }
+  async function createMemberInvitation() {
+    const householdId = selectedHouseholdId;
+    if (!householdId) return;
+    setBusy(true);
+    clearMutationError();
+    setCreatedMemberInvitationForHousehold(undefined);
+    try {
+      const response = await mobileRequest<CreateHouseholdMemberInvitationResponse>(
+        '/v1/family/member-invitations',
+        {
+          method: 'POST',
+          headers: { 'X-BB-Household-Id': householdId },
+          body: JSON.stringify({
+            recipientConnectionCode: memberRecipientConnectionCode.trim(),
+          }),
+        },
+      );
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      setCreatedMemberInvitationForHousehold({ householdId, value: response });
+      setMemberRecipientConnectionCodeDraft(undefined);
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message: response.reused
+          ? 'The existing neutral household membership invitation was recovered safely. It grants no protected-adult access.'
+          : 'Neutral household membership invitation created. It grants no protected-adult access.',
+      });
+      await load(householdId);
+    } catch (caught) {
+      if (selectedHouseholdIdRef.current === householdId) setMutationError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function shareCreatedMemberInvitation() {
+    if (!createdMemberInvitation) return;
+    try {
+      const outcome = await Share.share({
+        message: [
+          'BoomerBuddy household membership invitation',
+          `Invitation ID: ${createdMemberInvitation.invitation.id}`,
+          `Expires ${new Date(createdMemberInvitation.invitation.expiresAt).toLocaleString()}.`,
+          'Use the same one-time connection code you created for this invitation. BoomerBuddy does not create or send a second credential.',
+          'This invitation grants household membership only. Protected-adult enrollment is a separate choice.',
+        ].join('\n'),
+      });
+      setStatusState({
+        scope: 'household',
+        householdId: selectedHouseholdId,
+        message:
+          outcome.action === Share.sharedAction
+            ? 'Your device share sheet completed. BoomerBuddy did not choose a recipient or send a message.'
+            : 'Share sheet closed. BoomerBuddy did not send anything.',
+      });
+    } catch (caught) {
+      setError(readableError(caught));
+    }
+  }
+  function invalidateMemberInvitationReview() {
+    memberInvitationReviewRequestIdRef.current += 1;
+    memberInvitationReviewAbortRef.current?.abort();
+    memberInvitationReviewAbortRef.current = undefined;
+    setMemberInvitationReview(undefined);
+    setMemberConsentConfirmed(false);
+  }
+  async function reviewMemberInvitation() {
+    const reviewedInvitationId = memberInvitationId.trim();
+    const reviewedInvitationCredential = memberInvitationCredential.trim();
+    const requestId = ++memberInvitationReviewRequestIdRef.current;
+    memberInvitationReviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    memberInvitationReviewAbortRef.current = controller;
+    setBusy(true);
+    setError('');
+    setMemberInvitationReview(undefined);
+    setMemberConsentConfirmed(false);
+    try {
+      const response = await mobileRequest<HouseholdMemberInvitationPreviewResponse>(
+        `/v1/family/member-invitations/${encodeURIComponent(reviewedInvitationId)}/preview`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ invitationCredential: reviewedInvitationCredential }),
+          signal: controller.signal,
+        },
+      );
+      if (controller.signal.aborted || memberInvitationReviewRequestIdRef.current !== requestId)
+        return;
+      if (response.invitation.id !== reviewedInvitationId) {
+        throw new MobileCustomerError(
+          'The household membership invitation did not match the credentials you entered.',
+        );
+      }
+      setMemberInvitationReview({
+        invitationId: reviewedInvitationId,
+        invitationCredential: reviewedInvitationCredential,
+        value: response,
+      });
+      setStatusState({
+        scope: 'invitation',
+        message: 'Household membership invitation ready to review. No access has been granted.',
+      });
+    } catch (caught) {
+      if (controller.signal.aborted || memberInvitationReviewRequestIdRef.current !== requestId)
+        return;
+      setError(readableError(caught));
+    } finally {
+      if (memberInvitationReviewRequestIdRef.current === requestId) {
+        memberInvitationReviewAbortRef.current = undefined;
+        setBusy(false);
+      }
+    }
+  }
+  async function acceptMemberInvitation() {
+    if (!memberInvitationReview || !memberConsentConfirmed) return;
+    const reviewed = memberInvitationReview;
+    const acceptedHouseholdId = reviewed.value.invitation.household.id;
+    setBusy(true);
+    clearMutationError();
+    try {
+      const response = await mobileRequest<AcceptHouseholdMemberInvitationResponse>(
+        `/v1/family/member-invitations/${encodeURIComponent(reviewed.invitationId)}/accept`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            invitationCredential: reviewed.invitationCredential,
+            previewVersion: reviewed.value.invitation.previewVersion,
+          }),
+        },
+      );
+      if (response.membership.householdId !== acceptedHouseholdId) {
+        throw new MobileCustomerError(
+          'The accepted household did not match the membership invitation you reviewed.',
+        );
+      }
+      invalidateMemberInvitationReview();
+      setMemberInvitationId('');
+      setMemberInvitationCredential('');
+      const refreshedMe = await mobileRequest<MeResponse>('/v1/me');
+      if (!refreshedMe.principal.households.some((scope) => scope.id === acceptedHouseholdId)) {
+        throw new MobileCustomerError(
+          'Membership was accepted, but the reviewed household is not available in this session.',
+        );
+      }
+      const nextHouseholdId = replacePrincipal(refreshedMe.principal, acceptedHouseholdId);
+      if (nextHouseholdId !== acceptedHouseholdId) {
+        throw new MobileCustomerError('The reviewed household could not be selected safely.');
+      }
+      setAcceptedNeutralMembershipHouseholdId(acceptedHouseholdId);
+      setStatusState({
+        scope: 'invitation',
+        message:
+          'Household membership accepted. Protected-adult access remains a separate consent choice.',
+      });
+      await load(acceptedHouseholdId);
+    } catch (caught) {
+      setMutationError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function revokeMemberInvitation(id: string) {
+    const householdId = selectedHouseholdId;
+    if (!householdId) return;
+    setBusy(true);
+    clearMutationError();
+    try {
+      await mobileRequest(`/v1/family/member-invitations/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'X-BB-Household-Id': householdId },
+      });
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      if (createdMemberInvitation?.invitation.id === id) {
+        setCreatedMemberInvitationForHousehold(undefined);
+      }
+      setConfirmingMemberInvitation(undefined);
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message: 'Pending household membership invitation revoked.',
+      });
+      await load(householdId);
+    } catch (caught) {
+      if (selectedHouseholdIdRef.current === householdId) setMutationError(caught);
+    } finally {
+      setBusy(false);
+    }
+  }
+  function membershipMutationIsCurrent(
+    attempt: NeutralMembershipAttempt,
+    controller: AbortController,
+  ): boolean {
+    return (
+      !controller.signal.aborted &&
+      membershipMutationAbortRef.current === controller &&
+      membershipMutationRequestIdRef.current === attempt.requestId &&
+      householdGenerationRef.current === attempt.householdGeneration &&
+      selectedHouseholdIdRef.current === attempt.householdId
+    );
+  }
+  async function removeNeutralMembership(membershipId: string, removingSelf: boolean) {
+    const householdId = selectedHouseholdId;
+    const member = family?.members.find((candidate) => candidate.membershipId === membershipId);
+    if (
+      !householdId ||
+      family?.household.id !== householdId ||
+      member === undefined ||
+      (member.personId === principal.personId) !== removingSelf ||
+      !canRemoveNeutralMembership(member)
+    ) {
+      setConfirmingMembership(undefined);
+      setError(
+        'This membership still has another household role. End protected, Trusted Circle, administrator, payer, or billing authority first.',
+      );
+      return;
+    }
+    membershipMutationAbortRef.current?.abort();
+    const controller = new AbortController();
+    membershipMutationAbortRef.current = controller;
+    const attempt: NeutralMembershipAttempt = {
+      householdId,
+      householdGeneration: householdGenerationRef.current,
+      requestId: ++membershipMutationRequestIdRef.current,
+    };
+    let removalCommitted = false;
+    setBusy(true);
+    clearMutationError();
+    try {
+      await mobileRequest(`/v1/family/members/${encodeURIComponent(membershipId)}`, {
+        method: 'DELETE',
+        headers: { 'X-BB-Household-Id': householdId },
+        signal: controller.signal,
+      });
+      removalCommitted = true;
+      if (!membershipMutationIsCurrent(attempt, controller)) return;
+      setConfirmingMembership(undefined);
+      if (removingSelf) {
+        const refreshed = meResponseSchema.parse(
+          await mobileRequest<unknown>('/v1/me', { signal: controller.signal }),
+        );
+        if (!membershipMutationIsCurrent(attempt, controller)) return;
+        if (refreshed.principal.households.some((scope) => scope.id === householdId)) {
+          throw new MobileCustomerError(
+            'The membership was removed, but the account still reported the former household.',
+          );
+        }
+        familyRequestIdRef.current += 1;
+        dispatchFamily({ type: 'reset' });
+        const nextHouseholdId = replacePrincipal(refreshed.principal);
+        if (nextHouseholdId === householdId) {
+          throw new MobileCustomerError('The former household could not be cleared safely.');
+        }
+        setStatusState({
+          scope: 'invitation',
+          message:
+            'You left the household. No protected, Trusted Circle, administrator, payer, or billing authority was changed.',
+        });
+        navigation.navigate('Home');
+        return;
+      }
+      const refreshedFamily = await load(householdId, controller.signal);
+      if (!membershipMutationIsCurrent(attempt, controller)) return;
+      if (!refreshedFamily) {
+        throw new MobileCustomerError(
+          'The neutral membership was removed, but the household roster could not be refreshed.',
+        );
+      }
+      setStatusState({
+        scope: 'household',
+        householdId,
+        message: 'The neutral household membership was removed.',
+      });
+    } catch (caught) {
+      if (!membershipMutationIsCurrent(attempt, controller)) return;
+      if (removalCommitted) {
+        familyRequestIdRef.current += 1;
+        dispatchFamily({ type: 'reset' });
+        setError(
+          'The membership change was saved, but mobile access could not be refreshed. Do not submit it again. Return Home and refresh access.',
+        );
+        navigation.navigate('Home');
+      } else {
+        setMutationError(caught);
+      }
+    } finally {
+      if (
+        membershipMutationRequestIdRef.current === attempt.requestId ||
+        (controller.signal.aborted && membershipMutationAbortRef.current === undefined)
+      ) {
+        membershipMutationAbortRef.current = undefined;
+        setBusy(false);
+      }
+    }
+  }
   async function createInvite() {
     const householdId = selectedHouseholdId;
     if (!householdId) return;
     setBusy(true);
-    setError('');
+    clearMutationError();
     setCreatedForHousehold(undefined);
     try {
       const response = await mobileRequest<CreateInvitationResponse>('/v1/family/invitations', {
         method: 'POST',
         headers: { 'X-BB-Household-Id': householdId },
         body: JSON.stringify({
-          inviteeDisplayName: inviteeName,
+          ...(__DEV__
+            ? { inviteeDisplayName: inviteeName }
+            : { recipientConnectionCode: recipientConnectionCode.trim() }),
           permissions: ['view_shared_checks'],
         }),
       });
       if (selectedHouseholdIdRef.current !== householdId) return;
       setCreatedForHousehold({ householdId, value: response });
       setInviteeNameDraft(undefined);
+      setRecipientConnectionCodeDraft(undefined);
       await load(householdId);
     } catch (caught) {
-      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setMutationError(caught);
     } finally {
       setBusy(false);
     }
@@ -1991,17 +2847,28 @@ export function FamilyScreen({
     }
   }
   async function shareCreatedInvitation() {
-    if (!__DEV__ || created === undefined) return;
+    if (created === undefined) return;
     const householdId = selectedHouseholdId;
     try {
-      const draft = buildUserInitiatedInvitationShareDraft({
-        invitationId: created.invitation.id,
-        localInviteCode: created.localInviteCode,
-        expiresAt: created.invitation.expiresAt,
-        surface: 'native_share_sheet',
-      });
-      const outcome = await Share.share({ message: draft.draftText });
+      const message =
+        created.delivery === 'local_only'
+          ? buildUserInitiatedInvitationShareDraft({
+              invitationId: created.invitation.id,
+              localInviteCode: created.localInviteCode,
+              expiresAt: created.invitation.expiresAt,
+              surface: 'native_share_sheet',
+            }).draftText
+          : [
+              'BoomerBuddy Trusted Circle invitation.',
+              'You must sign in, review the invitation, and choose whether to accept. Opening it grants no access or messaging consent.',
+              `Invitation ID: ${created.invitation.id}`,
+              'Use the one-time connection code you created and already hold. BoomerBuddy does not create or send a second credential.',
+              `Expires: ${created.invitation.expiresAt}`,
+              'Share only with the intended trusted person. Do not forward.',
+            ].join('\n');
+      const outcome = await Share.share({ message });
       if (selectedHouseholdIdRef.current !== householdId) return;
+      setConfirmingRelationship(undefined);
       setStatusState({
         scope: 'household',
         householdId,
@@ -2023,7 +2890,7 @@ export function FamilyScreen({
     }
     const acceptedHouseholdId = reviewedInvitation.value.invitation.household.id;
     setBusy(true);
-    setError('');
+    clearMutationError();
     try {
       const accepted = await mobileRequest<AcceptedInvitation>(
         `/v1/family/invitations/${encodeURIComponent(acceptance.invitationId)}/accept`,
@@ -2060,7 +2927,7 @@ export function FamilyScreen({
       }
       await load(acceptedHouseholdId);
     } catch (caught) {
-      setError(readableError(caught));
+      setMutationError(caught);
     } finally {
       setBusy(false);
     }
@@ -2078,7 +2945,7 @@ export function FamilyScreen({
     const householdId = selectedHouseholdId;
     if (!householdId) return;
     setBusy(true);
-    setError('');
+    clearMutationError();
     try {
       await mobileRequest(`/v1/family/invitations/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -2094,7 +2961,7 @@ export function FamilyScreen({
       });
       await load(householdId);
     } catch (caught) {
-      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setMutationError(caught);
     } finally {
       setBusy(false);
     }
@@ -2103,6 +2970,7 @@ export function FamilyScreen({
     const householdId = selectedHouseholdId;
     if (!householdId) return;
     setBusy(true);
+    clearMutationError();
     try {
       await mobileRequest(`/v1/family/relationships/${encodeURIComponent(id)}`, {
         method: 'DELETE',
@@ -2126,7 +2994,7 @@ export function FamilyScreen({
         navigation.navigate('Home');
       }
     } catch (caught) {
-      if (selectedHouseholdIdRef.current === householdId) setError(readableError(caught));
+      if (selectedHouseholdIdRef.current === householdId) setMutationError(caught);
     } finally {
       setBusy(false);
     }
@@ -2138,17 +3006,168 @@ export function FamilyScreen({
       </Text>
       <Text style={s.body}>Permissions are explicit. Invitations are not emailed or texted.</Text>
       {error ? <ErrorText message={error} /> : null}
+      {recentAuthenticationRequired ? (
+        <View style={s.banner}>
+          <Text style={s.heading}>Sign in again before changing household access</Text>
+          <Text style={s.body}>
+            BoomerBuddy did not make the change or retry it. Your invitation entries remain on this
+            screen where possible. Return Home, sign out, sign in again, then review the details and
+            submit the change yourself.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Return Home to sign out"
+            onPress={() => navigation.navigate('Home')}
+          />
+        </View>
+      ) : null}
       {status ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>
           {status}
         </Text>
       ) : null}
       <View style={s.card}>
-        <Text style={s.heading}>Accept an invitation</Text>
+        <Text style={s.heading}>Create a private connection code</Text>
+        <Text style={s.body}>
+          Give this one-time code to a household organizer who is adding you as a neutral member or
+          to a protected adult who is inviting you into their Trusted Circle. The code expires after
+          24 hours, grants no access by itself, and is never sent automatically.
+        </Text>
+        <ActionButton
+          kind="secondary"
+          title={ownConnectionCode ? 'Rotate connection code' : 'Create connection code'}
+          disabled={busy}
+          onPress={() => void generateRecipientConnectionCode()}
+        />
+        {ownConnectionCode ? (
+          <View accessibilityLiveRegion="polite" style={s.banner}>
+            <Text style={s.label}>One-time connection code</Text>
+            <Text selectable style={s.body}>
+              {ownConnectionCode.recipientConnectionCode}
+            </Text>
+            <Text style={s.muted}>
+              Expires {new Date(ownConnectionCode.expiresAt).toLocaleString()}. Creating another
+              code makes this one stop working.
+            </Text>
+            <ActionButton
+              title="Share connection code"
+              disabled={busy}
+              onPress={() => void shareRecipientConnectionCode()}
+            />
+          </View>
+        ) : null}
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Accept a household membership invitation</Text>
         <Text style={s.muted}>
-          Sign in with the invited account and enter both one-time values given by the protected
-          member who initiated the invitation. Review the household, protected person, permission,
-          and expiry before deciding.
+          Use the invitation ID the organizer gave you and the connection code you created and kept.
+          This invitation only joins you to a household. It does not make you a protected adult,
+          share Checks, or grant another person access to you. Those choices remain separate.
+        </Text>
+        <Text style={s.label}>Membership invitation ID</Text>
+        <TextInput
+          accessibilityLabel="Household membership invitation ID"
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!busy}
+          onChangeText={(value) => {
+            setMemberInvitationId(value);
+            invalidateMemberInvitationReview();
+          }}
+          style={s.input}
+          value={memberInvitationId}
+        />
+        <Text style={s.label}>Connection code you created for this invitation</Text>
+        <TextInput
+          accessibilityLabel="Connection code you created for this household invitation"
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!busy}
+          onChangeText={(value) => {
+            setMemberInvitationCredential(value);
+            invalidateMemberInvitationReview();
+          }}
+          secureTextEntry
+          style={s.input}
+          value={memberInvitationCredential}
+        />
+        <ActionButton
+          title="Review household membership invitation"
+          disabled={busy || !memberInvitationId.trim() || memberInvitationCredential.length < 32}
+          onPress={() => void reviewMemberInvitation()}
+        />
+      </View>
+      {memberInvitationReview ? (
+        <View style={s.card}>
+          <Text style={s.pill}>Membership only</Text>
+          <Text accessibilityRole="header" style={s.heading}>
+            Review household membership
+          </Text>
+          <Text style={s.label}>Household</Text>
+          <Text style={s.body}>{memberInvitationReview.value.invitation.household.name}</Text>
+          <Text style={s.label}>Invited by</Text>
+          <Text style={s.body}>
+            {memberInvitationReview.value.invitation.invitedBy.displayName}
+          </Text>
+          <Text style={s.label}>Access after acceptance</Text>
+          <Text style={s.body}>
+            Neutral household membership only. Protected-adult enrollment, learning, Check, and
+            Trusted Circle permissions remain separate choices.
+          </Text>
+          <Text style={s.label}>Expires</Text>
+          <Text style={s.body}>
+            {new Date(memberInvitationReview.value.invitation.expiresAt).toLocaleString()}
+          </Text>
+          <Pressable
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: memberConsentConfirmed }}
+            onPress={() => setMemberConsentConfirmed((current) => !current)}
+            style={[s.choice, memberConsentConfirmed && s.choiceSelected]}
+          >
+            <View style={[s.radio, memberConsentConfirmed && s.radioSelected]} />
+            <Text style={s.body}>
+              I reviewed the household, inviter, membership-only access, and expiry and choose to
+              join.
+            </Text>
+          </Pressable>
+          <ActionButton
+            title={busy ? 'Accepting membership…' : 'Accept household membership'}
+            disabled={busy || !memberConsentConfirmed}
+            onPress={() => void acceptMemberInvitation()}
+          />
+          <ActionButton
+            kind="secondary"
+            title="Cancel without joining"
+            disabled={busy}
+            onPress={() => {
+              invalidateMemberInvitationReview();
+              setMemberInvitationId('');
+              setMemberInvitationCredential('');
+            }}
+          />
+        </View>
+      ) : null}
+      {acceptedNeutralMembershipHouseholdId === selectedHouseholdId ? (
+        <View style={s.banner}>
+          <Text style={s.heading}>Household membership accepted</Text>
+          <Text style={s.body}>
+            You joined as a neutral member. If this account is for the adult who will use
+            BoomerBuddy protection, review protected-adult enrollment separately. Nothing was
+            enrolled automatically.
+          </Text>
+          <ActionButton
+            kind="secondary"
+            title="Review protected-adult enrollment"
+            onPress={() => navigation.navigate('ProtectedAccess')}
+          />
+        </View>
+      ) : null}
+      <View style={s.card}>
+        <Text style={s.heading}>Accept a Trusted Circle invitation</Text>
+        <Text style={s.muted}>
+          {__DEV__
+            ? 'Sign in with the invited account and enter the invitation ID and separate one-time credential the protected member gave you. Review the household, protected person, permission, and expiry before deciding.'
+            : 'Sign in with the invited account. Enter the invitation ID the protected member gave you and the connection code you created and kept. Review the household, protected person, permission, and expiry before deciding.'}
         </Text>
         <Text style={s.label}>Invitation ID</Text>
         <TextInput
@@ -2162,9 +3181,11 @@ export function FamilyScreen({
           style={s.input}
           value={invitationId}
         />
-        <Text style={s.label}>One-time code</Text>
+        <Text style={s.label}>
+          {__DEV__ ? 'One-time invitation credential' : 'Your connection code'}
+        </Text>
         <TextInput
-          accessibilityLabel="One-time invitation code"
+          accessibilityLabel={__DEV__ ? 'One-time invitation credential' : 'Your connection code'}
           autoCapitalize="none"
           onChangeText={(value) => {
             setInviteCode(value);
@@ -2231,17 +3252,204 @@ export function FamilyScreen({
         <>
           <View style={s.card}>
             <Text style={s.heading}>{family.household.name}</Text>
-            {family.members.map((member) => (
-              <View key={member.membershipId}>
-                <Text style={s.label}>{member.displayName}</Text>
-                <Text style={s.muted}>
-                  member · {member.status}
-                  {member.isAdministrator ? ' · administrator' : ''}
-                  {member.isProtectedMember ? ' · protected adult' : ''}
-                </Text>
-              </View>
-            ))}
+            {family.members.map((member) => {
+              const removingSelf = member.personId === principal.personId;
+              const canRemove = canRemoveNeutralMembership(member);
+              return (
+                <View key={member.membershipId}>
+                  <Text style={s.label}>{member.displayName}</Text>
+                  <Text style={s.muted}>
+                    member · {member.status}
+                    {member.isAdministrator ? ' · administrator' : ''}
+                    {member.isProtectedMember ? ' · protected adult' : ''}
+                  </Text>
+                  {canRemove ? (
+                    confirmingMembershipId === member.membershipId ? (
+                      <>
+                        <Text style={s.body}>
+                          {removingSelf
+                            ? 'Leave this household? This is allowed only while you have no active protected, Trusted Circle, administrator, payer, or billing role.'
+                            : 'Remove this neutral membership? The server will refuse if any protected, Trusted Circle, administrator, payer, or billing role remains.'}
+                        </Text>
+                        <ActionButton
+                          kind="danger"
+                          title={
+                            busy
+                              ? 'Updating…'
+                              : removingSelf
+                                ? 'Yes, leave household'
+                                : 'Yes, remove member'
+                          }
+                          disabled={busy}
+                          onPress={() =>
+                            void removeNeutralMembership(member.membershipId, removingSelf)
+                          }
+                        />
+                        <ActionButton
+                          kind="secondary"
+                          title="Keep membership"
+                          disabled={busy}
+                          onPress={() => setConfirmingMembership(undefined)}
+                        />
+                      </>
+                    ) : (
+                      <ActionButton
+                        kind="danger"
+                        title={removingSelf ? 'Leave household' : 'Remove member'}
+                        disabled={busy}
+                        onPress={() =>
+                          setConfirmingMembership({
+                            householdId: selectedHouseholdId,
+                            familyRequestId:
+                              visibleFamilyState?.status === 'ready'
+                                ? visibleFamilyState.requestId
+                                : -1,
+                            membershipId: member.membershipId,
+                          })
+                        }
+                      />
+                    )
+                  ) : null}
+                </View>
+              );
+            })}
           </View>
+          <View style={s.card}>
+            <Text style={s.heading}>Household membership invitations</Text>
+            <Text style={s.muted}>
+              These invitations grant neutral household membership only. They do not enroll a
+              protected adult or grant Check, learning, or Trusted Circle access.
+            </Text>
+            {(family.memberInvitations ?? []).filter((invitation) => invitation.state === 'pending')
+              .length ? (
+              (family.memberInvitations ?? [])
+                .filter((invitation) => invitation.state === 'pending')
+                .map((invitation) => (
+                  <View key={invitation.id}>
+                    <Text style={s.label}>{invitation.inviteeDisplayName}</Text>
+                    <Text style={s.muted}>
+                      Neutral membership only · Expires{' '}
+                      {new Date(invitation.expiresAt).toLocaleString()} · Not sent automatically
+                    </Text>
+                    {isHouseholdAdministrator ? (
+                      confirmingMemberInvitationId === invitation.id ? (
+                        <>
+                          <Text style={s.body}>
+                            Revoke this membership invitation? Its one-time credential will stop
+                            working.
+                          </Text>
+                          <ActionButton
+                            kind="danger"
+                            title={busy ? 'Revoking…' : 'Yes, revoke membership invitation'}
+                            disabled={busy}
+                            onPress={() => void revokeMemberInvitation(invitation.id)}
+                          />
+                          <ActionButton
+                            kind="secondary"
+                            title="Keep membership invitation"
+                            disabled={busy}
+                            onPress={() => setConfirmingMemberInvitation(undefined)}
+                          />
+                        </>
+                      ) : (
+                        <ActionButton
+                          kind="danger"
+                          title="Revoke membership invitation"
+                          disabled={busy}
+                          onPress={() =>
+                            setConfirmingMemberInvitation({
+                              householdId: selectedHouseholdId,
+                              invitationId: invitation.id,
+                            })
+                          }
+                        />
+                      )
+                    ) : null}
+                  </View>
+                ))
+            ) : (
+              <Text style={s.body}>No pending household membership invitations.</Text>
+            )}
+            <Text style={s.muted}>
+              Invitation history never displays a one-time membership credential.
+            </Text>
+          </View>
+          {isHouseholdAdministrator ? (
+            <View style={s.card}>
+              <Text style={s.heading}>Invite someone to join the household</Text>
+              <Text style={s.body}>
+                Ask the signed-in recipient to create a one-time connection code above and give it
+                to you manually. This creates neutral household membership only. Protected-adult
+                enrollment and every sharing permission remain separate choices.
+              </Text>
+              <Text style={s.label}>Recipient's one-time connection code</Text>
+              <TextInput
+                accessibilityLabel="Recipient's one-time connection code for household membership"
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!busy}
+                onChangeText={(value) =>
+                  setMemberRecipientConnectionCodeDraft({
+                    householdId: selectedHouseholdId,
+                    value,
+                  })
+                }
+                secureTextEntry
+                style={s.input}
+                value={memberRecipientConnectionCode}
+              />
+              <ActionButton
+                title="Create household membership invitation"
+                disabled={busy || memberRecipientConnectionCode.trim().length < 32}
+                onPress={() => void createMemberInvitation()}
+              />
+            </View>
+          ) : null}
+          {createdMemberInvitation ? (
+            <View accessibilityLiveRegion="polite" style={s.banner}>
+              <Text style={s.heading}>
+                {createdMemberInvitation.reused
+                  ? 'Household membership invitation recovered'
+                  : 'Household membership invitation created'}
+              </Text>
+              <Text style={s.body}>
+                Give the invitation ID to the intended person. They use the same one-time connection
+                code they created and already hold. BoomerBuddy does not create a second credential,
+                choose a recipient, or send a message.
+              </Text>
+              <Text selectable style={s.label}>
+                Invitation ID: {createdMemberInvitation.invitation.id}
+              </Text>
+              <Text style={s.muted}>
+                Neutral membership only · Expires{' '}
+                {new Date(createdMemberInvitation.invitation.expiresAt).toLocaleString()}
+              </Text>
+              <ActionButton
+                title="Share membership invitation ID"
+                disabled={busy}
+                onPress={() => void shareCreatedMemberInvitation()}
+              />
+              <Text style={s.muted}>
+                Your device owns the destination and final send. BoomerBuddy requests no contacts
+                permission and sends nothing automatically.
+              </Text>
+            </View>
+          ) : null}
+          {protectedSelfCanUseSafeWord || trustedPersonCanUseSafeWord ? (
+            <View style={s.card}>
+              <Text style={s.heading}>Family verification aid</Text>
+              <Text style={s.body}>
+                A protected adult can replace or disable their family safe word. An exact active
+                trusted person can privately check a phrase. A match is a social aid, not identity
+                proof.
+              </Text>
+              <ActionButton
+                kind="secondary"
+                title="Open family verification aid"
+                onPress={() => navigation.navigate('FamilySafeWord')}
+              />
+            </View>
+          ) : null}
           <View style={s.card}>
             <Text style={s.heading}>Active Trusted Circle</Text>
             {family.relationships.filter((relationship) => relationship.state === 'active')
@@ -2259,12 +3467,37 @@ export function FamilyScreen({
                     {isHouseholdAdministrator ||
                     relationship.protectedPersonId === principal.personId ||
                     relationship.trustedPersonId === principal.personId ? (
-                      <ActionButton
-                        kind="danger"
-                        title="Revoke access"
-                        disabled={busy}
-                        onPress={() => void revoke(relationship.id)}
-                      />
+                      confirmingRelationshipId === relationship.id ? (
+                        <>
+                          <Text style={s.body}>
+                            End this Trusted Circle relationship? Future sharing access will stop.
+                          </Text>
+                          <ActionButton
+                            kind="danger"
+                            title={busy ? 'Ending access…' : 'Yes, end Trusted Circle access'}
+                            disabled={busy}
+                            onPress={() => void revoke(relationship.id)}
+                          />
+                          <ActionButton
+                            kind="secondary"
+                            title="Keep Trusted Circle access"
+                            disabled={busy}
+                            onPress={() => setConfirmingRelationship(undefined)}
+                          />
+                        </>
+                      ) : (
+                        <ActionButton
+                          kind="danger"
+                          title="End Trusted Circle access"
+                          disabled={busy}
+                          onPress={() =>
+                            setConfirmingRelationship({
+                              householdId: selectedHouseholdId,
+                              relationshipId: relationship.id,
+                            })
+                          }
+                        />
+                      )
                     ) : null}
                   </View>
                 ))
@@ -2325,49 +3558,80 @@ export function FamilyScreen({
             )}
             <Text style={s.muted}>Invitation history never displays one-time codes.</Text>
           </View>
-          {__DEV__ && isProtectedMember ? (
+          {isProtectedMember ? (
             <View style={s.card}>
-              <Text style={s.heading}>Create local invitation</Text>
+              <Text style={s.heading}>Invite a trusted person</Text>
               <Text style={s.body}>
                 You are inviting a trusted person into a relationship with you. An administrator
                 cannot consent on your behalf, and the invited person must separately accept.
               </Text>
-              <Text style={s.label}>Trusted person’s display name</Text>
-              <TextInput
-                accessibilityLabel="Trusted person’s display name"
-                onChangeText={(value) =>
-                  setInviteeNameDraft({ householdId: selectedHouseholdId, value })
-                }
-                style={s.input}
-                value={inviteeName}
-              />
+              {__DEV__ ? (
+                <>
+                  <Text style={s.label}>Trusted person’s display name</Text>
+                  <TextInput
+                    accessibilityLabel="Trusted person’s display name"
+                    onChangeText={(value) =>
+                      setInviteeNameDraft({ householdId: selectedHouseholdId, value })
+                    }
+                    style={s.input}
+                    value={inviteeName}
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={s.label}>Their one-time connection code</Text>
+                  <TextInput
+                    accessibilityLabel="Trusted person’s one-time connection code"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    onChangeText={(value) =>
+                      setRecipientConnectionCodeDraft({
+                        householdId: selectedHouseholdId,
+                        value,
+                      })
+                    }
+                    secureTextEntry
+                    style={s.input}
+                    value={recipientConnectionCode}
+                  />
+                </>
+              )}
               <Text style={s.muted}>
                 Requested permission: view only redacted check results that are deliberately shared.
-                Narrow acceptance and participant revocation are implemented. Broader generic
-                consent activate/defer and escalation notifications are deferred.
+                The other person still reviews and accepts the invitation before access begins.
               </Text>
               <ActionButton
-                title="Create local invitation"
-                disabled={busy || !inviteeName.trim()}
+                title="Create one-time invitation credential"
+                disabled={
+                  busy ||
+                  (__DEV__ ? !inviteeName.trim() : recipientConnectionCode.trim().length < 32)
+                }
                 onPress={() => void createInvite()}
               />
             </View>
           ) : null}
-          {__DEV__ && created ? (
+          {created ? (
             <View accessibilityLiveRegion="polite" style={s.banner}>
-              <Text style={s.heading}>Local invitation created</Text>
+              <Text style={s.heading}>
+                {created.reused
+                  ? 'Trusted Circle invitation recovered'
+                  : 'Trusted Circle invitation created'}
+              </Text>
               <Text style={s.body}>
-                Share these once with the intended person. They are not sent automatically or
-                retained in the displayed history.
+                {created.delivery === 'local_only'
+                  ? 'Share these once with the intended person. They are not sent automatically or retained in the displayed history.'
+                  : 'Give the invitation ID to the intended person. They use the same one-time connection code they created and already hold. BoomerBuddy creates no second credential and sends nothing automatically.'}
               </Text>
               <Text selectable style={s.label}>
                 Invitation ID: {created.invitation.id}
               </Text>
-              <Text selectable style={s.label}>
-                One-time code: {created.localInviteCode}
-              </Text>
+              {created.delivery === 'local_only' ? (
+                <Text selectable style={s.label}>
+                  One-time code: {created.localInviteCode}
+                </Text>
+              ) : null}
               <ActionButton
-                title="Open device share sheet"
+                title="Share Trusted Circle invitation ID"
                 onPress={() => void shareCreatedInvitation()}
               />
               <Text style={s.muted}>
@@ -2452,6 +3716,7 @@ export function OrientationScreen(): React.ReactElement {
   const [phrase, setPhrase] = useState('');
   const [practice, setPractice] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [retryVersion, setRetryVersion] = useState(0);
   const canUseOrientation =
     selectedScope?.isProtectedMember === true &&
     selectedScope.capabilities.includes('orientation:use');
@@ -2465,6 +3730,7 @@ export function OrientationScreen(): React.ReactElement {
         if (!active) return;
         setState(response.orientation);
         setLoadedHouseholdId(selectedHouseholdId);
+        setError('');
       })
       .catch((caught) => {
         if (active) setError(readableError(caught));
@@ -2472,9 +3738,10 @@ export function OrientationScreen(): React.ReactElement {
     return () => {
       active = false;
     };
-  }, [canUseOrientation, selectedHouseholdId]);
+  }, [canUseOrientation, retryVersion, selectedHouseholdId]);
   async function start() {
     setBusy('start');
+    setError('');
     try {
       const response = await mobileRequest<{ orientation: OrientationStateDto }>(
         '/v1/orientation/start',
@@ -2490,6 +3757,7 @@ export function OrientationScreen(): React.ReactElement {
   }
   async function complete(key: OrientationKey) {
     setBusy(key);
+    setError('');
     try {
       const response = await mobileRequest<{ orientation: OrientationStateDto }>(
         `/v1/orientation/steps/${key}`,
@@ -2505,6 +3773,7 @@ export function OrientationScreen(): React.ReactElement {
   }
   async function safeWord(action: 'configure' | 'defer') {
     setBusy('safe_word');
+    setError('');
     try {
       await mobileRequest('/v1/orientation/safe-word', {
         method: 'PUT',
@@ -2541,7 +3810,6 @@ export function OrientationScreen(): React.ReactElement {
           {announcement}
         </Text>
       ) : null}
-      {error ? <ErrorText message={error} /> : null}
       {!canUseOrientation ? (
         <View style={s.banner}>
           <Text style={s.heading}>Protected adult access required</Text>
@@ -2550,10 +3818,23 @@ export function OrientationScreen(): React.ReactElement {
             or paying for the household does not replace that adult&apos;s consent.
           </Text>
         </View>
+      ) : error && !visibleState ? (
+        <View style={s.card}>
+          <ErrorText message={error} />
+          <ActionButton
+            kind="secondary"
+            title="Retry Orientation"
+            onPress={() => {
+              setError('');
+              setRetryVersion((current) => current + 1);
+            }}
+          />
+        </View>
       ) : !visibleState ? (
         <Loading label="Loading orientation…" />
       ) : (
         <>
+          {error ? <ErrorText message={error} /> : null}
           <View style={s.card}>
             <Text style={s.heading}>{visibleState.completedSteps.length} of 6 complete</Text>
             <Text style={s.body}>Status: {orientationStatusLabels[visibleState.status]}</Text>

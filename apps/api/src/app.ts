@@ -24,17 +24,20 @@ import { registerBusinessOsRoutes } from './routes/business-os';
 import { registerCommerceRoutes } from './routes/commerce';
 import { registerEditorialIntelligenceRoutes } from './routes/editorial-intelligence';
 import { registerFamilyRoutes } from './routes/family';
+import { registerFamilySafeWordRoutes } from './routes/family-safe-word';
 import { registerFeedbackRoutes } from './routes/feedback';
 import { registerFounderProvisioningRoutes } from './routes/founder-provisioning';
 import { registerFoundingHouseholdRoutes } from './routes/founding-households';
 import { registerHqRoutes } from './routes/hq';
 import { registerMessagingRoutes } from './routes/messaging';
+import { registerMemberLearningRoutes } from './routes/member-learning';
 import { registerOrientationRoutes } from './routes/orientation';
 import { registerPublicCheckRoutes } from './routes/public-checks';
 import { registerPrivacyRoutes } from './routes/privacy';
 import { registerReferralRoutes } from './routes/referrals';
 import { registerSessionRoutes } from './routes/sessions';
 import { registerSupportReceiptRoutes } from './routes/support-receipts';
+import { registerTrustedCircleAttentionRoutes } from './routes/trusted-circle-attention';
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
@@ -251,7 +254,21 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       if (!cleanup.saturated) break;
       supportReceiptsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
     }
-    return checksMoreDue || accessIntentsMoreDue || supportReceiptsMoreDue;
+    let familySafeWordRateBucketsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.familySafeWords.purgeExpiredRateBuckets(
+        context.now(),
+        retentionBatchSize,
+      );
+      if (!cleanup.saturated) break;
+      familySafeWordRateBucketsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    return (
+      checksMoreDue ||
+      accessIntentsMoreDue ||
+      supportReceiptsMoreDue ||
+      familySafeWordRateBucketsMoreDue
+    );
   };
   let retentionNeedsContinuation = false;
   try {
@@ -391,7 +408,9 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   registerPrivacyRoutes(app, context);
   registerSessionRoutes(app, context);
   registerCheckRoutes(app, context);
+  registerTrustedCircleAttentionRoutes(app, context);
   registerFamilyRoutes(app, context);
+  registerFamilySafeWordRoutes(app, context);
   registerEditorialIntelligenceRoutes(app, {
     config: context.config,
     sessions: context.repositories.sessions,
@@ -404,6 +423,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     feedback: context.repositories.feedback,
     now: context.now,
   });
+  registerMemberLearningRoutes(app, context);
   registerOrientationRoutes(app, context);
   registerCommerceRoutes(
     app,

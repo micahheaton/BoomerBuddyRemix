@@ -27,7 +27,7 @@ export const completeOrientationStepRequestSchema = z
   .strict();
 
 export const safeWordRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('configure'), phrase: z.string().min(8).max(200) }).strict(),
+  z.object({ action: z.literal('configure'), phrase: z.string().min(8).max(128) }).strict(),
   z.object({ action: z.literal('defer') }).strict(),
 ]);
 

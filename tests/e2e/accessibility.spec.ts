@@ -46,17 +46,32 @@ test('public landmark pages have zero serious or critical axe violations', async
 test('member landmark pages have zero serious or critical axe violations', async ({ page }) => {
   await signInCustomer(page);
   const pages = [
-    ['/member', /^Hello,/u],
-    ['/member/check', 'Check something suspicious'],
-    ['/member/history', 'Your check records'],
-    ['/member/family', 'Your household and Trusted Circle'],
-    ['/member/orientation', 'Orientation'],
-    ['/member/founding-household', 'Review finite sponsored access'],
+    ['/member', /^Hello,/u, 'Member home | BoomerBuddy'],
+    ['/member/check', 'Check something suspicious', 'Check something suspicious | BoomerBuddy'],
+    ['/member/history', 'Your check records', 'Check history | BoomerBuddy'],
+    [
+      '/member/family',
+      'Your household and Trusted Circle',
+      'Family and Trusted Circle | BoomerBuddy',
+    ],
+    [
+      '/member/family/safe-word',
+      'Family verification aid',
+      'Family verification aid | BoomerBuddy',
+    ],
+    ['/member/orientation', 'Orientation', 'Orientation, Learn and updates | BoomerBuddy'],
   ] as const;
-  for (const [path, heading] of pages) {
+  for (const [path, heading, title] of pages) {
     await gotoReady(page, `${customerUrl}${path}`, heading);
+    await expect(page).toHaveTitle(title);
     await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
   }
+  await gotoReady(
+    page,
+    `${customerUrl}/member/founding-household`,
+    'Review finite sponsored access',
+  );
+  await expectNoSeriousOrCriticalAxeViolations(page, 'Customer /member/founding-household');
 });
 
 test('HQ landmark pages have zero serious or critical axe violations', async ({ page }) => {

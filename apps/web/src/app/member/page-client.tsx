@@ -1,61 +1,141 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   CheckListResponse,
   EntitlementResponse,
+  MemberLearningResponse,
   OrientationStateDto,
+  TrustedCircleAttentionResponse,
 } from '@boomerbuddy/contracts';
 import { useHousehold } from '../../components/household-context';
 import { apiRequest, readableError } from '../../lib/api';
+import {
+  householdBoundValue,
+  householdRequestIsCurrent,
+  type HouseholdBoundValue,
+} from '../../lib/household-request';
 
 export default function MemberHomePage() {
   const { me, selectedHouseholdId, selectedScope } = useHousehold();
-  const [orientation, setOrientation] = useState<OrientationStateDto>();
-  const [checkCount, setCheckCount] = useState(0);
-  const [entitlements, setEntitlements] = useState<{
-    householdId: string;
-    value: EntitlementResponse;
-  }>();
-  const [entitlementsUnavailableFor, setEntitlementsUnavailableFor] = useState('');
-  const [error, setError] = useState('');
+  const [orientationState, setOrientationState] =
+    useState<HouseholdBoundValue<OrientationStateDto>>();
+  const [orientationErrorState, setOrientationErrorState] = useState<HouseholdBoundValue<string>>();
+  const [checkCountState, setCheckCountState] = useState<HouseholdBoundValue<number>>();
+  const [checkCountErrorState, setCheckCountErrorState] = useState<HouseholdBoundValue<string>>();
+  const [attentionState, setAttentionState] =
+    useState<HouseholdBoundValue<TrustedCircleAttentionResponse>>();
+  const [attentionErrorState, setAttentionErrorState] = useState<HouseholdBoundValue<string>>();
+  const [learningState, setLearningState] = useState<HouseholdBoundValue<MemberLearningResponse>>();
+  const [learningErrorState, setLearningErrorState] = useState<HouseholdBoundValue<string>>();
+  const [entitlements, setEntitlements] = useState<HouseholdBoundValue<EntitlementResponse>>();
+  const [entitlementsErrorState, setEntitlementsErrorState] =
+    useState<HouseholdBoundValue<string>>();
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const selectedHouseholdIdRef = useRef(selectedHouseholdId);
+  const loadGenerationRef = useRef(0);
+  const hasTrustedCircleGrant =
+    selectedScope?.trustedCircleGrants.some((grant) =>
+      grant.permissions.includes('view_shared_checks'),
+    ) === true;
 
   useEffect(() => {
-    if (!selectedHouseholdId) return;
-    const scopedHeaders = { 'X-BB-Household-Id': selectedHouseholdId };
+    selectedHouseholdIdRef.current = selectedHouseholdId;
+  }, [selectedHouseholdId]);
+
+  useEffect(() => {
+    const householdId = selectedHouseholdId;
+    const generation = ++loadGenerationRef.current;
+    if (!householdId) return;
+    const controller = new AbortController();
+    const requestIdentity = { householdId, generation };
+    const requestIsCurrent = (): boolean =>
+      !controller.signal.aborted &&
+      householdRequestIsCurrent(requestIdentity, {
+        householdId: selectedHouseholdIdRef.current,
+        generation: loadGenerationRef.current,
+      });
+    const scopedRequest = {
+      headers: { 'X-BB-Household-Id': householdId },
+      signal: controller.signal,
+    };
     const tasks: Promise<void>[] = [];
     const isProtectedMember = selectedScope?.isProtectedMember === true;
     if (isProtectedMember && selectedScope.capabilities.includes('orientation:use')) {
       tasks.push(
-        apiRequest<{ orientation: OrientationStateDto }>('/v1/orientation', {
-          headers: scopedHeaders,
-        }).then((response) => setOrientation(response.orientation)),
+        apiRequest<{ orientation: OrientationStateDto }>('/v1/orientation', scopedRequest)
+          .then((response) => {
+            if (!requestIsCurrent()) return;
+            setOrientationState({ householdId, value: response.orientation });
+            setOrientationErrorState(undefined);
+          })
+          .catch((caught) => {
+            if (!requestIsCurrent()) return;
+            setOrientationErrorState({ householdId, value: readableError(caught) });
+          }),
+      );
+      tasks.push(
+        apiRequest<MemberLearningResponse>('/v1/member-learning', scopedRequest)
+          .then((response) => {
+            if (!requestIsCurrent()) return;
+            setLearningState({ householdId, value: response });
+            setLearningErrorState(undefined);
+          })
+          .catch((caught) => {
+            if (!requestIsCurrent()) return;
+            setLearningErrorState({ householdId, value: readableError(caught) });
+          }),
       );
     }
     if (
       selectedScope?.capabilities.includes('history:read') &&
-      (isProtectedMember ||
-        selectedScope.trustedCircleGrants.some((grant) =>
-          grant.permissions.includes('view_shared_checks'),
-        ))
+      (isProtectedMember || hasTrustedCircleGrant)
     ) {
       tasks.push(
-        apiRequest<CheckListResponse>('/v1/checks', { headers: scopedHeaders }).then((response) =>
-          setCheckCount(response.total),
-        ),
+        apiRequest<CheckListResponse>('/v1/checks', scopedRequest)
+          .then((response) => {
+            if (!requestIsCurrent()) return;
+            setCheckCountState({ householdId, value: response.total });
+            setCheckCountErrorState(undefined);
+          })
+          .catch((caught) => {
+            if (!requestIsCurrent()) return;
+            setCheckCountErrorState({ householdId, value: readableError(caught) });
+          }),
+      );
+    }
+    if (hasTrustedCircleGrant) {
+      tasks.push(
+        apiRequest<TrustedCircleAttentionResponse>('/v1/trusted-circle/attention', scopedRequest)
+          .then((response) => {
+            if (!requestIsCurrent()) return;
+            setAttentionState({ householdId, value: response });
+            setAttentionErrorState(undefined);
+          })
+          .catch((caught) => {
+            if (!requestIsCurrent()) return;
+            setAttentionErrorState({ householdId, value: readableError(caught) });
+          }),
       );
     }
     if (selectedScope?.isBillingManager) {
-      void apiRequest<EntitlementResponse>('/v1/entitlements', { headers: scopedHeaders })
-        .then((response) => {
-          setEntitlements({ householdId: selectedHouseholdId, value: response });
-          setEntitlementsUnavailableFor('');
-        })
-        .catch(() => setEntitlementsUnavailableFor(selectedHouseholdId));
+      tasks.push(
+        apiRequest<EntitlementResponse>('/v1/entitlements', scopedRequest)
+          .then((response) => {
+            if (!requestIsCurrent()) return;
+            setEntitlements({ householdId, value: response });
+            setEntitlementsErrorState(undefined);
+          })
+          .catch((caught) => {
+            if (!requestIsCurrent()) return;
+            setEntitlementsErrorState({ householdId, value: readableError(caught) });
+          }),
+      );
     }
-    void Promise.all(tasks).catch((caught) => setError(readableError(caught)));
-  }, [selectedHouseholdId, selectedScope]);
+    void Promise.all(tasks);
+    return () => controller.abort();
+  }, [hasTrustedCircleGrant, reloadVersion, selectedHouseholdId, selectedScope]);
 
   const isUnassigned = me.principal.households.length === 0;
   const isProtectedMember = selectedScope?.isProtectedMember === true;
@@ -71,14 +151,25 @@ export default function MemberHomePage() {
       selectedScope.trustedCircleGrants.some((grant) =>
         grant.permissions.includes('view_shared_checks'),
       ));
-  const canUseFamily =
-    isUnassigned ||
-    selectedScope?.isAdministrator === true ||
-    selectedScope?.isProtectedMember === true ||
-    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
+  const canUseFamily = isUnassigned || selectedScope !== undefined;
   const canManageSponsoredAccess = selectedScope?.isAdministrator === true;
-  const selectedEntitlements =
-    entitlements?.householdId === selectedHouseholdId ? entitlements.value : undefined;
+  const orientation = householdBoundValue(orientationState, selectedHouseholdId);
+  const orientationError = householdBoundValue(orientationErrorState, selectedHouseholdId);
+  const checkCount = householdBoundValue(checkCountState, selectedHouseholdId);
+  const checkCountError = householdBoundValue(checkCountErrorState, selectedHouseholdId);
+  const attention = householdBoundValue(attentionState, selectedHouseholdId);
+  const attentionError = householdBoundValue(attentionErrorState, selectedHouseholdId);
+  const learning = householdBoundValue(learningState, selectedHouseholdId);
+  const learningError = householdBoundValue(learningErrorState, selectedHouseholdId);
+  const selectedEntitlements = householdBoundValue(entitlements, selectedHouseholdId);
+  const entitlementsError = householdBoundValue(entitlementsErrorState, selectedHouseholdId);
+  const hasLoadError = Boolean(
+    orientationError ||
+    learningError ||
+    checkCountError ||
+    (hasTrustedCircleGrant && attentionError) ||
+    entitlementsError,
+  );
   const protectedAllowance = selectedEntitlements?.commerce.allowances.find(
     (allowance) => allowance.kind === 'protected_members',
   );
@@ -102,6 +193,15 @@ export default function MemberHomePage() {
     return `${label}: ${allowance.used} of ${allowance.limit} used; ${allowance.remaining} remaining. ${status}`;
   }
 
+  function retryHome(): void {
+    setOrientationErrorState(undefined);
+    setLearningErrorState(undefined);
+    setCheckCountErrorState(undefined);
+    setAttentionErrorState(undefined);
+    setEntitlementsErrorState(undefined);
+    setReloadVersion((current) => current + 1);
+  }
+
   return (
     <main id="main-content" className="member-shell member-main">
       <span className="eyebrow">Member home</span>
@@ -111,18 +211,26 @@ export default function MemberHomePage() {
           ? 'You are not connected to a household yet. A valid invitation and your explicit consent are required before any household access appears.'
           : 'Take a breath. You can check something suspicious or ask a trusted person before you act.'}
       </p>
-      {error && (
-        <p className="error" role="alert">
-          {error} <Link href="/sign-in">Return to sign in</Link>
-        </p>
-      )}
+      {hasLoadError ? (
+        <section className="notice notice-warning" aria-labelledby="home-load-error-heading">
+          <h2 id="home-load-error-heading">Some household details could not be loaded</h2>
+          <p role="alert">
+            Your role and available destinations are still shown. Try again before relying on a
+            progress or record count.
+          </p>
+          <button className="button-secondary" type="button" onClick={retryHome}>
+            Try loading household details again
+          </button>
+        </section>
+      ) : null}
       {isUnassigned ? (
         <section className="card" style={{ marginTop: '1.5rem' }}>
           <span className="dev-pill">No household access</span>
           <h2>Accept an invitation when you are ready</h2>
           <p>
-            Ask the protected member who initiated the invitation for the one-time ID and code, then
-            review the requested relationship before accepting.
+            {process.env.NODE_ENV === 'production'
+              ? 'Create and keep your own temporary connection code in Family, then give it directly to the household organizer or protected member who is inviting you. They give you only the invitation ID. Use that ID with your own code to review whether this is neutral household membership or a Trusted Circle relationship before accepting.'
+              : 'For this local test, ask the protected member for the invitation ID and separate one-time invitation credential, then review the requested Trusted Circle relationship before accepting.'}
           </p>
           <Link className="button button-primary" href="/member/family">
             Open invitation acceptance
@@ -153,9 +261,13 @@ export default function MemberHomePage() {
             {canUseOrientation ? (
               <>
                 <p>
-                  {orientation?.status === 'ready'
-                    ? 'Your guided setup is complete.'
-                    : 'Review the short guided setup and product limits.'}
+                  {orientationError
+                    ? 'Orientation progress is unavailable right now.'
+                    : orientation?.status === 'ready'
+                      ? 'Your guided setup is complete.'
+                      : orientation
+                        ? 'Review the short guided setup and product limits.'
+                        : 'Loading orientation progress...'}
                 </p>
                 <div
                   className="progress"
@@ -182,14 +294,72 @@ export default function MemberHomePage() {
               </p>
             )}
           </section>
+          {canUseOrientation ? (
+            <section className="card">
+              <span className="dev-pill">This week</span>
+              <h2>Practice and reviewed updates</h2>
+              {learning ? (
+                <>
+                  <p>
+                    {learning.feed.unreadCount > 0
+                      ? `${learning.feed.unreadCount} in-app update${
+                          learning.feed.unreadCount === 1 ? '' : 's'
+                        } ready to review.`
+                      : 'You are caught up. A short lesson is always available when you want to practice.'}
+                  </p>
+                  <p className="meta">
+                    {learning.curriculum.completedCount} of {learning.curriculum.totalCount} safety
+                    lessons complete. Guidance is curated and dated, not live monitoring.
+                  </p>
+                </>
+              ) : learningError ? (
+                <p role="alert">Practice and update progress is unavailable right now.</p>
+              ) : (
+                <p>Loading this week&apos;s practice...</p>
+              )}
+              <Link href="/member/orientation#learn-updates">Open Learn &amp; updates</Link>
+            </section>
+          ) : null}
+          {hasTrustedCircleGrant ? (
+            <section className="card">
+              <span className="dev-pill">Trusted Circle attention</span>
+              <h2>Review requests</h2>
+              {attentionError ? (
+                <p role="alert">Trusted Circle requests are unavailable right now.</p>
+              ) : attention ? (
+                <p role="status">
+                  {attention.pendingAcknowledgementCount > 0
+                    ? `${attention.pendingAcknowledgementCount} shared ${
+                        attention.pendingAcknowledgementCount === 1
+                          ? 'result needs'
+                          : 'results need'
+                      } your acknowledgement.`
+                    : 'No shared results are waiting for your acknowledgement.'}
+                </p>
+              ) : (
+                <p role="status">Checking for Trusted Circle requests...</p>
+              )}
+              <p className="meta">
+                BoomerBuddy does not send a text, email, or push alert. Open History here when a
+                trusted person contacts you directly.
+              </p>
+              <Link href="/member/history">Open shared History</Link>
+            </section>
+          ) : null}
           <section className="card">
             <h2>Your recent checks</h2>
             {canReadHistory ? (
               <>
-                <p>
-                  <strong>{checkCount}</strong> minimized {checkCount === 1 ? 'record' : 'records'}{' '}
-                  available in your history.
-                </p>
+                {checkCountError ? (
+                  <p role="alert">The current history count is unavailable right now.</p>
+                ) : checkCount === undefined ? (
+                  <p role="status">Loading your history count...</p>
+                ) : (
+                  <p>
+                    <strong>{checkCount}</strong> minimized{' '}
+                    {checkCount === 1 ? 'record' : 'records'} available in your history.
+                  </p>
+                )}
                 <Link href="/member/history">Open history</Link>
               </>
             ) : (
@@ -279,7 +449,7 @@ export default function MemberHomePage() {
                   <li>{allowanceSummary('Trusted Circle participants', trustedAllowance)}</li>
                 </ul>
               </>
-            ) : entitlementsUnavailableFor === selectedHouseholdId ? (
+            ) : entitlementsError ? (
               <p className="meta">
                 Plan and allowance details are unavailable. The selected household permissions shown
                 in the actions above still apply.

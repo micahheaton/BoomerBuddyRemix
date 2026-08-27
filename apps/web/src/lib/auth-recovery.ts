@@ -1,4 +1,5 @@
 import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
+import { memberLearningPendingOperationStoragePrefix } from './member-learning-idempotency';
 
 export const selectedHouseholdStorageKey = 'boomerbuddy.selected-household';
 export const protectedSelfOperationStoragePrefix = 'bb:protected-self:';
@@ -28,15 +29,18 @@ const navigationFailureMessage =
 type CustomerSessionStorage = Pick<Storage, 'key' | 'length' | 'removeItem'>;
 
 export function clearCustomerSessionState(storage: CustomerSessionStorage): void {
-  const protectedOperationKeys: string[] = [];
+  const operationKeys: string[] = [];
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index);
-    if (key?.startsWith(protectedSelfOperationStoragePrefix)) {
-      protectedOperationKeys.push(key);
+    if (
+      key?.startsWith(protectedSelfOperationStoragePrefix) ||
+      key?.startsWith(memberLearningPendingOperationStoragePrefix)
+    ) {
+      operationKeys.push(key);
     }
   }
   storage.removeItem(selectedHouseholdStorageKey);
-  for (const key of protectedOperationKeys) storage.removeItem(key);
+  for (const key of operationKeys) storage.removeItem(key);
 }
 
 export interface AuthenticationRecoveryCoordinator {

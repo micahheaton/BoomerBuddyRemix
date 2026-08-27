@@ -139,6 +139,15 @@ describe('mobile support receipt surface', () => {
     expect(screen).toContain('customerErrorStatus(caught, 409)');
     expect(screen).toContain('Separate email option');
     expect(screen).toContain('Linking.openURL(`mailto:${supportEmail}`)');
+    expect(screen).toContain('supportReceiptCodeSchema.parse(receiptCode)');
+    expect(screen).toContain(
+      '`mailto:${supportEmail}?subject=${encodeURIComponent(validatedReceiptCode)}`',
+    );
+    expect(screen).toContain('openSupportEmail(emailReceiptCode)');
+    expect(screen).toContain('does not prefill the email body');
+    expect(screen).toContain('Review any automatic signature before');
+    expect(screen).toContain('No email is sent until you choose Send');
+    expect(screen).not.toMatch(/[?&](?:body|cc|bcc)=/iu);
     expect(screen).toContain('does not promise 24-hour or real-time support coverage');
     expect(screen).toContain('not a guarantee that a person has seen it');
     expect(screen).not.toContain('Support is monitored');

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import { useAuth } from '@clerk/expo';
 import * as Crypto from 'expo-crypto';
-import { apiPaths, type SupportReceiptRecordDto } from '@boomerbuddy/contracts';
+import {
+  apiPaths,
+  supportReceiptCodeSchema,
+  type SupportReceiptRecordDto,
+} from '@boomerbuddy/contracts';
 import { MobileCustomerError, mobileRequest, readableError } from './api';
 import { useOptionalMobileHousehold } from './household';
 import {
@@ -22,6 +26,11 @@ import { appStyles as s } from './theme';
 
 const supportEmail = 'support@boomerbuddy.net';
 const pageSize = 10;
+
+function supportReceiptEmailDraftUrl(receiptCode: string): string {
+  const validatedReceiptCode = supportReceiptCodeSchema.parse(receiptCode);
+  return `mailto:${supportEmail}?subject=${encodeURIComponent(validatedReceiptCode)}`;
+}
 
 function SupportButton({
   title,
@@ -110,6 +119,7 @@ function SupportReceiptContent({
   const [listError, setListError] = useState('');
   const [actionError, setActionError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [emailReceiptCode, setEmailReceiptCode] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const [unavailable, setUnavailable] = useState(false);
   const [intakeUnavailable, setIntakeUnavailable] = useState(false);
@@ -197,10 +207,12 @@ function SupportReceiptContent({
         body: JSON.stringify({ category: operation.category, impact: operation.impact }),
       });
       const result = parseMobileSupportReceiptMutation(raw);
+      const validatedReceiptCode = supportReceiptCodeSchema.parse(result.receipt.receiptCode);
       setPendingCreate(undefined);
+      setEmailReceiptCode(validatedReceiptCode);
       setIntakeUnavailable(false);
       setAnnouncement(
-        `Support receipt ${result.receipt.receiptCode} was recorded. No message or contact details were submitted.`,
+        `Support receipt ${validatedReceiptCode} was recorded. No message or contact details were submitted.`,
       );
       setOffset(0);
       await refreshPage(0);
@@ -259,9 +271,13 @@ function SupportReceiptContent({
     }
   }
 
-  async function openSupportEmail(): Promise<void> {
+  async function openSupportEmail(receiptCode?: string): Promise<void> {
     setEmailError('');
     try {
+      if (receiptCode !== undefined) {
+        await Linking.openURL(supportReceiptEmailDraftUrl(receiptCode));
+        return;
+      }
       await Linking.openURL(`mailto:${supportEmail}`);
     } catch {
       setEmailError('BoomerBuddy could not open an email app. Copy the address shown below.');
@@ -391,6 +407,20 @@ function SupportReceiptContent({
                 />
               </>
             )}
+            {emailReceiptCode !== '' ? (
+              <View style={s.banner} accessibilityLiveRegion="polite">
+                <Text style={s.heading}>Email about this receipt</Text>
+                <Text style={s.body}>
+                  Open a draft whose subject contains only receipt code {emailReceiptCode}.
+                  BoomerBuddy does not prefill the email body. Review any automatic signature before
+                  sending. No email is sent until you choose Send.
+                </Text>
+                <SupportButton
+                  title="Open email draft for this receipt"
+                  onPress={() => void openSupportEmail(emailReceiptCode)}
+                />
+              </View>
+            ) : null}
           </View>
 
           <View style={s.card}>

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   apiPaths,
+  supportReceiptCodeSchema,
   type CreateSupportReceiptRequest,
   type SupportReceiptRecordDto,
 } from '@boomerbuddy/contracts';
@@ -68,6 +69,11 @@ function operationKey(kind: 'create' | 'withdraw'): string {
   return `support-receipt:${kind}:${crypto.randomUUID()}`;
 }
 
+function supportReceiptEmailDraftHref(receiptCode: string): string {
+  const validatedReceiptCode = supportReceiptCodeSchema.parse(receiptCode);
+  return `mailto:support@boomerbuddy.net?subject=${encodeURIComponent(validatedReceiptCode)}`;
+}
+
 function isDefinitiveMutationFailure(error: unknown): boolean {
   return (
     error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 408
@@ -91,6 +97,7 @@ function HouseholdSupportReceipts() {
   const [listError, setListError] = useState('');
   const [actionError, setActionError] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [emailReceiptCode, setEmailReceiptCode] = useState('');
   const [unavailable, setUnavailable] = useState(false);
   const [intakeUnavailable, setIntakeUnavailable] = useState(false);
   const [pendingCreate, setPendingCreate] = useState<PendingCreate>();
@@ -168,9 +175,11 @@ function HouseholdSupportReceipts() {
         headers: { 'Idempotency-Key': operation.key },
         body: JSON.stringify({ category: operation.category, impact: operation.impact }),
       });
+      const validatedReceiptCode = supportReceiptCodeSchema.parse(result.receipt.receiptCode);
       clearPendingCreate();
+      setEmailReceiptCode(validatedReceiptCode);
       setAnnouncement(
-        `Support receipt ${result.receipt.receiptCode} was recorded. No message or contact details were submitted.`,
+        `Support receipt ${validatedReceiptCode} was recorded. No message or contact details were submitted.`,
       );
       setIntakeUnavailable(false);
       await refreshFirstPage();
@@ -307,6 +316,25 @@ function HouseholdSupportReceipts() {
             </button>
           </form>
         )}
+        {emailReceiptCode !== '' ? (
+          <div className="notice">
+            <p>
+              If you need to explain this issue, you can open an email draft linked to receipt{' '}
+              <strong>{emailReceiptCode}</strong>.
+            </p>
+            <a
+              className="button button-secondary"
+              href={supportReceiptEmailDraftHref(emailReceiptCode)}
+            >
+              Open email draft for this receipt
+            </a>
+            <p className="help">
+              The draft subject contains only the receipt code. BoomerBuddy does not prefill the
+              email body. Review any automatic signature before sending. No email is sent until you
+              choose Send in your email app.
+            </p>
+          </div>
+        ) : null}
         <p className="meta">
           Need to explain the issue? Email{' '}
           <a href="mailto:support@boomerbuddy.net">support@boomerbuddy.net</a>. Sending an email is

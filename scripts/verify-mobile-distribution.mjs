@@ -651,6 +651,7 @@ assertRelease(
   'mobile runtime must pin the exact production API origin',
 );
 const appSource = await readFile(join(mobileRoot, 'App.tsx'), 'utf8');
+const supportScreenSource = await readFile(join(mobileRoot, 'src/support-screen.tsx'), 'utf8');
 assertRelease(
   appSource.includes("value.startsWith('pk_live_')"),
   'production authentication must reject non-live Clerk publishable keys',
@@ -684,11 +685,49 @@ const sourceHttpsLiterals = [
 for (const literal of sourceHttpsLiterals) {
   assertRelease(approvedHttpsLiterals.has(literal), `unapproved mobile HTTPS literal ${literal}`);
 }
+const approvedMailtoTemplates = new Set([
+  'mailto:${supportEmail}',
+  'mailto:${supportEmail}?subject=${encodeURIComponent(validatedReceiptCode)}',
+]);
+const sourceMailtoTemplates = combinedProductionSource.match(/mailto:[^`'"\r\n]+/gu) ?? [];
 assertRelease(
-  (combinedProductionSource.match(/Linking\.openURL\(/gu) ?? []).length === 2 &&
+  sourceMailtoTemplates.length === approvedMailtoTemplates.size &&
+    sourceMailtoTemplates.every((template) => approvedMailtoTemplates.has(template)),
+  'mobile email links must remain limited to a blank support draft or a receipt-code subject',
+);
+assertRelease(
+  supportScreenSource.includes(
+    [
+      'function supportReceiptEmailDraftUrl(receiptCode: string): string {',
+      '  const validatedReceiptCode = supportReceiptCodeSchema.parse(receiptCode);',
+      '  return `mailto:${supportEmail}?subject=${encodeURIComponent(validatedReceiptCode)}`;',
+      '}',
+    ].join('\n'),
+  ) && (combinedProductionSource.match(/\?subject=/gu) ?? []).length === 1,
+  'receipt email subject must contain only a schema-validated opaque receipt code',
+);
+assertRelease(
+  !/[?&](?:body|cc|bcc)=/iu.test(combinedProductionSource),
+  'mobile email drafts must not prefill body, cc, or bcc content',
+);
+assertRelease(
+  (supportScreenSource.match(/openSupportEmail\(/gu) ?? []).length === 3 &&
+    supportScreenSource.includes('onPress={() => void openSupportEmail(emailReceiptCode)}') &&
+    supportScreenSource.includes('onPress={() => void openSupportEmail()}'),
+  'support email drafts must open only from explicit user button actions',
+);
+assertRelease(
+  !/(?:Linking\.sendIntent|Share\.share|provider\.send|messages\.create)/iu.test(
+    supportScreenSource,
+  ),
+  'mobile support must not send or share outbound content automatically',
+);
+assertRelease(
+  (combinedProductionSource.match(/Linking\.openURL\(/gu) ?? []).length === 3 &&
     combinedProductionSource.includes('Linking.openURL(customerWebSignInUrl)') &&
-    combinedProductionSource.includes('Linking.openURL(`mailto:${supportEmail}`)'),
-  'outbound mobile links must remain limited to web-preview sign-in and user-initiated email',
+    combinedProductionSource.includes('Linking.openURL(`mailto:${supportEmail}`)') &&
+    combinedProductionSource.includes('Linking.openURL(supportReceiptEmailDraftUrl(receiptCode))'),
+  'outbound mobile links must remain limited to web-preview sign-in and user-initiated support email',
 );
 for (const [label, pattern] of [
   ['authenticated web billing route', /\/member\/billing/iu],

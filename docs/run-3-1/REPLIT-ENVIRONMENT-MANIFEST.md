@@ -15,7 +15,7 @@ trusted founder backup/restore machine.
 | -------------------------- | ---------------------------------------- | ------- | ------------------------------------------ | --------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV`                 | Select production guards and compiled UI | No      | founder: `production`                      | W/A/K/H/M | Required exactly `production`; any other value makes `replit-service` refuse build/start.                                       |
 | `BB_REPLIT_SERVICE`        | Select one workspace                     | No      | founder: `web`, `api`, `worker`, or `hq`   | W/A/K/H   | Required and unique per project; missing/other value refuses build/start.                                                       |
-| `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal the configured annotated tag's dereferenced commit. A provider snapshot HEAD may differ only when its tree is identical. |
+| `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal both the configured annotated tag's dereferenced commit and the published checkout HEAD. A different snapshot commit is rejected even when its tree is identical. |
 | `BB_RUN3_1_RELEASE_TAG`    | Bind runtime to immutable tag            | No      | `run3-1-replit-founding-household-<12hex>` | W/A/K/H   | Required; the ref itself must be an annotated tag object, and its suffix must equal the candidate commit's first 12 characters. |
 | `REPLIT_DEPLOYMENT`        | Prove a published runtime                | No      | Replit automatic: `1`                      | W/A/K/H   | Required at start and must be `1`; never set manually in local evidence.                                                        |
 | `PORT`                     | Provider-selected listener port          | No      | Replit automatic integer                   | W/A/K/H   | Required for web-facing services. Next consumes it directly; the wrapper derives the API child's `BB_API_PORT`. The worker uses it only for a static private liveness listener and falls back to `3000` when Replit omits it. |
@@ -24,6 +24,7 @@ Every Replit provenance check additionally requires all of the following:
 
 - `git cat-file -t refs/tags/<tag>` returns exactly `tag`; a lightweight tag is not accepted.
 - `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`.
+- `git rev-parse HEAD` equals `BB_RUN3_1_RELEASE_COMMIT`.
 - `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}` exactly.
 - `git status --porcelain=v1 --untracked-files=all` emits no entries before the service build.
   Staged, unstaged, and nonignored untracked content all fail closed.
@@ -46,15 +47,16 @@ fetch, nonzero denial classification, and recovery owner. Store each private val
 matching Replit protected credential store. No project may share a credential or retain a
 write-capable Replit GitHub connection.
 
-Replit may package the reviewed source tree beneath a different provider-generated snapshot commit.
-That representation is accepted only when the configured annotated tag still dereferences to the
-recorded candidate commit, the two trees are identical, and the full porcelain status is empty. For
+The published Replit build context must preserve the reviewed commit as its exact checkout HEAD.
+A different provider-generated snapshot commit is rejected even when its tree matches the tag. The
+configured annotated tag must dereference to that same commit, the trees must be identical, and the
+full porcelain status must be empty. For
 API, web, and HQ Autoscale builds only, the wrapper recognizes Replit's exact reviewed
 `deploymentTarget = "cloudrun"` append by requiring the sole raw status record, canonical and
 rewritten blob hashes, and unchanged mode. It restores the canonical indexed `.replit`, reruns the
 same status command, and proceeds only after the result is empty. The Reserved VM worker never
 receives this normalization. Any other byte, target, path, status, or mode fails closed; this does not
-permit a moved or lightweight tag, a different tagged commit, a changed tree, or arbitrary dirty
+permit a moved or lightweight tag, a different HEAD or tagged commit, a changed tree, or arbitrary dirty
 content. On dirty-status failure, the wrapper may print only bounded index/worktree status and escaped
 filenames (at most 50 paths and 256 bytes per rendered path); it never prints file contents.
 

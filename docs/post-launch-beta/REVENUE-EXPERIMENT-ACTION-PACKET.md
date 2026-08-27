@@ -4,9 +4,9 @@ Status: **non-executable local specification; no external action authorized or p
 
 Controlling registry: [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md)
 
-Clean pushed implementation and local-validation baseline before this documentation correction:
-`9323bc5cdefb244a1f9be6f08e1f4007023ddc3c`. GitHub Actions run `32950774457` for that SHA is
-green across all four jobs. The 9323 baseline remains not live-capable because its Family
+Clean pushed implementation and local-validation baseline before this follow-up tranche:
+`c39a98415320adb40737d1ea354674b2aa8c4194`. GitHub Actions run `33023999677` for that SHA is
+green across all four jobs. The c39a984 baseline remains not live-capable because its Family
 catalogue is a hypothesis that provider-backed production entitlement verification cannot make
 effective.
 

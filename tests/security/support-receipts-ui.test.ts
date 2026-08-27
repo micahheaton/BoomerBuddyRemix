@@ -40,6 +40,14 @@ describe('support receipt customer and HQ UI boundaries', () => {
     );
     expect(component).not.toContain('Your receipt list was refreshed.');
     expect(component).toContain('mailto:support@boomerbuddy.net');
+    expect(component).toContain('supportReceiptCodeSchema.parse(receiptCode)');
+    expect(component).toContain(
+      '`mailto:support@boomerbuddy.net?subject=${encodeURIComponent(validatedReceiptCode)}`',
+    );
+    expect(component).toContain('href={supportReceiptEmailDraftHref(emailReceiptCode)}');
+    expect(component).toContain('does not prefill the');
+    expect(component).toContain('Review any automatic signature before sending');
+    expect(component).not.toMatch(/[?&](?:body|cc|bcc)=/iu);
     expect(component).toContain('This form has no message box');
     expect(component).toContain('Support receipts are not available right now');
     expect(component).toContain('Creating a new support receipt is not available right now');

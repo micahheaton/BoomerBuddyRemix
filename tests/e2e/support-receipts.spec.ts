@@ -34,6 +34,12 @@ test('member support receipts and the owner queue preserve the content-free life
     expect(response.status()).toBe(201);
     const body = (await response.json()) as SupportReceiptMutation;
     await expect(page.getByText(`Reference: ${body.receipt.receiptCode}`)).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Open email draft for this receipt' }),
+    ).toHaveAttribute(
+      'href',
+      `mailto:support@boomerbuddy.net?subject=${encodeURIComponent(body.receipt.receiptCode)}`,
+    );
     return body.receipt.receiptCode;
   };
 

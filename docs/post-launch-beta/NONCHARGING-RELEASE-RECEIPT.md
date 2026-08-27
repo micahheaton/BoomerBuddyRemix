@@ -236,8 +236,10 @@ For each of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boo
 
 1. Each of the four Replit consumers fetches the annotated tag with its own read-only credential and
    checks it out detached.
-2. Require tag object type `tag`, peeled commit equality, exact tag-tree equality, and empty
-   `git status --porcelain=v1 --untracked-files=all` in the project and published build context.
+2. Require tag object type `tag`, peeled commit equality, published checkout HEAD equality to the
+   exact release commit, exact tag-tree equality, and empty
+   `git status --porcelain=v1 --untracked-files=all` in the project and published build context. A
+   different snapshot commit is rejected even when its tree is identical.
 3. Build and deploy API, then one worker, then customer web, then HQ. Initial deployment keeps
    `BB_STRIPE_MODE=disabled`, `BB_TWILIO_MODE=disabled`, support intake default-off until its drill,
    and every production migration switch false.
@@ -406,7 +408,7 @@ Repeat this table for each service.
 | Project | Exact one of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, `boomerbuddy-hq` |
 | Service | Exact one of `web`, `api`, `worker`, `hq` |
 | Git credential | Safe unique ID, type, repository-only scope, read-only permission export, expiry |
-| Pull proof | Exact annotated tag, peeled commit, tree equality, empty full porcelain |
+| Pull proof | Exact annotated tag, peeled commit, exact checkout HEAD equality, tree equality, empty full porcelain |
 | Denied-write proof | Exact dry-run command, nonzero exit, safe denial classification |
 | Build | Command, build ID, exact SHA/tag/tree, UTC, result |
 | Deployment | Deployment ID, region, origin or private liveness class, UTC |

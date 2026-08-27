@@ -196,8 +196,8 @@ describe('revenue hypothesis production boundary', () => {
     expect(packet).toContain(
       'Status: **non-executable local specification; no external action authorized or performed**',
     );
-    expect(packet).toContain('`9323bc5cdefb244a1f9be6f08e1f4007023ddc3c`');
-    expect(packet).toMatch(/9323 baseline remains not live-capable/u);
+    expect(packet).toContain('`c39a98415320adb40737d1ea354674b2aa8c4194`');
+    expect(packet).toMatch(/c39a984 baseline remains not live-capable/u);
     expect(packet).toContain(
       'This versioned packet cannot bind the final commit SHA that contains itself',
     );

@@ -52,6 +52,7 @@
     "test:security": "vitest run --project security",
     "test:eval": "tsx scripts/eval-report.ts",
     "test:e2e": "playwright test",
+    "test:e2e:accessibility-matrix": "playwright test --config tests/e2e/accessibility.playwright.config.ts",
     "test:coverage": "vitest run --coverage --project unit",
     "verify:secrets": "node scripts/verify-no-secrets.mjs",
     "verify:runtime-deps": "node scripts/verify-runtime-dependency-scope.mjs",

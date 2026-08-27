@@ -240,6 +240,27 @@ function reviewedOptionalLockfile(): Record<string, unknown> {
 }
 
 describe('Run 3.1 Replit deployment controls', () => {
+  it('keeps operator runbooks aligned with exact checkout-commit enforcement', async () => {
+    const [manifest, goLive] = await Promise.all([
+      readFile(join(root, 'docs/run-3-1/REPLIT-ENVIRONMENT-MANIFEST.md'), 'utf8'),
+      readFile(join(root, 'docs/run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md'), 'utf8'),
+    ]);
+    const runbooks = `${manifest}\n${goLive}`;
+
+    for (const runbook of [manifest, goLive]) {
+      expect(runbook).toContain('`git rev-parse HEAD` equals `BB_RUN3_1_RELEASE_COMMIT`');
+    }
+    expect(runbooks).toMatch(
+      /different (?:Replit |provider-generated )?snapshot commit is rejected/iu,
+    );
+    expect(runbooks).not.toMatch(
+      /snapshot HEAD may differ|may package the same tree under a different snapshot commit|may package the reviewed source tree beneath a different provider-generated snapshot commit|different Replit snapshot commit is permitted/iu,
+    );
+    expect(goLive).toContain('https://github.com/micahheaton/BoomerBuddyRemix.git');
+    expect(goLive).toContain('`https://github.com/micahheaton/BoomerBuddyRemix`');
+    expect(goLive).toMatch(/any other\s+URL spelling/u);
+  });
+
   it('keeps GitHub authoritative and excludes the legacy Replit project', async () => {
     const instructions = await readFile(join(root, 'AGENTS.md'), 'utf8');
 

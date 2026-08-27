@@ -313,6 +313,42 @@ describe('provider-free mobile distribution verifier', () => {
     });
   });
 
+  it('allows only explicit blank or validated receipt-code support email drafts', () => {
+    const verifier = readFileSync(
+      resolve(repositoryRoot, 'scripts/verify-mobile-distribution.mjs'),
+      'utf8',
+    );
+    const supportScreen = readFileSync(
+      resolve(repositoryRoot, 'apps/mobile/src/support-screen.tsx'),
+      'utf8',
+    );
+
+    expect(verifier).toContain("'mailto:${supportEmail}'");
+    expect(verifier).toContain(
+      "'mailto:${supportEmail}?subject=${encodeURIComponent(validatedReceiptCode)}'",
+    );
+    expect(verifier).toContain('supportReceiptCodeSchema.parse(receiptCode)');
+    expect(verifier).toContain(
+      '(combinedProductionSource.match(/\\?subject=/gu) ?? []).length === 1',
+    );
+    expect(verifier).toContain('/[?&](?:body|cc|bcc)=/iu.test(combinedProductionSource)');
+    expect(verifier).toContain(
+      '(supportScreenSource.match(/openSupportEmail\\(/gu) ?? []).length === 3',
+    );
+    expect(verifier).toContain('Linking.openURL(supportReceiptEmailDraftUrl(receiptCode))');
+    const automaticSendFailure =
+      'mobile support must not send or share outbound content automatically';
+    expect(verifier).toContain(automaticSendFailure);
+    const automaticSendGuardEnd = verifier.indexOf(automaticSendFailure);
+    const automaticSendGuardStart = verifier.lastIndexOf('assertRelease(', automaticSendGuardEnd);
+    expect(automaticSendGuardStart).toBeGreaterThanOrEqual(0);
+    const automaticSendGuard = verifier.slice(automaticSendGuardStart, automaticSendGuardEnd);
+    expect(automaticSendGuard).toContain('supportScreenSource');
+    expect(automaticSendGuard).not.toContain('combinedProductionSource');
+    expect(supportScreen).toContain('onPress={() => void openSupportEmail(emailReceiptCode)}');
+    expect(supportScreen).not.toMatch(/[?&](?:body|cc|bcc)=/iu);
+  });
+
   it('verifies resolved manifests, release inputs, legal routes, assets, and link posture offline', () => {
     const output = execFileSync(
       process.execPath,

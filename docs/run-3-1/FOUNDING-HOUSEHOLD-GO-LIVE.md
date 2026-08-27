@@ -82,23 +82,25 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    fine-grained token is acceptable only with `Contents: Read-only`, `Metadata: Read-only`, and no
    repository, organization, or user write permission. Store the private value only in the matching
    Replit credential store, keep the remote URL credential-free, and remove any write-capable Replit
-   GitHub connection. The checkout remote must use exactly
-   `https://github.com/micahheaton/BoomerBuddyRemix.git` for an HTTPS-compatible read-only
-   credential or exactly `git@github.com:micahheaton/BoomerBuddyRemix.git` for the preferred
-   read-only deploy key. The deployment wrapper rejects credentials embedded in a URL, forks, host
-   aliases, alternate URL spellings, multiple origin URLs, and noncanonical push metadata without
+   GitHub connection. The checkout remote must use exactly either
+   `https://github.com/micahheaton/BoomerBuddyRemix.git` or
+   `https://github.com/micahheaton/BoomerBuddyRemix` for an HTTPS-compatible read-only credential,
+   or exactly `git@github.com:micahheaton/BoomerBuddyRemix.git` for the preferred read-only deploy
+   key. The deployment wrapper rejects credentials embedded in a URL, forks, host aliases, any other
+   URL spelling, multiple origin URLs, and noncanonical push metadata without
    printing the observed URL.
 9. In each Replit project Shell, explicitly fetch the exact tag ref with
    `git fetch origin refs/tags/<tag>:refs/tags/<tag>` because Replit's Pull action does not fetch tags,
    then check out the candidate tag in detached mode. Verify that
    `git cat-file -t refs/tags/<tag>` returns exactly `tag`,
    `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`,
+   `git rev-parse HEAD` equals `BB_RUN3_1_RELEASE_COMMIT`,
    `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}`, and
    `git status --porcelain=v1 --untracked-files=all` is empty. Before relying on publication, prove
    that the **published build context**, not only the project shell, preserves `.git`, the
-   annotated tag, exact tree equality, and the empty full-porcelain status: the provenance wrapper
-   checks all four. Replit may package the same tree under a different snapshot commit, but a
-   lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
+   annotated tag, exact commit and tree equality, and the empty full-porcelain status: the provenance
+   wrapper checks all of them. A different Replit snapshot commit is rejected even when its tree
+   matches the tag. A lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
    unstaged, or nonignored untracked content must fail. For API, web, and HQ only, Replit may append
    its documented `deploymentTarget = "cloudrun"` Autoscale line to the tracked `.replit` file.
    The wrapper accepts that provider input only when raw porcelain is exactly one unstaged
@@ -475,8 +477,8 @@ The complete service-by-service inventory and failure behavior is in
 - HQ MFA cannot be required and freshly proven.
 - Customer/HQ token and maximum-session bounds cannot be configured and retained as provider proof.
 - The configured release ref is not an annotated tag that dereferences to
-  `BB_RUN3_1_RELEASE_COMMIT`, or the published build-context HEAD tree does not exactly match the tag tree. A
-  different Replit snapshot commit is permitted only with exact tree equality.
+  `BB_RUN3_1_RELEASE_COMMIT`, the published build-context HEAD is not exactly that commit, or its tree
+  does not exactly match the tag tree. A different Replit snapshot commit is never permitted.
 - Published build context does not preserve the required `.git` metadata, annotated tag, exact-tree
   equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.
 - API/worker can start without founder binding or with runtime migrations/demo identities.

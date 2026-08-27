@@ -476,6 +476,7 @@ function Customers() {
   );
 }
 
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The horizontally scrollable review table must be reachable by keyboard. */
 function OwnerFraud() {
   const [data, setData] = useState<ChecksResponse>();
   const [error, setError] = useState('');
@@ -504,7 +505,12 @@ function OwnerFraud() {
         <strong>Content exclusion:</strong> this response contains identifiers, kind, risk, provider
         state, and time only. It cannot display submitted text or URL content.
       </div>
-      <div className="table-wrap section">
+      <div
+        aria-label="Scrollable check metadata review table"
+        className="table-wrap section"
+        role="region"
+        tabIndex={0}
+      >
         <table>
           <caption>
             Check metadata review - <DataLabel />
@@ -545,6 +551,7 @@ function OwnerFraud() {
     </>
   );
 }
+/* eslint-enable jsx-a11y/no-noninteractive-tabindex */
 
 function AssignedReviewQueue() {
   const [data, setData] = useState<HqReviewQueueResponse>();

@@ -100,6 +100,18 @@ describe('noncharging release documentation', () => {
     expect(goLive).toContain('With the same per-project credential');
   });
 
+  it('binds every published checkout to the exact release commit, not only its tree', async () => {
+    const receipt = await repositoryDocument(
+      'docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md',
+    );
+
+    expect(receipt).toContain('published checkout HEAD equality to the');
+    expect(receipt).toContain('exact checkout HEAD equality');
+    expect(receipt).toContain(
+      'different snapshot commit is rejected even when its tree is identical',
+    );
+  });
+
   it('keeps the standalone Replit runbook behind the same exact authority and inventory gates', async () => {
     const runbook = await repositoryDocument('docs/run-3/REPLIT-FIRST-LAUNCH-RUNBOOK.md');
 

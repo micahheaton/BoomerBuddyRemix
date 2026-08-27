@@ -4,7 +4,8 @@ Status: **prepared locally; no participants, enrichment, outreach, or production
 
 ## Boundary
 
-The first cohort is a founder-curated learning set of approximately 10–25 households. Names,
+The first product cohort expands only through the current 1 -> 3 -> 5 evidence gates. Each expansion
+requires the prior cohort gate to pass; this is a cap, not an acquisition target. Names,
 addresses, phone numbers, emails, relationship details, interview notes, and consent evidence never
 belong in Git. This document is a blank operating template, not a lead list and not authorization to
 contact anyone.

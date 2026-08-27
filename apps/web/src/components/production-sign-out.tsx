@@ -2,8 +2,9 @@
 
 import { useClerk } from '@clerk/nextjs';
 import { useState } from 'react';
+import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
 import { apiRequest } from '../lib/api';
-import { clearCustomerSessionState } from '../lib/auth-recovery';
+import { clearCustomerSessionState, productionSessionRecoveryPath } from '../lib/auth-recovery';
 
 export function ProductionSignOut() {
   const clerk = useClerk();
@@ -18,7 +19,10 @@ export function ProductionSignOut() {
       // session record is already unavailable or the API cannot be reached.
     } finally {
       clearCustomerSessionState(window.sessionStorage);
-      await clerk.signOut({ redirectUrl: '/sign-in' });
+      const outcome = await settleIdentitySignOut({
+        clearIdentitySession: () => clerk.signOut(),
+      });
+      window.location.replace(outcome === 'cleared' ? '/sign-in' : productionSessionRecoveryPath);
     }
   }
 

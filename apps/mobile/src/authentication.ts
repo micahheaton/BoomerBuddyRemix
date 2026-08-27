@@ -1,5 +1,6 @@
 export interface MobileAuthenticationTokenRequest {
   readonly skipCache?: boolean;
+  readonly purpose?: 'session_sign_out';
 }
 
 export interface MobileAuthenticationRecoveryGuard {
@@ -9,6 +10,15 @@ export interface MobileAuthenticationRecoveryGuard {
 export interface MobileAuthenticationBridge {
   readonly getToken: (request?: MobileAuthenticationTokenRequest) => Promise<string | null>;
   readonly recoverUnauthorizedSession: (guard: MobileAuthenticationRecoveryGuard) => Promise<void>;
+}
+
+export async function readCurrentMobileAuthenticationToken(input: {
+  readonly isCurrent: () => boolean;
+  readonly readToken: () => Promise<string | null>;
+}): Promise<string | null> {
+  if (!input.isCurrent()) return null;
+  const token = await input.readToken();
+  return input.isCurrent() ? token : null;
 }
 
 export type MobileAuthenticationContext = Readonly<{
@@ -135,7 +145,11 @@ export async function readMobileAuthenticationToken(
   const { bridge, generation } = context;
   requireCurrentAuthenticationContext(bridge, generation);
   if (!request.skipCache) {
-    const token = (await bridge?.getToken({ skipCache: false })) ?? null;
+    const token =
+      (await bridge?.getToken({
+        skipCache: false,
+        ...(request.purpose === undefined ? {} : { purpose: request.purpose }),
+      })) ?? null;
     requireCurrentAuthenticationContext(bridge, generation);
     return token;
   }
@@ -143,7 +157,12 @@ export async function readMobileAuthenticationToken(
     const promise = boundProviderAttempt(
       Promise.resolve().then(() => {
         requireCurrentAuthenticationContext(bridge, generation);
-        return bridge?.getToken({ skipCache: true }) ?? null;
+        return (
+          bridge?.getToken({
+            skipCache: true,
+            ...(request.purpose === undefined ? {} : { purpose: request.purpose }),
+          }) ?? null
+        );
       }),
     ).then((token) => {
       requireCurrentAuthenticationContext(bridge, generation);

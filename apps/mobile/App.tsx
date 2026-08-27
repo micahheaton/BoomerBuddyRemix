@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -12,6 +12,7 @@ import {
   captureMobileAuthenticationContext,
   configureMobileAuthentication,
   isMobileAuthenticationContextCurrent,
+  readCurrentMobileAuthenticationToken,
 } from './src/authentication';
 import { MobileHouseholdProvider } from './src/household';
 import {
@@ -28,15 +29,29 @@ import {
 } from './src/policy-screens';
 import {
   beginMobileHouseholdSession,
+  clearPendingMobileSignOut,
   clearLegacyDevelopmentSessionToken,
   clearMobileDeviceState,
   endMobileHouseholdSession,
+  isMobileSignOutPending,
   isMobileHouseholdSessionCurrent,
+  markPendingMobileSignOut,
+  readPendingMobileSignOut,
   restoreSelectedHouseholdId,
   setSelectedHouseholdId,
   type MobileHouseholdSession,
 } from './src/session';
-import { clearMobileDeviceStateSafely, completeMobileSignOut } from './src/sign-out';
+import {
+  beginMobileSignOutAttempt,
+  classifyMobileSignOutInspection,
+  clearMobileDeviceStateSafely,
+  completeMobileSignOut,
+  createMobileSignOutAttemptGate,
+  mobileProviderStateSettleTimeoutMs,
+  planMobileSignOut,
+  shouldUseProviderWideMobileSignOut,
+  type MobileSignOutOutcome,
+} from './src/sign-out';
 import { SupportScreen } from './src/support-screen';
 import { appStyles } from './src/theme';
 import {
@@ -77,6 +92,21 @@ type RestoredMobileSession = {
   principal: PrincipalDto;
 };
 
+type MobileSignOutTarget = Readonly<{
+  identitySessionId?: string;
+  householdSession?: MobileHouseholdSession;
+}>;
+
+type MobileSignOutState = Readonly<{
+  status: 'pending' | 'awaiting_provider_state' | 'retry_required';
+  target: MobileSignOutTarget;
+}>;
+
+type PendingSignOutInspection = Readonly<{
+  authenticationKey: string;
+  status: 'none' | 'pending' | 'unavailable';
+}>;
+
 function MobileApplication(): React.ReactElement {
   const { isLoaded, isSignedIn, sessionId, signOut: clerkSignOut } = useAuth();
   const { session: clerkSession } = useSession();
@@ -85,7 +115,13 @@ function MobileApplication(): React.ReactElement {
   const [sessionError, setSessionError] = useState('');
   const [restoreAttempt, setRestoreAttempt] = useState(0);
   const [nativeEntry, setNativeEntry] = useState<NativeEntrySignal>('none');
+  const [pendingSignOutInspection, setPendingSignOutInspection] =
+    useState<PendingSignOutInspection>();
+  const [signOutState, setSignOutState] = useState<MobileSignOutState>();
   const householdSessionRef = useRef<MobileHouseholdSession | undefined>(undefined);
+  const signOutStateRef = useRef<MobileSignOutState | undefined>(undefined);
+  const [signOutAttemptGate] = useState(createMobileSignOutAttemptGate);
+  const authenticationKey = `${isSignedIn ? 'signed-in' : 'signed-out'}:${sessionId ?? ''}`;
 
   useEffect(() => {
     let active = true;
@@ -108,6 +144,78 @@ function MobileApplication(): React.ReactElement {
   }, []);
 
   useEffect(() => {
+    if (!isLoaded) return;
+    let active = true;
+    void readPendingMobileSignOut().then(async (pending) => {
+      if (!active) return;
+      const inspection = classifyMobileSignOutInspection({
+        isSignedIn: Boolean(isSignedIn),
+        pendingStatus: pending.status,
+        hasActiveSignOut: signOutStateRef.current !== undefined,
+      });
+      if (inspection === 'clear') {
+        if (pending.status === 'pending') {
+          await clearPendingMobileSignOut(pending.identitySessionId);
+        }
+        if (!active) return;
+        signOutStateRef.current = undefined;
+        setSignOutState(undefined);
+        setSessionError('');
+        setPendingSignOutInspection({ authenticationKey, status: 'none' });
+        return;
+      }
+      if (inspection === 'restore_allowed') {
+        setPendingSignOutInspection({ authenticationKey, status: 'none' });
+        return;
+      }
+
+      const target: MobileSignOutTarget =
+        signOutStateRef.current?.target ??
+        (pending.status === 'pending'
+          ? { identitySessionId: pending.identitySessionId }
+          : sessionId
+            ? { identitySessionId: sessionId }
+            : {});
+      const next: MobileSignOutState = { status: 'retry_required', target };
+      signOutStateRef.current = next;
+      endMobileHouseholdSession();
+      householdSessionRef.current = undefined;
+      setRestoredSession(undefined);
+      setRestoring(false);
+      setSessionError(
+        pending.status === 'pending'
+          ? 'Secure sign out still needs to finish. Your member area remains closed. Try sign out again when you have a connection.'
+          : pending.status === 'unavailable'
+            ? 'BoomerBuddy could not check whether secure sign out finished. Your member area remains closed. Try sign out again.'
+            : 'The identity session changed before secure sign out was confirmed. Your member area remains closed. Try sign out again.',
+      );
+      setSignOutState(next);
+      setPendingSignOutInspection({ authenticationKey, status: pending.status });
+    });
+    return () => {
+      active = false;
+    };
+  }, [authenticationKey, isLoaded, isSignedIn, sessionId]);
+
+  useEffect(() => {
+    if (signOutState?.status !== 'awaiting_provider_state') return;
+    const observedState = signOutState;
+    const timeout = setTimeout(() => {
+      if (signOutStateRef.current !== observedState) return;
+      const retry: MobileSignOutState = {
+        status: 'retry_required',
+        target: observedState.target,
+      };
+      signOutStateRef.current = retry;
+      setSignOutState(retry);
+      setSessionError(
+        'Secure sign out was accepted, but the identity session is still present on this device. Your member area remains closed. Try sign out again.',
+      );
+    }, mobileProviderStateSettleTimeoutMs);
+    return () => clearTimeout(timeout);
+  }, [signOutState]);
+
+  useEffect(() => {
     let active = true;
     let householdSession: MobileHouseholdSession | undefined;
     const restoreController = new AbortController();
@@ -116,6 +224,13 @@ function MobileApplication(): React.ReactElement {
 
     async function restoreSession() {
       if (!isLoaded) return;
+      if (
+        pendingSignOutInspection?.authenticationKey !== authenticationKey ||
+        pendingSignOutInspection.status !== 'none' ||
+        signOutStateRef.current !== undefined
+      ) {
+        return;
+      }
       if (!isSignedIn) {
         // A device-keystore failure must not strand a signed-out user on the restore screen.
         // The in-memory household selection is cleared before persisted cleanup is attempted.
@@ -186,7 +301,97 @@ function MobileApplication(): React.ReactElement {
         endMobileHouseholdSession(householdSession);
       }
     };
-  }, [isLoaded, isSignedIn, restoreAttempt, sessionId]);
+  }, [
+    authenticationKey,
+    isLoaded,
+    isSignedIn,
+    pendingSignOutInspection,
+    restoreAttempt,
+    sessionId,
+  ]);
+
+  const activeRestoredSession =
+    isSignedIn && sessionId && restoredSession?.identitySessionId === sessionId
+      ? restoredSession
+      : undefined;
+  const principal = activeRestoredSession?.principal;
+
+  const runMobileSignOut = useCallback(
+    (target: MobileSignOutTarget, attemptApiRevoke: boolean): Promise<MobileSignOutOutcome> => {
+      const pending: MobileSignOutState = { status: 'pending', target };
+      return beginMobileSignOutAttempt({
+        gate: signOutAttemptGate,
+        closePrivateAccess: () => {
+          signOutStateRef.current = pending;
+          setSignOutState(pending);
+          setRestoredSession(undefined);
+          setRestoring(false);
+          setSessionError('');
+        },
+        operation: async () => {
+          const identitySessionId = target.identitySessionId;
+          const householdSession = target.householdSession;
+          const authenticationContext = captureMobileAuthenticationContext();
+          const markerPersisted = identitySessionId
+            ? await markPendingMobileSignOut(identitySessionId)
+            : false;
+          const providerWideSignOut = shouldUseProviderWideMobileSignOut({
+            markerPersisted,
+            ...(identitySessionId ? { targetIdentitySessionId: identitySessionId } : {}),
+            ...(sessionId ? { currentIdentitySessionId: sessionId } : {}),
+          });
+          if (
+            attemptApiRevoke &&
+            identitySessionId &&
+            householdSession &&
+            isMobileHouseholdSessionCurrent(householdSession)
+          ) {
+            try {
+              await mobileRequest('/v1/sessions/current', {
+                method: 'DELETE',
+                authenticationPurpose: 'session_sign_out',
+              });
+            } catch {
+              /* The pending marker and provider sign-out still fail closed. */
+            }
+          }
+          const outcome = await completeMobileSignOut({
+            clearDeviceState: () => {
+              if (householdSession && isMobileHouseholdSessionCurrent(householdSession)) {
+                return clearMobileDeviceState(householdSession);
+              }
+              return Promise.resolve();
+            },
+            signOutIdentitySession: () =>
+              providerWideSignOut || !identitySessionId
+                ? clerkSignOut()
+                : clerkSignOut({ sessionId: identitySessionId }),
+          });
+          if (
+            signOutStateRef.current?.target !== target ||
+            !isMobileAuthenticationContextCurrent(authenticationContext)
+          ) {
+            return outcome;
+          }
+          if (outcome === 'complete') {
+            const complete: MobileSignOutState = { status: 'awaiting_provider_state', target };
+            signOutStateRef.current = complete;
+            setSignOutState(complete);
+            setSessionError('');
+          } else {
+            const retry: MobileSignOutState = { status: 'retry_required', target };
+            signOutStateRef.current = retry;
+            setSignOutState(retry);
+            setSessionError(
+              'We could not finish secure sign out. Your member area remains closed. Check your connection and try sign out again.',
+            );
+          }
+          return outcome;
+        },
+      });
+    },
+    [clerkSignOut, sessionId, signOutAttemptGate],
+  );
 
   useEffect(() => {
     const identitySessionId = isSignedIn && sessionId ? sessionId : undefined;
@@ -199,65 +404,81 @@ function MobileApplication(): React.ReactElement {
         ? householdSessionRef.current
         : undefined;
     return configureMobileAuthentication({
-      getToken: (request) => {
-        if (!identitySession || !householdSession) return Promise.resolve(null);
-        return identitySession.getToken({
-          template: mobileJwtTemplate,
-          ...(request?.skipCache ? { skipCache: true } : {}),
-        });
-      },
+      getToken: (request) =>
+        readCurrentMobileAuthenticationToken({
+          isCurrent: () =>
+            Boolean(
+              identitySession &&
+              householdSession &&
+              isMobileHouseholdSessionCurrent(householdSession) &&
+              (!isMobileSignOutPending() || request?.purpose === 'session_sign_out'),
+            ),
+          readToken: () =>
+            identitySession
+              ? identitySession.getToken({
+                  template: mobileJwtTemplate,
+                  ...(request?.skipCache ? { skipCache: true } : {}),
+                })
+              : Promise.resolve(null),
+        }),
       recoverUnauthorizedSession: async (guard) => {
-        if (!identitySessionId || !householdSession || !guard.isCurrent()) return;
-        const outcome = await completeMobileSignOut({
-          clearDeviceState: () =>
-            guard.isCurrent() ? clearMobileDeviceState(householdSession) : Promise.resolve(),
-          signOutIdentitySession: () =>
-            guard.isCurrent() ? clerkSignOut({ sessionId: identitySessionId }) : Promise.resolve(),
-        });
-        if (!guard.isCurrent()) return;
-        setRestoredSession(undefined);
-        setSessionError(
-          outcome === 'complete'
-            ? ''
-            : 'Your session ended, but secure sign out did not finish. Check your connection and try again.',
-        );
+        if (
+          !identitySessionId ||
+          !householdSession ||
+          !guard.isCurrent() ||
+          signOutAttemptGate.isActive()
+        ) {
+          return;
+        }
+        await runMobileSignOut({ identitySessionId, householdSession }, false);
       },
     });
-  }, [clerkSession, clerkSignOut, isLoaded, isSignedIn, restoreAttempt, sessionId]);
+  }, [
+    clerkSession,
+    isLoaded,
+    isSignedIn,
+    restoreAttempt,
+    runMobileSignOut,
+    sessionId,
+    signOutAttemptGate,
+  ]);
 
-  const activeRestoredSession =
-    isSignedIn && sessionId && restoredSession?.identitySessionId === sessionId
-      ? restoredSession
-      : undefined;
-  const principal = activeRestoredSession?.principal;
-
-  async function signOut() {
-    const identitySessionId = activeRestoredSession?.identitySessionId;
-    const householdSession = activeRestoredSession?.householdSession;
-    if (!identitySessionId || !householdSession) return;
-    const authenticationContext = captureMobileAuthenticationContext();
-    try {
-      await mobileRequest('/v1/sessions/current', { method: 'DELETE' });
-    } catch {
-      /* Clerk sign-out and local preference cleanup still complete. */
-    }
-    if (!isMobileAuthenticationContextCurrent(authenticationContext)) return;
-    const outcome = await completeMobileSignOut({
-      clearDeviceState: () =>
-        isMobileAuthenticationContextCurrent(authenticationContext)
-          ? clearMobileDeviceState(householdSession)
-          : Promise.resolve(),
-      signOutIdentitySession: () =>
-        isMobileAuthenticationContextCurrent(authenticationContext)
-          ? clerkSignOut({ sessionId: identitySessionId })
-          : Promise.resolve(),
+  function signOut() {
+    const existingTarget = signOutStateRef.current?.target;
+    const plan = planMobileSignOut({
+      isSignedIn: Boolean(isSignedIn),
+      ...(existingTarget?.identitySessionId
+        ? { pendingIdentitySessionId: existingTarget.identitySessionId }
+        : {}),
+      ...(sessionId ? { currentIdentitySessionId: sessionId } : {}),
+      ...(activeRestoredSession
+        ? { restoredIdentitySessionId: activeRestoredSession.identitySessionId }
+        : {}),
     });
-    if (!isMobileAuthenticationContextCurrent(authenticationContext)) return;
-    setRestoredSession(undefined);
-    setSessionError(
-      outcome === 'complete'
-        ? ''
-        : 'We could not finish secure sign out. Check your connection and try again.',
+    if (!plan.shouldSignOut) return;
+    const identitySessionId = plan.identitySessionId;
+    const currentHouseholdSession =
+      activeRestoredSession?.householdSession ??
+      (householdSessionRef.current && isMobileHouseholdSessionCurrent(householdSessionRef.current)
+        ? householdSessionRef.current
+        : undefined);
+    const target: MobileSignOutTarget = existingTarget ?? {
+      ...(identitySessionId ? { identitySessionId } : {}),
+      ...(currentHouseholdSession ? { householdSession: currentHouseholdSession } : {}),
+    };
+    void runMobileSignOut(target, existingTarget === undefined);
+  }
+
+  if (signOutState?.status === 'pending' || signOutState?.status === 'awaiting_provider_state') {
+    return (
+      <View style={[appStyles.safe, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator accessibilityLabel="Signing out securely" size="large" />
+        <Text style={appStyles.body}>
+          {signOutState.status === 'pending'
+            ? 'Signing out securely…'
+            : 'Secure sign out finished. Closing the previous session…'}
+        </Text>
+      </View>
     );
   }
 
@@ -285,7 +506,11 @@ function MobileApplication(): React.ReactElement {
               <SessionRecoveryScreen
                 {...props}
                 message={sessionError}
-                onRetry={() => setRestoreAttempt((attempt) => attempt + 1)}
+                onRetry={() =>
+                  signOutState?.status === 'retry_required'
+                    ? signOut()
+                    : setRestoreAttempt((attempt) => attempt + 1)
+                }
                 onSignOut={() => void signOut()}
               />
             )}

@@ -293,6 +293,7 @@ describe('provider-free mobile distribution verifier', () => {
     expect(dependencyPrivacy.classifications).toEqual({
       '@boomerbuddy/contracts': 'first_party_contracts_no_runtime_collection',
       '@boomerbuddy/design': 'first_party_static_design_no_runtime_collection',
+      '@boomerbuddy/security': 'first_party_session_security_no_runtime_collection',
       '@clerk/expo': 'hosted_identity_and_session_sdk',
       '@react-navigation/native': 'navigation_ui_runtime',
       '@react-navigation/native-stack': 'navigation_ui_runtime',

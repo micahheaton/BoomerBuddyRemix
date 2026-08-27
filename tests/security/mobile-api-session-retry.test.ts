@@ -63,6 +63,39 @@ describe('mobile API session retry', () => {
     dispose();
   });
 
+  it('limits pending-sign-out token access to the exact current-session DELETE', async () => {
+    const { api, authentication } = await mobileModules();
+    const getToken = vi.fn(async () => 'captured-sign-out-token');
+    const dispose = authentication.configureMobileAuthentication({
+      getToken,
+      recoverUnauthorizedSession: async () => undefined,
+    });
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      api.mobileRequest('/v1/sessions/current', {
+        method: 'DELETE',
+        authenticationPurpose: 'session_sign_out',
+      }),
+    ).resolves.toBeUndefined();
+    expect(getToken).toHaveBeenCalledWith({
+      skipCache: false,
+      purpose: 'session_sign_out',
+    });
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('Authorization')).toBe(
+      'Bearer captured-sign-out-token',
+    );
+
+    await expect(
+      api.mobileRequest('/v1/family', {
+        authenticationPurpose: 'session_sign_out',
+      }),
+    ).rejects.toThrow('limited to the exact current-session DELETE');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    dispose();
+  });
+
   it('signs out only after the forced token also receives a 401', async () => {
     const { api, authentication } = await mobileModules();
     const getToken = vi.fn(async (request?: { skipCache?: boolean }) =>

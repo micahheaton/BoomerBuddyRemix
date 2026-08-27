@@ -3,6 +3,7 @@ export * from './clerk-session';
 export * from './encoding';
 export * from './encryption';
 export * from './fingerprint';
+export * from './identity-sign-out';
 export * from './minimize';
 export * from './redaction';
 export * from './resource-auth';

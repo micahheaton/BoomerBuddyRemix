@@ -3,6 +3,7 @@ import * as SecureStore from './secure-store';
 
 const legacyDevelopmentTokenKey = 'boomerbuddy.local.mobile.dev-token';
 const legacySelectedHouseholdKey = 'boomerbuddy.mobile.selected-household';
+const pendingSignOutKey = 'boomerbuddy.mobile.pending-sign-out-session';
 const selectedHouseholdKeyPrefix = 'boomerbuddy.mobile.selected-household.';
 const secureStoreOperationTimeoutMs = 2_000;
 const opaqueIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$/u;
@@ -12,11 +13,18 @@ export type MobileHouseholdSession = Readonly<{
   identitySessionId: string;
 }>;
 
+export type PendingMobileSignOutRead =
+  | Readonly<{ status: 'none' }>
+  | Readonly<{ status: 'pending'; identitySessionId: string }>
+  | Readonly<{ status: 'unavailable' }>;
+
 let householdSessionGeneration = 0;
 let activeHouseholdSession: MobileHouseholdSession | undefined;
 let activeHouseholdPersonId: string | undefined;
 let selectedHouseholdId: string | null = null;
 let preferenceRevision = 0;
+let pendingSignOutRevision = 0;
+let pendingSignOutSessionId: string | undefined;
 
 type HouseholdPreference = Readonly<{
   householdId: string | null;
@@ -24,6 +32,13 @@ type HouseholdPreference = Readonly<{
 }>;
 
 const latestHouseholdPreference = new Map<string, HouseholdPreference>();
+
+type PendingSignOutPreference = Readonly<{
+  identitySessionId?: string;
+  revision: number;
+}>;
+
+let latestPendingSignOutPreference: PendingSignOutPreference = Object.freeze({ revision: 0 });
 
 function selectedHouseholdKey(personId: string): string | undefined {
   return opaqueIdPattern.test(personId) ? `${selectedHouseholdKeyPrefix}${personId}` : undefined;
@@ -87,6 +102,89 @@ function persistHouseholdPreference(
     await boundSecureStoreOperation(operation);
   };
   return persist().catch(() => undefined);
+}
+
+function persistPendingSignOutPreference(preference: PendingSignOutPreference): Promise<boolean> {
+  if (Platform.OS === 'web') return Promise.resolve(true);
+  const persist = async (): Promise<boolean> => {
+    if (latestPendingSignOutPreference.revision !== preference.revision) return false;
+    if (!(await boundSecureStoreOperation(SecureStore.isAvailableAsync()))) return false;
+    if (latestPendingSignOutPreference.revision !== preference.revision) return false;
+    const operation = preference.identitySessionId
+      ? SecureStore.setItemAsync(pendingSignOutKey, preference.identitySessionId, {
+          keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        })
+      : SecureStore.deleteItemAsync(pendingSignOutKey);
+    const repairIfStale = (): void => {
+      if (latestPendingSignOutPreference.revision !== preference.revision) {
+        void persistPendingSignOutPreference(latestPendingSignOutPreference);
+      }
+    };
+    void operation.then(repairIfStale, repairIfStale);
+    await boundSecureStoreOperation(operation);
+    return latestPendingSignOutPreference.revision === preference.revision;
+  };
+  return persist().catch(() => false);
+}
+
+export function isMobileSignOutPending(): boolean {
+  return pendingSignOutSessionId !== undefined;
+}
+
+export function markPendingMobileSignOut(identitySessionId: string): Promise<boolean> {
+  const normalized = identitySessionId.trim();
+  if (!opaqueIdPattern.test(normalized)) return Promise.resolve(false);
+  pendingSignOutSessionId = normalized;
+  latestPendingSignOutPreference = Object.freeze({
+    identitySessionId: normalized,
+    revision: (pendingSignOutRevision += 1),
+  });
+  return persistPendingSignOutPreference(latestPendingSignOutPreference);
+}
+
+export async function readPendingMobileSignOut(): Promise<PendingMobileSignOutRead> {
+  if (pendingSignOutSessionId !== undefined) {
+    return { status: 'pending', identitySessionId: pendingSignOutSessionId };
+  }
+  if (Platform.OS === 'web') return { status: 'none' };
+  const observedRevision = latestPendingSignOutPreference.revision;
+  try {
+    if (!(await boundSecureStoreOperation(SecureStore.isAvailableAsync()))) {
+      return { status: 'unavailable' };
+    }
+    const stored = await boundSecureStoreOperation(SecureStore.getItemAsync(pendingSignOutKey));
+    if (latestPendingSignOutPreference.revision !== observedRevision) {
+      return pendingSignOutSessionId === undefined
+        ? { status: 'none' }
+        : { status: 'pending', identitySessionId: pendingSignOutSessionId };
+    }
+    if (stored === null) return { status: 'none' };
+    if (!opaqueIdPattern.test(stored)) return { status: 'unavailable' };
+    pendingSignOutSessionId = stored;
+    latestPendingSignOutPreference = Object.freeze({
+      identitySessionId: stored,
+      revision: observedRevision,
+    });
+    return { status: 'pending', identitySessionId: stored };
+  } catch {
+    // Authentication must not resume when a pending-sign-out marker cannot be checked.
+    return { status: 'unavailable' };
+  }
+}
+
+export function clearPendingMobileSignOut(identitySessionId: string): Promise<boolean> {
+  const normalized = identitySessionId.trim();
+  if (
+    !opaqueIdPattern.test(normalized) ||
+    (pendingSignOutSessionId !== undefined && pendingSignOutSessionId !== normalized)
+  ) {
+    return Promise.resolve(false);
+  }
+  pendingSignOutSessionId = undefined;
+  latestPendingSignOutPreference = Object.freeze({
+    revision: (pendingSignOutRevision += 1),
+  });
+  return persistPendingSignOutPreference(latestPendingSignOutPreference);
 }
 
 export function beginMobileHouseholdSession(identitySessionId: string): MobileHouseholdSession {

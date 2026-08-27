@@ -1,4 +1,21 @@
-### Founder clicks/actions
+# Historical Founding Household go-live record
+
+Status: **superseded; not an operational production runbook**
+
+This document is retained to explain the earlier Run 3.1 evidence chain. Do not execute its
+numbered actions to create a new production Founding program, sponsorship, credential, invitation,
+enrollment, customer account, customer contact, or external-user cohort. Production intentionally
+refuses the historical Founding activation routes. The
+`founding-household:bootstrap-production` command is maintenance-only historical tooling pending a
+separate recovery-use review; do not run it for new production activation.
+
+Current implementation begins with `docs/post-launch-beta/RUN-NEXT-EXECUTION.md` and is controlled
+by `docs/post-launch-beta/EXECUTION-PLAN.md`,
+`docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md`, and the G0-G15 prompt pack. Their exact
+candidate, provider, deployment, payment, and customer gates take precedence over every numbered
+action below. The text below is archival evidence, not authority.
+
+### Historical founder clicks/actions
 
 This is a manual bridge for one free Founding Household. It does not authorize a public launch,
 payments, SMS, mobile-store submission, campaigns, DNS changes, or autonomous invitations. Stop at

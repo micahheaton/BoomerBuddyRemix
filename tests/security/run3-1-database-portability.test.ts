@@ -82,6 +82,8 @@ const launchCriticalEvidenceTables = [
   'commerce_stripe_cohort_policy_events_v2',
   'commerce_billing_reverification_mutex',
   'commerce_billing_reverification_bindings',
+  'public_check_attribution_aggregates',
+  'acquisition_touchpoints',
   'private_beta_access_intent_gate',
   'private_beta_access_intent_receipts',
   'private_beta_access_intent_rate_buckets',
@@ -183,6 +185,8 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         'artifacts',
         'analyses',
         'check_shares',
+        'public_check_attribution_aggregates',
+        'acquisition_touchpoints',
         'entitlement_grants',
         'founding_household_sponsor_backings',
         'founding_household_enrollments',
@@ -208,8 +212,12 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
     });
     const sql = snapshotInvocation.args.at(-1);
     expect(sql).toBeDefined();
+    expect(sql).toContain('json_object_agg(table_name, row_count ORDER BY table_name)');
+    expect(sql).not.toContain("'criticalCounts', json_build_object(");
     for (const table of launchCriticalEvidenceTables) {
-      expect(sql).toContain(`'${table}', (SELECT count(*)::bigint FROM "public"."${table}")`);
+      expect(sql).toContain(
+        `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
+      );
     }
   });
   it('parses one PostgreSQL URL into a scrubbed process environment without secret argv', () => {

@@ -1,10 +1,20 @@
 # First Customer: Seven-Day Critical Path
 
-Status: **candidate operating plan; calendar starts only after founder-owned staging prerequisites exist**
+Status: **historical Run 3 plan; superseded and not an operational customer-activation runbook**
 
 Last reviewed: 2026-08-16
 
-The shortest safe path is a web-first, founder-invited Founding Household with no card, followed by a separately gated Stripe test journey and live-activation review. Apple/Google store readiness does not block this path. “Day 1” below is a readiness-relative workday, not a promise that missing accounts, professional decisions, human participants, or provider review can be completed in seven calendar days.
+Do not execute this plan to create a new production Founding Household, customer invitation,
+credential, sponsorship, enrollment, or customer contact. Production now refuses the historical
+Founding activation path. Use `docs/post-launch-beta/EXECUTION-PLAN.md`,
+`docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md`, and the G0-G15 prompt pack as controlling
+references; begin current implementation at `docs/post-launch-beta/RUN-NEXT-EXECUTION.md`. This file
+remains only as historical planning evidence.
+
+Historically, this plan proposed a web-first, founder-invited Founding Household with no card,
+followed by a separately gated Stripe test journey and live-activation review. That route is no
+longer authorized. Apple/Google store readiness did not block that historical path. "Day 1" below is
+a historical readiness-relative workday, not a current schedule or authority.
 
 ## Entry criteria
 

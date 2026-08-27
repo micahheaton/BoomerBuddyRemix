@@ -234,15 +234,37 @@ describe('mobile production surface', () => {
     expect(apiOrigin).toContain(
       "export const productionMobileApiOrigin = 'https://api.boomerbuddy.net';",
     );
-    expect(api).toContain(
-      'readMobileAuthenticationToken({ skipCache: true }, authenticationContext)',
-    );
+    expect(api).toContain('readMobileAuthenticationToken(');
+    expect(api).toContain('skipCache: true');
     expect(app).toContain('completeMobileSignOut({');
+    expect(app).toContain('beginMobileSignOutAttempt({');
+    expect(app).toContain('planMobileSignOut({');
+    expect(app).toContain('readPendingMobileSignOut()');
+    expect(app).toContain('markPendingMobileSignOut(identitySessionId)');
+    expect(app).toContain('shouldUseProviderWideMobileSignOut({');
+    expect(app).toContain('classifyMobileSignOutInspection({');
+    expect(app).toContain("status: 'awaiting_provider_state'");
+    expect(app).toContain('mobileProviderStateSettleTimeoutMs');
+    expect(app).toContain("authenticationPurpose: 'session_sign_out'");
+    expect(app).toContain('readCurrentMobileAuthenticationToken({');
+    expect(app).toContain('isMobileHouseholdSessionCurrent(householdSession)');
+    expect(app).toContain("request?.purpose === 'session_sign_out'");
     expect(app).toContain('clerkSession?.id === identitySessionId');
     expect(app).toContain('clearMobileDeviceState(householdSession)');
     expect(app).toContain('clerkSignOut({ sessionId: identitySessionId })');
+    expect(app).toContain('? clerkSignOut()');
+    expect(app).not.toContain('if (!identitySessionId || !householdSession) return;');
     expect(app).toContain('isMobileAuthenticationContextCurrent(authenticationContext)');
-    expect(app).toContain('secure sign out did not finish');
+    expect(app).toContain('could not finish secure sign out');
+    expect(session).toContain("'boomerbuddy.mobile.pending-sign-out-session'");
+    expect(session).toContain('Authentication must not resume when a pending-sign-out marker');
+    expect(app).not.toContain('clearPendingSignOut:');
+    expect(app.indexOf("signOutState?.status === 'pending'")).toBeLessThan(
+      app.indexOf('if (!isLoaded || restoring)'),
+    );
+    expect(app.indexOf('setRestoredSession(undefined);')).toBeLessThan(
+      app.indexOf('operation: async () =>'),
+    );
     expect(combined).not.toContain('/v1/dev/sessions/mobile');
     expect(combined).not.toContain('writeSessionToken');
     expect(combined).not.toContain('readSessionToken');

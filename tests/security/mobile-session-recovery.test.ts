@@ -3,6 +3,7 @@ import {
   captureMobileAuthenticationContext,
   configureMobileAuthentication,
   isMobileAuthenticationContextCurrent,
+  readCurrentMobileAuthenticationToken,
   readMobileAuthenticationToken,
   recoverUnauthorizedMobileSession,
   type MobileAuthenticationBridge,
@@ -25,6 +26,27 @@ describe('mobile authentication recovery', () => {
 
     dispose();
     await expect(readMobileAuthenticationToken()).resolves.toBeNull();
+  });
+
+  it('does not release a token after its household session stops being current', async () => {
+    let current = true;
+    let releaseToken!: (token: string) => void;
+    const readToken = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          releaseToken = resolve;
+        }),
+    );
+    const token = readCurrentMobileAuthenticationToken({
+      isCurrent: () => current,
+      readToken,
+    });
+    expect(readToken).toHaveBeenCalledOnce();
+
+    current = false;
+    releaseToken('fresh-rotating-jti-token');
+
+    await expect(token).resolves.toBeNull();
   });
 
   it('coalesces forced token refreshes and bypasses the Clerk token cache', async () => {

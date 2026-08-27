@@ -2,9 +2,16 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { CheckKind, CheckResult, CreateCheckResponse } from '@boomerbuddy/contracts';
+import type {
+  CheckKind,
+  CheckResult,
+  CreateCheckResponse,
+  FamilyResponse,
+  MeResponse,
+  PrincipalDto,
+} from '@boomerbuddy/contracts';
 import { PublicFooter, PublicHeader } from '../../components/public-shell';
-import { ApiError, apiRequest, readableError } from '../../lib/api';
+import { ApiError, apiRequest, readableError, setSelectedHouseholdId } from '../../lib/api';
 
 type PublicAttribution = {
   source: 'direct' | 'organic' | 'partner' | 'campaign';
@@ -47,6 +54,12 @@ type PublicCheckResult = {
   };
 };
 
+type PublicHouseholdChoice = {
+  id: string;
+  label: string;
+  detail: string;
+};
+
 const riskText: Record<CheckResult['risk'], string> = {
   caution: 'Use caution',
   high_concern: 'High concern',
@@ -67,6 +80,16 @@ const redactionText: Record<
   authorization_credential: 'password or access-code pattern',
   one_time_code: 'one-time code',
 };
+
+function householdChoiceDetail(scope: PrincipalDto['households'][number]): string {
+  return [
+    scope.isAdministrator ? 'administrator' : 'member',
+    scope.isProtectedMember ? 'protected adult' : '',
+    scope.isBillingManager ? 'billing manager' : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
 
 function attributionFromLocation(): PublicAttribution {
   if (typeof window === 'undefined') return { source: 'direct', campaign: 'none' };
@@ -103,6 +126,8 @@ export default function PublicCheckPage() {
   const [error, setError] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
   const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [householdChoices, setHouseholdChoices] = useState<PublicHouseholdChoice[]>([]);
+  const [saveHouseholdId, setSaveHouseholdId] = useState('');
   const attribution = useRef<PublicAttribution | undefined>(undefined);
   const resultHeading = useRef<HTMLHeadingElement>(null);
 
@@ -138,6 +163,8 @@ export default function PublicCheckPage() {
     setError('');
     setSaveStatus('');
     setNeedsSignIn(false);
+    setHouseholdChoices([]);
+    setSaveHouseholdId('');
     setSavedCheck(undefined);
     setResult(undefined);
     try {
@@ -162,6 +189,31 @@ export default function PublicCheckPage() {
     }
   }
 
+  async function loadHouseholdChoices(): Promise<number> {
+    const me = await apiRequest<MeResponse>('/v1/me', {
+      publicCheckHandoff: 'household_discovery',
+    });
+    const eligibleScopes = me.principal.households.filter((scope) => scope.isProtectedMember);
+    const choices = await Promise.all(
+      eligibleScopes.map(async (scope, index): Promise<PublicHouseholdChoice> => {
+        let label = `Household ${index + 1}`;
+        try {
+          const family = await apiRequest<FamilyResponse>('/v1/family', {
+            publicCheckHandoff: 'household_name',
+            headers: { 'X-BB-Household-Id': scope.id },
+          });
+          label = family.household.name;
+        } catch {
+          // A numbered fallback avoids exposing opaque IDs when a name is unavailable.
+        }
+        return { id: scope.id, label, detail: householdChoiceDetail(scope) };
+      }),
+    );
+    setHouseholdChoices(choices);
+    setSaveHouseholdId('');
+    return choices.length;
+  }
+
   async function saveToHousehold() {
     if (!result || savedCheck) return;
     setBusy('save');
@@ -173,6 +225,7 @@ export default function PublicCheckPage() {
         `/v1/public/checks/${encodeURIComponent(result.id)}/save`,
         {
           method: 'POST',
+          publicCheckHandoff: 'conversion_save',
           body: JSON.stringify({
             conversionToken: result.conversionGrant.token,
             saveConsent: true,
@@ -190,6 +243,28 @@ export default function PublicCheckPage() {
         setSaveStatus(
           'Sign in in another tab, return here, and choose Save again before this result expires.',
         );
+      } else if (
+        caught instanceof ApiError &&
+        caught.status === 409 &&
+        caught.code === 'conflict'
+      ) {
+        try {
+          const eligibleHouseholdCount = await loadHouseholdChoices();
+          setSaveStatus(
+            eligibleHouseholdCount > 0
+              ? 'Choose the household that should receive this Check, then choose Save.'
+              : 'Your account does not have an eligible protected-adult household for saving this Check.',
+          );
+        } catch (householdError) {
+          if (householdError instanceof ApiError && householdError.status === 401) {
+            setNeedsSignIn(true);
+            setSaveStatus(
+              'Sign in in another tab, return here, and choose Save again before this result expires.',
+            );
+          } else {
+            setSaveStatus(readableError(householdError));
+          }
+        }
       } else {
         setSaveStatus(readableError(caught));
       }
@@ -377,10 +452,39 @@ export default function PublicCheckPage() {
                   the selected household. BoomerBuddy saves the version with supported sensitive
                   patterns already removed. Trying again can return only this same saved Check.
                 </p>
+                {householdChoices.length > 0 ? (
+                  <div className="form-stack">
+                    <label htmlFor="public-check-household">Household for this saved Check</label>
+                    <select
+                      id="public-check-household"
+                      value={saveHouseholdId}
+                      onChange={(event) => {
+                        const householdId = event.target.value;
+                        setSaveHouseholdId(householdId);
+                        setSelectedHouseholdId(householdId);
+                      }}
+                    >
+                      <option value="">Choose a household</option>
+                      {householdChoices.map((choice) => (
+                        <option key={choice.id} value={choice.id}>
+                          {choice.label} - {choice.detail}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="help">
+                      This choice stays in this tab and is used only for requests you make while the
+                      tab remains open.
+                    </p>
+                  </div>
+                ) : null}
                 <button
                   className="button-secondary"
                   type="button"
-                  disabled={busy !== '' || Boolean(savedCheck)}
+                  disabled={
+                    busy !== '' ||
+                    Boolean(savedCheck) ||
+                    (householdChoices.length > 0 && !saveHouseholdId)
+                  }
                   onClick={() => void saveToHousehold()}
                 >
                   {savedCheck

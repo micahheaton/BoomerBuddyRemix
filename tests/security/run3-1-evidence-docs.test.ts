@@ -9,10 +9,14 @@ async function document(name: string): Promise<string> {
 }
 
 describe('Run 3.1 founder evidence documents', () => {
-  it('starts with exact founder actions and preserves the executable production bootstrap contract', async () => {
+  it('marks the Founding bootstrap instructions historical and points to the current entry', async () => {
     const runbook = await document('FOUNDING-HOUSEHOLD-GO-LIVE.md');
 
-    expect(runbook.startsWith('### Founder clicks/actions\n')).toBe(true);
+    expect(runbook.startsWith('# Historical Founding Household go-live record\n')).toBe(true);
+    expect(runbook).toContain('superseded; not an operational production runbook');
+    expect(runbook).toMatch(/Do not execute its\s+numbered actions/u);
+    expect(runbook).toContain('docs/post-launch-beta/RUN-NEXT-EXECUTION.md');
+    expect(runbook).toContain('maintenance-only historical tooling');
     expect(runbook).toContain('npm run identity:bootstrap-founder');
     expect(runbook).toContain('npm run founding-household:bootstrap-production');
     expect(runbook).toContain('--benefit-key family_beta_v1');
@@ -40,6 +44,7 @@ describe('Run 3.1 founder evidence documents', () => {
       'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
       'CLERK_SECRET_KEY',
       'NEXT_PUBLIC_CLERK_SIGN_IN_URL',
+      'BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED',
       'BB_API_HOST',
       'BB_API_PORT',
       'BB_TRUSTED_PROXY_HOPS',

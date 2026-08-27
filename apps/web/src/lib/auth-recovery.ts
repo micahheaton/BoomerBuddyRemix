@@ -1,3 +1,5 @@
+import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
+
 export const selectedHouseholdStorageKey = 'boomerbuddy.selected-household';
 export const protectedSelfOperationStoragePrefix = 'bb:protected-self:';
 export const productionSessionRecoveryPath = '/sign-in/session-recovery';
@@ -151,7 +153,12 @@ export async function clearClerkSessionWhenLoaded(input: {
   readonly wait?: RecoveryWait;
 }): Promise<void> {
   await waitForClerkLoaded(input);
-  await input.clearClerkSession();
+  const outcome = await settleIdentitySignOut({
+    clearIdentitySession: input.clearClerkSession,
+  });
+  if (outcome !== 'cleared') {
+    throw new Error('The identity session could not be cleared within the recovery boundary.');
+  }
 }
 
 export async function clearClerkSessionAndNavigate(input: {

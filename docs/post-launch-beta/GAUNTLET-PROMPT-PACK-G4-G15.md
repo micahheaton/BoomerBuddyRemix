@@ -249,7 +249,7 @@ Read AGENTS.md; EXECUTION-PLAN.md and supplement; OFFER-HYPOTHESIS-REGISTRY.md a
 
 Allowed actions
 
-Use fresh synthetic customer/HQ identities in approved non-production realms. Rehearse invite, sign-in, consent, roles, orientation, actual synthetic Check, optional redacted share, billing-authority grant, sandbox Checkout, signed webhooks, entitlement, receipt guidance, support, feedback, return, cancel, refund, teardown, and rollback. Inject failure/replay/delay/outage. Fix only proven blockers with regression, then restart clean.
+Use fresh synthetic customer/HQ identities in approved non-production realms. Run two clean rehearsals, each with separate fresh customer and HQ sessions and reset synthetic state. Rehearse invite, sign-in, consent, roles, orientation, actual synthetic Check, optional redacted share, billing-authority grant, sandbox Checkout, signed webhooks, entitlement, receipt guidance, support, feedback, return, cancel, refund, teardown, and rollback. Give each run its own candidate-bound receipt. Inject failure/replay/delay/outage. Fix only proven blockers with regression, then restart clean.
 
 Forbidden actions
 
@@ -261,7 +261,7 @@ Run customer journey; auth/adversarial; payment/reconciliation; support/incident
 
 Evidence gates
 
-Clean-account rehearsal passes signup through payment/use/support/cancel/refund/teardown. Failure matrix includes decline, action required, duplicate/delayed/out-of-order webhook, entitlement loss, unknown Checkout, restart, outage, consent withdrawal, cross-realm, restore, and timed rollback. No PII/secrets. Any unresolved P0 or launch-critical P1 is no-go; other P1 requires owner/date/bounded exposure/founder acceptance.
+Two clean-account rehearsals pass signup through payment/use/support/cancel/refund/teardown with separate fresh customer and HQ sessions, state reset, and separate receipts. Failure matrix includes decline, action required, duplicate/delayed/out-of-order webhook, entitlement loss, unknown Checkout, restart, outage, consent withdrawal, cross-realm, restore, and timed rollback. No PII/secrets. Any unresolved P0 or launch-critical P1 is no-go; other P1 requires owner/date/bounded exposure/founder acceptance.
 
 Tests
 
@@ -281,7 +281,7 @@ Reset only synthetic environments through approved procedures. Revert fixes only
 
 Verifiable completion
 
-Complete only when one clean rehearsal passes, every forced failure reaches a safe state, rollback is timed, the packet binds exact SHA/tag, and founder-only actions are ordered.
+Complete only when both clean rehearsals pass from reset state with separate fresh customer and HQ sessions and separate receipts, every forced failure reaches a safe state, rollback is timed, the packet binds exact SHA/tag, and founder-only actions are ordered.
 
 Durable goal
 

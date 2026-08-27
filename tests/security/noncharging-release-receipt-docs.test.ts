@@ -44,7 +44,7 @@ describe('noncharging release documentation', () => {
     expect(receipt).toMatch(/never alter or replace the\s+authorized snapshot/u);
   });
 
-  it('keeps the release default-off and proves zero customer or money effect', async () => {
+  it('keeps the live release default-off and separates sandbox rehearsal evidence', async () => {
     const receipt = await repositoryDocument(
       'docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md',
     );
@@ -55,9 +55,10 @@ describe('noncharging release documentation', () => {
       'stripe_database_initiation=false',
       'stripe_active_cohort=0',
       'stripe_eligible_customer_households=0',
-      'stripe_checkout_or_portal_sessions_created=0',
-      'stripe_customers_or_subscriptions_created=0',
-      'money_moved=false',
+      'stripe_live_checkout_or_portal_sessions_created=0',
+      'stripe_live_customers_or_subscriptions_created=0',
+      'stripe_live_money_moved=false',
+      'stripe_sandbox_rehearsal_objects_torn_down=true',
       'customer_contacted=false',
       'customer_pii_retained=false',
       'twilio_enabled=false',
@@ -131,10 +132,13 @@ describe('noncharging release documentation', () => {
     );
   });
 
-  it('inventories live Stripe before writes and separately authorizes program and customer activation', async () => {
-    const [receipt, goLive] = await Promise.all([
+  it('inventories live Stripe before writes and marks the Founding activation path historical', async () => {
+    const [receipt, goLive, verdict, firstCustomer, playbook] = await Promise.all([
       repositoryDocument('docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md'),
       repositoryDocument('docs/run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md'),
+      repositoryDocument('docs/run-3/00-EXECUTIVE-VERDICT.md'),
+      repositoryDocument('docs/run-3/FIRST-CUSTOMER-7-DAY-PLAN.md'),
+      repositoryDocument('docs/run-3/FOUNDING-HOUSEHOLD-PLAYBOOK.md'),
     ]);
     const liveStripe = receipt.slice(
       receipt.indexOf('### H. Configure minimum live Stripe'),
@@ -151,19 +155,57 @@ describe('noncharging release documentation', () => {
     expect(liveStripe).toMatch(/exact\s+before\/after counts/u);
     expect(liveStripe).toContain('scope drift: stop before the first write');
 
-    const programBoundary = goLive.indexOf('NONCHARGING AUTHORITY ENDS BEFORE STEP 19');
-    const step19 = goLive.indexOf('19. With that same controlled database connection');
-    const customerBoundary = goLive.indexOf('`READY_FOR_FOUNDING_HOUSEHOLD` is evidence');
-    const step27 = goLive.indexOf('27. In customer Clerk **Invitations**');
+    expect(goLive).toContain('Status: **superseded; not an operational production runbook**');
+    expect(goLive).toMatch(/Do not execute its\s+numbered actions/u);
+    expect(goLive).toContain('maintenance-only historical tooling');
+    expect(verdict).toContain(
+      'The Run 3 Founding Household customer path is historical evidence only',
+    );
+    expect(verdict).toContain('The current implementation entry point is');
+    expect(firstCustomer).toContain(
+      'superseded and not an operational customer-activation runbook',
+    );
+    expect(playbook).toContain('not an operational production runbook');
+    expect(verdict).not.toMatch(/remain the operational\s+handoff/u);
+  });
 
-    expect(programBoundary).toBeGreaterThanOrEqual(0);
-    expect(step19).toBeGreaterThan(programBoundary);
-    expect(goLive).toContain('`founding_program_activation`');
-    expect(goLive).toContain('Step 19 and step 20 must each be named');
-    expect(customerBoundary).toBeGreaterThanOrEqual(0);
-    expect(step27).toBeGreaterThan(customerBoundary);
-    expect(goLive).toContain('`founding_customer_activation`');
-    expect(goLive).toMatch(/do not\s+authorize customer contact/u);
+  it('records exact default-off acquisition and support rollout plus two clean rehearsals', async () => {
+    const [receipt, manifest, runbook, gauntlet, cohort] = await Promise.all([
+      repositoryDocument('docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md'),
+      repositoryDocument('docs/run-3-1/REPLIT-ENVIRONMENT-MANIFEST.md'),
+      repositoryDocument('docs/run-3/REPLIT-FIRST-LAUNCH-RUNBOOK.md'),
+      repositoryDocument('docs/post-launch-beta/GAUNTLET-PROMPT-PACK-G4-G15.md'),
+      repositoryDocument('docs/run-3/FIRST-COHORT-AND-DISCOVERY-WORKFLOW.md'),
+    ]);
+    const deploymentContract = `${receipt}\n${manifest}\n${runbook}`;
+
+    for (const control of [
+      'BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED',
+      'BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED',
+      'BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED',
+      'BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED',
+      'BB_SUPPORT_RECEIPTS_INTAKE_ENABLED',
+    ]) {
+      expect(receipt).toContain(`${control}=false`);
+      expect(manifest).toContain(`\`${control}\``);
+      expect(runbook).toContain(`\`${control}\``);
+    }
+    expect(deploymentContract).toMatch(
+      /keep support intake false[\s\S]*customer access and HQ queue true/iu,
+    );
+    expect(deploymentContract).toMatch(/roll back intake first/iu);
+    expect(deploymentContract).toContain('PRIVATE-BETA-ACCESS-INTENTS.md');
+    expect(receipt).toContain('private_beta_access_intents_edge_guard_api=false');
+    expect(receipt).toContain('private_beta_access_intents_edge_guard_web=false');
+    expect(receipt).toContain('customer_clerk_self_deletion_disabled_confirmed=true');
+    expect(receipt).toContain('BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED=true');
+    expect(receipt).toContain('approved isolated nonproduction');
+    expect(receipt).toContain('first_customer_rehearsal_1=<separate receipt ID>:passed');
+    expect(receipt).toContain('first_customer_rehearsal_2=<separate receipt ID>:passed');
+    expect(gauntlet).toMatch(/two clean rehearsals/iu);
+    expect(gauntlet).toMatch(/separate fresh customer and HQ sessions/iu);
+    expect(gauntlet).toMatch(/reset synthetic state/iu);
+    expect(cohort).toContain('1 -> 3 -> 5');
   });
 
   it('discovers the tagged migration suffix exactly and tracks the current end of chain', async () => {

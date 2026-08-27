@@ -148,12 +148,15 @@ The completed action manifest may include only:
   approved account support, legal, receipt, tax, payout, and descriptor settings;
 - managed PostgreSQL migration, encrypted backup, independent restore, and synthetic verification;
 - exact-tag pulls, builds, and initiation-disabled deployments for web, API, worker, and HQ;
-- synthetic health, authentication, support, monitoring, alert, drain, and rollback drills; and
+- bounded synthetic health, authentication, private-beta access-intent, content-free support,
+  monitoring, alert, drain, and rollback drills with every temporary control returned to false; and
 - read-only provider inventory and reconciliation.
 
-It never includes customer contact, customer consent, a customer account, a Checkout or Portal
-Session, a live Customer, Subscription, Invoice, PaymentIntent, Charge, Refund, Dispute, payout,
-public store submission, paid infrastructure expansion outside the recorded ceiling, or Twilio.
+It never includes customer contact, customer consent, a live or production customer account, a live
+Checkout or Portal Session, a live Customer, Subscription, Invoice, PaymentIntent, Charge, Refund,
+Dispute, payout, public store submission, paid infrastructure expansion outside the recorded
+ceiling, or Twilio. Fresh synthetic identities and sandbox payment objects are allowed only inside
+the isolated nonproduction rehearsals expressly listed below and must be torn down safely.
 
 ## 6. Exact noncharging action order
 
@@ -241,8 +244,23 @@ For each of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boo
    `git status --porcelain=v1 --untracked-files=all` in the project and published build context. A
    different snapshot commit is rejected even when its tree is identical.
 3. Build and deploy API, then one worker, then customer web, then HQ. Initial deployment keeps
-   `BB_STRIPE_MODE=disabled`, `BB_TWILIO_MODE=disabled`, support intake default-off until its drill,
-   and every production migration switch false.
+   `BB_STRIPE_MODE=disabled`, `BB_TWILIO_MODE=disabled`, every production migration switch false,
+   and these exact default-off controls:
+
+   ```text
+   API: BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED=false
+   API: BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED=false
+   API: BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED=false
+   API: BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED=false
+   API: BB_SUPPORT_RECEIPTS_INTAKE_ENABLED=false
+   customer web: BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED=false
+   customer web: BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED=false
+   customer web: BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED=false
+   worker and HQ: all five variable names absent
+   API, worker, HQ, and mobile: BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED absent
+   ```
+
+   Record names and booleans only. Do not rely on an omitted default.
 4. Record project, service, credential safe ID, release SHA/tag/tree, build ID, deployment ID, region,
    origin, manifest-name digest, start result, and prior rollback deployment. Record no secret value.
 5. Prove API live and ready health, private worker liveness plus current database heartbeat, public
@@ -263,6 +281,9 @@ Customer production application:
 - configure exact Customer issuer, `boomerbuddy-customer` audience, Customer-only keys and cookies,
   the operation-bound `reverification_id` claim, authenticator-app MFA, backup recovery, and the
   required MFA policy; and
+- disable direct Clerk self-deletion so all customer deletion continues through BoomerBuddy's
+  protected deletion workflow; only after provider and deployed-route proof set
+  `BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED=true` on customer web and redeploy it; and
 - configure approved privacy and terms URLs plus the separately reviewed `boomerbuddy-mobile` JWT
   template before claiming native authentication.
 
@@ -389,15 +410,29 @@ canonical invoice-paid entitlement remain mandatory.
 2. Prove API and worker health, worker heartbeat age, inventory completion, webhook endpoint health,
    redacted logs, hosted alert receipt, acknowledgement by primary and backup, database backup age,
    and support queue handling.
-3. Enable content-free support receipts only for the synthetic drill after customer history and HQ
-   queue access are proved. Confirm intake, acknowledgement, transition, withdrawal, tenant denial,
-   retry, and rollback. Do not promise 24-hour human service.
-4. Time a rollback to the immediately prior deployment, then redeploy the exact candidate while all
+3. Rehearse private-beta access intents only after the deployed edge guard, owned mailbox,
+   retention, and rollback gates in `docs/run-3/PRIVATE-BETA-ACCESS-INTENTS.md` pass. Set both access
+   variables true on API and web together, prove one bounded synthetic receipt, then set the enabled
+   variable false on both services and return the edge confirmation to false.
+4. Keep support intake false. Set `BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED=true` and
+   `BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED=true` on API first; redeploy and prove both read paths with
+   separate synthetic customer and HQ sessions. Then set `BB_SUPPORT_RECEIPTS_INTAKE_ENABLED=true`
+   and confirm intake, acknowledgement, transition, withdrawal, tenant denial, retry, and rollback.
+   Roll back intake first, then return all three support variables to false. Do not promise 24-hour
+   human service.
+5. Run two clean synthetic first-customer rehearsals only in approved isolated nonproduction
+   customer and HQ test realms with the isolated Stripe commerce sandbox. Each run uses fresh,
+   separate customer and HQ sessions, starts from reset synthetic state, includes only sandbox
+   Checkout/webhook/cancel/refund objects, ends in a safe teardown, and has its own candidate-bound
+   receipt. No live customer account, live payment object, customer contact, or customer data is
+   allowed. A pass from one run cannot close the other.
+6. Time a rollback to the immediately prior deployment, then redeploy the exact candidate while all
    Stripe initiation controls remain closed. Do not down-migrate.
-5. Reconcile Stripe request logs, inventory, application controls, Replit deployment IDs, database
-   state, Clerk audit logs, and GitHub refs. Prove no customer contact, customer data, Checkout or
-   Portal Session, payment object, money movement, Twilio action, legacy change, or mobile-store
-   action occurred.
+7. Reconcile Stripe request logs, inventory, application controls, Replit deployment IDs, database
+   state, Clerk audit logs, and GitHub refs. Prove no customer contact, customer data, live
+   production Checkout or Portal Session, live payment object, live money movement, Twilio action,
+   legacy change, or mobile-store action occurred. Separately reconcile the named isolated sandbox
+   objects to the two rehearsal receipts and prove their required safe teardown.
 
 ## 7. Per-service Replit receipt
 
@@ -485,8 +520,10 @@ Stop the affected lane immediately on:
 - unexpected Stripe resource, annual/Individual/referral object, wrong price field, Tax mismatch,
   unknown receipt setting, missing legal/support setting, wrong webhook/event/version, key custody
   crossover, provider ambiguity, or legacy endpoint contact;
-- any Checkout or Portal Session, Customer, Subscription, Invoice, PaymentIntent, Charge, Refund,
-  Dispute, payout, customer contact, mobile-store action, or money movement;
+- any live production Checkout or Portal Session, Customer, Subscription, Invoice, PaymentIntent,
+  Charge, Refund, Dispute, payout, customer contact, mobile-store action, or money movement;
+- any sandbox object outside the named isolated commerce sandbox and rehearsal receipts, or any
+  incomplete sandbox teardown;
 - any API/worker initiation switch true, enabled database initiation, open cohort, eligible customer
   household, or customer billing-authority activation;
 - failed health, worker heartbeat, raw-body signature, inventory, redaction, alert, support, drain,
@@ -553,15 +590,27 @@ stripe_worker_runtime_initiation=false
 stripe_database_initiation=false
 stripe_active_cohort=0
 stripe_eligible_customer_households=0
-stripe_checkout_or_portal_sessions_created=0
-stripe_customers_or_subscriptions_created=0
-money_moved=false
+stripe_live_checkout_or_portal_sessions_created=0
+stripe_live_customers_or_subscriptions_created=0
+stripe_live_money_moved=false
+stripe_sandbox_rehearsal_receipts=<two separate safe receipt IDs>
+stripe_sandbox_rehearsal_objects_torn_down=true
 customer_contacted=false
 customer_pii_retained=false
 twilio_enabled=false
 legacy_boomerbuddy_changed=false
 monitoring_alert_receipt=passed
 support_rehearsal=passed
+support_receipts_customer_access=false
+support_receipts_hq_queue=false
+support_receipts_intake=false
+customer_clerk_self_deletion_disabled_confirmed=true
+private_beta_access_intents_api=false
+private_beta_access_intents_web=false
+private_beta_access_intents_edge_guard_api=false
+private_beta_access_intents_edge_guard_web=false
+first_customer_rehearsal_1=<separate receipt ID>:passed
+first_customer_rehearsal_2=<separate receipt ID>:passed
 timed_rollback=passed
 final_disposition=NONCHARGING_READY_CHECKOUT_CLOSED
 ```

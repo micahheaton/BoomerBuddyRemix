@@ -77,6 +77,7 @@ additional set, or any altered inventory or lock metadata remains a hard failure
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Select the correct browser Clerk application               | No      | customer or HQ `pk_live_...`                                  | W/H                      | Required in production; customer and HQ values come from separate Clerk apps. At build, the reviewed Next config aliases Replit-managed `CLERK_PUBLISHABLE_KEY` when this name is absent. |
 | `CLERK_SECRET_KEY`                  | Clerk Next.js server/middleware credential                 | Yes     | matching Clerk production application                         | W/H                      | Required only in the matching project. Missing makes every matched production request return no-store 503. Never prefix with `NEXT_PUBLIC_`.                   |
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL`     | Pin Clerk server and browser redirects to the local route  | No      | exactly `/sign-in`                                            | W/H                      | Required exactly as shown. Missing or any other value makes every matched production request return no-store 503 instead of falling back to the hosted Account Portal. |
+| `BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED` | Gate the embedded Customer Clerk security profile | No | exactly `false` until provider proof, then `true` | W only | While false or absent, `/member/account-security` refuses to mount the broader Clerk profile. Set true only after the Customer Clerk instance proves direct self-deletion disabled; omit from API, worker, HQ, and mobile. |
 | `NEXT_PUBLIC_API_URL`               | Legacy local direct API target                             | No      | not set                                                       | none in production       | Production client uses same-origin `/api`; omit.                                                                                                               |
 | `EXPO_PUBLIC_API_URL`               | Mobile direct API target                                   | No      | not set                                                       | none                     | Mobile is outside Run 3.1 deployment.                                                                                                                          |
 
@@ -97,6 +98,10 @@ The matching Customer Clerk production instance uses this exact application-path
 - Self-hosted sign-in component URL: `https://app.boomerbuddy.net/sign-in`, backed by the Next
   catch-all route `/sign-in/[[...sign-in]]` and `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`.
 - Account Portal fallback after customer sign-in: `https://app.boomerbuddy.net/member`.
+- Direct Clerk self-deletion: disabled. Keep
+  `BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED=false` until this exact provider setting and
+  the BoomerBuddy account-deletion workflow are proved together; then set it true on customer web
+  only and re-run the authenticated account-security route test.
 
 Keep the existing root-domain Clerk infrastructure, including `accounts.boomerbuddy.net` and the
 reviewed Clerk Frontend API or OAuth callback domain. These hosts are identity-provider
@@ -166,6 +171,32 @@ near-match probes fail closed on both applications.
 
 `BB_SESSION_SECRET` is intentionally **absent** in production. Supplying it refuses startup because
 production accepts only Clerk's exact `__session`; the secret exists only for local development.
+
+### Default-off acquisition and support controls
+
+These nonsecret controls are part of the exact deployment manifest. Do not omit them and rely on an
+implicit default. Worker and HQ projects must not receive them.
+
+| Variable | API project | Customer web project | Activation and failure behavior |
+| --- | --- | --- | --- |
+| `BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED` | exactly `false` at baseline | exactly `false` at baseline | May become `true` on API and web only after the edge gate below is proved. A mismatched pair is a hard stop. |
+| `BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED` | exactly `false` at baseline | exactly `false` at baseline | May become `true` with the access-intent switch only after deployed edge rate limiting, mailbox ownership, retention, and rollback are proved. |
+| `BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED` | exactly `false` at baseline | absent | Enable first for a synthetic drill so an authenticated customer can read only their own content-free receipts. |
+| `BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED` | exactly `false` at baseline | absent | Enable with customer access and before intake so a recently MFA-verified HQ operator can see the content-free queue. |
+| `BB_SUPPORT_RECEIPTS_INTAKE_ENABLED` | exactly `false` at baseline | absent | Enable last, only after both read paths pass. Disable first on rollback. |
+
+Access-intent activation follows `docs/run-3/PRIVATE-BETA-ACCESS-INTENTS.md`: prove the deployed edge
+guard and owned mailbox, set both access-intent variables true on API and web for the same exact
+release, then run the bounded synthetic receipt and rollback drill. Disable by setting
+`BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED=false` on both services first, then return the edge
+confirmation to false when the evidence is no longer current.
+
+Support activation is API-only. Keep intake false while setting customer access and HQ queue true;
+redeploy API and prove both paths with separate synthetic customer and HQ sessions. Only then set
+intake true and run create, idempotent retry, acknowledgement, transition, withdrawal, tenant
+denial, and rollback. Roll back by setting intake false first, then customer access and HQ queue
+false. Record only names, booleans, exact release identity, timestamps, and content-free receipt
+IDs. Never record PII or submitted content.
 
 ### Surface-separated live Stripe configuration
 

@@ -53,8 +53,11 @@ const customerPublicPages = [
   'apps/web/src/app/account-deletion/page.tsx',
   'apps/web/src/app/billing-terms/page.tsx',
   'apps/web/src/app/check/page.tsx',
+  'apps/web/src/app/error.tsx',
   'apps/web/src/app/feedback/page.tsx',
+  'apps/web/src/app/global-error.tsx',
   'apps/web/src/app/how-it-works/page.tsx',
+  'apps/web/src/app/not-found.tsx',
   'apps/web/src/app/page.tsx',
   'apps/web/src/app/pricing/page.tsx',
   'apps/web/src/app/privacy/page.tsx',
@@ -65,6 +68,7 @@ const customerPublicPages = [
 ] as const;
 
 const customerGuardedPages = [
+  'apps/web/src/app/member/account-security/[[...account-security]]/page.tsx',
   'apps/web/src/app/member/billing/page.tsx',
   'apps/web/src/app/member/billing/success/page.tsx',
   'apps/web/src/app/member/check/page.tsx',

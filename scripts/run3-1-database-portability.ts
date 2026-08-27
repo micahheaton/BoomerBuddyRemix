@@ -41,6 +41,8 @@ export const criticalPortabilityTables = [
   'public_check_contexts',
   'public_check_results',
   'public_check_conversions',
+  'public_check_attribution_aggregates',
+  'acquisition_touchpoints',
   'consents',
   'consent_evidence',
   'consent_current_projections',
@@ -529,10 +531,19 @@ export function buildPgRestoreInvocation(input: {
 }
 
 const snapshotSql = `SELECT json_build_object(
-  'criticalCounts', json_build_object(
-    ${criticalPortabilityTables
-      .map((table) => `'${table}', (SELECT count(*)::bigint FROM "public"."${table}")`)
-      .join(',\n    ')}
+  'criticalCounts', COALESCE(
+    (
+      SELECT json_object_agg(table_name, row_count ORDER BY table_name)
+      FROM (
+        ${criticalPortabilityTables
+          .map(
+            (table) =>
+              `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
+          )
+          .join('\n        UNION ALL\n        ')}
+      ) AS critical_counts
+    ),
+    '{}'::json
   ),
   'migrations', COALESCE(
     (SELECT json_agg(version || ':' || checksum ORDER BY version) FROM "public"."schema_migrations"),

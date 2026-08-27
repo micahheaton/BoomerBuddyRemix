@@ -3,6 +3,7 @@
 import { SignIn, useAuth, useClerk } from '@clerk/nextjs';
 import { useState } from 'react';
 import { apiPaths } from '@boomerbuddy/contracts';
+import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
 import { hqRequest } from '../lib/api';
 
 export function ProductionHqSignIn() {
@@ -64,8 +65,9 @@ export function ProductionHqSignOut({ onSignedOut }: { onSignedOut: () => void }
     } catch {
       // Always revoke Clerk's upstream session even if the local session is already unavailable.
     } finally {
-      await clerk.signOut({ redirectUrl: '/sign-in' });
+      await settleIdentitySignOut({ clearIdentitySession: () => clerk.signOut() });
       onSignedOut();
+      window.location.replace('/sign-in');
     }
   }
 

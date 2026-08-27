@@ -118,8 +118,11 @@ describe('production identity UI boundary', () => {
     for (const implementation of [memberSignOut, hqSignOut]) {
       expect(implementation).toContain("method: 'DELETE'");
       expect(implementation).toContain('clerk.signOut');
-      expect(implementation).toContain("redirectUrl: '/sign-in'");
+      expect(implementation).toContain('settleIdentitySignOut');
+      expect(implementation).toContain('window.location.replace(');
     }
+    expect(memberSignOut).toContain('productionSessionRecoveryPath');
+    expect(hqSignOut).toContain("window.location.replace('/sign-in')");
   });
 
   it('fails closed without Clerk and protects production member and HQ routes', async () => {

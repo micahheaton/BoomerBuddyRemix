@@ -188,6 +188,27 @@ Secret values stay only in the matching Replit project Secrets or an approved st
 - `BB_STRIPE_LIVE_API_RESTRICTED_KEY`
 - `BB_STRIPE_LIVE_WEBHOOK_SECRET`
 
+### Default-off acquisition and support names
+
+| Variable | API | Customer web | Worker/HQ |
+| --- | --- | --- | --- |
+| `BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED` | `false` baseline | `false` baseline | absent |
+| `BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED` | `false` baseline | `false` baseline | absent |
+| `BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED` | `false` baseline | absent | absent |
+| `BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED` | `false` baseline | absent | absent |
+| `BB_SUPPORT_RECEIPTS_INTAKE_ENABLED` | `false` baseline | absent | absent |
+
+Do not rely on omission as the deployment record. Bind these exact names and false values to the
+release receipt. For private-beta access intents, follow
+`PRIVATE-BETA-ACCESS-INTENTS.md`: prove the edge and mailbox gates, then set both access-intent
+variables true on API and customer web together. On rollback, set the enabled variable false on
+both services first, then return the edge confirmation to false.
+
+For content-free support receipts, keep intake false; set customer access and HQ queue true on API;
+redeploy and prove both read paths with separate synthetic sessions; then set intake true and run
+the bounded drill. Roll back intake first, then return all three support variables to false. Never
+place these variables on worker, customer web, or HQ, and never use customer PII in the drill.
+
 ### Stripe surface-separated names
 
 - `BB_STRIPE_MODE`
@@ -252,6 +273,12 @@ stops launch verification and requires lower concurrency or a larger compute bef
 - `NEXT_PUBLIC_API_URL`
 - `EXPO_PUBLIC_API_URL`
 
+Customer web also requires
+`BB_CUSTOMER_CLERK_SELF_DELETION_DISABLED_CONFIRMED=false` at baseline. Set it true only after the
+Customer Clerk instance proves direct self-deletion disabled and the protected BoomerBuddy deletion
+workflow remains canonical. While false, `/member/account-security` intentionally does not mount
+the broader Clerk profile. Omit this variable from API, worker, HQ, and mobile.
+
 Public build variables are not secrets. They must contain only the intended HTTPS API origin and must be set before building each client.
 
 ## Persistent data and filesystem rules
@@ -297,8 +324,11 @@ Before DNS or customer invitation:
 5. Run the full Edge suite against staging with synthetic personas only.
 6. Exercise Public Check behind the actual proxy path and validate `BB_TRUSTED_PROXY_HOPS` against observed addresses; forged forwarding headers must not bypass quotas.
 7. Verify redacted logs and alerts without submitting real scam content, secrets, or customer data.
-8. If Stripe test configuration exists, use signed test webhooks and test-mode objects only. Confirm no live key or live product ID is loaded.
-9. Stop one worker during a leased test job and prove reclaim/reconciliation before adding another worker.
+8. Confirm all five acquisition/support variables match the recorded false baseline. If their
+   synthetic drills are in scope, follow the exact staged activation and rollback order above and
+   finish with the receipt-recorded values.
+9. If Stripe test configuration exists, use signed test webhooks and test-mode objects only. Confirm no live key or live product ID is loaded.
+10. Stop one worker during a leased test job and prove reclaim/reconciliation before adding another worker.
 
 Record deployment ID, exact commit, schema version, image/build digest where available, timestamp, operator, and evidence category (`local`, `provider_test`, or `deployed_staging`).
 

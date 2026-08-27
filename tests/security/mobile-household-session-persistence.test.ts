@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { readCurrentMobileAuthenticationToken } from '../../apps/mobile/src/authentication';
 
 const secureStore = vi.hoisted(() => ({
   deleteItemAsync: vi.fn<(key: string) => Promise<void>>(),
@@ -33,6 +34,80 @@ describe('mobile household selection persistence', () => {
     ).trim();
 
     expect(adapter).toBe("export * from 'expo-secure-store';");
+  });
+
+  it('persists and clears only the opaque Clerk session id for pending sign-out', async () => {
+    const session = await sessionModule();
+
+    await expect(session.markPendingMobileSignOut('session_pending_one')).resolves.toBe(true);
+    expect(session.isMobileSignOutPending()).toBe(true);
+    await expect(session.readPendingMobileSignOut()).resolves.toEqual({
+      status: 'pending',
+      identitySessionId: 'session_pending_one',
+    });
+    expect(secureStore.setItemAsync).toHaveBeenCalledWith(
+      'boomerbuddy.mobile.pending-sign-out-session',
+      'session_pending_one',
+      { keychainAccessible: secureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY },
+    );
+
+    await expect(session.clearPendingMobileSignOut('session_pending_one')).resolves.toBe(true);
+    expect(session.isMobileSignOutPending()).toBe(false);
+    expect(secureStore.deleteItemAsync).toHaveBeenCalledWith(
+      'boomerbuddy.mobile.pending-sign-out-session',
+    );
+  });
+
+  it('blocks a cold-start token read even when Clerk can mint a fresh rotating JTI', async () => {
+    const firstLaunch = await sessionModule();
+    await firstLaunch.markPendingMobileSignOut('session_pending_cold_start');
+    secureStore.getItemAsync.mockResolvedValueOnce('session_pending_cold_start');
+
+    const coldStart = await sessionModule();
+    await expect(coldStart.readPendingMobileSignOut()).resolves.toEqual({
+      status: 'pending',
+      identitySessionId: 'session_pending_cold_start',
+    });
+    const mintFreshToken = vi.fn(async () => 'fresh-token-with-new-jti');
+
+    await expect(
+      readCurrentMobileAuthenticationToken({
+        isCurrent: () => !coldStart.isMobileSignOutPending(),
+        readToken: mintFreshToken,
+      }),
+    ).resolves.toBeNull();
+    expect(mintFreshToken).not.toHaveBeenCalled();
+  });
+
+  it('keeps a replacement Clerk session closed until the captured pending session is cleared', async () => {
+    const session = await sessionModule();
+    await session.markPendingMobileSignOut('session_pending_original');
+    const replacementSession = session.beginMobileHouseholdSession('session_replacement');
+    const mintReplacementToken = vi.fn(async () => 'replacement-session-token');
+
+    await expect(
+      readCurrentMobileAuthenticationToken({
+        isCurrent: () =>
+          session.isMobileHouseholdSessionCurrent(replacementSession) &&
+          !session.isMobileSignOutPending(),
+        readToken: mintReplacementToken,
+      }),
+    ).resolves.toBeNull();
+    expect(mintReplacementToken).not.toHaveBeenCalled();
+    await expect(session.clearPendingMobileSignOut('session_replacement')).resolves.toBe(false);
+    await expect(session.readPendingMobileSignOut()).resolves.toEqual({
+      status: 'pending',
+      identitySessionId: 'session_pending_original',
+    });
+  });
+
+  it('fails closed when the pending-sign-out marker cannot be checked', async () => {
+    secureStore.getItemAsync.mockRejectedValueOnce(new Error('fixture keychain read failure'));
+    const session = await sessionModule();
+
+    await expect(session.readPendingMobileSignOut()).resolves.toEqual({
+      status: 'unavailable',
+    });
   });
 
   it('reads, writes, and deletes a person-scoped preference with device-only access', async () => {

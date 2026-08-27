@@ -120,7 +120,7 @@ function ProductionBillingPage() {
       const result = await reverifiedMutation(path, init);
       if (isClerkReverificationHint(result)) {
         throw new ApiError(
-          'A recent enrolled MFA second factor is required for billing. Google or email sign-in and Device Trust alone do not qualify. Set up MFA through secure sign-in, then try again.',
+          'A recent enrolled MFA second factor is required for billing. Google or email sign-in and Device Trust alone do not qualify. Review account security to enroll an available method, then try again.',
           'billing_mfa_required',
           403,
         );
@@ -291,8 +291,9 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
       <p className="meta">
         Before Checkout or billing management opens, BoomerBuddy asks you to confirm your identity
         with an MFA method already enrolled on your account. Google or email sign-in and a trusted
-        device do not replace that step. If no MFA method is available, use{' '}
-        <Link href="/sign-in">secure sign-in</Link> to complete setup.
+        device do not replace that step. Review{' '}
+        <Link href="/member/account-security">account security</Link> to enroll an available method
+        before trying billing again.
       </p>
       {error ? (
         <p className="error" role="alert">

@@ -27,6 +27,10 @@ export class MobileCustomerError extends Error {
   }
 }
 
+export type MobileRequestInit = RequestInit & {
+  readonly authenticationPurpose?: 'session_sign_out';
+};
+
 class MobileRequestAbortedError extends Error {
   override readonly name = 'MobileRequestAbortedError';
 }
@@ -66,9 +70,19 @@ function awaitRequestStep<T>(operation: Promise<T>, signal: AbortSignal): Promis
 
 export async function mobileRequest<T>(
   path: string,
-  init: RequestInit = {},
+  init: MobileRequestInit = {},
   includeAuth = true,
 ): Promise<T> {
+  const { authenticationPurpose, ...requestInit } = init;
+  const method = (requestInit.method ?? 'GET').toUpperCase();
+  if (
+    authenticationPurpose !== undefined &&
+    (!includeAuth || path !== '/v1/sessions/current' || method !== 'DELETE')
+  ) {
+    throw new TypeError(
+      'Pending sign-out authentication is limited to the exact current-session DELETE.',
+    );
+  }
   // Bind the request to the household that was selected when the caller initiated it. Clerk token
   // acquisition can yield long enough for navigation to select a different household.
   const selectedHouseholdId = includeAuth && path !== '/v1/me' ? readSelectedHouseholdId() : null;
@@ -78,7 +92,7 @@ export async function mobileRequest<T>(
       requireMobileAuthenticationContextCurrent(authenticationContext);
     }
   };
-  const callerSignal = init.signal ?? undefined;
+  const callerSignal = requestInit.signal ?? undefined;
   const requestController = new AbortController();
   let abortCause: 'caller' | 'timeout' | undefined;
   const abortRequest = (cause: 'caller' | 'timeout'): void => {
@@ -93,7 +107,10 @@ export async function mobileRequest<T>(
   try {
     const token = includeAuth
       ? await awaitRequestStep(
-          readMobileAuthenticationToken({}, authenticationContext),
+          readMobileAuthenticationToken(
+            authenticationPurpose === undefined ? {} : { purpose: authenticationPurpose },
+            authenticationContext,
+          ),
           requestController.signal,
         )
       : null;
@@ -106,9 +123,9 @@ export async function mobileRequest<T>(
     }
     const send = (requestToken: string | null) => {
       requireCurrentAuthenticationContext();
-      const headers = new Headers(init.headers);
+      const headers = new Headers(requestInit.headers);
       headers.set('Accept', 'application/json');
-      if (init.body && !headers.has('Content-Type')) {
+      if (requestInit.body && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
       }
       if (requestToken) headers.set('Authorization', `Bearer ${requestToken}`);
@@ -124,7 +141,7 @@ export async function mobileRequest<T>(
         else headers.delete('X-BB-Household-Id');
       }
       return fetch(`${baseUrl}${path}`, {
-        ...init,
+        ...requestInit,
         credentials: 'omit',
         signal: requestController.signal,
         headers,
@@ -136,7 +153,13 @@ export async function mobileRequest<T>(
       let refreshedToken: string | null;
       try {
         refreshedToken = await awaitRequestStep(
-          readMobileAuthenticationToken({ skipCache: true }, authenticationContext),
+          readMobileAuthenticationToken(
+            {
+              skipCache: true,
+              ...(authenticationPurpose === undefined ? {} : { purpose: authenticationPurpose }),
+            },
+            authenticationContext,
+          ),
           requestController.signal,
         );
       } catch {

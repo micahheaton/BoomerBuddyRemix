@@ -33,20 +33,63 @@ export class ApiError extends Error {
   }
 }
 
-function serviceName(): string {
-  return process.env.NODE_ENV === 'production' ? 'BoomerBuddy' : 'The local service';
-}
+export type ApiRequestInit = RequestInit & {
+  readonly publicCheckHandoff?: 'conversion_save' | 'household_discovery' | 'household_name';
+};
 
-export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+export type ApiRequestSecurityPolicy = Readonly<{
+  anonymousPublicRequest: boolean;
+  intentionalSignOut: boolean;
+  authenticationRecoveryEligible: boolean;
+}>;
+
+export function classifyApiRequestSecurity(
+  path: string,
+  method: string,
+  publicCheckHandoff?: 'conversion_save' | 'household_discovery' | 'household_name',
+): ApiRequestSecurityPolicy {
+  const normalizedMethod = method.toUpperCase();
   const anonymousPublicRequest =
     path === '/v1/public/check-contexts' ||
     path === '/v1/public/checks' ||
     path === '/v1/public/access-intents';
-  const intentionalSignOut =
-    path === '/v1/sessions/current' && (init.method ?? 'GET').toUpperCase() === 'DELETE';
+  const intentionalSignOut = path === '/v1/sessions/current' && normalizedMethod === 'DELETE';
+  const conversionSaveRequest =
+    normalizedMethod === 'POST' && /^\/v1\/public\/checks\/[^/?#]+\/save$/u.test(path);
+  const householdDiscoveryRequest = normalizedMethod === 'GET' && path === '/v1/me';
+  const householdNameRequest = normalizedMethod === 'GET' && path === '/v1/family';
+  if (
+    (publicCheckHandoff === 'conversion_save' && !conversionSaveRequest) ||
+    (publicCheckHandoff === 'household_discovery' && !householdDiscoveryRequest) ||
+    (publicCheckHandoff === 'household_name' && !householdNameRequest)
+  ) {
+    throw new TypeError(
+      'Authentication recovery suppression is limited to the exact Public Check handoff request.',
+    );
+  }
+  return {
+    anonymousPublicRequest,
+    intentionalSignOut,
+    authenticationRecoveryEligible:
+      !anonymousPublicRequest && !intentionalSignOut && publicCheckHandoff === undefined,
+  };
+}
+
+function serviceName(): string {
+  return process.env.NODE_ENV === 'production' ? 'BoomerBuddy' : 'The local service';
+}
+
+export async function apiRequest<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  const { publicCheckHandoff, ...requestInit } = init;
+  const requestPolicy = classifyApiRequestSecurity(
+    path,
+    requestInit.method ?? 'GET',
+    publicCheckHandoff,
+  );
+  const { anonymousPublicRequest } = requestPolicy;
   const selectedHouseholdId =
     path === '/v1/me' || anonymousPublicRequest ? '' : readSelectedHouseholdId();
-  const callerSignal = init.signal ?? undefined;
+  const callerSignal = requestInit.signal ?? undefined;
   const timeoutController = callerSignal ? undefined : new AbortController();
   const timeout = timeoutController
     ? setTimeout(() => timeoutController.abort(), 15_000)
@@ -54,14 +97,14 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   const requestSignal = callerSignal ?? timeoutController!.signal;
   try {
     const response = await fetch(`${apiBaseUrl}${path}`, {
-      ...init,
+      ...requestInit,
       credentials: anonymousPublicRequest ? 'omit' : 'include',
       signal: requestSignal,
       headers: {
         Accept: 'application/json',
-        ...(init.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(requestInit.body ? { 'Content-Type': 'application/json' } : {}),
         ...(selectedHouseholdId ? { 'X-BB-Household-Id': selectedHouseholdId } : {}),
-        ...init.headers,
+        ...requestInit.headers,
       },
     });
 
@@ -81,7 +124,7 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
         shouldBeginProductionAuthenticationRecovery(
           response.status,
           process.env.NODE_ENV,
-          !anonymousPublicRequest && !intentionalSignOut,
+          requestPolicy.authenticationRecoveryEligible,
         )
       ) {
         void beginProductionAuthenticationRecovery();

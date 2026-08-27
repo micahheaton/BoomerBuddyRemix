@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
+import { settleIdentitySignOut } from '@boomerbuddy/security';
 import {
   clearCustomerSessionState,
   clearClerkSessionAndNavigate,
@@ -9,6 +10,7 @@ import {
   productionSessionRecoveryPath,
   shouldBeginProductionAuthenticationRecovery,
 } from '../../apps/web/src/lib/auth-recovery';
+import { classifyApiRequestSecurity } from '../../apps/web/src/lib/api';
 
 const source = (path: string) => readFile(path, 'utf8');
 
@@ -34,6 +36,21 @@ describe('customer production authentication recovery', () => {
     clearCustomerSessionState(storage);
 
     expect(keys).toEqual(['unrelated.session-value']);
+  });
+
+  it('bounds a nonsettling Clerk cleanup and reports the terminal recovery outcome', async () => {
+    vi.useFakeTimers();
+    try {
+      const cleanup = settleIdentitySignOut({
+        clearIdentitySession: () => new Promise<void>(() => undefined),
+      });
+
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      await expect(cleanup).resolves.toBe('cleanup_timed_out');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('coalesces concurrent unauthorized responses into one clear and one Clerk sign-out', async () => {
@@ -193,6 +210,46 @@ describe('customer production authentication recovery', () => {
     expect(shouldBeginProductionAuthenticationRecovery(401, 'production', false)).toBe(false);
   });
 
+  it('preserves an anonymous Public Check result across the expected sign-in handoff', () => {
+    const conversionSave = classifyApiRequestSecurity(
+      '/v1/public/checks/check-public-one/save',
+      'POST',
+      'conversion_save',
+    );
+    expect(conversionSave).toEqual({
+      anonymousPublicRequest: false,
+      intentionalSignOut: false,
+      authenticationRecoveryEligible: false,
+    });
+    expect(
+      shouldBeginProductionAuthenticationRecovery(
+        401,
+        'production',
+        conversionSave.authenticationRecoveryEligible,
+      ),
+    ).toBe(false);
+
+    const ordinaryAuthenticatedRequest = classifyApiRequestSecurity('/v1/me', 'GET');
+    expect(ordinaryAuthenticatedRequest.authenticationRecoveryEligible).toBe(true);
+    const householdDiscovery = classifyApiRequestSecurity('/v1/me', 'GET', 'household_discovery');
+    expect(householdDiscovery.authenticationRecoveryEligible).toBe(false);
+    const householdName = classifyApiRequestSecurity('/v1/family', 'GET', 'household_name');
+    expect(householdName.authenticationRecoveryEligible).toBe(false);
+    expect(() => classifyApiRequestSecurity('/v1/family', 'GET', 'household_discovery')).toThrow(
+      'limited to the exact Public Check handoff request',
+    );
+    expect(() => classifyApiRequestSecurity('/v1/me', 'GET', 'household_name')).toThrow(
+      'limited to the exact Public Check handoff request',
+    );
+    expect(() =>
+      classifyApiRequestSecurity(
+        '/v1/public/checks/check-public-one/save',
+        'GET',
+        'conversion_save',
+      ),
+    ).toThrow('limited to the exact Public Check handoff request');
+  });
+
   it('coalesces retry while busy and keeps the successful state latched for navigation', async () => {
     let releaseSignOut: (() => void) | undefined;
     const signOut = vi.fn(
@@ -285,18 +342,26 @@ describe('customer production authentication recovery', () => {
   });
 
   it('wires every customer API 401 through the boundary without automatic recovery redirects', async () => {
-    const [api, recovery, provider, boundary, signIn] = await Promise.all([
+    const [api, recovery, provider, boundary, signIn, publicCheck] = await Promise.all([
       source('apps/web/src/lib/api.ts'),
       source('apps/web/src/lib/auth-recovery.ts'),
       source('apps/web/src/components/identity-provider.tsx'),
       source('apps/web/src/components/production-auth-recovery.tsx'),
       source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
+      source('apps/web/src/app/check/page.tsx'),
     ]);
 
     expect(api).toContain('shouldBeginProductionAuthenticationRecovery(');
     expect(api).toContain('!anonymousPublicRequest');
     expect(api).toContain('!intentionalSignOut');
     expect(api).toContain('void beginProductionAuthenticationRecovery();');
+    expect(api).toContain("publicCheckHandoff === 'conversion_save'");
+    expect(api).toContain("publicCheckHandoff === 'household_discovery'");
+    expect(api).toContain("publicCheckHandoff === 'household_name'");
+    expect(publicCheck).toContain("publicCheckHandoff: 'conversion_save'");
+    expect(publicCheck).toContain("publicCheckHandoff: 'household_discovery'");
+    expect(publicCheck).toContain("publicCheckHandoff: 'household_name'");
+    expect(publicCheck).toContain('setSelectedHouseholdId(householdId)');
     expect(provider).toContain('<ProductionAuthenticationRecovery>{children}');
     expect(boundary).toContain('registerProductionAuthenticationRecovery(async () =>');
     expect(boundary).toContain('clearClerkSessionAndNavigate({');

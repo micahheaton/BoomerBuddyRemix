@@ -33,10 +33,11 @@ as part of this cutover.
 | `BB_REPLIT_SERVICE`        | Select one workspace                     | No      | founder: `web`, `api`, `worker`, or `hq`   | W/A/K/H   | Required and unique per project; missing/other value refuses build/start.                                                       |
 | `BB_RUN3_1_RELEASE_COMMIT` | Bind runtime to candidate                | No      | dossier: 40 lowercase hex                  | W/A/K/H   | Required; must equal both the configured annotated tag's dereferenced commit and the published checkout HEAD. A different snapshot commit is rejected even when its tree is identical. |
 | `BB_RUN3_1_RELEASE_TAG`    | Bind runtime to immutable tag            | No      | `run3-1-replit-founding-household-<12hex>` | W/A/K/H   | Required; the ref itself must be an annotated tag object, and its suffix must equal the candidate commit's first 12 characters. |
+| `BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64` | Authenticate the promoted runtime receipt | Yes | unique canonical base64 32-byte key per Replit project | W/A/K/H | Required during build and start. Generate a different value for each service, store it only in that project's Production app secrets and external recovery escrow, and never copy it across services. Missing, malformed, or mismatched values fail closed. |
 | `REPLIT_DEPLOYMENT`        | Prove a published runtime                | No      | Replit automatic: `1`                      | W/A/K/H   | Required at start and must be `1`; never set manually in local evidence.                                                        |
 | `PORT`                     | Provider-selected listener port          | No      | Replit automatic integer                   | W/A/K/H   | Required for web-facing services. Next consumes it directly; the wrapper derives the API child's `BB_API_PORT`. The worker uses it only for a static private liveness listener and falls back to `3000` when Replit omits it. |
 
-Every Replit provenance check additionally requires all of the following:
+Every Replit build-context provenance check additionally requires all of the following:
 
 - `git cat-file -t refs/tags/<tag>` returns exactly `tag`; a lightweight tag is not accepted.
 - `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`.
@@ -44,6 +45,21 @@ Every Replit provenance check additionally requires all of the following:
 - `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}` exactly.
 - `git status --porcelain=v1 --untracked-files=all` emits no entries before the service build.
   Staged, unstaged, and nonignored untracked content all fail closed.
+
+The wrapper repeats the canonical origin, annotated tag, exact commit/tree, and clean-checkout checks
+after the build and production dependency validation. Only then does it emit a bounded,
+service-specific receipt inside the runtime output. The receipt binds the canonical repository,
+service, commit, tree, annotated-tag object, immutable runtime-output digest, wrapper, root and
+workspace package manifests, root and installed lock metadata, and release tag. It is authenticated
+with the matching project's `BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64`.
+
+Replit may omit Git metadata when promoting the build artifact. A gitless production start is valid
+only when that exact authenticated receipt survives promotion and matches the configured release and
+runtime files. Missing, malformed, stale, cross-service, unsigned, altered-artifact, or temporary
+receipts fail before the child service starts. If Git metadata is present or discoverable at runtime,
+the wrapper also repeats the full Git checks and rejects any disagreement with the receipt. Mutable
+top-level Next cache, dev, diagnostics, and trace entries are excluded from the immutable digest so a
+legitimate process restart does not invalidate the release.
 
 Each of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq` must use a
 different credential scoped only to `micahheaton/BoomerBuddyRemix`. Prefer a unique deploy key with

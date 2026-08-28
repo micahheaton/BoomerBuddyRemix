@@ -133,9 +133,19 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    `node_modules` paths, resolved registry URLs, and complete npm dependency-node metadata. It also
    requires lockfile version 3 and the exact optional flags, package paths, integrity hashes, and
    dependency ranges from the tagged `package-lock.json`. API, worker, malformed or nested problems,
-   altered metadata, or any partial, duplicate, or additional npm problem fails closed. If the published build context cannot provide evidence, publication is
-   expected to fail and the release control needs a reviewed code change/new tag; do not bypass it
-   with an environment value. With the same per-project credential, run
+   altered metadata, or any partial, duplicate, or additional npm problem fails closed. If the
+   published build context cannot provide evidence, publication is expected to fail and the release
+   control needs a reviewed code change/new tag; do not bypass it with an environment value. The
+   wrapper repeats the canonical origin, tag, commit, tree, and clean-checkout checks after the build
+   and dependency inventory, then writes an authenticated, service-specific receipt into the runtime
+   output. Generate one distinct canonical 32-byte base64
+   `BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64` per Replit project and store it in that project's
+   Production app secrets and external recovery escrow. Do not share the value between services.
+   Replit may strip Git metadata from the promoted runtime artifact; startup then requires the exact
+   authenticated receipt and matching immutable runtime files. If Git metadata remains discoverable,
+   runtime repeats the full Git checks as well. Missing, malformed, stale, cross-service, altered,
+   unsigned, or temporary receipts fail before the service child starts.
+   With the same per-project credential, run
    `git push --dry-run origin HEAD:refs/heads/bb-denied-write-proof-<receipt-id>` and require a nonzero
    exit caused by denied write access. Exit zero is a hard stop even though `--dry-run` creates no
    ref. Never remove `--dry-run` or test a force, delete, branch, or tag write. Record only the safe
@@ -486,6 +496,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 | Service selector              | Published app secrets                   | `BB_REPLIT_SERVICE`                         | No                            | `web`, `api`, `worker`, `hq`               | matching published service                                      |
 | Candidate commit              | Published app secrets                   | `BB_RUN3_1_RELEASE_COMMIT`                  | No                            | 40 lowercase hex                           | web, API, worker, HQ                                            |
 | Candidate tag                 | Published app secrets                   | `BB_RUN3_1_RELEASE_TAG`                     | No                            | `run3-1-replit-founding-household-<12hex>` | web, API, worker, HQ                                            |
+| Runtime provenance HMAC       | Published app secrets + external escrow | `BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64`      | Yes                           | unique canonical 32-byte base64 per service | web, API, worker, HQ                                           |
 | Deployment marker             | Replit automatic                        | `REPLIT_DEPLOYMENT`                         | No                            | `1`                                        | published start gate                                            |
 | Provider port                 | Replit automatic                        | `PORT`                                      | No                            | integer                                    | web, API, HQ                                                    |
 | Customer/HQ visible origin    | Published app secrets                   | `BB_PUBLIC_ORIGIN`                          | No                            | exact HTTPS origin                         | web or HQ, distinct values                                      |
@@ -543,6 +554,9 @@ The complete service-by-service inventory and failure behavior is in
   does not exactly match the tag tree. A different Replit snapshot commit is never permitted.
 - Published build context does not preserve the required `.git` metadata, annotated tag, exact-tree
   equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.
+- Promoted runtime lacks the exact authenticated service receipt, uses a shared or unescrowed
+  provenance HMAC key, or its receipt, release identity, measured launch files, or immutable output
+  digest does not match.
 - API/worker can start without founder binding or with runtime migrations/demo identities.
 - The destructive PostgreSQL verifier is pointed at live, a nonempty DB, or a DB without a delimited
   `ci`/`test` name, or `BB_ALLOW_POSTGRES_VERIFICATION` is present in a runtime service.

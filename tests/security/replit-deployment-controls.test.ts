@@ -1,15 +1,26 @@
+import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import process from 'node:process';
 import { describe, expect, it } from 'vitest';
 
 const root = process.cwd();
 const replitServiceScript = join(root, 'scripts/replit-service.mjs');
-const provenanceFixtureRoot = join(root, 'tmp');
+const provenanceFixtureRoot = join(tmpdir(), 'boomerbuddy-test-fixtures');
 const canonicalGitHubOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git';
 const canonicalGitHubOriginWithoutGitSuffix = 'https://github.com/micahheaton/BoomerBuddyRemix';
 const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git';
+const fixtureArtifactDirectories = {
+  api: ['apps', 'api', 'dist'],
+  hq: ['apps', 'hq', '.next'],
+  web: ['apps', 'web', '.next'],
+  worker: ['apps', 'worker', 'dist'],
+} as const;
+const provenanceReceiptFilename = '.boomerbuddy-replit-provenance.v1.json';
+const provenanceReceiptTemporaryFilename = '.boomerbuddy-replit-provenance.v1.tmp';
+const fixtureProvenanceHmacKey = Buffer.alloc(32, 0xa5).toString('base64');
 const canonicalReplitConfig = [
   'entrypoint = "scripts/replit-service.mjs"',
   'modules = ["nodejs-22"]',
@@ -89,6 +100,7 @@ async function createProvenanceFixture(
     inventory?: (directory: string) => Record<string, unknown>;
     inventoryExitCode?: 0 | 1;
     lockfile?: () => Record<string, unknown>;
+    mutateTrackedOnBuild?: boolean;
     originUrl?: string | null;
     pushOriginUrl?: string;
   } = {},
@@ -97,6 +109,14 @@ async function createProvenanceFixture(
   const directory = await mkdtemp(join(provenanceFixtureRoot, 'replit-provenance-'));
   const binDirectory = join(directory, 'bin');
   await mkdir(binDirectory);
+  await mkdir(join(directory, 'scripts'));
+  await mkdir(join(directory, 'node_modules'));
+  const wrapperSource = await readFile(replitServiceScript);
+  await Promise.all(
+    Object.values(fixtureArtifactDirectories).map((segments) =>
+      mkdir(join(directory, ...segments), { recursive: true }),
+    ),
+  );
   const inventory = options.inventory?.(directory) ?? { dependencies: {} };
   const inventoryJson = JSON.stringify(inventory);
   const inventoryExitCode =
@@ -112,16 +132,30 @@ async function createProvenanceFixture(
   }
   await Promise.all([
     writeFile(join(directory, '.replit'), canonicalReplitConfig, 'utf8'),
+    writeFile(join(directory, '.gitignore'), 'apps/\nnode_modules/\n', 'utf8'),
     writeFile(join(directory, 'package-lock.json'), lockfileJson, 'utf8'),
+    writeFile(join(directory, 'node_modules', '.package-lock.json'), lockfileJson, 'utf8'),
+    writeFile(join(directory, 'package.json'), '{"name":"fixture"}\n', 'utf8'),
+    writeFile(join(directory, 'scripts', 'replit-service.mjs'), wrapperSource),
     writeFile(join(directory, 'tracked.txt'), 'candidate tree\n', 'utf8'),
+    ...Object.entries(fixtureArtifactDirectories).map(([service, segments]) =>
+      writeFile(join(directory, ...segments, 'artifact.txt'), `${service} artifact\n`, 'utf8'),
+    ),
+    ...Object.entries(fixtureArtifactDirectories).map(([service, segments]) =>
+      writeFile(
+        join(directory, ...segments.slice(0, 2), 'package.json'),
+        `{"name":"@boomerbuddy/${service}"}\n`,
+        'utf8',
+      ),
+    ),
     writeFile(
       join(binDirectory, 'npm'),
-      `#!/bin/sh\nif [ "$1" = "ls" ]; then\n  printf '%s\\n' '${inventoryJson}'\n  exit ${inventoryExitCode}\nfi\nexit 0\n`,
+      `#!/bin/sh\nif [ "$1" = "ls" ]; then\n  printf '%s\\n' '${inventoryJson}'\n  exit ${inventoryExitCode}\nfi\nif [ "$1" = "run" ] && [ "$2" = "build" ] && [ "${options.mutateTrackedOnBuild === true ? '1' : '0'}" = "1" ]; then\n  printf '%s\\n' 'mutated during build' > tracked.txt\nfi\nif [ "$1" = "run" ] && [ "$2" = "start" ]; then\n  printf '%s\\n' 'FIXTURE_NPM_START'\n  if [ -n "$BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64" ]; then printf '%s\\n' 'FIXTURE_HMAC_VISIBLE'; fi\nfi\nexit 0\n`,
       'utf8',
     ),
     writeFile(
       join(binDirectory, 'npm.cmd'),
-      `@echo off\r\nif not "%~1"=="ls" exit /b 0\r\necho ${inventoryJson}\r\nexit /b ${inventoryExitCode}\r\n`,
+      `@echo off\r\nif "%~1"=="run" if "%~2"=="build" if "${options.mutateTrackedOnBuild === true ? '1' : '0'}"=="1" echo mutated during build> tracked.txt\r\nif "%~1"=="run" if "%~2"=="start" echo FIXTURE_NPM_START\r\nif "%~1"=="run" if "%~2"=="start" if defined BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64 echo FIXTURE_HMAC_VISIBLE\r\nif not "%~1"=="ls" exit /b 0\r\necho ${inventoryJson}\r\nexit /b ${inventoryExitCode}\r\n`,
       'utf8',
     ),
   ]);
@@ -151,8 +185,10 @@ function runFixtureBuild(
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     BB_REPLIT_SERVICE: service,
+    BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64: fixtureProvenanceHmacKey,
     BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
     BB_RUN3_1_RELEASE_TAG: fixture.tag,
+    GIT_CEILING_DIRECTORIES: fixture.directory,
     NODE_ENV: 'production',
     REPLIT_DEPLOYMENT: '1',
     ...(service === 'web' || service === 'hq'
@@ -164,6 +200,44 @@ function runFixtureBuild(
   environment[pathKey] =
     `${join(fixture.directory, 'bin')}${delimiter}${environment[pathKey] ?? ''}`;
   return spawnSync(process.execPath, [replitServiceScript, 'build'], {
+    cwd: fixture.directory,
+    encoding: 'utf8',
+    env: environment,
+    shell: false,
+  });
+}
+
+function fixtureReceiptPath(
+  fixture: ProvenanceFixture,
+  service: 'api' | 'hq' | 'web' | 'worker' = 'worker',
+): string {
+  return join(fixture.directory, ...fixtureArtifactDirectories[service], provenanceReceiptFilename);
+}
+
+function runFixtureStart(
+  fixture: ProvenanceFixture,
+  service: 'api' | 'hq' | 'web' | 'worker' = 'worker',
+  environmentOverrides: NodeJS.ProcessEnv = {},
+) {
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    BB_REPLIT_SERVICE: service,
+    BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64: fixtureProvenanceHmacKey,
+    BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
+    BB_RUN3_1_RELEASE_TAG: fixture.tag,
+    GIT_CEILING_DIRECTORIES: fixture.directory,
+    NODE_ENV: 'production',
+    REPLIT_DEPLOYMENT: '1',
+    ...(service === 'api' ? { BB_API_HOST: '0.0.0.0', PORT: '3000' } : {}),
+    ...(service === 'web' || service === 'hq'
+      ? { BB_PUBLIC_ORIGIN: `https://${service}.example.invalid`, PORT: '3000' }
+      : {}),
+    ...environmentOverrides,
+  };
+  const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
+  environment[pathKey] =
+    `${join(fixture.directory, 'bin')}${delimiter}${environment[pathKey] ?? ''}`;
+  return spawnSync(process.execPath, [replitServiceScript, 'start'], {
     cwd: fixture.directory,
     encoding: 'utf8',
     env: environment,
@@ -259,6 +333,11 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(goLive).toContain('https://github.com/micahheaton/BoomerBuddyRemix.git');
     expect(goLive).toContain('`https://github.com/micahheaton/BoomerBuddyRemix`');
     expect(goLive).toMatch(/any other\s+URL spelling/u);
+    for (const runbook of [manifest, goLive]) {
+      expect(runbook).toContain('BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64');
+      expect(runbook).toMatch(/promoted runtime/iu);
+      expect(runbook).toMatch(/authenticated.*receipt/isu);
+    }
   });
 
   it('keeps GitHub authoritative and excludes the legacy Replit project', async () => {
@@ -317,9 +396,15 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain(
       "const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git'",
     );
-    expect(source.indexOf('assertCanonicalGitHubOrigin();')).toBeLessThan(
-      source.indexOf("if (mode === 'start')"),
-    );
+    expect(source).toContain('clearPriorBuildReceipt();');
+    expect(source).toContain('writeBuildProvenanceReceipt(postBuildProvenance);');
+    expect(source).toContain('assertRuntimeProvenanceReceipt(releaseProvenance);');
+    expect(source).toContain("'github:micahheaton/BoomerBuddyRemix'");
+    expect(source).toContain("'.boomerbuddy-replit-provenance.v1.json'");
+    expect(source).toContain("createHash('sha256')");
+    expect(source).toContain('BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64');
+    expect(source).toContain("createHmac('sha256', provenanceHmacKey())");
+    expect(source).toContain('timingSafeEqual(actualHmac, expectedHmac)');
     expect(source).toContain('const tagReference = `refs/tags/${expectedTag}`');
     expect(source).toContain("captureGit(['cat-file', '-t', tagReference])");
     expect(source).toContain("captureGit(['rev-parse', '--verify', 'HEAD^{tree}'])");
@@ -339,7 +424,9 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('reviewNpmProblems(inventory)');
     expect(source).toContain('hashes and filenames only');
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
-    expect(source).toContain('{ ...serviceEnvironment, BB_API_PORT: providerApiPort }');
+    expect(source).toContain('const childEnvironment = { ...serviceEnvironment }');
+    expect(source).toContain('delete childEnvironment.BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64');
+    expect(source).toContain('childEnvironment.BB_API_PORT = providerApiPort');
     expect(source).toContain('canonicalProductionPublicOrigin(process.env.BB_PUBLIC_ORIGIN)');
     expect(source).toContain(
       'serviceEnvironment = { ...process.env, BB_PUBLIC_ORIGIN: publicOrigin }',
@@ -418,6 +505,7 @@ describe('Run 3.1 Replit deployment controls', () => {
           'requires one safe canonicalizable HTTPS BB_PUBLIC_ORIGIN',
         );
         expect(commandOutput(result), publicOrigin).not.toContain('Replit web build passed');
+        await expect(readFile(fixtureReceiptPath(fixture, 'web'), 'utf8')).rejects.toThrow();
       }
     } finally {
       await rm(fixture.directory, { force: true, recursive: true });
@@ -443,7 +531,7 @@ describe('Run 3.1 Replit deployment controls', () => {
     }
   });
 
-  it('rejects missing or noncanonical GitHub origin metadata before build or start', async () => {
+  it('rejects noncanonical GitHub origin metadata during build and when present at start', async () => {
     const originCases = [
       { label: 'missing', originUrl: null },
       {
@@ -484,23 +572,18 @@ describe('Run 3.1 Replit deployment controls', () => {
       }
     }
 
-    const fixture = await createProvenanceFixture({
-      pushOriginUrl: 'https://github.com/example/BoomerBuddyRemix.git',
-    });
+    const fixture = await createProvenanceFixture();
     try {
-      const result = spawnSync(process.execPath, [replitServiceScript, 'start'], {
-        cwd: fixture.directory,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          BB_REPLIT_SERVICE: 'worker',
-          BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
-          BB_RUN3_1_RELEASE_TAG: fixture.tag,
-          NODE_ENV: 'production',
-          REPLIT_DEPLOYMENT: '1',
-        },
-        shell: false,
-      });
+      const build = runFixtureBuild(fixture);
+      expect(build.status, commandOutput(build)).toBe(0);
+      runGit(fixture.directory, [
+        'remote',
+        'set-url',
+        '--push',
+        'origin',
+        'https://github.com/example/BoomerBuddyRemix.git',
+      ]);
+      const result = runFixtureStart(fixture);
       const output = commandOutput(result);
       expect(result.status).not.toBe(0);
       expect(output).toContain(
@@ -676,6 +759,167 @@ describe('Run 3.1 Replit deployment controls', () => {
       expect(commandOutput(result)).toContain(
         'Replit worker build passed with an isolated production dependency graph.',
       );
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('requires a canonical external HMAC key before emitting a build receipt', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const result = runFixtureBuild(fixture, 'worker', {
+        BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64: 'not-a-key',
+      });
+      const output = commandOutput(result);
+      expect(result.status, output).not.toBe(0);
+      expect(output).toContain('must be one canonical 32-byte base64 key');
+      expect(output).not.toContain('Replit worker build passed');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('rechecks the exact checkout after build commands before signing a receipt', async () => {
+    const fixture = await createProvenanceFixture({ mutateTrackedOnBuild: true });
+    try {
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status, output).not.toBe(0);
+      expect(output).toContain('checkout contains changes outside the tagged candidate');
+      expect(output).not.toContain('Replit worker build passed');
+      await expect(readFile(fixtureReceiptPath(fixture), 'utf8')).rejects.toThrow();
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each(['api', 'hq', 'web', 'worker'] as const)(
+    'starts a gitless %s artifact only with the exact build-emitted receipt',
+    async (service) => {
+      const fixture = await createProvenanceFixture();
+      try {
+        const build = runFixtureBuild(fixture, service);
+        expect(build.status, commandOutput(build)).toBe(0);
+        const receipt = await readFile(fixtureReceiptPath(fixture, service), 'utf8');
+        expect(receipt).toContain('"repository":"github:micahheaton/BoomerBuddyRemix"');
+        expect(receipt.endsWith('\n')).toBe(true);
+
+        await rm(join(fixture.directory, '.git'), { force: true, recursive: true });
+        const start = runFixtureStart(fixture, service);
+        expect(start.status, commandOutput(start)).toBe(0);
+        expect(commandOutput(start)).toContain('FIXTURE_NPM_START');
+        expect(commandOutput(start)).not.toContain('FIXTURE_HMAC_VISIBLE');
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    },
+  );
+
+  it('permits a gitless Next restart after only mutable cache and trace data changes', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const build = runFixtureBuild(fixture, 'web');
+      expect(build.status, commandOutput(build)).toBe(0);
+      await rm(join(fixture.directory, '.git'), { force: true, recursive: true });
+      const nextDirectory = join(fixture.directory, ...fixtureArtifactDirectories.web);
+      await mkdir(join(nextDirectory, 'cache'), { recursive: true });
+      await Promise.all([
+        writeFile(join(nextDirectory, 'cache', 'restart-cache.bin'), 'mutable\n', 'utf8'),
+        writeFile(join(nextDirectory, 'trace'), 'mutable trace\n', 'utf8'),
+      ]);
+
+      const start = runFixtureStart(fixture, 'web');
+      expect(start.status, commandOutput(start)).toBe(0);
+      expect(commandOutput(start)).toContain('FIXTURE_NPM_START');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it.each([
+    'missing',
+    'malformed',
+    'stale',
+    'signed-metadata',
+    'cross-service',
+    'forged',
+    'temporary',
+    'altered-artifact',
+    'same-size-artifact',
+  ])('rejects a %s provenance receipt before gitless child startup', async (receiptCase) => {
+    const fixture = await createProvenanceFixture();
+    try {
+      if (receiptCase !== 'missing') {
+        const build = runFixtureBuild(fixture);
+        expect(build.status, commandOutput(build)).toBe(0);
+      }
+      await rm(join(fixture.directory, '.git'), { force: true, recursive: true });
+
+      const workerReceiptPath = fixtureReceiptPath(fixture);
+      if (receiptCase === 'malformed') {
+        await writeFile(workerReceiptPath, '{}\n', 'utf8');
+      } else if (
+        receiptCase === 'stale' ||
+        receiptCase === 'signed-metadata' ||
+        receiptCase === 'forged'
+      ) {
+        const receipt = JSON.parse(await readFile(workerReceiptPath, 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        if (receiptCase === 'stale') receipt.commit = 'a'.repeat(40);
+        else if (receiptCase === 'signed-metadata') receipt.tree = 'b'.repeat(40);
+        else receipt.artifactSha256 = '0'.repeat(64);
+        await writeFile(workerReceiptPath, `${JSON.stringify(receipt)}\n`, 'utf8');
+      } else if (receiptCase === 'cross-service') {
+        const receipt = await readFile(workerReceiptPath, 'utf8');
+        await writeFile(fixtureReceiptPath(fixture, 'api'), receipt, 'utf8');
+      } else if (receiptCase === 'temporary') {
+        await writeFile(
+          join(
+            fixture.directory,
+            ...fixtureArtifactDirectories.worker,
+            provenanceReceiptTemporaryFilename,
+          ),
+          'staged\n',
+          'utf8',
+        );
+      } else if (receiptCase === 'altered-artifact') {
+        await writeFile(
+          join(fixture.directory, ...fixtureArtifactDirectories.worker, 'altered.txt'),
+          'changed after build\n',
+          'utf8',
+        );
+      } else if (receiptCase === 'same-size-artifact') {
+        const artifactPath = join(
+          fixture.directory,
+          ...fixtureArtifactDirectories.worker,
+          'artifact.txt',
+        );
+        const original = await readFile(artifactPath, 'utf8');
+        await writeFile(artifactPath, original.replaceAll('w', 'W'), 'utf8');
+      }
+
+      const result = runFixtureStart(fixture, receiptCase === 'cross-service' ? 'api' : 'worker');
+      const output = commandOutput(result);
+      expect(result.status, output).not.toBe(0);
+      expect(output).not.toContain('FIXTURE_NPM_START');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('clears an older receipt before a later build can fail', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const firstBuild = runFixtureBuild(fixture);
+      expect(firstBuild.status, commandOutput(firstBuild)).toBe(0);
+      expect(await readFile(fixtureReceiptPath(fixture), 'utf8')).toContain('"version":1');
+
+      await writeFile(join(fixture.directory, 'tracked.txt'), 'dirty checkout\n', 'utf8');
+      const failedBuild = runFixtureBuild(fixture);
+      expect(failedBuild.status, commandOutput(failedBuild)).not.toBe(0);
+      await expect(readFile(fixtureReceiptPath(fixture), 'utf8')).rejects.toThrow();
     } finally {
       await rm(fixture.directory, { force: true, recursive: true });
     }

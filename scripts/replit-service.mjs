@@ -1,6 +1,17 @@
 import { Buffer } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import process from 'node:process';
 import { URL } from 'node:url';
@@ -20,6 +31,22 @@ const canonicalGitHubOrigins = new Set([
   canonicalGitHubHttpsOriginWithoutGitSuffix,
   canonicalGitHubDeployKeyOrigin,
 ]);
+const canonicalRepositoryIdentity = 'github:micahheaton/BoomerBuddyRemix';
+const runtimeArtifactDirectories = {
+  api: ['apps', 'api', 'dist'],
+  hq: ['apps', 'hq', '.next'],
+  web: ['apps', 'web', '.next'],
+  worker: ['apps', 'worker', 'dist'],
+};
+const provenanceReceiptFilename = '.boomerbuddy-replit-provenance.v1.json';
+const provenanceReceiptTemporaryFilename = '.boomerbuddy-replit-provenance.v1.tmp';
+const provenanceReceiptMaxBytes = 4_096;
+const runtimeArtifactMaxEntries = 100_000;
+const runtimeArtifactMaxBytes = 1024 * 1024 * 1024;
+const runtimeArtifactMaxDepth = 64;
+const mutableNextArtifactDirectories = new Set(['cache', 'dev', 'diagnostics']);
+const mutableNextArtifactFiles = new Set(['trace', 'trace-build']);
+const runtimeHashChunkBytes = 64 * 1024;
 const service = process.env.BB_REPLIT_SERVICE;
 const mode = process.argv[2];
 
@@ -103,8 +130,6 @@ function assertCanonicalGitHubOrigin() {
     );
   }
 }
-
-assertCanonicalGitHubOrigin();
 
 const provenanceDiagnosticMaxBuffer = 1024 * 1024;
 const provenanceDiagnosticMaxEntries = 50;
@@ -300,7 +325,7 @@ function assertReleaseProvenance({ verifyCheckout }) {
   if (!expectedTag.endsWith(expectedCommit.slice(0, 12))) {
     throw new TypeError('The Run 3.1 release tag suffix must match the exact release commit');
   }
-  if (!verifyCheckout) return;
+  if (!verifyCheckout) return { commit: expectedCommit, tag: expectedTag };
   const tagReference = `refs/tags/${expectedTag}`;
   if (captureGit(['cat-file', '-t', tagReference]) !== 'tag') {
     throw new TypeError('The Run 3.1 release tag must be an annotated tag object');
@@ -314,6 +339,7 @@ function assertReleaseProvenance({ verifyCheckout }) {
   const headCommit = captureGit(['rev-parse', '--verify', 'HEAD^{commit}']);
   const headTree = captureGit(['rev-parse', '--verify', 'HEAD^{tree}']);
   const taggedTree = captureGit(['rev-parse', '--verify', `${tagReference}^{tree}`]);
+  const tagObject = captureGit(['rev-parse', '--verify', `${tagReference}^{object}`]);
   if (headTree !== taggedTree) {
     try {
       reportTreeMismatch({ headCommit, headTree, taggedCommit, taggedTree });
@@ -351,6 +377,340 @@ function assertReleaseProvenance({ verifyCheckout }) {
       );
     }
     throw new TypeError('The Replit checkout contains changes outside the tagged candidate');
+  }
+  return { commit: expectedCommit, tag: expectedTag, tagObject, tree: headTree };
+}
+
+function runtimeArtifactDirectory() {
+  return join(process.cwd(), ...runtimeArtifactDirectories[service]);
+}
+
+function assertSafeArtifactPathComponents() {
+  let current = process.cwd();
+  for (const segment of runtimeArtifactDirectories[service]) {
+    current = join(current, segment);
+    const status = lstatSync(current, { throwIfNoEntry: false });
+    if (status === undefined) return;
+    if (status.isSymbolicLink()) {
+      throw new TypeError('The Replit runtime artifact path must not contain symbolic links');
+    }
+    if (!status.isDirectory()) {
+      throw new TypeError('The Replit runtime artifact path must contain only directories');
+    }
+  }
+}
+
+function removeExistingReceiptFile(path) {
+  const status = lstatSync(path, { throwIfNoEntry: false });
+  if (status === undefined) return;
+  if (!status.isFile() || status.isSymbolicLink()) {
+    throw new TypeError('A Replit provenance receipt path must be a regular file');
+  }
+  unlinkSync(path);
+}
+
+function clearPriorBuildReceipt() {
+  assertSafeArtifactPathComponents();
+  const directory = runtimeArtifactDirectory();
+  removeExistingReceiptFile(join(directory, provenanceReceiptFilename));
+  removeExistingReceiptFile(join(directory, provenanceReceiptTemporaryFilename));
+}
+
+function collectRuntimeArtifactFiles(
+  directory,
+  relativePrefix = '',
+  state = { bytes: 0, entries: 0, files: [] },
+  depth = 0,
+) {
+  if (depth > runtimeArtifactMaxDepth) {
+    throw new TypeError('The Replit runtime artifact exceeds the maximum directory depth');
+  }
+  const directoryStatus = lstatSync(directory, { throwIfNoEntry: false });
+  if (
+    directoryStatus === undefined ||
+    !directoryStatus.isDirectory() ||
+    directoryStatus.isSymbolicLink()
+  ) {
+    throw new TypeError('The Replit runtime artifact directory must be a real directory');
+  }
+  const entries = readdirSync(directory, { withFileTypes: true }).sort((left, right) =>
+    Buffer.compare(Buffer.from(left.name, 'utf8'), Buffer.from(right.name, 'utf8')),
+  );
+  for (const entry of entries) {
+    state.entries += 1;
+    if (state.entries > runtimeArtifactMaxEntries) {
+      throw new TypeError('The Replit runtime artifact exceeds the bounded provenance limits');
+    }
+    const path = join(directory, entry.name);
+    const relativePath = relativePrefix === '' ? entry.name : `${relativePrefix}/${entry.name}`;
+    const status = lstatSync(path);
+    if (status.isSymbolicLink()) {
+      throw new TypeError('The Replit runtime artifact must not contain symbolic links');
+    }
+    if (
+      relativePrefix === '' &&
+      (service === 'web' || service === 'hq') &&
+      (mutableNextArtifactDirectories.has(entry.name) || mutableNextArtifactFiles.has(entry.name))
+    ) {
+      const hasExpectedType = mutableNextArtifactDirectories.has(entry.name)
+        ? status.isDirectory()
+        : status.isFile();
+      if (!hasExpectedType) {
+        throw new TypeError('A mutable Next runtime entry has an unexpected filesystem type');
+      }
+      continue;
+    }
+    if (
+      relativePrefix === '' &&
+      (entry.name === provenanceReceiptFilename ||
+        entry.name === provenanceReceiptTemporaryFilename)
+    ) {
+      continue;
+    }
+    if (status.isDirectory()) {
+      collectRuntimeArtifactFiles(path, relativePath, state, depth + 1);
+      continue;
+    }
+    if (!status.isFile()) {
+      throw new TypeError('The Replit runtime artifact may contain only files and directories');
+    }
+    state.bytes += status.size;
+    state.files.push({ path, relativePath, size: status.size });
+    if (state.bytes > runtimeArtifactMaxBytes) {
+      throw new TypeError('The Replit runtime artifact exceeds the bounded provenance limits');
+    }
+  }
+  return state.files;
+}
+
+function updateHashWithFile(hash, path, label, size) {
+  hash.update(`file\0${label}\0${size}\0`, 'utf8');
+  const descriptor = openSync(path, 'r');
+  const chunk = Buffer.allocUnsafe(runtimeHashChunkBytes);
+  try {
+    let bytesRead;
+    do {
+      bytesRead = readSync(descriptor, chunk, 0, chunk.length, null);
+      if (bytesRead > 0) hash.update(chunk.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+  } finally {
+    closeSync(descriptor);
+  }
+  hash.update('\0', 'utf8');
+}
+
+function criticalRuntimeFile(segments) {
+  let current = process.cwd();
+  for (const [index, segment] of segments.entries()) {
+    current = join(current, segment);
+    const status = lstatSync(current, { throwIfNoEntry: false });
+    if (status === undefined || status.isSymbolicLink()) {
+      throw new TypeError('A measured Replit runtime launch file is missing or unsafe');
+    }
+    if (index < segments.length - 1 && !status.isDirectory()) {
+      throw new TypeError('A measured Replit runtime launch path is not a directory');
+    }
+    if (index === segments.length - 1 && !status.isFile()) {
+      throw new TypeError('A measured Replit runtime launch file is not a regular file');
+    }
+  }
+  return current;
+}
+
+function runtimeArtifactDigest() {
+  assertSafeArtifactPathComponents();
+  const files = collectRuntimeArtifactFiles(runtimeArtifactDirectory());
+  if (files.length === 0) {
+    throw new TypeError('The Replit runtime artifact must contain at least one file');
+  }
+  const hash = createHash('sha256');
+  hash.update(`boomerbuddy-replit-runtime-artifact-v1\0${service}\0`, 'utf8');
+  const criticalFiles = [
+    ['scripts', 'replit-service.mjs'],
+    ['package.json'],
+    ['package-lock.json'],
+    ['node_modules', '.package-lock.json'],
+    ['apps', service, 'package.json'],
+  ];
+  for (const segments of criticalFiles) {
+    const path = criticalRuntimeFile(segments);
+    const size = lstatSync(path).size;
+    updateHashWithFile(hash, path, `critical/${segments.join('/')}`, size);
+  }
+  for (const file of files) {
+    updateHashWithFile(hash, file.path, `artifact/${file.relativePath}`, file.size);
+  }
+  return hash.digest('hex');
+}
+
+function canonicalReceiptText(receipt) {
+  return `${JSON.stringify(receipt)}\n`;
+}
+
+function provenanceHmacKey() {
+  const encoded = process.env.BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64;
+  const decoded = Buffer.from(encoded ?? '', 'base64');
+  if (
+    typeof encoded !== 'string' ||
+    decoded.length !== 32 ||
+    decoded.toString('base64') !== encoded
+  ) {
+    throw new TypeError(
+      'BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64 must be one canonical 32-byte base64 key',
+    );
+  }
+  return decoded;
+}
+
+function writeBuildProvenanceReceipt(release) {
+  const unsignedReceipt = {
+    version: 1,
+    service,
+    repository: canonicalRepositoryIdentity,
+    commit: release.commit,
+    tree: release.tree,
+    tag: release.tag,
+    tagObject: release.tagObject,
+    artifactSha256: runtimeArtifactDigest(),
+  };
+  const receipt = {
+    ...unsignedReceipt,
+    hmacSha256: createHmac('sha256', provenanceHmacKey())
+      .update(canonicalReceiptText(unsignedReceipt), 'utf8')
+      .digest('hex'),
+  };
+  const text = canonicalReceiptText(receipt);
+  if (Buffer.byteLength(text, 'utf8') > provenanceReceiptMaxBytes) {
+    throw new TypeError('The Replit provenance receipt exceeds its size limit');
+  }
+  const directory = runtimeArtifactDirectory();
+  const receiptPath = join(directory, provenanceReceiptFilename);
+  const temporaryPath = join(directory, provenanceReceiptTemporaryFilename);
+  try {
+    writeFileSync(temporaryPath, text, { encoding: 'utf8', flag: 'wx', mode: 0o644 });
+    renameSync(temporaryPath, receiptPath);
+  } catch (error) {
+    const temporaryStatus = lstatSync(temporaryPath, { throwIfNoEntry: false });
+    if (temporaryStatus?.isFile() && !temporaryStatus.isSymbolicLink()) unlinkSync(temporaryPath);
+    throw error;
+  }
+}
+
+function parseRuntimeProvenanceReceipt() {
+  assertSafeArtifactPathComponents();
+  const directory = runtimeArtifactDirectory();
+  const temporaryStatus = lstatSync(join(directory, provenanceReceiptTemporaryFilename), {
+    throwIfNoEntry: false,
+  });
+  if (temporaryStatus !== undefined) {
+    throw new TypeError('A temporary Replit provenance receipt must not exist at startup');
+  }
+  const path = join(directory, provenanceReceiptFilename);
+  const status = lstatSync(path, { throwIfNoEntry: false });
+  if (
+    status === undefined ||
+    !status.isFile() ||
+    status.isSymbolicLink() ||
+    status.size < 1 ||
+    status.size > provenanceReceiptMaxBytes
+  ) {
+    throw new TypeError('A valid Replit build provenance receipt is required at startup');
+  }
+  const text = readFileSync(path, 'utf8');
+  let receipt;
+  try {
+    receipt = JSON.parse(text);
+  } catch {
+    throw new TypeError('The Replit build provenance receipt must contain canonical JSON');
+  }
+  const keys = [
+    'version',
+    'service',
+    'repository',
+    'commit',
+    'tree',
+    'tag',
+    'tagObject',
+    'artifactSha256',
+    'hmacSha256',
+  ];
+  if (
+    typeof receipt !== 'object' ||
+    receipt === null ||
+    Array.isArray(receipt) ||
+    Object.keys(receipt).length !== keys.length ||
+    keys.some((key, index) => Object.keys(receipt)[index] !== key) ||
+    canonicalReceiptText(receipt) !== text ||
+    receipt.version !== 1 ||
+    typeof receipt.service !== 'string' ||
+    typeof receipt.repository !== 'string' ||
+    typeof receipt.commit !== 'string' ||
+    typeof receipt.tree !== 'string' ||
+    typeof receipt.tag !== 'string' ||
+    typeof receipt.tagObject !== 'string' ||
+    typeof receipt.artifactSha256 !== 'string' ||
+    typeof receipt.hmacSha256 !== 'string' ||
+    !/^[0-9a-f]{40}$/u.test(receipt.commit) ||
+    !/^[0-9a-f]{40}$/u.test(receipt.tree) ||
+    !/^[0-9a-f]{40}$/u.test(receipt.tagObject) ||
+    !/^run3-1-replit-founding-household-[0-9a-f]{12}$/u.test(receipt.tag) ||
+    !/^[0-9a-f]{64}$/u.test(receipt.artifactSha256) ||
+    !/^[0-9a-f]{64}$/u.test(receipt.hmacSha256)
+  ) {
+    throw new TypeError('The Replit build provenance receipt has an invalid schema');
+  }
+  return receipt;
+}
+
+function runtimeGitMetadataPresent() {
+  const gitMetadata = lstatSync(join(process.cwd(), '.git'), { throwIfNoEntry: false });
+  if (gitMetadata?.isSymbolicLink()) {
+    throw new TypeError('Runtime Git metadata must not be a symbolic link');
+  }
+  if (
+    gitMetadata !== undefined ||
+    process.env.GIT_DIR !== undefined ||
+    process.env.GIT_WORK_TREE !== undefined
+  ) {
+    return true;
+  }
+  const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    maxBuffer: provenanceDiagnosticMaxBuffer,
+    shell: false,
+  });
+  return result.error === undefined && result.status === 0;
+}
+
+function assertRuntimeProvenanceReceipt(release) {
+  const receipt = parseRuntimeProvenanceReceipt();
+  const { hmacSha256, ...unsignedReceipt } = receipt;
+  const expectedHmac = createHmac('sha256', provenanceHmacKey())
+    .update(canonicalReceiptText(unsignedReceipt), 'utf8')
+    .digest();
+  const actualHmac = Buffer.from(hmacSha256, 'hex');
+  if (actualHmac.length !== expectedHmac.length || !timingSafeEqual(actualHmac, expectedHmac)) {
+    throw new TypeError('The Replit build provenance receipt signature is invalid');
+  }
+  if (
+    receipt.service !== service ||
+    receipt.repository !== canonicalRepositoryIdentity ||
+    receipt.commit !== release.commit ||
+    receipt.tag !== release.tag
+  ) {
+    throw new TypeError('The Replit runtime receipt does not match this configured release');
+  }
+  if (receipt.artifactSha256 !== runtimeArtifactDigest()) {
+    throw new TypeError('The Replit runtime artifact does not match its build provenance receipt');
+  }
+
+  if (!runtimeGitMetadataPresent()) return;
+  assertCanonicalGitHubOrigin();
+  const checkout = assertReleaseProvenance({ verifyCheckout: true });
+  if (checkout.tree !== receipt.tree || checkout.tagObject !== receipt.tagObject) {
+    throw new TypeError('Runtime Git metadata does not match the build provenance receipt');
   }
 }
 
@@ -516,6 +876,8 @@ function reviewNpmProblems(inventory) {
   return artifactNames;
 }
 
+if (mode === 'build') clearPriorBuildReceipt();
+
 let providerApiPort;
 if (mode === 'start') {
   if (process.env.REPLIT_DEPLOYMENT !== '1') {
@@ -608,7 +970,10 @@ if (service === 'web' || service === 'hq') {
   serviceEnvironment = { ...process.env, BB_PUBLIC_ORIGIN: publicOrigin };
 }
 
-assertReleaseProvenance({ verifyCheckout: mode === 'build' });
+if (mode === 'build') {
+  assertCanonicalGitHubOrigin();
+}
+const releaseProvenance = assertReleaseProvenance({ verifyCheckout: mode === 'build' });
 
 if (mode === 'build') {
   run([
@@ -654,14 +1019,17 @@ if (mode === 'build') {
       throw new Error(`The ${service} Replit graph unexpectedly includes ${forbidden}`);
     }
   }
+  assertCanonicalGitHubOrigin();
+  const postBuildProvenance = assertReleaseProvenance({ verifyCheckout: true });
+  writeBuildProvenanceReceipt(postBuildProvenance);
   process.stdout.write(
     `Replit ${service} build passed with an isolated production dependency graph.\n`,
   );
 } else {
-  const childEnvironment =
-    service === 'api'
-      ? { ...serviceEnvironment, BB_API_PORT: providerApiPort }
-      : serviceEnvironment;
+  assertRuntimeProvenanceReceipt(releaseProvenance);
+  const childEnvironment = { ...serviceEnvironment };
+  delete childEnvironment.BB_REPLIT_PROVENANCE_HMAC_KEY_BASE64;
+  if (service === 'api') childEnvironment.BB_API_PORT = providerApiPort;
   const child = spawn(npmCommand, [...npmPrefix, 'run', 'start', '--workspace', workspace], {
     cwd: process.cwd(),
     env: childEnvironment,

@@ -11,6 +11,35 @@ import { isPublicCustomerResourcePath } from './lib/resource-auth-policy';
 const productionClerkSignInUrl = '/sign-in';
 const configuredClerkSignInUrl = process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL;
 const configuredPublicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true);
+
+function forwardedPortDiagnostic(value: string | null): string {
+  if (value === null) return 'absent';
+  if (value === '') return 'empty';
+  if (value === '80' || value === '443') return value;
+  return 'other';
+}
+
+function authorityDiagnostic(value: string | null): string {
+  if (value === null) return 'absent';
+  return configuredPublicOrigin !== undefined &&
+    canonicalPublicOrigin(`https://${value}`, true) === configuredPublicOrigin
+    ? 'expected'
+    : 'other';
+}
+
+function rejectedOriginDiagnostic(request: NextRequest): string {
+  const forwardedProto = request.headers.get('x-forwarded-proto');
+  return [
+    `forwarded=${request.headers.get('forwarded') === null ? 'absent' : 'present'}`,
+    `host=${authorityDiagnostic(request.headers.get('host'))}`,
+    `xfh=${authorityDiagnostic(request.headers.get('x-forwarded-host'))}`,
+    `proto=${
+      forwardedProto === null ? 'absent' : forwardedProto === 'https' ? 'https' : 'other'
+    }`,
+    `port=${forwardedPortDiagnostic(request.headers.get('x-forwarded-port'))}`,
+  ].join(',');
+}
+
 const productionClerkMiddleware =
   configuredPublicOrigin === undefined
     ? undefined
@@ -69,7 +98,10 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   ) {
     return new NextResponse('The requested application is unavailable.', {
       status: 421,
-      headers: { 'cache-control': 'no-store' },
+      headers: {
+        'cache-control': 'no-store',
+        'x-boomerbuddy-origin-class': rejectedOriginDiagnostic(request),
+      },
     });
   }
 

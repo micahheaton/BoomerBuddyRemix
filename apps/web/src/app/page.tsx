@@ -1,84 +1,237 @@
 import Link from 'next/link';
 import { PublicFooter, PublicHeader } from '../components/public-shell';
+import { indexedCustomerPageMetadata } from '../lib/public-page-metadata';
+
+export const metadata = indexedCustomerPageMetadata['/'];
 
 export default function HomePage() {
   return (
     <>
       <PublicHeader />
       <main id="main-content">
-        <section className="page-shell hero">
+        <section className="page-shell marketing-hero">
           <div>
-            <span className="eyebrow">Pause · Check · Connect</span>
-            <h1>From suspicious to a safer next step—together.</h1>
+            <span className="eyebrow">
+              Scam-safety practice and support for older adults and families
+            </span>
+            <h1>Practice, check, and respond safely to suspicious messages together.</h1>
             <p className="lede">
-              BoomerBuddy helps you slow down, check a suspicious text or link, and involve someone
-              you trust. Public Check works without an account. Its rules-only result can be wrong
-              and is not calibrated real-world fraud-detection evidence.
+              BoomerBuddy gives each adult seven short safety lessons, a private way to check
+              suspicious text or links, and an optional redacted handoff to one person they choose.
+              During web access, you contact that person directly; BoomerBuddy does not message them
+              automatically.
+            </p>
+            <p className="offer-line" aria-label="Family plan offer">
+              <strong>Family</strong>
+              <span>7 days free, then USD 149.90/year</span>
+              <span>Or USD 14.99/month without a trial</span>
             </p>
             <div className="button-row">
-              <Link className="button button-primary" href="/check">
-                Check something now
+              <Link className="button button-primary" href="/sign-up">
+                Create an account
               </Link>
-              <Link className="button button-secondary" href="/how-it-works">
-                See how it works
+              <Link className="button button-secondary" href="/check">
+                Try a free Check
+              </Link>
+              <Link className="button button-secondary" href="/sign-in">
+                Already a member? Sign in
               </Link>
             </div>
+            <p className="help">
+              Creating an account does not start a trial or charge you. If annual billing is
+              available, a trial starts only after you review the exact first-charge date and
+              confirm secure checkout. Seven days are free, then Family renews at USD 149.90 per
+              year unless canceled before the trial ends.
+            </p>
+            <p className="help">
+              Private by design: BoomerBuddy does not monitor your phone, read your messages, or
+              contact family automatically. A Check explains warning signs and safer actions; it
+              cannot guarantee that something is safe.
+            </p>
+            <p className="help">
+              Web access is the current path. iPhone and Android apps are still in signed-device and
+              store testing.
+            </p>
           </div>
-          <aside className="hero-card" aria-label="What to do right now">
-            <span className="dev-pill">A useful pause</span>
-            <h2>If a message feels urgent</h2>
-            <ol className="plain-list">
-              <li>Do not reply, click, pay, or share a code.</li>
-              <li>Use contact details you find independently.</li>
-              <li>Ask someone you trust before acting.</li>
+          <aside className="hero-card workflow-card" aria-label="The Family response plan">
+            <span className="data-pill">A plan before the pressure</span>
+            <h2>A simple habit when something feels wrong</h2>
+            <ol className="workflow-list">
+              <li>
+                <strong>Learn</strong>
+                <span>Practice common scam situations before one feels urgent.</span>
+              </li>
+              <li>
+                <strong>Check</strong>
+                <span>Review warning signs and safer next actions.</span>
+              </li>
+              <li>
+                <strong>Ask by choice</strong>
+                <span>
+                  Contact your chosen person, then share a summary with the original message or link
+                  removed.
+                </span>
+              </li>
+              <li>
+                <strong>Follow through</strong>
+                <span>See when they acknowledge it and record when the concern is handled.</span>
+              </li>
             </ol>
           </aside>
         </section>
+
         <section className="section section-alt">
-          <div className="page-shell" style={{ paddingBlock: 0 }}>
-            <h2 className="section-heading">Clear help, without false certainty</h2>
-            <div className="card-grid">
+          <div className="page-shell section-shell">
+            <div className="section-copy">
+              <span className="eyebrow">Ongoing household value</span>
+              <h2 className="section-heading">Family is more than a checker</h2>
+              <p className="section-lede">
+                Prepare together before something suspicious arrives, then use a clear, private plan
+                when it does.
+              </p>
+            </div>
+            <div className="card-grid value-grid">
               <article className="card">
-                <div className="step-number">1</div>
-                <h3>Share safely</h3>
+                <h3>Seven short lessons</h3>
                 <p>
-                  Use Public Check without signing in. Never include passwords, access codes, or
-                  financial details.
+                  Practice handling urgency, impersonation, passwords and codes, unusual payment
+                  requests, remote access, and recovery without shame.
                 </p>
               </article>
               <article className="card">
-                <div className="step-number">2</div>
-                <h3>Read the limits</h3>
+                <h3>Reviewed scam guidance</h3>
                 <p>
-                  See a risk level, evidence sufficiency, explicit limitations, and the available
-                  provider state.
+                  Read dated, source-linked US guidance. Reviewed state-specific briefs currently
+                  cover Arizona, California, Illinois, New York, and Pennsylvania; other states use
+                  an honest national fallback.
                 </p>
               </article>
               <article className="card">
-                <div className="step-number">3</div>
-                <h3>Choose a safe action</h3>
-                <p>Pause, verify through an official channel, or bring in your Trusted Circle.</p>
+                <h3>Weekly practice prompt</h3>
+                <p>
+                  Choose whether to show a short weekly pause-and-verify prompt in the member&apos;s
+                  in-app learning feed.
+                </p>
+              </article>
+              <article className="card">
+                <h3>Private Check history</h3>
+                <p>
+                  Save eligible Checks for up to 30 days, revisit safer actions, and record when a
+                  concern has been handled.
+                </p>
+              </article>
+              <article className="card">
+                <h3>Trusted Circle help</h3>
+                <p>
+                  Share a summary with the original message or link removed. Only the person you
+                  chose can review and acknowledge it in the app.
+                </p>
+              </article>
+              <article className="card">
+                <h3>Family Safe Word</h3>
+                <p>
+                  Agree on an optional private phrase for family-emergency conversations. It is a
+                  social aid, not proof of identity.
+                </p>
               </article>
             </div>
           </div>
         </section>
-        <section className="page-shell section">
-          <h2 className="section-heading">Built for calm decisions</h2>
-          <div className="card-grid two">
+
+        <section className="page-shell section-shell">
+          <div className="section-copy">
+            <span className="eyebrow">Consent comes first</span>
+            <h2 className="section-heading">Help without taking control</h2>
+            <p className="section-lede">
+              Every adult chooses whether to participate and what to share. Paying for or managing a
+              household does not reveal another adult&apos;s Checks.
+            </p>
+          </div>
+          <div className="audience-grid">
             <article className="card">
-              <h3>Plain language</h3>
+              <h3>When you receive something suspicious</h3>
               <p>
-                Large controls, clear labels, and no color-only warnings make the experience easier
-                to use under pressure.
+                Get a calm second look without being judged, rushed, monitored, or asked to give up
+                control of your account.
               </p>
             </article>
             <article className="card">
-              <h3>Your people stay in the loop</h3>
+              <h3>When someone asks you for help</h3>
               <p>
-                Family controls make consent and permissions visible. BoomerBuddy does not
-                automatically email or text invitations.
+                See only the summary they chose to share, with the original message or link removed,
+                and help them choose a safer next step.
               </p>
             </article>
+          </div>
+          <div className="notice consent-note">
+            <strong>Private by default. Shared on purpose.</strong> BoomerBuddy examines only the
+            text or website address someone deliberately submits. It does not continuously monitor
+            messages, calls, contacts, accounts, or location.{' '}
+            <Link href="/trust">See the trust boundaries</Link>.
+          </div>
+        </section>
+
+        <section className="section section-alt">
+          <div className="page-shell section-shell">
+            <div className="section-copy">
+              <span className="eyebrow">Choose what fits now</span>
+              <h2 className="section-heading">
+                Use Public Check now. Add Family for an ongoing plan.
+              </h2>
+            </div>
+            <div className="comparison-grid">
+              <article className="card plan-card">
+                <p className="plan-kicker">No account required</p>
+                <h3>Public Check</h3>
+                <p className="plan-price">Free</p>
+                <ul className="plain-list">
+                  <li>Check message text or a website address</li>
+                  <li>See warning signs, uncertainty, and safer actions</li>
+                  <li>Temporary by default</li>
+                  <li>No household collaboration</li>
+                </ul>
+                <Link className="button button-secondary" href="/check">
+                  Try a free Check
+                </Link>
+              </article>
+              <article className="card plan-card plan-card-featured">
+                <p className="plan-kicker">Available on the web</p>
+                <h3>Family</h3>
+                <p className="plan-price">7 days free, then USD 149.90/year</p>
+                <ul className="plain-list">
+                  <li>Save USD 29.98 compared with twelve monthly payments</li>
+                  <li>USD 14.99 monthly is available without a trial</li>
+                  <li>Up to three protected adults, with every adult joining by choice</li>
+                  <li>Up to six Trusted Circle participants across the household</li>
+                  <li>Private History for up to 30 days and sharing only by choice</li>
+                  <li>See when your chosen person acknowledges a shared summary</li>
+                  <li>Safe Word, seven lessons, guidance, and weekly practice</li>
+                </ul>
+                <Link className="button button-primary" href="/pricing">
+                  Review Family pricing
+                </Link>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section className="page-shell closing-section">
+          <div>
+            <span className="eyebrow">A clearer next step</span>
+            <h2 className="section-heading">Build the habit before the next urgent message.</h2>
+            <p>
+              Create an account to review availability and the exact billing terms. Signing up alone
+              does not start a trial or charge you. Native iPhone and Android packages are still
+              completing signed-device and store testing.
+            </p>
+          </div>
+          <div className="button-row">
+            <Link className="button button-primary" href="/sign-up">
+              Create an account
+            </Link>
+            <Link className="button button-secondary" href="/sign-in">
+              Already a member? Sign in
+            </Link>
           </div>
         </section>
       </main>

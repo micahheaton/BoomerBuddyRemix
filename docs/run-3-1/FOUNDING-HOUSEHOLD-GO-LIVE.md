@@ -1,4 +1,21 @@
-### Founder clicks/actions
+# Historical Founding Household go-live record
+
+Status: **superseded; not an operational production runbook**
+
+This document is retained to explain the earlier Run 3.1 evidence chain. Do not execute its
+numbered actions to create a new production Founding program, sponsorship, credential, invitation,
+enrollment, customer account, customer contact, or external-user cohort. Production intentionally
+refuses the historical Founding activation routes. The
+`founding-household:bootstrap-production` command is maintenance-only historical tooling pending a
+separate recovery-use review; do not run it for new production activation.
+
+Current implementation begins with `docs/post-launch-beta/RUN-NEXT-EXECUTION.md` and is controlled
+by `docs/post-launch-beta/EXECUTION-PLAN.md`,
+`docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md`, and the G0-G15 prompt pack. Their exact
+candidate, provider, deployment, payment, and customer gates take precedence over every numbered
+action below. The text below is archival evidence, not authority.
+
+### Historical founder clicks/actions
 
 This is a manual bridge for one free Founding Household. It does not authorize a public launch,
 payments, SMS, mobile-store submission, campaigns, DNS changes, or autonomous invitations. Stop at
@@ -9,47 +26,98 @@ does not itself authorize them. The founder may separately authorize a synthetic
 provider-proof deployment to collect missing evidence; that is not external-user activation. No
 non-test invitation, sign-in, or customer data is allowed until step 26's independent verdict gate.
 
-1. Open the company GitHub organization. Create or select a **private** BoomerBuddy repository,
-   require MFA for administrators, record two recovery owners, and protect deletion or movement of
-   release tags. Do not upload an `.env`, database, backup, receipt, or customer data.
-2. Add that repository as `origin`, push the reviewed implementation commit, and push the immutable
-   annotated tag `run3-1-replit-founding-household-<first-12-commit-characters>`. Verify the tag
-   resolves to the full recorded commit. Never move, delete, or reuse this tag.
-3. In the Clerk Dashboard, create a **separate customer production application**. Open
+1. Open the company GitHub organization and confirm read-only that the private canonical repository
+   is `micahheaton/BoomerBuddyRemix`, administrator MFA and recovery ownership are current, and release
+   tags cannot be moved or deleted casually. Do not create another source repository or upload an
+   `.env`, database, backup, receipt, secret, or customer data.
+2. Push the reviewed candidate commit to its review branch, run the complete local gate, and require
+   every GitHub CI job green on that exact 40-character SHA. Outside the versioned candidate, complete
+   `docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md` in state
+   `draft_pre_authorization`. Bind the candidate SHA/tree, green CI, planned annotated tag
+   `run3-1-replit-founding-household-<first-12-commit-characters>`, ordered action manifest, and scope
+   digest while recording that the tag and external effects are absent. Do not create the tag yet.
+   After the founder cites that receipt ID and digest and types
+   `CONFIRM NONCHARGING RELEASE SETUP`, make tag creation and push the first authorized action. Verify
+   the remote tag object is annotated and peels to the exact candidate, append its object ID, peeled
+   commit, and tree to the external receipt, and only then perform a provider write. Advance `main`
+   only if it preserves the exact candidate commit. A squash, rebase, merge commit, changed tree,
+   changed CI result, or changed action scope requires a new candidate, receipt, and confirmation.
+   Never move, delete, or reuse a release tag.
+3. In the Clerk Dashboard, select the exact existing **Customer production application** whose safe
+   application ID is recorded in the external receipt. Stop if the account, environment, application,
+   or role is ambiguous, or if more than one application could be the Customer target. Do not create,
+   delete, rename, or replace an application unless read-only inventory proves the intended Customer
+   application is absent and that exact creation is included in the authorized action manifest. Open
    **Restrictions**, enable **Restricted mode**, and save. Public sign-up is a release blocker even
    though the UI hides sign-up. Do not use a shared customer/HQ tenant.
 4. In the customer Clerk application, configure only the intended sign-in methods, lock identifier
-   changes where practical, set the exact customer Replit HTTPS origin, and configure the standard
-   session token to carry audience `boomerbuddy-customer`. Require and record a signed-token lifetime
-   no longer than five minutes and a maximum customer session no longer than 24 hours for this beta;
-   if the provider cannot enforce and evidence those bounds, stop for review. Do not add authorization
-   roles or household IDs to Clerk claims.
+   changes where practical, and set the customer application Home URL to exactly
+   `https://app.boomerbuddy.net/member`, Unauthorized sign-in URL to exactly
+   `https://app.boomerbuddy.net/unauthorized-sign-in`, self-hosted sign-in component URL to exactly
+   `https://app.boomerbuddy.net/sign-in`, and Account Portal customer sign-in fallback to exactly
+   `https://app.boomerbuddy.net/member`. The deployed component must remain the local Next catch-all
+   `/sign-in/[[...sign-in]]` with `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`. Preserve the existing
+   root-domain Clerk infrastructure, including `accounts.boomerbuddy.net` and the reviewed Clerk
+   Frontend API or OAuth callback domain; do not point any field at the separate legacy
+   `BoomerBuddy` Replit project. Configure the standard session token to carry audience
+   `boomerbuddy-customer`. Require and record a signed-token lifetime no longer than five minutes and
+   a maximum customer session no longer than 24 hours for this beta; if the provider cannot enforce
+   and evidence those bounds, stop for review. Do not add authorization roles or household IDs to
+   Clerk claims. Record path/configuration evidence without keys, user records, email addresses,
+   session identifiers, or other PII.
 5. From customer Clerk **API keys**, record the production Frontend API/issuer origin, publishable
    key, secret key, and PEM public verification key. The secret key and PEM value go only into the
    services listed in the environment manifest. Never paste them into Git or this document.
-6. In the Clerk Dashboard, create a **different HQ production application**. Enable restricted
-   access. In **Multi-factor**, enable an approved second factor and turn on **Require multi-factor
+6. In the Clerk Dashboard, select the exact existing **HQ production application** whose different
+   safe application ID is recorded in the external receipt. Stop on account, environment,
+   application, role, or Customer/HQ ambiguity. Do not create, delete, rename, or replace an HQ
+   application unless read-only inventory proves the intended HQ application is absent and that exact
+   creation is included in the authorized action manifest. Enable restricted access. In
+   **Multi-factor**, enable an approved second factor and turn on **Require multi-factor
    authentication**. Replit-managed Clerk is not accepted for HQ unless it independently proves this
    MFA requirement without modifying the frozen source.
-7. Configure the HQ token audience as `boomerbuddy-hq`, set the exact HQ Replit HTTPS origin, require
-   a signed-token lifetime no longer than five minutes and an HQ session no longer than eight hours,
-   and create only the founder account. Record its exact Clerk `user_...` subject. Record the HQ
-   issuer, publishable key, secret key, distinct PEM public key, and provider-enforced MFA/session
-   settings.
+7. Configure the HQ token audience as `boomerbuddy-hq` and authorized party as exactly
+   `https://hq.boomerbuddy.net`. Set Application Home and Account Portal fallback to exactly
+   `https://hq.boomerbuddy.net/`. Set Unauthorized sign-in and the self-hosted sign-in component to
+   exactly `https://hq.boomerbuddy.net/sign-in`; the deployment uses
+   `/sign-in/[[...sign-in]]`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`, and redirects successful HQ
+   sign-in to `/`. Require a signed-token lifetime no longer than five minutes and an HQ session no
+   longer than eight hours, and create only the founder account. Record its exact Clerk `user_...`
+   subject only in the approved sensitive evidence store. Record the HQ issuer, key fingerprints,
+   distinct PEM fingerprint, path values, and provider-enforced MFA/session settings separately from
+   Customer evidence. Do not point any HQ field at Customer Clerk infrastructure or legacy
+   `boomerbuddy.net`. Stop on a loop, 404, wrong issuer/audience/authorized party, realm crossover, or
+   unavailable MFA/recovery.
 8. Open Replit and import the same private GitHub repository into four founder-owned projects named
    conceptually `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boomerbuddy-hq`.
-   Do not ask Replit Agent to rewrite authentication or application code.
+   Do not ask Replit Agent to rewrite authentication or application code. GitHub is the source of
+   truth: each service pulls the exact approved commit from `BoomerBuddyRemix`, and no Replit
+   project ever pushes code or editor checkpoints back to GitHub. The separate `BoomerBuddy`
+   project serving legacy `boomerbuddy.net` is outside this deployment set and stays untouched. Give
+   each 2.0 project a different credential scoped only to `micahheaton/BoomerBuddyRemix`. Prefer a
+   unique deploy key with **Allow write access** unchecked. A repository-scoped GitHub App or
+   fine-grained token is acceptable only with `Contents: Read-only`, `Metadata: Read-only`, and no
+   repository, organization, or user write permission. Store the private value only in the matching
+   Replit credential store, keep the remote URL credential-free, and remove any write-capable Replit
+   GitHub connection. The checkout remote must use exactly either
+   `https://github.com/micahheaton/BoomerBuddyRemix.git` or
+   `https://github.com/micahheaton/BoomerBuddyRemix` for an HTTPS-compatible read-only credential,
+   or exactly `git@github.com:micahheaton/BoomerBuddyRemix.git` for the preferred read-only deploy
+   key. The deployment wrapper rejects credentials embedded in a URL, forks, host aliases, any other
+   URL spelling, multiple origin URLs, and noncanonical push metadata without
+   printing the observed URL.
 9. In each Replit project Shell, explicitly fetch the exact tag ref with
    `git fetch origin refs/tags/<tag>:refs/tags/<tag>` because Replit's Pull action does not fetch tags,
    then check out the candidate tag in detached mode. Verify that
    `git cat-file -t refs/tags/<tag>` returns exactly `tag`,
    `git rev-parse refs/tags/<tag>^{commit}` equals `BB_RUN3_1_RELEASE_COMMIT`,
+   `git rev-parse HEAD` equals `BB_RUN3_1_RELEASE_COMMIT`,
    `git rev-parse HEAD^{tree}` equals `git rev-parse refs/tags/<tag>^{tree}`, and
    `git status --porcelain=v1 --untracked-files=all` is empty. Before relying on publication, prove
    that the **published build context**, not only the project shell, preserves `.git`, the
-   annotated tag, exact tree equality, and the empty full-porcelain status: the provenance wrapper
-   checks all four. Replit may package the same tree under a different snapshot commit, but a
-   lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
+   annotated tag, exact commit and tree equality, and the empty full-porcelain status: the provenance
+   wrapper checks all of them. A different Replit snapshot commit is rejected even when its tree
+   matches the tag. A lightweight or moved tag, a tag resolving to another commit, a changed tree, or any staged,
    unstaged, or nonignored untracked content must fail. For API, web, and HQ only, Replit may append
    its documented `deploymentTarget = "cloudrun"` Autoscale line to the tracked `.replit` file.
    The wrapper accepts that provider input only when raw porcelain is exactly one unstaged
@@ -67,12 +135,22 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
    dependency ranges from the tagged `package-lock.json`. API, worker, malformed or nested problems,
    altered metadata, or any partial, duplicate, or additional npm problem fails closed. If the published build context cannot provide evidence, publication is
    expected to fail and the release control needs a reviewed code change/new tag; do not bypass it
-   with an environment value.
-10. In one founder-controlled Replit project, open **Database** and provision Production PostgreSQL.
-    Record the provider database/project identifier, region, connection hostname, database name, and
-    the TLS-capable `DATABASE_URL`. The URL must include exactly one `sslmode=require`,
-    `sslmode=verify-ca`, or preferably `sslmode=verify-full`. Do not use the deployment filesystem
-    for customer truth.
+   with an environment value. With the same per-project credential, run
+   `git push --dry-run origin HEAD:refs/heads/bb-denied-write-proof-<receipt-id>` and require a nonzero
+   exit caused by denied write access. Exit zero is a hard stop even though `--dry-run` creates no
+   ref. Never remove `--dry-run` or test a force, delete, branch, or tag write. Record only the safe
+   credential ID/fingerprint, type, repository scope, permission export, expiry/rotation date,
+   successful exact-tag fetch, nonzero denial classification, and recovery owner. Do not record the
+   value.
+10. Select the exact existing managed Production PostgreSQL project and database whose safe IDs are
+    recorded in the external receipt. Stop on account, project, region, database, ownership, or
+    application ambiguity. Provision a new production database only when read-only inventory proves
+    the intended database is absent and the authorized action manifest records the provider, region,
+    cost ceiling, owner, backup boundary, and rollback. Never create a second database merely because
+    a Replit project exposes a **Database** button. Record the provider database/project identifier,
+    region, connection hostname, database name, and the TLS-capable `DATABASE_URL`. The URL must
+    include exactly one `sslmode=require`, `sslmode=verify-ca`, or preferably
+    `sslmode=verify-full`. Do not use the deployment filesystem for customer truth.
 11. Provision a **new, empty, disposable** provider PostgreSQL database whose name has a delimited
     `ci` or `test` segment, for example `boomerbuddy_run31_test`. In a dedicated verification shell,
     use only that database's TLS URL and run:
@@ -91,7 +169,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     retain the content-free diagnostic, stop retrying, lower concurrent database work, and repeat on
     a new empty disposable database. Before customer traffic, either prove three consecutive exact
     20-accepted/1-quota-rejected runs with the production caps or raise the production compute to at
-    least 0.5 CU (prefer bounded 0.5–1 CU autoscaling where available) and repeat the same gate.
+    least 0.5 CU (prefer bounded 0.5-1 CU autoscaling where available) and repeat the same gate.
 
 12. Create a migration credential and runtime credential with the narrowest provider-supported
     separation. Use the direct database URL and `BB_POSTGRES_POOL_MAX=1` only for the controlled
@@ -129,16 +207,164 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `Forwarded` header all match that exact direct probe. Every external `/`, API path, and operator route still crosses the HQ Clerk boundary. Mixed or malformed forwarding metadata and any
     changed provider probe must fail promotion until this exact predicate is reviewed; do not widen
     the anonymous HQ surface.
-18. Before publishing API or worker, use a one-off founder-controlled shell with the migration
-    credential and the complete production configuration. Run `npm ci --ignore-scripts`, then
-    `npm run db:migrate` twice. The first run must record exactly the 0001–0027 forward chain, and the
-    second must report no migrations to apply. Never enable per-startup migrations.
+18. Before publishing API or worker, keep Stripe initiation and Twilio disabled, quiesce API and
+    worker mutations, create an encrypted pre-migration backup outside the repository, and prove that
+    backup in a disposable restore. Derive the migration manifest from the verified annotated tag,
+    never from a mutable branch, stale runbook ceiling, or working-tree glob. From the detached tag,
+    retain the safe output of both commands:
+
+    ```text
+    git ls-tree -r --name-only refs/tags/<tag> -- packages/persistence/migrations
+    git ls-tree -r refs/tags/<tag> -- packages/persistence/migrations
+    ```
+
+    Accept only SQL paths matching
+    `packages/persistence/migrations/[0-9][0-9][0-9][0-9]_[a-z0-9_]+.sql`. Require exactly one file
+    for every contiguous numeric prefix beginning at `0001`, lexicographic order equal to numeric
+    order, no duplicate version, and no unexpected migration path. Record the ordered filenames, Git
+    blob IDs, and a manifest digest. Compute the expected database checksum for each tagged SQL file
+    as lowercase SHA-256 after normalizing CRLF and CR line endings to LF, matching
+    `packages/persistence/src/migrations.ts`. Compare the ordered `schema_migrations` names and
+    checksums before the run. They must be an exact checksum-valid prefix of the tagged manifest;
+    an unknown row, missing interior row, duplicate prefix, checksum mismatch, or non-prefix state is
+    a hard stop.
+
+    The current documented repository chain ends at:
+
+    ```text
+    0033_run3_1_billing_recovery_evidence.sql
+    0034_run3_1_support_receipts.sql
+    0035_run3_1_paid_family_catalog.sql
+    0036_run3_1_protected_self_enrollment.sql
+    0037_run3_1_paid_family_entitlement_repair.sql
+    0038_run3_1_member_learning_feed.sql
+    0039_trusted_circle_customer_journey.sql
+    0040_run3_1_member_learning_idempotency.sql
+    0041_run3_1_family_safe_word_lifecycle.sql
+    0042_run3_1_regional_scam_guidance.sql
+    0043_governed_first_party_content.sql
+    0044_versioned_stripe_offer_catalog.sql
+    ```
+
+    Therefore, for an exact `0027` production prefix and a candidate whose manifest ends at
+    `0044`, the pending suffix is exactly
+    `0028_run3_1_billing_authority_workflow.sql`,
+    `0029_run3_1_stripe_live_control_plane.sql`,
+    `0030_run3_1_billing_reverification_binding.sql`,
+    `0031_run3_1_mobile_session_retention.sql`,
+    `0032_run3_1_private_beta_access_intents.sql`,
+    `0033_run3_1_billing_recovery_evidence.sql`,
+    `0034_run3_1_support_receipts.sql`, and
+    `0035_run3_1_paid_family_catalog.sql`,
+    `0036_run3_1_protected_self_enrollment.sql`, and
+    `0037_run3_1_paid_family_entitlement_repair.sql`,
+    `0038_run3_1_member_learning_feed.sql`,
+    `0039_trusted_circle_customer_journey.sql`, and
+    `0040_run3_1_member_learning_idempotency.sql`, and
+    `0041_run3_1_family_safe_word_lifecycle.sql`, and
+    `0042_run3_1_regional_scam_guidance.sql`,
+    `0043_governed_first_party_content.sql`, and
+    `0044_versioned_stripe_offer_catalog.sql`. For an exact `0032` prefix, it is exactly `0033`
+    through `0044`. A genuinely empty database receives the entire tagged `0001` through final-candidate
+    manifest. A future forward migration must be the next contiguous entry in the exact tagged
+    manifest and must appear in the external receipt. Do not guess its filename, treat this documented
+    `0044` snapshot as a future release ceiling, or run an untagged migration. The only
+    allowed pending set is the tagged candidate manifest minus the exact database prefix.
+
+    Before applying a suffix that includes `0035`, perform a read-only inventory of the exact
+    `family_v1` row in `commerce_plan_versions`. At a pre-`0035` prefix, only absence or the exact
+    immutable monthly hypothesis accepted by
+    `packages/persistence/migrations/0035_run3_1_paid_family_catalog.sql` may proceed. Any annual,
+    mixed monthly/annual, active, differently priced, differently entitled, or otherwise divergent
+    row is a hard stop. Do not update or delete the row to make migration pass. A disposable database
+    may be recreated from the verified source; a durable database requires a separately reviewed
+    lineage and data-portability repair. At a `0035` or later prefix, require the exact monthly USD
+    14.99 hypothesis and `founding_family_monthly_v1` offer contract.
+
+    Before applying a suffix that includes `0037`, count production rows in
+    `commerce_stripe_session_operations`. A pre-`0037` database must contain zero such rows because
+    they cannot name the exact preflight receipt introduced by `0037`; any row is a hard stop for a
+    separately reviewed evidence migration. At a `0037` or later prefix, require zero production
+    rows with `preflight_record_id IS NULL`. The live Stripe audit reported zero live products,
+    prices, subscriptions, and webhooks, but that provider fact does not replace this database
+    inventory. Migration `0037` deliberately performs no historical backfill and its production
+    preflight check makes an unexpected pre-existing row stop the migration transactionally.
+
+    Use a one-off founder-controlled shell with the migration credential, direct TLS database URL,
+    `BB_POSTGRES_POOL_MAX=1`, and the complete production configuration. Run
+    `npm ci --ignore-scripts`, then `npm run db:migrate` twice. The first run's ordered applied list
+    must equal the derived pending suffix exactly. The second run must report
+    `Applied 0 migration(s): none`. Verify that the final `schema_migrations` names and canonical
+    checksums equal the entire tagged manifest, then create a post-migration backup bound to the exact
+    release commit. Restore it into a fresh disposable database and prove the same manifest plus
+    billing authority, Stripe controls, reverification, mobile retention, privacy-minimized access
+    intent, billing recovery evidence, support receipts, paid Family catalogue, protected-self
+    enrollment operation evidence, member learning feed, Trusted Circle customer journey,
+    member-learning operation receipts, and any later tagged repair structures before publishing.
+    Never enable per-startup migrations.
+
+    Migration `0036` keeps protected-self mutation receipts append-only for durable temporal
+    idempotency: replaying an old key must return its original result without repeating or undoing a
+    later mutation. Receipts contain only bounded identifiers, action/result facts, and a request
+    digest; never submitted Check content or PII. The exact household/member foreign key preserves
+    tenant and actor lineage, and the household-gate foreign key preserves the receipt's serialization
+    lineage. The repository resolves an existing key first, caps no-effect receipts at 16 per action
+    and actor/household, and caps state-changing general enrollments at 64. A genuinely enrolled
+    member's state-changing withdrawal is never blocked by those quotas; each such receipt requires a
+    prior accepted enrollment, so the successful-enrollment cap bounds public-route withdrawal cycles
+    and storage. Gate locks are household-scoped; unrelated households do not share a singleton lock.
+    Retain these rows with consent and audit history rather than deleting them and reopening stale-key
+    effects.
+
+    The same migration preserves the original exact Founding protected-consent acceptance as
+    historical evidence while allowing a later independently versioned general self-consent after
+    exact self-withdrawal, including after Founding offboarding when another effective entitlement
+    exists. If offboarding rebinds the original allocation, its append-only allowance transition
+    supplies the exact original enrollment/allocation/grant proof without rewriting history. It does
+    not weaken Founding service-consent termination or sponsor-chain evidence. The
+    automated protected-enrollment fixtures use only a synthetic local Family entitlement. Passing
+    them does not prove Stripe integration, a live payment, or production paid-entitlement readiness.
+
+    Migration `0037` preserves local/test fixtures only for a local runtime. In production it grants
+    the immutable Family hypothesis only from one exact live USD 14.99 monthly chain: provider and
+    customer binding, Checkout operation and completion, operation-bound preflight receipt, paid
+    invoice authority, current lifecycle, and any bounded dunning grace with signed failure lineage.
+    It also makes every production Stripe operation require its environment-matched preflight
+    receipt. Passing local fixtures or serializer mocks is not production paid-entitlement evidence.
+
+    After `0029`, do not deploy the old pre-`0029` application as a binary-only rollback. After
+    `0037`, do not deploy a pre-`0037` API or worker: it cannot attach the required preflight receipt,
+    and the database will reject every production Stripe operation before provider dispatch. Keep
+    Stripe initiation disabled and use a `0037`-compatible corrective tag or a forward corrective
+    migration. A database rollback is allowed only before any post-migration durable write and must
+    be coordinated: stop and drain all services, prove the pre-migration backup in disposable
+    infrastructure, restore the complete database at the verified zero-write point, deploy the
+    matching API, worker, web, and HQ set, and only then reopen traffic. Never destructively
+    down-migrate or discard consent, billing, audit, webhook, refund, dispute, job, or reconciliation
+    evidence.
+
+    **NONCHARGING AUTHORITY ENDS BEFORE STEP 19.** The receipt and phrase from step 2 authorize only
+    the exact noncharging manifest. They do not authorize a production founder-identity bootstrap, a
+    Founding Household program or sponsorship write, a real customer account or invitation, customer
+    contact, consent, entitlement, Checkout, payment, or feedback.
+
+    Before step 19 or 20, create a separate immutable `founding_program_activation` receipt outside
+    the candidate. Bind it to the exact candidate SHA/tree/tag, the completed noncharging receipt ID
+    and digest, the exact production database safe IDs and pre-state, the exact commands and operation
+    IDs, maximum-one cap, finite dates, expected database deltas, evidence gates, stop conditions, and
+    rollback or forward-containment path. Its canonical digest must use the same frozen-snapshot rules
+    as `NONCHARGING-RELEASE-RECEIPT.md`. An independent reviewer must record GO, and the account holder
+    must cite the activation receipt ID and digest and explicitly authorize the exact numbered actions
+    in the active task. Step 19 and step 20 must each be named; neither may be inferred from
+    `CONFIRM NONCHARGING RELEASE SETUP`. If this receipt or authorization is absent, do not run either
+    step. Continue only unrelated actions that remain explicitly listed in the noncharging manifest
+    and do not depend on these production writes.
 19. With that same controlled database connection, run `npm run identity:bootstrap-founder` once.
     Confirm the content-free receipt names `production-founder-v1`, the configured founder person,
     identity, organization, and employee assignment. An exact replay may report `exact_replay`; a
     semantic conflict is a hard stop.
 20. Choose reviewed finite dates, a privacy-policy version, a maximum of **1**, and a fresh lowercase
-    UUID v4. Invitation TTL must be 1–14 days; access duration 1–180 days; program end must be after
+    UUID v4. Invitation TTL must be 1-14 days; access duration 1-180 days; program end must be after
     database time and within 180 days; sponsorship must already be active and end no earlier than the
     program. Access and invitation expiry may be clipped by the program end. Run:
 
@@ -155,8 +381,9 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     deployment, exact founder-binding startup success occurs before any durable worker heartbeat or
     job loop, one durable retention job remains after restart, and no Stripe, Twilio, media,
     classification, transcription, or outbound handler is present.
-23. Publish customer web and HQ. Record deployment IDs, build IDs, origins, and response headers.
-    Verify HTTPS, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, and
+23. Publish customer web, complete its smoke gates, and only then publish HQ and complete its smoke
+    gates. Record deployment IDs, build IDs, origins, and response headers for each surface. Verify
+    HTTPS, `Content-Security-Policy: frame-ancestors 'none'`, `X-Frame-Options: DENY`, and
     `X-Content-Type-Options: nosniff`. Confirm missing Clerk configuration returns a no-store 503.
 24. In an incognito browser, verify `/check` remains anonymous and `/member` is protected. Inspect
     Clerk's `__session` behavior for HTTPS, Secure, HttpOnly, SameSite, short expiry/refresh, logout,
@@ -177,6 +404,17 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `READY_FOR_FOUNDING_HOUSEHOLD`.** This is the pre-invitation activation gate. Evidence that can
     exist only after the single controlled invitation is post-activation acceptance evidence, not a
     circular prerequisite for the invitation.
+
+    `READY_FOR_FOUNDING_HOUSEHOLD` is evidence, not authority. Before step 27 or any later customer
+    action, create a separate immutable `founding_customer_activation` receipt bound to the exact
+    candidate, completed noncharging receipt, completed program-activation receipt, exact deployed
+    service and database safe IDs, support window and backup, maximum one invitation, allowed steps,
+    stop conditions, and rollback or offboarding path. Keep the customer's identity and contact data
+    out of the receipt. After independent GO, the account holder must cite that receipt ID and digest
+    and explicitly authorize the exact customer-contact and activation actions in the active task.
+    The noncharging phrase, the program-activation authorization, and the readiness verdict do not
+    authorize customer contact, an invitation, consent, entitlement, feedback, or payment. This
+    founding activation receipt never authorizes a charge.
 27. In customer Clerk **Invitations**, manually invite exactly the first trusted customer while
     restricted mode remains enabled. This founder click is the only external invitation action.
     BoomerBuddy itself sends no email or SMS.
@@ -254,6 +492,7 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
 | API proxy origin              | Published app secrets                   | `BB_API_INTERNAL_ORIGIN`                    | No                            | exact API HTTPS origin                     | web, HQ                                                         |
 | Clerk browser key             | Published app secrets                   | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`         | No                            | matching `pk_live_...`                     | web or HQ, distinct tenants                                     |
 | Clerk server key              | Published app secrets                   | `CLERK_SECRET_KEY`                          | Yes                           | matching provider value                    | web or HQ, distinct tenants                                     |
+| Clerk sign-in route           | Published app secrets                   | `NEXT_PUBLIC_CLERK_SIGN_IN_URL`             | No                            | exactly `/sign-in`                         | web and HQ; any other value fails closed                        |
 | API bind                      | Published app secrets                   | `BB_API_HOST`                               | No                            | `0.0.0.0`                                  | API                                                             |
 | API port                      | Derived by start wrapper                | `BB_API_PORT`                               | No                            | provider `PORT`                            | API child; do not configure separately                          |
 | Trusted proxy count           | Published app secrets                   | `BB_TRUSTED_PROXY_HOPS`                     | No                            | `0`                                        | API, worker, controlled CLI                                     |
@@ -300,8 +539,8 @@ The complete service-by-service inventory and failure behavior is in
 - HQ MFA cannot be required and freshly proven.
 - Customer/HQ token and maximum-session bounds cannot be configured and retained as provider proof.
 - The configured release ref is not an annotated tag that dereferences to
-  `BB_RUN3_1_RELEASE_COMMIT`, or the published build-context HEAD tree does not exactly match the tag tree. A
-  different Replit snapshot commit is permitted only with exact tree equality.
+  `BB_RUN3_1_RELEASE_COMMIT`, the published build-context HEAD is not exactly that commit, or its tree
+  does not exactly match the tag tree. A different Replit snapshot commit is never permitted.
 - Published build context does not preserve the required `.git` metadata, annotated tag, exact-tree
   equality, and empty `git status --porcelain=v1 --untracked-files=all` evidence.
 - API/worker can start without founder binding or with runtime migrations/demo identities.

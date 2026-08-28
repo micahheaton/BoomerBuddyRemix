@@ -1,15 +1,39 @@
 export type CommerceProviderEnvironment = 'test' | 'sandbox' | 'production';
 
-export interface StripeFoundingOffer {
-  readonly offerId: 'founding_family_monthly_v1';
-  readonly planVersionId: 'family_v1';
-  readonly billingInterval: 'month';
+export const stripeFailedPaymentEventTypes = [
+  'invoice.payment_failed',
+  'invoice.payment_action_required',
+] as const;
+
+export function isStripeFailedPaymentEventType(eventType: string): boolean {
+  return stripeFailedPaymentEventTypes.some((candidate) => candidate === eventType);
+}
+
+export type StripeOfferId =
+  | 'founding_family_monthly_v1'
+  | 'family_monthly_v2'
+  | 'family_annual_v2'
+  | 'individual_monthly_v1'
+  | 'individual_annual_v1';
+
+export interface StripeOffer {
+  readonly offerId: StripeOfferId;
+  readonly planVersionId: 'family_v1' | 'family_v3' | 'individual_v3';
+  readonly plan: 'family' | 'individual';
+  readonly displayName: 'Family' | 'Individual';
+  readonly billingInterval: 'month' | 'year';
   readonly providerProductId: string;
   readonly providerPriceId: string;
   readonly currency: 'usd';
-  readonly unitAmountMinor: 1499;
+  readonly unitAmountMinor: 899 | 1499 | 8990 | 14990;
   readonly quantity: 1;
+  readonly trialPeriodDays: 0 | 7;
+  readonly customerSelectable: boolean;
+  readonly defaultAcquisitionOffer: boolean;
 }
+
+/** Kept as a compatibility alias while the v1 monthly offer remains readable. */
+export type StripeFoundingOffer = StripeOffer;
 
 export interface CommerceActor {
   readonly personId: string;
@@ -41,6 +65,7 @@ export interface CommerceCheckoutPort {
     readonly actor: CommerceActor;
     /** Server-created canonical subscription; never accepted from an untrusted client. */
     readonly canonicalSubscriptionId: string;
+    readonly offerId: StripeOfferId;
     readonly customerReference?: string;
     readonly planVersionId: string;
     readonly providerPriceId: string;
@@ -90,16 +115,18 @@ export interface NormalizedProviderCommerceEvent {
   readonly providerPaymentIntentId?: string;
   readonly checkoutCompletion?: {
     readonly sessionStatus: 'complete';
-    readonly paymentStatus: 'paid';
-    readonly amountTotal: 1499;
+    readonly paymentStatus: 'paid' | 'no_payment_required';
+    readonly amountTotal: number;
     readonly currency: 'usd';
+    readonly paymentMethodCollection: 'always';
+    readonly offerId: StripeOfferId;
     readonly providerExpiresAt: Date;
   };
   readonly checkoutExpiration?: {
     readonly sessionStatus: 'expired';
     readonly paymentStatus: 'unpaid';
     readonly mode: 'subscription';
-    readonly amountTotal: 1499;
+    readonly amountTotal: number;
     readonly currency: 'usd';
     readonly providerExpiresAt: Date;
   };
@@ -107,7 +134,12 @@ export interface NormalizedProviderCommerceEvent {
   readonly providerProductId?: string;
   readonly providerSubscriptionItemId?: string;
   readonly subscriptionOfferExact?: true;
+  readonly offerId?: StripeOfferId;
+  readonly unitAmountMinor?: number;
   readonly billingInterval?: 'month' | 'year';
+  readonly trialStartsAt?: Date;
+  readonly trialEndsAt?: Date;
+  readonly paymentMethodPresent?: true;
   readonly currentPeriodStartsAt?: Date;
   readonly currentPeriodEndsAt?: Date;
   /** Signed provider metadata. Persistence must still validate every field against its own rows. */
@@ -123,6 +155,7 @@ export interface NormalizedProviderCommerceEvent {
 }
 
 export interface ProviderPaidPeriodEvidence {
+  readonly offerId: StripeOfferId;
   readonly providerInvoiceId: string;
   readonly externalSubscriptionId: string;
   readonly providerSubscriptionItemId: string;
@@ -132,7 +165,7 @@ export interface ProviderPaidPeriodEvidence {
   readonly providerPaymentIntentId: string;
   readonly providerPriceId: string;
   readonly billingReason: 'subscription_create' | 'subscription_cycle';
-  readonly amountPaid: 1499;
+  readonly amountPaid: number;
   readonly amountRemaining: 0;
   readonly currency: 'usd';
   readonly quantity: 1;
@@ -147,6 +180,7 @@ export interface ProviderPaidPeriodEvidence {
 }
 
 export interface ProviderFailedPaymentEvidence {
+  readonly offerId: StripeOfferId;
   readonly providerInvoiceId: string;
   readonly externalSubscriptionId: string;
   readonly providerSubscriptionItemId: string;
@@ -156,7 +190,7 @@ export interface ProviderFailedPaymentEvidence {
   readonly providerPaymentIntentId?: string;
   readonly providerPriceId: string;
   readonly billingReason: 'subscription_create' | 'subscription_cycle';
-  readonly amountDue: 1499;
+  readonly amountDue: number;
   readonly currency: 'usd';
   readonly quantity: 1;
   readonly attemptCount: number;
@@ -169,9 +203,13 @@ export interface ProviderFailedPaymentEvidence {
 export interface StripePreflightEvidence {
   readonly environment: 'test' | 'production';
   readonly accountId: string;
+  readonly accountChargesEnabled: boolean;
+  readonly accountPayoutsEnabled: boolean;
+  readonly accountCountry: string | null;
+  readonly accountBusinessType: string | null;
   readonly livemode: boolean;
   readonly apiVersion: string;
-  readonly offer: StripeFoundingOffer;
+  readonly offer: StripeOffer;
   readonly portalConfigurationId: string;
   readonly productActive: true;
   readonly priceActive: true;
@@ -180,6 +218,8 @@ export interface StripePreflightEvidence {
   readonly portalCancellationMode: 'at_period_end';
   readonly portalProrationBehavior: 'none';
   readonly portalSubscriptionUpdateDefaultsEmpty: true;
+  readonly portalPaymentMethodUpdateEnabled: true;
+  readonly portalInvoiceHistoryEnabled: true;
   readonly retentionCouponEvidence: 'manual_founder_browser_required';
   readonly promotionsEnabled: false;
   readonly automaticTaxEnabled: false;
@@ -192,7 +232,7 @@ interface ProviderFinancialRestrictionEvidenceBase {
   readonly providerPaymentIntentId: string;
   readonly providerInvoiceId: string;
   readonly externalSubscriptionId: string;
-  readonly providerChargeAmount: 1499;
+  readonly providerChargeAmount: number;
   readonly restrictionAmount: number;
   readonly currency: 'usd';
   readonly eventState: 'opened' | 'cleared' | 'retained';
@@ -258,5 +298,5 @@ export interface ProviderReconciliationPort {
 }
 
 export interface StripePreflightPort {
-  readonly verifyConfiguredResources: () => Promise<StripePreflightEvidence>;
+  readonly verifyConfiguredResources: (offerId?: StripeOfferId) => Promise<StripePreflightEvidence>;
 }

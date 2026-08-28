@@ -43,6 +43,8 @@ export type AllowanceKind = (typeof allowanceKinds)[number];
 export const billingIntervals = ['month', 'year'] as const;
 export type BillingInterval = (typeof billingIntervals)[number];
 
+// Keep the legacy kind readable for historical catalog and migration evidence. Active offer
+// hypotheses live in revenue-hypotheses.ts and never emit the retired founding experiment.
 export const priceHypothesisKinds = ['list', 'founding_experiment'] as const;
 export type PriceHypothesisKind = (typeof priceHypothesisKinds)[number];
 
@@ -725,7 +727,7 @@ export const seededCommercePlanVersions = Object.freeze({
     ],
     prices: [
       { interval: 'month', amountMinor: 899, currency: 'USD', kind: 'list' },
-      { interval: 'year', amountMinor: 8_900, currency: 'USD', kind: 'list' },
+      { interval: 'year', amountMinor: 8_990, currency: 'USD', kind: 'list' },
     ],
   }),
   family: defineCommercePlanVersion({
@@ -742,13 +744,41 @@ export const seededCommercePlanVersions = Object.freeze({
     ],
     prices: [
       { interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' },
-      { interval: 'year', amountMinor: 14_900, currency: 'USD', kind: 'list' },
-      {
-        interval: 'year',
-        amountMinor: 11_900,
-        currency: 'USD',
-        kind: 'founding_experiment',
-      },
+      { interval: 'year', amountMinor: 14_990, currency: 'USD', kind: 'list' },
+    ],
+  }),
+  individual: defineCommercePlanVersion({
+    id: ids.commercePlanVersion('individual_v3'),
+    productVersionId: seededConsumerProductVersion.id,
+    key: 'plus',
+    version: 3,
+    displayName: 'Individual',
+    availableFrom: '2026-08-28T00:00:00.000Z',
+    capabilities: ['check:text', 'check:url', 'history:read', 'family:manage', 'orientation:use'],
+    allowances: [
+      { kind: 'protected_members', limit: 1 },
+      { kind: 'trusted_circle_participants', limit: 2 },
+    ],
+    prices: [
+      { interval: 'month', amountMinor: 899, currency: 'USD', kind: 'list' },
+      { interval: 'year', amountMinor: 8_990, currency: 'USD', kind: 'list' },
+    ],
+  }),
+  familyV3: defineCommercePlanVersion({
+    id: ids.commercePlanVersion('family_v3'),
+    productVersionId: seededConsumerProductVersion.id,
+    key: 'family',
+    version: 3,
+    displayName: 'Family',
+    availableFrom: '2026-08-28T00:00:00.000Z',
+    capabilities: ['check:text', 'check:url', 'history:read', 'family:manage', 'orientation:use'],
+    allowances: [
+      { kind: 'protected_members', limit: 3 },
+      { kind: 'trusted_circle_participants', limit: 6 },
+    ],
+    prices: [
+      { interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' },
+      { interval: 'year', amountMinor: 14_990, currency: 'USD', kind: 'list' },
     ],
   }),
 });

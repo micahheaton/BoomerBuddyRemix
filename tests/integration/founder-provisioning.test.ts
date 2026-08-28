@@ -50,6 +50,8 @@ describe('founder-only provisioning console API', () => {
     expect(body.workstreams.some(({ status }) => status === 'test_proven')).toBe(false);
     expect(stripe?.configurationEnvironmentNames).toEqual([
       'BB_STRIPE_MODE',
+      'BB_STRIPE_RUNTIME_SURFACE',
+      'BB_STRIPE_LIVE_INITIATION_ENABLED',
       'BB_STRIPE_TEST_ACCOUNT_ID',
       'BB_STRIPE_TEST_FOUNDING_PRODUCT_ID',
       'BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID',
@@ -62,9 +64,14 @@ describe('founder-only provisioning console API', () => {
     expect(stripe?.secretEnvironmentNames).toEqual([
       'BB_STRIPE_TEST_API_KEY',
       'BB_STRIPE_TEST_WEBHOOK_SECRET',
-      'BB_STRIPE_LIVE_API_KEY',
+      'BB_STRIPE_LIVE_API_RESTRICTED_KEY',
+      'BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY',
       'BB_STRIPE_LIVE_WEBHOOK_SECRET',
     ]);
+    expect(stripe?.purpose).toContain('max-one Family $14.99/month rollout');
+    expect(stripe?.adapterState).toBe('implemented_disabled');
+    expect(stripe?.nextFounderAction).toContain('live initiation remains false');
+    expect(response.body).not.toContain('BB_STRIPE_LIVE_API_KEY');
     expect(response.body).not.toMatch(/(?:sk|pk)_(?:test|live)_[A-Za-z0-9]+/u);
     expect(response.body).not.toMatch(/whsec_[A-Za-z0-9]+/u);
     expect(response.body).not.toMatch(/postgres(?:ql)?:\/\//u);

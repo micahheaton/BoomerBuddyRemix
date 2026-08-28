@@ -103,6 +103,57 @@ export interface StoredCheck extends DecisionRecord {
   readonly state: 'active' | 'deleted';
 }
 
+export type CheckShareLifecycleState = 'shared' | 'acknowledged' | 'closed';
+export type CheckShareClosureReason = 'safer_action_completed' | 'no_longer_needs_help';
+
+export interface CheckShareLifecycleRecord {
+  readonly checkId: string;
+  readonly sharedWithPersonId: string;
+  readonly sharedWithDisplayName: string;
+  readonly state: CheckShareLifecycleState;
+  readonly sharedAt: Date;
+  readonly acknowledgedAt?: Date;
+  readonly closedAt?: Date;
+  readonly closureReason?: CheckShareClosureReason;
+}
+
+interface CheckShareRow extends Record<string, unknown> {
+  readonly analysis_id: string;
+  readonly shared_with_person_id: string;
+  readonly shared_with_display_name: string;
+  readonly lifecycle_state: CheckShareLifecycleState;
+  readonly created_at: unknown;
+  readonly acknowledged_at: unknown | null;
+  readonly closed_at: unknown | null;
+  readonly closure_reason: CheckShareClosureReason | null;
+}
+
+function mapCheckShare(row: CheckShareRow): CheckShareLifecycleRecord {
+  return {
+    checkId: row.analysis_id,
+    sharedWithPersonId: row.shared_with_person_id,
+    sharedWithDisplayName: row.shared_with_display_name,
+    state: row.lifecycle_state,
+    sharedAt: asDate(row.created_at, 'check_shares.created_at'),
+    ...(row.acknowledged_at === null
+      ? {}
+      : { acknowledgedAt: asDate(row.acknowledged_at, 'check_shares.acknowledged_at') }),
+    ...(row.closed_at === null
+      ? {}
+      : { closedAt: asDate(row.closed_at, 'check_shares.closed_at') }),
+    ...(row.closure_reason === null ? {} : { closureReason: row.closure_reason }),
+  };
+}
+
+const checkShareProjection = `
+  SELECT share.analysis_id, share.shared_with_person_id,
+         person.display_name AS shared_with_display_name,
+         share.lifecycle_state, share.created_at, share.acknowledged_at,
+         share.closed_at, share.closure_reason
+  FROM check_shares share
+  JOIN persons person ON person.id = share.shared_with_person_id
+`;
+
 interface CheckRow extends Record<string, unknown> {
   readonly id: string;
   readonly artifact_id: string;
@@ -567,8 +618,8 @@ export class CheckRepository {
     readonly audience: Audience;
     readonly correlationId: string;
     readonly now: Date;
-  }): Promise<void> {
-    await this.database.transaction(async (transaction) => {
+  }): Promise<CheckShareLifecycleRecord> {
+    return this.database.transaction(async (transaction) => {
       const hasEnrollment = await hasEffectiveProtectedEnrollment(
         transaction,
         input.householdId,
@@ -612,10 +663,11 @@ export class CheckRepository {
       const relationshipId = allowed.rows[0]?.relationship_id;
       if (relationshipId === undefined)
         throw new DomainError('not_authorized', 'Sharing is not permitted');
-      await transaction.query(
+      const inserted = await transaction.query(
         `INSERT INTO check_shares(
            household_id, analysis_id, relationship_id, shared_with_person_id, shared_by_person_id, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+         ) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING
+         RETURNING analysis_id`,
         [
           input.householdId,
           input.checkId,
@@ -625,29 +677,284 @@ export class CheckRepository {
           input.now.toISOString(),
         ],
       );
-      await writeAuditAndOutbox(
-        transaction,
-        this.idFactory,
-        {
-          householdId: input.householdId,
-          actorPersonId: input.ownerPersonId,
-          audience: input.audience,
-          correlationId: input.correlationId,
-          now: input.now,
-        },
-        {
-          action: 'check.shared',
-          resourceType: 'check',
-          resourceId: input.checkId,
-          outcome: 'completed',
-        },
-        {
-          eventType: 'check.shared.v1',
-          aggregateType: 'check',
-          aggregateId: input.checkId,
-          payload: { shareState: 'active' },
-        },
+      if (inserted.rowCount === 1) {
+        await transaction.query(
+          `INSERT INTO check_share_lifecycle_events(
+             id, household_id, analysis_id, shared_with_person_id, actor_person_id,
+             event_kind, state_after, closure_reason, created_at
+           ) VALUES ($1,$2,$3,$4,$5,'shared','shared',NULL,$6)`,
+          [
+            this.idFactory.next('check_share_event'),
+            input.householdId,
+            input.checkId,
+            input.sharedWithPersonId,
+            input.ownerPersonId,
+            input.now.toISOString(),
+          ],
+        );
+        await writeAuditAndOutbox(
+          transaction,
+          this.idFactory,
+          {
+            householdId: input.householdId,
+            actorPersonId: input.ownerPersonId,
+            audience: input.audience,
+            correlationId: input.correlationId,
+            now: input.now,
+          },
+          {
+            action: 'check.shared',
+            resourceType: 'check',
+            resourceId: input.checkId,
+            outcome: 'completed',
+          },
+          {
+            eventType: 'check.shared.v1',
+            aggregateType: 'check',
+            aggregateId: input.checkId,
+            payload: { shareState: 'shared' },
+          },
+        );
+      }
+      const current = await transaction.query<CheckShareRow>(
+        `${checkShareProjection}
+         WHERE share.household_id = $1 AND share.analysis_id = $2
+           AND share.shared_with_person_id = $3`,
+        [input.householdId, input.checkId, input.sharedWithPersonId],
       );
+      const row = current.rows[0];
+      if (row === undefined) throw new Error('Check share was not persisted');
+      return mapCheckShare(row);
+    });
+  }
+
+  async listShares(input: {
+    readonly householdId: string;
+    readonly checkId: string;
+    readonly actorPersonId: string;
+  }): Promise<readonly CheckShareLifecycleRecord[]> {
+    const result = await this.database.query<CheckShareRow>(
+      `${checkShareProjection}
+       WHERE share.household_id = $1 AND share.analysis_id = $2
+         AND (share.shared_by_person_id = $3 OR share.shared_with_person_id = $3)
+       ORDER BY share.created_at, share.shared_with_person_id`,
+      [input.householdId, input.checkId, input.actorPersonId],
+    );
+    return result.rows.map(mapCheckShare);
+  }
+
+  async acknowledgeShare(input: {
+    readonly householdId: string;
+    readonly checkId: string;
+    readonly trustedPersonId: string;
+    readonly audience: Audience;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<CheckShareLifecycleRecord | null> {
+    return this.database.transaction(async (transaction) => {
+      const existing = await transaction.query<
+        { readonly lifecycle_state: CheckShareLifecycleState } & Record<string, unknown>
+      >(
+        `SELECT share.lifecycle_state FROM check_shares share
+         JOIN analyses analysis
+           ON analysis.household_id = share.household_id
+          AND analysis.id = share.analysis_id
+         JOIN artifacts artifact
+           ON artifact.household_id = analysis.household_id
+          AND artifact.id = analysis.artifact_id
+         JOIN trusted_circle_relationships relationship
+           ON relationship.household_id = share.household_id
+          AND relationship.id = share.relationship_id
+         JOIN consents consent
+           ON consent.household_id = relationship.household_id
+          AND consent.id = relationship.consent_id
+         WHERE share.household_id = $1 AND share.analysis_id = $2
+           AND share.shared_with_person_id = $3
+           AND relationship.trusted_person_id = $3
+           AND relationship.protected_person_id = analysis.requested_by
+           AND relationship.state = 'active'
+           AND relationship.permissions ? 'view_shared_checks'
+           AND consent.state = 'active'
+           AND analysis.state = 'completed' AND artifact.state = 'active'
+           AND artifact.delete_after > $4
+         FOR UPDATE OF share`,
+        [input.householdId, input.checkId, input.trustedPersonId, input.now.toISOString()],
+      );
+      const row = existing.rows[0];
+      if (row === undefined) return null;
+      if (row.lifecycle_state === 'shared') {
+        const changed = await transaction.query(
+          `UPDATE check_shares
+           SET lifecycle_state = 'acknowledged', acknowledged_by_person_id = $3,
+               acknowledged_at = $4
+           WHERE household_id = $1 AND analysis_id = $2
+             AND shared_with_person_id = $3 AND lifecycle_state = 'shared'`,
+          [input.householdId, input.checkId, input.trustedPersonId, input.now.toISOString()],
+        );
+        if (changed.rowCount !== 1) throw new DomainError('conflict', 'Check share changed');
+        await transaction.query(
+          `INSERT INTO check_share_lifecycle_events(
+             id, household_id, analysis_id, shared_with_person_id, actor_person_id,
+             event_kind, state_after, closure_reason, created_at
+           ) VALUES ($1,$2,$3,$4,$4,'acknowledged','acknowledged',NULL,$5)`,
+          [
+            this.idFactory.next('check_share_event'),
+            input.householdId,
+            input.checkId,
+            input.trustedPersonId,
+            input.now.toISOString(),
+          ],
+        );
+        await writeAuditAndOutbox(
+          transaction,
+          this.idFactory,
+          {
+            householdId: input.householdId,
+            actorPersonId: input.trustedPersonId,
+            audience: input.audience,
+            correlationId: input.correlationId,
+            now: input.now,
+          },
+          {
+            action: 'check.share_acknowledged',
+            resourceType: 'check',
+            resourceId: input.checkId,
+            outcome: 'completed',
+          },
+          {
+            eventType: 'check.share_acknowledged.v1',
+            aggregateType: 'check',
+            aggregateId: input.checkId,
+            payload: { shareState: 'acknowledged' },
+          },
+        );
+      }
+      const current = await transaction.query<CheckShareRow>(
+        `${checkShareProjection}
+         WHERE share.household_id = $1 AND share.analysis_id = $2
+           AND share.shared_with_person_id = $3`,
+        [input.householdId, input.checkId, input.trustedPersonId],
+      );
+      const currentRow = current.rows[0];
+      return currentRow === undefined ? null : mapCheckShare(currentRow);
+    });
+  }
+
+  async closeShare(input: {
+    readonly householdId: string;
+    readonly checkId: string;
+    readonly ownerPersonId: string;
+    readonly sharedWithPersonId: string;
+    readonly resolution: CheckShareClosureReason;
+    readonly audience: Audience;
+    readonly correlationId: string;
+    readonly now: Date;
+  }): Promise<CheckShareLifecycleRecord | null> {
+    return this.database.transaction(async (transaction) => {
+      const existing = await transaction.query<
+        {
+          readonly lifecycle_state: CheckShareLifecycleState;
+          readonly closure_reason: CheckShareClosureReason | null;
+        } & Record<string, unknown>
+      >(
+        `SELECT share.lifecycle_state, share.closure_reason FROM check_shares share
+         JOIN analyses analysis
+           ON analysis.household_id = share.household_id
+          AND analysis.id = share.analysis_id
+         JOIN artifacts artifact
+           ON artifact.household_id = analysis.household_id
+          AND artifact.id = analysis.artifact_id
+         WHERE share.household_id = $1 AND share.analysis_id = $2
+           AND share.shared_by_person_id = $3 AND analysis.requested_by = $3
+           AND share.shared_with_person_id = $4
+           AND analysis.state = 'completed' AND artifact.state = 'active'
+           AND artifact.delete_after > $5
+         FOR UPDATE OF share`,
+        [
+          input.householdId,
+          input.checkId,
+          input.ownerPersonId,
+          input.sharedWithPersonId,
+          input.now.toISOString(),
+        ],
+      );
+      const row = existing.rows[0];
+      if (row === undefined) return null;
+      if (row.lifecycle_state === 'shared') {
+        throw new DomainError(
+          'conflict',
+          'The trusted person must acknowledge this shared result before it can be closed',
+        );
+      }
+      if (row.lifecycle_state === 'closed' && row.closure_reason !== input.resolution) {
+        throw new DomainError('conflict', 'This shared result is already closed');
+      }
+      if (row.lifecycle_state === 'acknowledged') {
+        const changed = await transaction.query(
+          `UPDATE check_shares
+           SET lifecycle_state = 'closed', closed_by_person_id = $3,
+               closed_at = $5, closure_reason = $6
+           WHERE household_id = $1 AND analysis_id = $2
+             AND shared_by_person_id = $3 AND shared_with_person_id = $4
+             AND lifecycle_state = 'acknowledged'`,
+          [
+            input.householdId,
+            input.checkId,
+            input.ownerPersonId,
+            input.sharedWithPersonId,
+            input.now.toISOString(),
+            input.resolution,
+          ],
+        );
+        if (changed.rowCount !== 1) throw new DomainError('conflict', 'Check share changed');
+        await transaction.query(
+          `INSERT INTO check_share_lifecycle_events(
+             id, household_id, analysis_id, shared_with_person_id, actor_person_id,
+             event_kind, state_after, closure_reason, created_at
+           ) VALUES ($1,$2,$3,$4,$5,'closed','closed',$6,$7)`,
+          [
+            this.idFactory.next('check_share_event'),
+            input.householdId,
+            input.checkId,
+            input.sharedWithPersonId,
+            input.ownerPersonId,
+            input.resolution,
+            input.now.toISOString(),
+          ],
+        );
+        await writeAuditAndOutbox(
+          transaction,
+          this.idFactory,
+          {
+            householdId: input.householdId,
+            actorPersonId: input.ownerPersonId,
+            audience: input.audience,
+            correlationId: input.correlationId,
+            now: input.now,
+          },
+          {
+            action: 'check.share_closed',
+            resourceType: 'check',
+            resourceId: input.checkId,
+            outcome: 'completed',
+            metadata: { resolution: input.resolution },
+          },
+          {
+            eventType: 'check.share_closed.v1',
+            aggregateType: 'check',
+            aggregateId: input.checkId,
+            payload: { shareState: 'closed', resolution: input.resolution },
+          },
+        );
+      }
+      const current = await transaction.query<CheckShareRow>(
+        `${checkShareProjection}
+         WHERE share.household_id = $1 AND share.analysis_id = $2
+           AND share.shared_with_person_id = $3`,
+        [input.householdId, input.checkId, input.sharedWithPersonId],
+      );
+      const currentRow = current.rows[0];
+      return currentRow === undefined ? null : mapCheckShare(currentRow);
     });
   }
 }

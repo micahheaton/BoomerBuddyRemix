@@ -94,7 +94,7 @@ describe('production identity persistence', () => {
     expect(created).toMatchObject({
       issuer: customerIssuer,
       subject: 'user_customer_exact',
-      displayName: 'Founding household administrator',
+      displayName: 'Household administrator',
     });
     if (created === null) throw new Error('Expected customer bootstrap');
     await expect(identities.findCustomerBootstrapByIdentity(created.identityId)).resolves.toEqual(

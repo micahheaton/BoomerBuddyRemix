@@ -1,13 +1,25 @@
+import type { Metadata } from 'next';
 import { MemberGate } from '../../components/member-gate';
+import { protectProductionMemberResource } from '../../lib/resource-auth';
 
-export default function MemberLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const production = process.env.NODE_ENV === 'production';
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    noarchive: true,
+    noimageindex: true,
+    nosnippet: true,
+  },
+};
+
+export default async function MemberLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  await protectProductionMemberResource();
   return (
     <MemberGate>
       <p className="dev-banner">
-        {production
-          ? 'Private Founding Household beta · Rules-only analysis is not calibrated efficacy evidence · Do not enter secrets'
-          : 'Local development build · Local rules-only analysis · No live reputation provider · Do not enter secrets'}
+        Early access - Results can be wrong - Never enter passwords, access codes, or payment
+        information
       </p>
       {children}
     </MemberGate>

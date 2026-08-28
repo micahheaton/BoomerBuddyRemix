@@ -27,7 +27,7 @@ export const completeOrientationStepRequestSchema = z
   .strict();
 
 export const safeWordRequestSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('configure'), phrase: z.string().min(8).max(200) }).strict(),
+  z.object({ action: z.literal('configure'), phrase: z.string().min(8).max(128) }).strict(),
   z.object({ action: z.literal('defer') }).strict(),
 ]);
 
@@ -135,10 +135,10 @@ export const entitlementResponseSchema = z.object({
         sourcePlanVersionId: opaqueIdSchema,
       }),
     ),
-    mode: z.literal('local_mock'),
-    hypothesis: z.literal(true),
+    mode: z.enum(['local_mock', 'canonical']),
+    hypothesis: z.boolean(),
   }),
-  environment: z.enum(['development', 'test']),
+  environment: z.enum(['development', 'test', 'production']),
 });
 
 export type OrientationStateDto = z.infer<typeof orientationStateSchema>;

@@ -2,7 +2,9 @@ import type { AppConfig } from '@boomerbuddy/config';
 import type { Logger } from '@boomerbuddy/observability';
 import type { IdentityTokenVerifier } from '@boomerbuddy/security';
 import {
+  AccessIntentRepository,
   AutomationBudgetRepository,
+  BillingAuthorityRepository,
   BusinessOsRepository,
   CheckRepository,
   CommerceOperationsRepository,
@@ -11,22 +13,29 @@ import {
   EditorialIntelligenceRepository,
   EntitlementRepository,
   FamilyRepository,
+  FamilySafeWordRepository,
   FeedbackRepository,
   FounderProvisioningRepository,
   FoundingHouseholdRepository,
+  GovernedContentRepository,
   HqRepository,
   KnowledgeRepository,
+  MemberLearningRepository,
   MessagingRepository,
   OrientationRepository,
   PublicCheckRepository,
   ProductionIdentityRepository,
   ReferralCreditRepository,
   SessionRepository,
+  SupportReceiptRepository,
+  TrustedCircleAttentionRepository,
   type Database,
 } from '@boomerbuddy/persistence';
 
 export interface ApiRepositories {
+  readonly accessIntents: AccessIntentRepository;
   readonly automationBudget: AutomationBudgetRepository;
+  readonly billingAuthority: BillingAuthorityRepository;
   readonly checks: CheckRepository;
   readonly businessOs: BusinessOsRepository;
   readonly commerce: CommerceOperationsRepository;
@@ -35,16 +44,21 @@ export interface ApiRepositories {
   readonly entitlements: EntitlementRepository;
   readonly editorial: EditorialIntelligenceRepository;
   readonly family: FamilyRepository;
+  readonly familySafeWords: FamilySafeWordRepository;
   readonly feedback: FeedbackRepository;
   readonly founderProvisioning: FounderProvisioningRepository;
   readonly foundingHouseholds: FoundingHouseholdRepository;
+  readonly governedContent: GovernedContentRepository;
   readonly hq: HqRepository;
   readonly knowledge: KnowledgeRepository;
+  readonly memberLearning: MemberLearningRepository;
   readonly messaging: MessagingRepository;
   readonly orientation: OrientationRepository;
   readonly publicChecks: PublicCheckRepository;
   readonly referrals: ReferralCreditRepository;
   readonly sessions: SessionRepository;
+  readonly supportReceipts: SupportReceiptRepository;
+  readonly trustedCircleAttention: TrustedCircleAttentionRepository;
   readonly productionIdentities: ProductionIdentityRepository;
 }
 
@@ -67,11 +81,18 @@ export function createRepositories(
   const configuredFounderPersonId =
     config.identity.founderPersonId ?? 'founder-identity-unconfigured';
   return {
+    accessIntents: new AccessIntentRepository(
+      database,
+      config.secrets.fingerprintKey,
+      config.environment === 'production' ? 500 : 5,
+      500,
+    ),
     automationBudget: new AutomationBudgetRepository(
       database,
       undefined,
       config.identity.founderPersonId,
     ),
+    billingAuthority: new BillingAuthorityRepository(database, config.identity.founderPersonId),
     businessOs: new BusinessOsRepository(database, undefined, config.identity.founderPersonId),
     checks: new CheckRepository(
       database,
@@ -106,6 +127,12 @@ export function createRepositories(
       undefined,
       entitlementRuntimeEnvironment,
     ),
+    familySafeWords: new FamilySafeWordRepository(
+      database,
+      config.secrets.safeWordPepper,
+      undefined,
+      entitlementRuntimeEnvironment,
+    ),
     feedback: new FeedbackRepository(database, {
       encryptionKey: config.secrets.artifactEncryptionKey,
       encryptionKeyVersion: 1,
@@ -123,8 +150,17 @@ export function createRepositories(
       config.identity.founderPersonId,
       config.environment === 'production' ? 'production' : 'local',
     ),
+    governedContent: new GovernedContentRepository(database, {
+      encryptionKey: config.secrets.artifactEncryptionKey,
+      encryptionKeyVersion: 1,
+    }),
     hq: new HqRepository(database, undefined, entitlementRuntimeEnvironment),
     knowledge: new KnowledgeRepository(database),
+    memberLearning: new MemberLearningRepository(
+      database,
+      undefined,
+      entitlementRuntimeEnvironment,
+    ),
     messaging: new MessagingRepository(
       database,
       {
@@ -159,5 +195,7 @@ export function createRepositories(
       entitlementRuntimeEnvironment,
       identityTokenVerifier,
     ),
+    supportReceipts: new SupportReceiptRepository(database, config.secrets.fingerprintKey),
+    trustedCircleAttention: new TrustedCircleAttentionRepository(database),
   };
 }

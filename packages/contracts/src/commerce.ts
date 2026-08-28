@@ -1,8 +1,18 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema } from './common';
 
+export const stripeOfferIds = [
+  'founding_family_monthly_v1',
+  'family_monthly_v2',
+  'family_annual_v2',
+  'individual_monthly_v1',
+  'individual_annual_v1',
+] as const;
+
+export const stripeOfferIdSchema = z.enum(stripeOfferIds);
+
 export const stripeCheckoutRequestSchema = z.object({
-  offerId: z.literal('founding_family_monthly_v1'),
+  offerId: stripeOfferIdSchema,
 });
 
 export const stripeCheckoutResponseSchema = z.object({
@@ -15,7 +25,7 @@ export const stripeCheckoutResponseSchema = z.object({
     expiresAt: isoDateTimeSchema.optional(),
   }),
   limitation: z.literal(
-    'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+    'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
   ),
 });
 
@@ -32,10 +42,32 @@ export const stripePortalResponseSchema = z.object({
   ),
 });
 
+export const stripePublicOfferSchema = z
+  .object({
+    offerId: stripeOfferIdSchema,
+    plan: z.enum(['family', 'individual']),
+    displayName: z.string().min(1).max(80),
+    billingInterval: z.enum(['month', 'year']),
+    unitAmountMinor: z.number().int().positive(),
+    currency: z.literal('usd'),
+    trialPeriodDays: z.union([z.literal(0), z.literal(7)]),
+    customerSelectable: z.boolean(),
+    defaultAcquisitionOffer: z.boolean(),
+    disclosure: z.string().min(1).max(240),
+  })
+  .strict();
+
+export const stripePublicCatalogSchema = z
+  .object({
+    defaultOfferId: z.literal('family_annual_v2'),
+    offers: z.array(stripePublicOfferSchema).min(4).max(5),
+  })
+  .strict();
+
 export const stripeBillingStatusResponseSchema = z.object({
-  billing: z.object({
+  billing: stripePublicCatalogSchema.extend({
     householdId: opaqueIdSchema,
-    offerId: z.literal('founding_family_monthly_v1'),
+    offerId: stripeOfferIdSchema,
     checkoutState: z.enum([
       'unavailable',
       'eligible_disabled',
@@ -48,6 +80,21 @@ export const stripeBillingStatusResponseSchema = z.object({
     canonicalAccessActive: z.boolean(),
     portalAvailable: z.boolean(),
     runtimeInitiationEnabled: z.boolean(),
+    recoveryReason: z
+      .enum(['payment_action_required', 'payment_failed', 'invoice_finalization_failed'])
+      .optional(),
+    trialEndingReminder: z
+      .object({
+        intentId: opaqueIdSchema,
+        offerId: z.enum(['family_annual_v2', 'individual_annual_v1']),
+        trialEndsAt: isoDateTimeSchema,
+        chargeAmountMinor: z.union([z.literal(14_990), z.literal(8_990)]),
+        currency: z.literal('usd'),
+        disclosure: z.string().min(1).max(240),
+        acknowledgedAt: isoDateTimeSchema.optional(),
+      })
+      .strict()
+      .optional(),
     pendingOperation: z
       .object({
         serverOperationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{15,159}$/u),
@@ -59,9 +106,25 @@ export const stripeBillingStatusResponseSchema = z.object({
       .optional(),
   }),
   evidenceNotice: z.literal(
-    'Success redirects and provider status snapshots do not grant BoomerBuddy access.',
+    'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.',
   ),
 });
+
+export const stripeTrialReminderAcknowledgeRequestSchema = z
+  .object({
+    intentId: opaqueIdSchema,
+    idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{15,159}$/u),
+  })
+  .strict();
+
+export const stripeTrialReminderAcknowledgeResponseSchema = z
+  .object({
+    intentId: opaqueIdSchema,
+    receiptId: opaqueIdSchema,
+    duplicate: z.boolean(),
+    acknowledgedAt: isoDateTimeSchema,
+  })
+  .strict();
 
 export const stripeInitiationControlRequestSchema = z.object({
   environment: z.enum(['test', 'production']),
@@ -95,7 +158,63 @@ export const stripeInitiationControlProjectionSchema = z.object({
       'configuration_change',
     ])
     .optional(),
-  liveEnableAvailable: z.literal(false),
+  liveEnableAvailable: z.boolean(),
+});
+
+export const stripeCohortControlRequestSchema = z
+  .object({
+    environment: z.enum(['test', 'production']),
+    nextState: z.enum(['disabled', 'active', 'expired']),
+    maxActive: z.number().int().min(0).max(1).default(1),
+    policyExpiresAt: isoDateTimeSchema.optional(),
+    liveApproved: z.boolean().default(false),
+    expectedRevision: z.number().int().min(0),
+    reasonCode: z.enum([
+      'cohort_activation',
+      'cohort_change',
+      'cohort_expiration',
+      'founder_disable',
+      'incident_stop',
+    ]),
+    correlationId: opaqueIdSchema,
+  })
+  .superRefine((value, context) => {
+    const activeValid =
+      value.nextState === 'active' &&
+      value.maxActive === 1 &&
+      value.policyExpiresAt !== undefined &&
+      (value.reasonCode === 'cohort_activation' || value.reasonCode === 'cohort_change') &&
+      value.liveApproved === (value.environment === 'production');
+    const disabledValid =
+      value.nextState === 'disabled' &&
+      value.maxActive === 0 &&
+      value.liveApproved === false &&
+      ['cohort_change', 'founder_disable', 'incident_stop'].includes(value.reasonCode);
+    const expiredValid =
+      value.nextState === 'expired' &&
+      value.maxActive === 0 &&
+      value.liveApproved === false &&
+      ['cohort_expiration', 'incident_stop'].includes(value.reasonCode);
+    if (!activeValid && !disabledValid && !expiredValid) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Stripe cohort state, cap, approval, expiry, and reason must be coherent',
+      });
+    }
+  });
+
+export const stripeCohortControlQuerySchema = z.object({
+  environment: z.enum(['test', 'production']),
+});
+
+export const stripeCohortControlProjectionSchema = z.object({
+  environment: z.enum(['test', 'production']),
+  state: z.enum(['absent', 'disabled', 'active', 'expired']),
+  maxActive: z.number().int().min(0).max(1),
+  policyExpiresAt: isoDateTimeSchema.optional(),
+  liveApproved: z.boolean(),
+  revision: z.number().int().min(0),
+  changedAt: isoDateTimeSchema.optional(),
 });
 
 export const stripeHouseholdEligibilityRequestSchema = z.object({
@@ -113,6 +232,77 @@ export const stripeControlResponseSchema = z.object({
   recordedAt: isoDateTimeSchema,
 });
 
+export const stripeControlStatusQuerySchema = z.object({
+  environment: z.enum(['test', 'production']),
+});
+
+const stripeControlEvidenceEntrySchema = z
+  .object({
+    kind: z.enum(['preflight', 'initiation_control', 'cohort_control', 'eligibility']),
+    state: z.string().min(1).max(80),
+    occurredAt: isoDateTimeSchema,
+    subjectId: opaqueIdSchema.optional(),
+    revision: z.number().int().positive().optional(),
+    reasonCode: z.string().min(1).max(80).optional(),
+    evidenceLevel: z
+      .enum(['local_fixture', 'stripe_test', 'deployed_staging', 'live_production'])
+      .optional(),
+    authenticityKind: z.enum(['fixture_assertion', 'provider_read']).optional(),
+    transportKind: z.enum(['injected_fixture', 'stripe_https']).optional(),
+    evidenceDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/u)
+      .optional(),
+  })
+  .strict();
+
+const stripePreflightStatusSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('unknown') }).strict(),
+  z
+    .object({
+      state: z.enum(['configured', 'verified', 'unavailable']),
+      checkedAt: isoDateTimeSchema,
+      evidenceLevel: z.enum([
+        'local_fixture',
+        'stripe_test',
+        'deployed_staging',
+        'live_production',
+      ]),
+      authenticityKind: z.enum(['fixture_assertion', 'provider_read']),
+      transportKind: z.enum(['injected_fixture', 'stripe_https']),
+      evidenceDigest: z.string().regex(/^[a-f0-9]{64}$/u),
+      checks: z
+        .object({
+          accountReady: z.boolean(),
+          offerReady: z.boolean(),
+          portalReady: z.boolean(),
+          checkoutPolicyReady: z.boolean(),
+        })
+        .strict(),
+    })
+    .strict(),
+]);
+
+export const stripeControlStatusProjectionSchema = z
+  .object({
+    environment: z.enum(['test', 'production']),
+    preflight: stripePreflightStatusSchema,
+    eligibleHouseholds: z
+      .array(
+        z
+          .object({
+            householdId: opaqueIdSchema,
+            state: z.literal('eligible'),
+            eligibilityExpiresAt: isoDateTimeSchema,
+            occurredAt: isoDateTimeSchema,
+          })
+          .strict(),
+      )
+      .max(1),
+    evidence: z.array(stripeControlEvidenceEntrySchema).max(50),
+  })
+  .strict();
+
 export const stripeReconciliationRepairQuerySchema = z.object({
   reconciliationRunId: opaqueIdSchema,
 });
@@ -127,7 +317,7 @@ export const stripeReconciliationRepairRequestSchema = z.object({
 export const stripeReconciliationRepairProjectionSchema = z.object({
   reconciliationRunId: opaqueIdSchema,
   inboxId: opaqueIdSchema,
-  environment: z.literal('test'),
+  environment: z.enum(['test', 'production']),
   state: z.enum(['queued', 'running', 'completed', 'attention', 'failed']),
   failureCode: z.string().min(1).max(160).optional(),
   automaticAttemptCount: z.number().int().min(0).max(16),
@@ -139,7 +329,7 @@ export const stripeReconciliationRepairProjectionSchema = z.object({
 export const stripeReconciliationRepairResponseSchema = z.object({
   reconciliationRunId: opaqueIdSchema,
   inboxId: opaqueIdSchema,
-  environment: z.literal('test'),
+  environment: z.enum(['test', 'production']),
   revision: z.literal(1),
   authorizedAttemptLimit: z.literal(16),
   repairJobId: opaqueIdSchema,
@@ -152,11 +342,13 @@ const stripeServerOperationIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:.
 export const stripeSessionRetryRepairQuerySchema = z.object({
   householdId: opaqueIdSchema,
   serverOperationId: stripeServerOperationIdSchema,
+  environment: z.enum(['test', 'production']).default('test'),
 });
 
 export const stripeSessionRetryRepairRequestSchema = z.object({
   householdId: opaqueIdSchema,
   serverOperationId: stripeServerOperationIdSchema,
+  environment: z.enum(['test', 'production']).default('test'),
   expectedRevision: z.literal(0),
   reasonCode: z.literal('founder_bounded_same_key_retry'),
   correlationId: opaqueIdSchema,
@@ -166,7 +358,7 @@ export const stripeSessionRetryRepairProjectionSchema = z.object({
   operationId: opaqueIdSchema,
   householdId: opaqueIdSchema,
   serverOperationId: stripeServerOperationIdSchema,
-  environment: z.literal('test'),
+  environment: z.enum(['test', 'production']),
   action: z.literal('checkout'),
   state: z.enum(['prepared', 'dispatching', 'outcome_unknown', 'succeeded', 'failed_no_effect']),
   attemptCount: z.number().int().min(0).max(7),
@@ -181,7 +373,7 @@ export const stripeSessionRetryRepairResponseSchema = z.object({
   operationId: opaqueIdSchema,
   householdId: opaqueIdSchema,
   serverOperationId: stripeServerOperationIdSchema,
-  environment: z.literal('test'),
+  environment: z.enum(['test', 'production']),
   action: z.literal('checkout'),
   revision: z.literal(1),
   authorizedAttemptLimit: z.literal(7),
@@ -197,6 +389,24 @@ export const stripeWebhookResponseSchema = z.object({
 });
 
 export type StripeCheckoutRequest = z.infer<typeof stripeCheckoutRequestSchema>;
+export type StripeOfferId = z.infer<typeof stripeOfferIdSchema>;
 export type StripeCheckoutResponse = z.infer<typeof stripeCheckoutResponseSchema>;
 export type StripePortalResponse = z.infer<typeof stripePortalResponseSchema>;
 export type StripeBillingStatusResponse = z.infer<typeof stripeBillingStatusResponseSchema>;
+export type StripeTrialReminderAcknowledgeRequest = z.infer<
+  typeof stripeTrialReminderAcknowledgeRequestSchema
+>;
+export type StripeTrialReminderAcknowledgeResponse = z.infer<
+  typeof stripeTrialReminderAcknowledgeResponseSchema
+>;
+export type StripeInitiationControlRequest = z.infer<typeof stripeInitiationControlRequestSchema>;
+export type StripeInitiationControlProjection = z.infer<
+  typeof stripeInitiationControlProjectionSchema
+>;
+export type StripeCohortControlRequest = z.infer<typeof stripeCohortControlRequestSchema>;
+export type StripeCohortControlProjection = z.infer<typeof stripeCohortControlProjectionSchema>;
+export type StripeHouseholdEligibilityRequest = z.infer<
+  typeof stripeHouseholdEligibilityRequestSchema
+>;
+export type StripeControlResponse = z.infer<typeof stripeControlResponseSchema>;
+export type StripeControlStatusProjection = z.infer<typeof stripeControlStatusProjectionSchema>;

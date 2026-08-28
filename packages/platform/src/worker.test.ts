@@ -146,6 +146,67 @@ describe('portable worker leases', () => {
     await expect(execution).resolves.toEqual({ jobs: 0, outbox: 1 });
   });
 
+  it('refreshes worker presence during a slow handler and preserves shutdown state order', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const workerHeartbeats: { readonly state: string; readonly at: number }[] = [];
+    let releaseHandler: (() => void) | undefined;
+    let claims = 0;
+    const jobs = {
+      updateWorkerHeartbeat: async (input) => {
+        workerHeartbeats.push({ state: input.state, at: input.now.getTime() });
+      },
+      claim: async () => {
+        claims += 1;
+        return claims === 1 ? [job] : [];
+      },
+      beginConsumerReceipt: async () => 'acquired' as const,
+      heartbeatWithConsumerReceipt: async () => true,
+      completeConsumerReceipt: async () => true,
+      complete: async () => true,
+      fail: async () => 'retry' as const,
+      deadLetter: async () => true,
+      relinquishWorkerLeases: async () => 0,
+    } satisfies Partial<DurableJobRepository>;
+    const outbox = {
+      claim: async () => [],
+      relinquishWorkerLeases: async () => 0,
+    } satisfies Partial<OutboxDeliveryRepository>;
+    const worker = new PortableWorker(
+      jobs as unknown as DurableJobRepository,
+      outbox as unknown as OutboxDeliveryRepository,
+      {
+        [job.type]: async () =>
+          new Promise<void>((resolve) => {
+            releaseHandler = resolve;
+          }),
+      },
+      undefined,
+      config,
+      createLogger({ sink: () => undefined, clock: () => new Date() }),
+      () => new Date(),
+    );
+
+    const started = worker.start();
+    await vi.advanceTimersByTimeAsync(350);
+    const running = workerHeartbeats.filter((heartbeat) => heartbeat.state === 'running');
+    expect(running).toHaveLength(4);
+    expect(running.map((heartbeat) => heartbeat.at - now.getTime())).toEqual([0, 100, 200, 300]);
+    expect(releaseHandler).toBeTypeOf('function');
+
+    const stopped = worker.stop();
+    releaseHandler?.();
+    await Promise.all([started, stopped]);
+    expect(workerHeartbeats.map((heartbeat) => heartbeat.state)).toEqual([
+      'running',
+      'running',
+      'running',
+      'running',
+      'draining',
+      'stopped',
+    ]);
+  });
+
   it('fails a lost outbox completion without logging a false success', async () => {
     let failureCalls = 0;
     const jobs = {
@@ -189,15 +250,22 @@ describe('portable worker leases', () => {
   it('shares one in-flight shutdown before leases or the database may close', async () => {
     const workerStates: string[] = [];
     let releaseDraining: (() => void) | undefined;
+    let markDrainingStarted: (() => void) | undefined;
     let jobRelinquishes = 0;
     let outboxRelinquishes = 0;
     const draining = new Promise<void>((resolve) => {
       releaseDraining = resolve;
     });
+    const drainingStarted = new Promise<void>((resolve) => {
+      markDrainingStarted = resolve;
+    });
     const jobs = {
       updateWorkerHeartbeat: async (input) => {
         workerStates.push(input.state);
-        if (input.state === 'draining') await draining;
+        if (input.state === 'draining') {
+          markDrainingStarted?.();
+          await draining;
+        }
       },
       relinquishWorkerLeases: async () => {
         jobRelinquishes += 1;
@@ -223,6 +291,7 @@ describe('portable worker leases', () => {
     const signalStop = worker.stop();
     const finallyStop = worker.stop();
     expect(finallyStop).toBe(signalStop);
+    await drainingStarted;
     expect(workerStates).toEqual(['draining']);
     expect(jobRelinquishes).toBe(0);
     releaseDraining?.();

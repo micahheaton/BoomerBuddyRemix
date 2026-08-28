@@ -768,7 +768,7 @@ describe('Founding Household forward migration', () => {
     const withdrawnAt = new Date(now.getTime() + 1_000);
 
     await expect(
-      new EntitlementRepository(database, sequentialIds(), 'local').revokeProtectedSelf({
+      new EntitlementRepository(database, sequentialIds(), 'local').testOnlyRevokeProtectedSelf({
         householdId: 'household-harbor',
         personId: 'person-owner-bob',
         actorPersonId: 'person-owner-bob',

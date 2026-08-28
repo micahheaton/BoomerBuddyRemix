@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ClerkSessionTokenVerifier,
   IdentityTokenVerificationError,
+  mobileClerkAudience,
+  mobileClerkSurface,
   type ClerkIdentityRealm,
 } from './clerk-session';
 
@@ -13,6 +15,7 @@ const customerRealm: ClerkIdentityRealm = {
   audience: 'boomerbuddy-customer',
   jwtKey: 'customer-public-key',
   authorizedParties: ['https://customer.test'],
+  mobileAuthorizedParties: ['https://native-auth.test'],
 };
 const hqRealm: ClerkIdentityRealm = {
   issuer: 'https://hq.clerk.test',
@@ -46,6 +49,30 @@ function input(
     audience,
     origin: realm.authorizedParties[0] as string,
     realm,
+    now,
+  } as const;
+}
+
+function mobileClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    iss: customerRealm.issuer,
+    sub: 'user_customer_123',
+    jti: 'jwt_mobile_123',
+    aud: mobileClerkAudience,
+    bb_surface: mobileClerkSurface,
+    iat: nowSeconds - 5,
+    nbf: nowSeconds - 5,
+    exp: nowSeconds + 55,
+    sts: 'active',
+    ...overrides,
+  };
+}
+
+function mobileInput() {
+  return {
+    token: 'synthetic.jwt.signature',
+    audience: 'mobile',
+    realm: customerRealm,
     now,
   } as const;
 }
@@ -129,6 +156,101 @@ describe('ClerkSessionTokenVerifier', () => {
     });
     expect(verified).not.toHaveProperty('roles');
     expect(verified).not.toHaveProperty('admin');
+  });
+
+  it('binds mobile verification to the customer key and exact short-lived template claims', async () => {
+    const dependency = vi.fn(async () => mobileClaims());
+    const verified = await new ClerkSessionTokenVerifier(dependency).verify(mobileInput());
+    expect(dependency).toHaveBeenCalledWith('synthetic.jwt.signature', {
+      audience: mobileClerkAudience,
+      clockSkewInMs: 5_000,
+      jwtKey: customerRealm.jwtKey,
+    });
+    expect(verified).toEqual({
+      issuer: customerRealm.issuer,
+      subject: 'user_customer_123',
+      providerSessionId: 'jwt_mobile_123',
+      audience: 'mobile',
+      issuedAt: new Date((nowSeconds - 5) * 1_000),
+      expiresAt: new Date((nowSeconds + 55) * 1_000),
+    });
+  });
+
+  it('accepts only an absent or exactly allowlisted mobile authorized party', async () => {
+    await expect(
+      new ClerkSessionTokenVerifier(async () =>
+        mobileClaims({ azp: 'https://native-auth.test' }),
+      ).verify(mobileInput()),
+    ).resolves.toMatchObject({
+      audience: 'mobile',
+      authorizedParty: 'https://native-auth.test',
+    });
+    await expect(
+      new ClerkSessionTokenVerifier(async () =>
+        mobileClaims({ azp: 'https://unknown-native.test' }),
+      ).verify(mobileInput()),
+    ).rejects.toBeInstanceOf(IdentityTokenVerificationError);
+  });
+
+  it.each([
+    ['missing token id', { jti: undefined }],
+    ['browser audience', { aud: customerRealm.audience }],
+    ['array audience', { aud: [mobileClerkAudience] }],
+    ['missing surface', { bb_surface: undefined }],
+    ['browser surface', { bb_surface: 'web' }],
+    ['browser authorized party', { azp: customerRealm.authorizedParties[0] }],
+    ['long-lived template', { iat: nowSeconds - 6, exp: nowSeconds + 55 }],
+    ['wrong issuer', { iss: hqRealm.issuer }],
+  ])('rejects mobile %s claim swaps', async (_name, overrides) => {
+    const verifier = new ClerkSessionTokenVerifier(async () => mobileClaims(overrides));
+    await expect(verifier.verify(mobileInput())).rejects.toBeInstanceOf(
+      IdentityTokenVerificationError,
+    );
+  });
+
+  it('preserves optional customer second-factor assurance without requiring MFA for sign-in', async () => {
+    await expect(
+      new ClerkSessionTokenVerifier(async () => claims()).verify(input()),
+    ).resolves.not.toHaveProperty('secondFactorAgeSeconds');
+    await expect(
+      new ClerkSessionTokenVerifier(async () => claims({ fva: [0, -1] })).verify(input()),
+    ).resolves.toMatchObject({ firstFactorAgeSeconds: 30 });
+    await expect(
+      new ClerkSessionTokenVerifier(async () =>
+        claims({ fva: [2, 9], reverification_id: 'reverification_fixture_123' }),
+      ).verify(input()),
+    ).resolves.toMatchObject({
+      firstFactorAgeSeconds: 150,
+      secondFactorAgeSeconds: 570,
+      reverificationId: 'reverification_fixture_123',
+    });
+    await expect(
+      new ClerkSessionTokenVerifier(async () => claims({ fva: [0, 0] })).verify(input()),
+    ).resolves.toMatchObject({ firstFactorAgeSeconds: 30, secondFactorAgeSeconds: 30 });
+  });
+
+  it.each([undefined, '', 'contains spaces', { unexpected: true }])(
+    'ignores an absent or malformed customer reverification id %j',
+    async (reverificationId) => {
+      await expect(
+        new ClerkSessionTokenVerifier(async () =>
+          claims({ fva: [0, 0], reverification_id: reverificationId }),
+        ).verify(input()),
+      ).resolves.not.toHaveProperty('reverificationId');
+    },
+  );
+
+  it.each([
+    ['non-array', 'malformed'],
+    ['wrong tuple length', [0]],
+    ['string age', [0, '0']],
+    ['fractional age', [0, 0.5]],
+    ['out-of-range age', [0, -2]],
+    ['impossible first factor', [-1, 0]],
+  ])('ignores malformed customer fva assurance for %s', async (_name, fva) => {
+    await expect(
+      new ClerkSessionTokenVerifier(async () => claims({ fva })).verify(input()),
+    ).resolves.not.toHaveProperty('secondFactorAgeSeconds');
   });
 
   it('accepts an absent customer audience but rejects an absent HQ audience', async () => {

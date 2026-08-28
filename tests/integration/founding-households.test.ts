@@ -5,6 +5,7 @@ import {
   foundingHouseholdFounderConsoleResponseSchema,
   foundingHouseholdInvitationPreviewResponseSchema,
   foundingHouseholdMemberStatusResponseSchema,
+  type ProtectedSelfEnrollmentStatusResponse,
 } from '@boomerbuddy/contracts';
 import {
   foundingHouseholdProtectedEnrollmentConsentVersion,
@@ -19,12 +20,28 @@ import {
   login,
   type ApiHarness,
 } from './support';
+import { installSyntheticLocalFamilyEntitlement } from './protected-enrollment-fixture';
 
 const clockStart = new Date();
 const programEndsAt = new Date(clockStart.getTime() + 45 * 86_400_000).toISOString();
 
 function operation(kind: 'policy' | 'invite' | 'accept' | 'invite-revoke' | 'offboard', n: number) {
   return `founding-${kind}:00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
+
+function protectedOperation(action: 'enroll' | 'withdraw', n: number) {
+  return `protected-self-${action}:30000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+}
+
+function generalProtectedEnrollmentPayload(status: ProtectedSelfEnrollmentStatusResponse) {
+  return {
+    consentVersion: status.consent.version,
+    disclosureVersion: status.consent.disclosure.version,
+    disclosureDigest: status.consent.disclosure.digest,
+    policyVersion: status.consent.policy.version,
+    policyDigest: status.consent.policy.digest,
+    consentAccepted: true,
+  } as const;
 }
 
 function expectPrivateNoStore(
@@ -413,4 +430,256 @@ describe('Founding Household local no-card API', () => {
     expect(unrelatedAfter.rows).toEqual(unrelatedBefore.rows);
     expect(history.rows[0]).toEqual({ invitation_count: 1, enrollment_count: 1 });
   });
+
+  it('uses immutable Founding transition evidence for general self re-enrollment after offboarding', async () => {
+    harness = await createApiHarness(createMutableClock(clockStart));
+    const issued = await activateAndInvite();
+    const bob = await login(harness.app, 'owner-bob', 'customer');
+    const customerHeaders = {
+      ...browserHeaders(bob.cookie as string),
+      'x-bb-household-id': 'household-harbor',
+    };
+    const olivia = await login(harness.app, 'protected-olivia', 'customer');
+    const oliviaWithdrawal = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/protected-enrollment/withdraw',
+      headers: {
+        ...browserHeaders(olivia.cookie as string),
+        'x-bb-household-id': 'household-harbor',
+        'idempotency-key': protectedOperation('withdraw', 29),
+      },
+      payload: { withdrawalAcknowledged: true },
+    });
+    expect(oliviaWithdrawal.statusCode, oliviaWithdrawal.body).toBe(200);
+    expect(oliviaWithdrawal.json().changed).toBe(true);
+    const previewResponse = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${issued.invitationId}/preview`,
+      headers: customerHeaders,
+      payload: { invitationCredential: issued.credential },
+    });
+    const preview = foundingHouseholdInvitationPreviewResponseSchema.parse(previewResponse.json());
+    const acceptance = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${issued.invitationId}/accept`,
+      headers: { ...customerHeaders, 'idempotency-key': operation('accept', 30) },
+      payload: {
+        invitationCredential: issued.credential,
+        serviceConsentVersion: foundingHouseholdServiceConsentVersion,
+        serviceDisclosureDigest: preview.serviceDisclosureDigest,
+        servicePolicyDigest: preview.servicePolicyDigest,
+        serviceConsentAccepted: true,
+        protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
+        protectedEnrollmentDisclosureDigest: preview.protectedEnrollmentDisclosureDigest,
+        protectedEnrollmentPolicyDigest: preview.protectedEnrollmentPolicyDigest,
+        protectedEnrollmentConsentAccepted: true,
+      },
+    });
+    expect(acceptance.statusCode, acceptance.body).toBe(201);
+
+    await installSyntheticLocalFamilyEntitlement(harness, {
+      householdId: 'household-harbor',
+      payerPersonId: 'person-owner-bob',
+      suffix: 'founding-interop-local-family',
+      precedence: 300,
+    });
+    const preOffboardAllocation = await harness.database.query<
+      {
+        readonly entitlement_grant_id: string;
+        readonly founding_grant_id: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT allowance.entitlement_grant_id,
+              enrollment.entitlement_grant_id AS founding_grant_id
+       FROM protected_members protected
+       JOIN commerce_allowance_allocations allowance
+         ON allowance.household_id = protected.household_id
+        AND allowance.id = protected.allowance_allocation_id
+       JOIN founding_household_enrollments enrollment
+         ON enrollment.household_id = protected.household_id
+        AND enrollment.state = 'active'
+       WHERE protected.household_id = 'household-harbor'
+         AND protected.person_id = 'person-owner-bob'
+         AND protected.status = 'accepted'
+         AND allowance.state = 'active'`,
+    );
+    expect(preOffboardAllocation.rows[0]?.entitlement_grant_id).toBe(
+      preOffboardAllocation.rows[0]?.founding_grant_id,
+    );
+    const offboarded = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/founding-households/offboard',
+      headers: { ...customerHeaders, 'idempotency-key': operation('offboard', 34) },
+    });
+    expect(offboarded.statusCode, offboarded.body).toBe(200);
+    expect(offboarded.json().enrollment.state).toBe('revoked');
+    expect(offboarded.json().reboundProtectedAllocations).toBe(1);
+
+    const postOffboardWithdrawal = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/protected-enrollment/withdraw',
+      headers: {
+        ...customerHeaders,
+        'idempotency-key': protectedOperation('withdraw', 35),
+      },
+      payload: { withdrawalAcknowledged: true },
+    });
+    expect(postOffboardWithdrawal.statusCode, postOffboardWithdrawal.body).toBe(200);
+    expect(postOffboardWithdrawal.json().changed).toBe(true);
+
+    const postOffboardStatusResponse = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/protected-enrollment',
+      headers: customerHeaders,
+    });
+    const postOffboardStatus =
+      postOffboardStatusResponse.json<ProtectedSelfEnrollmentStatusResponse>();
+    expect(postOffboardStatus.eligibility).toBe('available');
+    const postOffboardReenrollment = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/protected-enrollment',
+      headers: { ...customerHeaders, 'idempotency-key': protectedOperation('enroll', 36) },
+      payload: generalProtectedEnrollmentPayload(postOffboardStatus),
+    });
+    expect(postOffboardReenrollment.statusCode, postOffboardReenrollment.body).toBe(201);
+
+    const evidence = await harness.database.query<
+      {
+        readonly historical_founding_acceptances: number;
+        readonly historical_founding_transitions: number;
+        readonly current_general_acceptances: number;
+        readonly founding_state: string;
+        readonly current_consent_version: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-harbor'
+            AND actor_person_id = 'person-owner-bob'
+            AND action = 'accept'
+            AND source_interaction = 'founding_household_protected_enrollment'
+            AND disclosure_version = 'founding-household-protected-self-v1'
+            AND supersedes_evidence_id IS NULL) AS historical_founding_acceptances,
+         (SELECT count(*)::int
+          FROM founding_household_allowance_transitions transition
+          JOIN founding_household_enrollments enrollment
+            ON enrollment.id = transition.enrollment_id
+          JOIN commerce_allowance_allocations allowance
+            ON allowance.household_id = transition.household_id
+           AND allowance.id = transition.allowance_allocation_id
+          WHERE enrollment.household_id = 'household-harbor'
+            AND transition.allowance_key = 'protected_members'
+            AND transition.from_grant_id = enrollment.entitlement_grant_id
+            AND allowance.subject_id = 'person-owner-bob')
+           AS historical_founding_transitions,
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-harbor'
+            AND actor_person_id = 'person-owner-bob'
+            AND action = 'accept'
+            AND source_interaction = 'protected_enrollment_accept'
+            AND disclosure_version = 'protected-self-enrollment-disclosure-v1')
+           AS current_general_acceptances,
+         (SELECT state FROM founding_household_enrollments
+          WHERE household_id = 'household-harbor') AS founding_state,
+         (SELECT consent_version FROM protected_members
+          WHERE household_id = 'household-harbor'
+            AND person_id = 'person-owner-bob') AS current_consent_version`,
+    );
+    expect(evidence.rows[0]).toEqual({
+      historical_founding_acceptances: 1,
+      historical_founding_transitions: 1,
+      current_general_acceptances: 1,
+      founding_state: 'revoked',
+      current_consent_version: 'protected-self-enrollment-v1',
+    });
+  }, 30_000);
+
+  it('preserves exact Founding acceptance while allowing general self re-enrollment during active service', async () => {
+    harness = await createApiHarness(createMutableClock(clockStart));
+    const issued = await activateAndInvite();
+    const bob = await login(harness.app, 'owner-bob', 'customer');
+    const customerHeaders = {
+      ...browserHeaders(bob.cookie as string),
+      'x-bb-household-id': 'household-harbor',
+    };
+    const previewResponse = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${issued.invitationId}/preview`,
+      headers: customerHeaders,
+      payload: { invitationCredential: issued.credential },
+    });
+    const preview = foundingHouseholdInvitationPreviewResponseSchema.parse(previewResponse.json());
+    const acceptance = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/founding-households/invitations/${issued.invitationId}/accept`,
+      headers: { ...customerHeaders, 'idempotency-key': operation('accept', 40) },
+      payload: {
+        invitationCredential: issued.credential,
+        serviceConsentVersion: foundingHouseholdServiceConsentVersion,
+        serviceDisclosureDigest: preview.serviceDisclosureDigest,
+        servicePolicyDigest: preview.servicePolicyDigest,
+        serviceConsentAccepted: true,
+        protectedEnrollmentConsentVersion: foundingHouseholdProtectedEnrollmentConsentVersion,
+        protectedEnrollmentDisclosureDigest: preview.protectedEnrollmentDisclosureDigest,
+        protectedEnrollmentPolicyDigest: preview.protectedEnrollmentPolicyDigest,
+        protectedEnrollmentConsentAccepted: true,
+      },
+    });
+    expect(acceptance.statusCode, acceptance.body).toBe(201);
+
+    const withdrawn = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/protected-enrollment/withdraw',
+      headers: {
+        ...customerHeaders,
+        'idempotency-key': protectedOperation('withdraw', 41),
+      },
+      payload: { withdrawalAcknowledged: true },
+    });
+    expect(withdrawn.statusCode, withdrawn.body).toBe(200);
+    const statusResponse = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/protected-enrollment',
+      headers: customerHeaders,
+    });
+    const enrollmentStatus = statusResponse.json<ProtectedSelfEnrollmentStatusResponse>();
+    expect(enrollmentStatus.eligibility).toBe('available');
+    const reenrolled = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/protected-enrollment',
+      headers: { ...customerHeaders, 'idempotency-key': protectedOperation('enroll', 42) },
+      payload: generalProtectedEnrollmentPayload(enrollmentStatus),
+    });
+    expect(reenrolled.statusCode, reenrolled.body).toBe(201);
+    expect(reenrolled.json().consentVersion).toBe('protected-self-enrollment-v1');
+
+    const evidence = await harness.database.query<
+      {
+        readonly historical_founding_acceptances: number;
+        readonly current_general_acceptances: number;
+        readonly founding_state: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-harbor'
+            AND actor_person_id = 'person-owner-bob'
+            AND action = 'accept'
+            AND source_interaction = 'founding_household_protected_enrollment')
+           AS historical_founding_acceptances,
+         (SELECT count(*)::int FROM consent_evidence
+          WHERE household_id = 'household-harbor'
+            AND actor_person_id = 'person-owner-bob'
+            AND action = 'accept'
+            AND source_interaction = 'protected_enrollment_accept')
+           AS current_general_acceptances,
+         (SELECT state FROM founding_household_enrollments
+          WHERE household_id = 'household-harbor') AS founding_state`,
+    );
+    expect(evidence.rows[0]).toEqual({
+      historical_founding_acceptances: 1,
+      current_general_acceptances: 1,
+      founding_state: 'active',
+    });
+  }, 30_000);
 });

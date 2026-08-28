@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { customerUrl, signInCustomer } from './helpers';
 
-test('billing and success surfaces remain fail-closed without founder activation', async ({
+test('billing and success surfaces remain fail-closed without billing activation', async ({
   page,
 }) => {
   await signInCustomer(page, 'owner-alice');
@@ -12,19 +12,18 @@ test('billing and success surfaces remain fail-closed without founder activation
     billingLink.click(),
   ]);
   await expect(page.getByRole('heading', { name: 'Manage billing' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'unavailable' })).toBeVisible();
-  await expect(page.getByText(/not in the founder-approved billing cohort/iu)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Billing is not available' })).toBeVisible();
+  await expect(page.getByText(/online billing is not available/iu)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toHaveCount(0);
 
   await page.goto(
     `${customerUrl}/member/billing/success?session_id=cs_live_forged&canonicalAccessActive=true`,
   );
+  await expect(page.getByRole('heading', { name: 'We are confirming your payment' })).toBeVisible();
   await expect(
-    page.getByRole('heading', { name: 'Payment evidence is still pending' }),
+    page.getByText(/Returning from Checkout does not by itself activate/iu),
   ).toBeVisible();
-  await expect(page.getByText(/Returning to this page did not grant access/iu)).toBeVisible();
-  await expect(page.getByText(/does not trust URL parameters/iu)).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Review billing state' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Review billing' })).toBeVisible();
 });
 
 test('mocked billing journey preserves unknown retry, expiry, paid truth, and portal controls', async ({
@@ -35,13 +34,66 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
   let billingState: BillingState = 'pending_unknown';
   let checkoutOperation = '';
   let checkoutHousehold = '';
+  let checkoutOffer = '';
   let portalOperation = '';
   let portalHousehold = '';
+  const offers = [
+    {
+      offerId: 'family_annual_v2',
+      plan: 'family',
+      displayName: 'Family',
+      billingInterval: 'year',
+      unitAmountMinor: 14_990,
+      currency: 'usd',
+      trialPeriodDays: 7,
+      customerSelectable: true,
+      defaultAcquisitionOffer: true,
+      disclosure: '7 days free, then $149.90/year unless canceled.',
+    },
+    {
+      offerId: 'family_monthly_v2',
+      plan: 'family',
+      displayName: 'Family',
+      billingInterval: 'month',
+      unitAmountMinor: 1_499,
+      currency: 'usd',
+      trialPeriodDays: 0,
+      customerSelectable: true,
+      defaultAcquisitionOffer: false,
+      disclosure: '$14.99/month until canceled.',
+    },
+    {
+      offerId: 'individual_annual_v1',
+      plan: 'individual',
+      displayName: 'Individual',
+      billingInterval: 'year',
+      unitAmountMinor: 8_990,
+      currency: 'usd',
+      trialPeriodDays: 7,
+      customerSelectable: false,
+      defaultAcquisitionOffer: false,
+      disclosure: '7 days free, then $89.90/year unless canceled.',
+    },
+    {
+      offerId: 'individual_monthly_v1',
+      plan: 'individual',
+      displayName: 'Individual',
+      billingInterval: 'month',
+      unitAmountMinor: 899,
+      currency: 'usd',
+      trialPeriodDays: 0,
+      customerSelectable: false,
+      defaultAcquisitionOffer: false,
+      disclosure: '$8.99/month until canceled.',
+    },
+  ] as const;
   const responseFor = () => {
     const common = {
       householdId: 'household-sunrise',
-      offerId: 'founding_family_monthly_v1',
+      offerId: 'family_annual_v2',
       runtimeInitiationEnabled: true,
+      defaultOfferId: 'family_annual_v2',
+      offers,
     } as const;
     const billing =
       billingState === 'pending_unknown'
@@ -96,9 +148,36 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     return {
       billing,
       evidenceNotice:
-        'Success redirects and provider status snapshots do not grant BoomerBuddy access.',
+        'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.',
     };
   };
+  await page.route('**/v1/commerce/billing-authority', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        householdId: 'household-sunrise',
+        personId: 'person-owner-alice',
+        administratorEligible: true,
+        authorityStatus: 'active',
+        canAccept: false,
+        canRevoke: true,
+        documents: {
+          accept: {
+            version: 'billing-authority-self-consent-v1',
+            digest: 'a'.repeat(64),
+            disclosure: 'Accept recurring billing responsibility for this household.',
+          },
+          revoke: {
+            version: 'billing-authority-self-withdrawal-v1',
+            digest: 'b'.repeat(64),
+            disclosure: 'Withdraw recurring billing responsibility for this household.',
+          },
+        },
+        externalActionExecuted: false,
+      }),
+    });
+  });
   await page.route('**/v1/commerce/stripe/billing', async (route) => {
     await route.fulfill({
       status: 200,
@@ -109,6 +188,7 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
   await page.route('**/v1/commerce/stripe/checkout', async (route) => {
     checkoutOperation = route.request().headers()['idempotency-key'] ?? '';
     checkoutHousehold = route.request().headers()['x-bb-household-id'] ?? '';
+    checkoutOffer = ((await route.request().postDataJSON()) as { offerId?: string }).offerId ?? '';
     billingState = 'pending_retry';
     await route.fulfill({
       status: 409,
@@ -127,11 +207,11 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
   });
 
   await page.goto(`${customerUrl}/member/billing`);
-  await expect(page.getByRole('heading', { name: 'pending provider' })).toBeVisible();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('outcome unknown');
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 1');
+  await expect(
+    page.getByRole('heading', { name: 'Confirming your billing request' }),
+  ).toBeVisible();
   await expect(page.getByTestId('billing-pending-operation')).toContainText(
-    'checkout-operation-unknown-0001',
+    'Your billing request is being confirmed',
   );
   await expect
     .poll(() =>
@@ -142,13 +222,35 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     .toBe('checkout-operation-unknown-0001');
 
   billingState = 'pending_retry';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('dispatching');
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 2');
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByTestId('billing-pending-operation')).toContainText(
+    'Please wait before starting another request',
+  );
 
   billingState = 'ready';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toBeVisible();
+  const billingOption = page.getByLabel('Billing option');
+  await expect(billingOption).toHaveValue('family_annual_v2');
+  await expect(page.getByTestId('billing-customer-terms')).toContainText(
+    '7 days free, then $149.90/year unless canceled.',
+  );
+  await billingOption.selectOption('family_monthly_v2');
+  await expect(page.getByTestId('billing-customer-terms')).toContainText(
+    '$14.99/month until canceled.',
+  );
+  await billingOption.selectOption('family_annual_v2');
+  await expect(page.getByTestId('billing-customer-terms')).toContainText(
+    'Charges are generally not refundable',
+  );
+  await expect(page.getByText(/MFA method already enrolled/iu)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Withdraw billing-manager role' })).toBeVisible();
+  await expect(
+    page.getByTestId('billing-customer-terms').getByRole('link', { name: 'support' }),
+  ).toHaveAttribute('href', '/support');
+  await expect(
+    page.getByTestId('billing-customer-terms').getByRole('link', { name: 'billing terms' }),
+  ).toHaveAttribute('href', '/billing-terms');
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -156,10 +258,13 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
       ),
     )
     .toBeNull();
-  await page.getByRole('button', { name: 'Continue to test checkout' }).click();
-  await expect(page.getByTestId('billing-pending-operation')).toContainText('attempt 2');
+  await page.getByRole('button', { name: 'Continue to secure checkout' }).click();
+  await expect(page.getByTestId('billing-pending-operation')).toContainText(
+    'Your billing request is being confirmed',
+  );
   expect(checkoutOperation).toMatch(/^checkout-/u);
   expect(checkoutHousehold).toBe('household-sunrise');
+  expect(checkoutOffer).toBe('family_annual_v2');
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -169,15 +274,21 @@ test('mocked billing journey preserves unknown retry, expiry, paid truth, and po
     .toBe(checkoutOperation);
 
   billingState = 'awaiting_payment';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('heading', { name: 'awaiting payment evidence' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Continue to test checkout' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('heading', { name: 'Confirming your payment' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue to secure checkout' })).toHaveCount(0);
 
   billingState = 'active';
-  await page.getByRole('button', { name: 'Refresh evidence state' }).click();
-  await expect(page.getByRole('heading', { name: 'active' })).toBeVisible();
-  await page.getByRole('button', { name: 'Open cancel-only billing portal' }).click();
+  await page.getByRole('button', { name: 'Refresh billing status' }).click();
+  await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();
+  await expect(page.getByTestId('billing-invoice-recovery')).toContainText(
+    'invoice history that Stripe has made available',
+  );
+  await expect(
+    page.getByTestId('billing-invoice-recovery').getByRole('link', { name: 'contact support' }),
+  ).toHaveAttribute('href', '/support');
+  await page.getByRole('button', { name: 'View invoices or manage billing' }).click();
   expect(portalOperation).toMatch(/^portal-/u);
   expect(portalHousehold).toBe('household-sunrise');
-  await expect(page.getByRole('heading', { name: 'active' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Membership is active' })).toBeVisible();
 });

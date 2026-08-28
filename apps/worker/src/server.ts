@@ -8,6 +8,7 @@ import {
 import { createLogger } from '@boomerbuddy/observability';
 import { StripeHttpTransport } from '@boomerbuddy/integrations';
 import {
+  AccessIntentRepository,
   AutomationBudgetRepository,
   BusinessOsRepository,
   CheckRepository,
@@ -17,13 +18,16 @@ import {
   createPostgresDatabase,
   DurableJobRepository,
   FeedbackRepository,
+  GovernedContentRepository,
   GrowthRuntimeRepository,
   growthProjectionEventTypes,
   MessagingRepository,
+  MobileJtiSessionRetentionRepository,
   OperationalWorkRepository,
   OutboxDeliveryRepository,
   PublicCheckRepository,
   ProductionIdentityRepository,
+  SupportReceiptRepository,
   runMigrations,
 } from '@boomerbuddy/persistence';
 import {
@@ -41,6 +45,7 @@ import {
 import { createStripeReconciliationHandler } from './commerce-reconciliation';
 import { composeFeedbackWorker } from './feedback-composition';
 import { composeProviderFreeMessagingWorker } from './messaging-composition';
+import { runMobileSessionRetentionSweep } from './mobile-session-retention';
 import {
   createStripeInventoryHandler,
   enqueueStripeInventory,
@@ -51,6 +56,11 @@ import { createWorkerStripeAdapter } from './stripe-adapter';
 import { createGrowthRuntimeHandlers, enqueueGrowthRuntimeJobs } from './growth-runtime';
 import { runReplitWorkerLifecycle } from './health-server';
 import { createOperationalHandlers, seedOperationalSchedules } from './operational-handlers';
+import {
+  createGovernedContentDailyHandler,
+  enqueueGovernedContentDailyJob,
+  governedContentDailyJobType,
+} from './governed-content';
 
 if (existsSync('.env')) loadEnvironmentFile();
 await runReplitWorkerLifecycle(
@@ -110,11 +120,20 @@ await runReplitWorkerLifecycle(
       hmacKey: appConfig.secrets.fingerprintKey,
       hmacKeyVersion: 1,
     });
+    const accessIntents = new AccessIntentRepository(database, appConfig.secrets.fingerprintKey);
+    const supportReceipts = new SupportReceiptRepository(
+      database,
+      appConfig.secrets.fingerprintKey,
+    );
     const feedback = new FeedbackRepository(database, {
       encryptionKey: appConfig.secrets.artifactEncryptionKey,
       encryptionKeyVersion: 1,
       fingerprintKey: appConfig.secrets.fingerprintKey,
       fingerprintKeyVersion: 1,
+    });
+    const governedContent = new GovernedContentRepository(database, {
+      encryptionKey: appConfig.secrets.artifactEncryptionKey,
+      encryptionKeyVersion: 1,
     });
     const messaging = new MessagingRepository(
       database,
@@ -138,6 +157,7 @@ await runReplitWorkerLifecycle(
     const businessOs = new BusinessOsRepository(database);
     const growth = new GrowthRuntimeRepository(database);
     const operations = new OperationalWorkRepository(database);
+    const mobileSessionRetention = new MobileJtiSessionRetentionRepository(database);
     const retentionIntervalMs = 5 * 60_000;
 
     const retentionHandler: JobHandler = async ({ job, heartbeat }) => {
@@ -147,10 +167,18 @@ await runReplitWorkerLifecycle(
       const now = new Date();
       const deleted = await checks.purgeDue({ now, limit: batch });
       const publicDeleted = await publicChecks.purgeExpired(now);
+      const accessIntentCleanup = await accessIntents.purgeExpired(now, batch);
+      const supportReceiptCleanup = await supportReceipts.purgeTerminal(Math.min(batch, 100));
       const messagingDeleted =
         entitlementRuntimeEnvironment === 'local'
           ? await messaging.purgeExpiredSupportContent({ limit: batch, now })
           : [];
+      const mobileRetention = await runMobileSessionRetentionSweep({
+        retention: mobileSessionRetention,
+        logger,
+        now,
+        limit: batch,
+      });
       await heartbeat();
       const next = nextRetentionSchedule({
         currentJobId: job.id,
@@ -160,7 +188,10 @@ await runReplitWorkerLifecycle(
           deleted.length === batch ||
           publicDeleted.contexts > 0 ||
           publicDeleted.results > 0 ||
-          messagingDeleted.length === batch,
+          accessIntentCleanup.saturated ||
+          supportReceiptCleanup.saturated ||
+          messagingDeleted.length === batch ||
+          mobileRetention.cleanupSaturated,
       });
       await jobs.enqueue({
         type: 'retention.sweep',
@@ -194,6 +225,9 @@ await runReplitWorkerLifecycle(
     await enqueueAutomationBudgetMaintenance({ jobs, now, batch: 25 });
     await enqueueGrowthRuntimeJobs({ jobs, now, batch: 100 });
     await seedOperationalSchedules({ environment: appConfig.environment, jobs, now });
+    if (appConfig.content?.dailyDraftGenerationEnabled === true) {
+      await enqueueGovernedContentDailyJob({ jobs, now });
+    }
 
     const handlers: Record<string, JobHandler> = {
       'retention.sweep': retentionHandler,
@@ -210,19 +244,34 @@ await runReplitWorkerLifecycle(
         operations,
         fingerprintKey: appConfig.secrets.fingerprintKey,
       }),
+      ...(appConfig.content?.dailyDraftGenerationEnabled === true
+        ? {
+            [governedContentDailyJobType]: createGovernedContentDailyHandler({
+              content: governedContent,
+              jobs,
+            }),
+          }
+        : {}),
     };
-    if (appConfig.commerce.stripe.mode === 'test') {
+    if (
+      appConfig.commerce.stripe.mode === 'test' ||
+      (appConfig.commerce.stripe.mode === 'live' &&
+        appConfig.commerce.stripe.runtimeSurface === 'worker')
+    ) {
       const stripe = appConfig.commerce.stripe;
+      const restrictedKey = stripe.mode === 'test' ? stripe.apiKey : stripe.workerRestrictedKey;
+      const evidenceLevel = stripe.mode === 'test' ? 'stripe_test' : 'live_production';
       const runtimeRunId = `worker-${randomUUID()}`;
       const stripeAdapter = createWorkerStripeAdapter({
-        transport: new StripeHttpTransport(stripe.apiKey, stripe.apiVersion),
+        transport: new StripeHttpTransport(restrictedKey, stripe.apiVersion),
         customerOrigins: appConfig.identity.customerOrigins,
         configuration: {
           environment: stripe.environment,
           accountId: stripe.accountId,
           apiVersion: stripe.apiVersion,
           portalConfigurationId: stripe.cancelOnlyPortalConfigurationId,
-          offer: stripe.offer,
+          defaultOfferId: stripe.defaultOfferId,
+          offers: stripe.offers,
         },
       });
       handlers['commerce.reconcile'] = createStripeReconciliationHandler({
@@ -236,7 +285,7 @@ await runReplitWorkerLifecycle(
         businessOs,
         commerceRuntime,
         provider: stripeAdapter,
-        evidenceLevel: 'stripe_test',
+        evidenceLevel,
         transportKind: 'stripe_https',
         runtimeRunId,
         authenticityKind: 'provider_read',
@@ -254,7 +303,7 @@ await runReplitWorkerLifecycle(
         environment: stripe.environment,
         accountId: stripe.accountId,
         apiVersion: stripe.apiVersion,
-        evidenceTier: 'stripe_test',
+        evidenceTier: evidenceLevel,
         transportKind: 'stripe_https',
         scheduledAt: now,
       });

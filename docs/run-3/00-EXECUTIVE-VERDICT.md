@@ -280,14 +280,19 @@ Every item is intentionally unchecked.
 
 ## First-customer path
 
-`FIRST-CUSTOMER-7-DAY-PLAN.md`, `STRIPE-FIRST-DOLLAR-RUNBOOK.md`,
-`FOUNDING-HOUSEHOLD-PLAYBOOK.md`, and `FIRST-COHORT-AND-DISCOVERY-WORKFLOW.md` remain the operational
-handoff. Day 1 does not start until the plan's stated entry criteria—especially dependency, source
-custody, identity, database, deployed-edge, and operational safety—are satisfied. Later provider,
-human, and professional gates control the corresponding later steps; they are evidence the plan is
-intended to produce, not circular prerequisites to begin every preparation step. Manual work is
-acceptable only where those documents explicitly bound it; no blocked safety or truth gate may be
-treated as a manual shortcut.
+The Run 3 Founding Household customer path is historical evidence only. It is not the current
+operational handoff and must not be used to create a new production sponsorship, credential,
+invitation, enrollment, or external-customer cohort. The production runtime intentionally refuses
+that historical activation path.
+
+The current implementation entry point is `docs/post-launch-beta/RUN-NEXT-EXECUTION.md`. It is
+controlled by `docs/post-launch-beta/EXECUTION-PLAN.md`,
+`docs/post-launch-beta/NONCHARGING-RELEASE-RECEIPT.md`, and the G0-G15 prompt pack. The active offer
+remains web-first Family at $14.99/month, with Checkout closed until its paid-entitlement and live
+release gates pass. `FIRST-CUSTOMER-7-DAY-PLAN.md`, `FOUNDING-HOUSEHOLD-PLAYBOOK.md`, and the
+customer-activation portion of `run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md` are retained only to explain
+earlier local and historical evidence. Manual work is acceptable only where the current handoff
+explicitly bounds it; no blocked safety or truth gate may be treated as a manual shortcut.
 
 ## Final boundary
 

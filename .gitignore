@@ -24,9 +24,33 @@ test-results/
 *.jks
 *.pem
 *.key
+*.p8
 *.keystore
 *.p12
 *.pfx
+*.mobileprovision
+*.provisionprofile
+GoogleService-Info.plist
+google-services.json
+credentials.json
+eas-credentials*.json
+eas.credentials*.json
+eas_credentials*.json
+client-secret*.json
+client_secret*.json
+*service-account*.json
+*service_account*.json
+*firebase-admin*.json
+*firebase_admin*.json
+google-credentials*.json
+gcp-credentials*.json
+firebase-credentials*.json
+clerk-credentials*.json
+stripe-credentials*.json
+twilio-credentials*.json
+aws-credentials*.json
+provider-credentials*.json
+provider-secrets*.json
 
 # Local databases and temporary data
 *.db

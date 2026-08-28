@@ -15,6 +15,10 @@ export class HqApiError extends Error {
   }
 }
 
+function serviceName(): string {
+  return process.env.NODE_ENV === 'production' ? 'The HQ service' : 'The local HQ service';
+}
+
 export async function hqRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const callerSignal = init.signal ?? undefined;
   const timeoutController = callerSignal ? undefined : new AbortController();
@@ -41,7 +45,7 @@ export async function hqRequest<T>(path: string, init: RequestInit = {}): Promis
         /* Preserve the safe fallback. */
       }
       throw new HqApiError(
-        error?.error.message ?? 'The local HQ service could not complete this request.',
+        error?.error.message ?? `${serviceName()} could not complete this request.`,
         response.status,
       );
     }
@@ -49,7 +53,7 @@ export async function hqRequest<T>(path: string, init: RequestInit = {}): Promis
     return (await response.json()) as T;
   } catch (error) {
     if (timeoutController?.signal.aborted) {
-      throw new HqApiError('The local service did not respond in time.', 408);
+      throw new HqApiError(`${serviceName()} did not respond in time.`, 408);
     }
     throw error;
   } finally {

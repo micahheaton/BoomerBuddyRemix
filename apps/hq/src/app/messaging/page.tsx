@@ -1,8 +1,10 @@
 import Link from 'next/link';
 
 import { MessagingSupport } from '../../components/messaging-support';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
-export default function MessagingSupportPage() {
+export default async function MessagingSupportPage() {
+  await protectProductionHqResource();
   const localOnlyEnabled = process.env.NODE_ENV !== 'production';
   return (
     <main className="hq-content" id="hq-main">

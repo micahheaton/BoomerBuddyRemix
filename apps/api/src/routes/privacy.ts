@@ -41,19 +41,22 @@ export function registerPrivacyRoutes(app: FastifyInstance, context: ApiContext)
       now,
     );
     assertMutationOrigin(request, context.config, auth);
-    const household = selectedHousehold(auth, request);
     const body = createSelfPrivacyRequestSchema.parse(request.body);
+    const householdSubject =
+      body.requestKind === 'delete'
+        ? {}
+        : { householdId: selectedHousehold(auth, request).householdId };
     const dueAt = new Date(now.getTime() + 30 * 86_400_000);
     let id: string;
     try {
       id = await context.repositories.businessOs.createPrivacyRequest({
         personId: auth.principal.personId,
-        householdId: household.householdId,
+        ...householdSubject,
         requestKind: body.requestKind,
         now,
         dueAt,
         context: {
-          householdId: household.householdId,
+          ...householdSubject,
           actorPersonId: auth.principal.personId,
           audience: auth.audience,
           correlationId: correlationId(request),

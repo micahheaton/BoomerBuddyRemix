@@ -14,12 +14,21 @@
     "apps/*",
     "packages/*"
   ],
+  "overrides": {
+    "metro": "0.84.5",
+    "metro-config": "0.84.5",
+    "metro-transform-worker": "0.84.5",
+    "react-native": "0.86.3"
+  },
   "scripts": {
     "dev": "concurrently -k -n api,web,hq -c blue,green,magenta \"npm run dev:api\" \"npm run dev:web\" \"npm run dev:hq\"",
     "dev:api": "tsx watch apps/api/src/server.ts",
     "dev:web": "npm run dev -w @boomerbuddy/web",
     "dev:hq": "npm run dev -w @boomerbuddy/hq",
     "dev:mobile": "npm run dev -w @boomerbuddy/mobile",
+    "mobile:assets": "node scripts/generate-mobile-assets.mjs",
+    "mobile:assets:check": "node scripts/generate-mobile-assets.mjs --check",
+    "mobile:verify-distribution": "node scripts/verify-mobile-distribution.mjs",
     "dev:worker": "npm run dev -w @boomerbuddy/worker",
     "build": "npm run typecheck && npm run build -w @boomerbuddy/api && npm run build -w @boomerbuddy/worker && npm run build -w @boomerbuddy/web && npm run build -w @boomerbuddy/hq && npm run build -w @boomerbuddy/mobile",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tsconfig.json --noEmit",
@@ -37,20 +46,25 @@
     "stripe:inventory:enqueue": "tsx scripts/enqueue-stripe-inventory.ts",
     "data:ncua": "tsx scripts/ingest-ncua-credit-unions.ts",
     "test:unit": "vitest run --project unit",
-    "test:integration": "vitest run --project integration",
+    "test:integration": "npm run test:integration:shard:1 && npm run test:integration:shard:2",
+    "test:integration:shard:1": "vitest run --project integration --shard=1/2",
+    "test:integration:shard:2": "vitest run --project integration --shard=2/2",
     "test:security": "vitest run --project security",
     "test:eval": "tsx scripts/eval-report.ts",
     "test:e2e": "playwright test",
+    "test:e2e:accessibility-matrix": "playwright test --config tests/e2e/accessibility.playwright.config.ts",
     "test:coverage": "vitest run --coverage --project unit",
     "verify:secrets": "node scripts/verify-no-secrets.mjs",
     "verify:runtime-deps": "node scripts/verify-runtime-dependency-scope.mjs",
     "verify:run3-1-deps": "node scripts/verify-run3-1-dependencies.mjs",
+    "verify:production-auth-routes": "cross-env BB_PRODUCTION_AUTH_ROUTES_ONLY=true node scripts/verify-founding-household-production-ui.mjs",
     "verify:production-ui": "node scripts/verify-founding-household-production-ui.mjs",
+    "verify:next-resource-auth": "node scripts/verify-next-resource-auth.mjs",
     "replit:build": "node scripts/replit-service.mjs build",
     "replit:start": "node scripts/replit-service.mjs start",
     "test": "npm run test:unit && npm run test:integration && npm run test:security && npm run test:eval",
     "audit:deps": "npm audit --audit-level=high",
-    "verify": "npm run verify:secrets && npm run verify:runtime-deps && npm run typecheck && npm run lint && npm run format:check && npm test && npm run build && npm run verify:production-ui"
+    "verify": "npm run verify:secrets && npm run verify:runtime-deps && npm run typecheck && npm run lint && npm run format:check && npm test && npm run build && npm run verify:production-ui && npm run verify:next-resource-auth"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",
@@ -67,11 +81,13 @@
     "eslint-plugin-jsx-a11y": "6.10.2",
     "eslint-plugin-react-hooks": "7.1.1",
     "prettier": "3.9.6",
+    "sharp": "0.35.3",
     "tsup": "8.5.1",
     "tsx": "4.23.12",
     "typescript": "6.0.3",
     "typescript-eslint": "8.67.0",
     "vitest": "4.1.10",
-    "wait-on": "9.1.0"
+    "wait-on": "9.1.0",
+    "ws": "8.21.3"
   }
 }

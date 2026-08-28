@@ -4,8 +4,13 @@ import { IdentityProvider } from '../components/identity-provider';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'BoomerBuddy — a calmer next step',
+  metadataBase: new URL('https://app.boomerbuddy.net'),
+  title: 'BoomerBuddy: a calmer next step',
   description: 'A calm way to check suspicious messages and involve people you trust.',
+  robots: {
+    index: true,
+    follow: true,
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

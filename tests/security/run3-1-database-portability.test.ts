@@ -46,6 +46,66 @@ const customDumpFixture = Buffer.from(
   'utf8',
 );
 const temporaryRoots: string[] = [];
+const launchCriticalEvidenceTables = [
+  'household_billing_authorities',
+  'household_billing_authority_events',
+  'commerce_product_versions',
+  'commerce_plan_versions',
+  'commerce_storefront_policies',
+  'commerce_checkout_intents',
+  'commerce_provider_customers',
+  'commerce_reconciliation_runs',
+  'commerce_stripe_offer_contracts',
+  'commerce_stripe_initiation_controls',
+  'commerce_stripe_initiation_control_events',
+  'commerce_stripe_eligible_households',
+  'commerce_stripe_eligibility_events',
+  'commerce_stripe_preflight_records',
+  'commerce_stripe_session_operations',
+  'commerce_stripe_checkout_completions',
+  'commerce_stripe_paid_invoice_evidence',
+  'commerce_stripe_failed_invoice_evidence',
+  'commerce_stripe_financial_restriction_resolutions',
+  'commerce_stripe_inventory_reconciliation_runs',
+  'commerce_stripe_inventory_mismatches',
+  'commerce_stripe_session_operation_attempts',
+  'commerce_stripe_session_retry_repair_events',
+  'commerce_stripe_cohort_policies',
+  'commerce_stripe_cohort_policy_events',
+  'commerce_stripe_invoice_authority_facts',
+  'commerce_stripe_dunning_events',
+  'commerce_stripe_financial_restriction_events',
+  'commerce_stripe_inventory_run_attempts',
+  'commerce_stripe_inventory_page_receipts',
+  'commerce_stripe_reconciliation_repair_events',
+  'commerce_stripe_checkout_dependency_wakes',
+  'commerce_stripe_cohort_policy_events_v2',
+  'commerce_billing_reverification_mutex',
+  'commerce_billing_reverification_bindings',
+  'public_check_attribution_aggregates',
+  'acquisition_touchpoints',
+  'private_beta_access_intent_gate',
+  'private_beta_access_intent_receipts',
+  'private_beta_access_intent_rate_buckets',
+  'private_beta_access_intent_aggregates',
+  'commerce_stripe_invoice_recovery_events',
+  'support_receipt_gate',
+  'support_receipts',
+  'support_receipt_operations',
+  'support_receipt_events',
+  'support_receipt_rate_buckets',
+  'protected_self_enrollment_household_gates',
+  'protected_self_enrollment_operations',
+  'check_share_lifecycle_events',
+  'trusted_circle_recipient_codes',
+  'trusted_circle_authenticated_rate_buckets',
+  'household_member_invitations',
+  'member_learning_progress',
+  'member_learning_preferences',
+  'member_in_app_feed_receipts',
+  'member_learning_operation_receipts',
+  'member_scam_guidance_briefs',
+] as const;
 
 function criticalCounts(offset = 0): CriticalTableCounts {
   return Object.fromEntries(
@@ -134,6 +194,9 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         'artifacts',
         'analyses',
         'check_shares',
+        'check_share_lifecycle_events',
+        'public_check_attribution_aggregates',
+        'acquisition_touchpoints',
         'entitlement_grants',
         'founding_household_sponsor_backings',
         'founding_household_enrollments',
@@ -143,8 +206,37 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         'feedback_processing_jobs',
         'feedback_authenticated_quota_buckets',
         'feedback_authenticated_quota_charges',
+        'trusted_circle_recipient_codes',
+        'trusted_circle_authenticated_rate_buckets',
+        'household_member_invitations',
+        'member_learning_progress',
+        'member_learning_preferences',
+        'member_in_app_feed_receipts',
+        'member_learning_operation_receipts',
+        'member_scam_guidance_briefs',
       ]),
     );
+  });
+
+  it('counts the explicit launch-critical authority, commerce, support, access, and enrollment inventory', () => {
+    expect(criticalPortabilityTables).toEqual(
+      expect.arrayContaining([...launchCriticalEvidenceTables]),
+    );
+    expect(new Set(criticalPortabilityTables).size).toBe(criticalPortabilityTables.length);
+
+    const snapshotInvocation = buildSnapshotInvocation({
+      database: parsePostgresDatabaseUrl(sourceDatabaseUrl),
+      cwd: repositoryRoot,
+    });
+    const sql = snapshotInvocation.args.at(-1);
+    expect(sql).toBeDefined();
+    expect(sql).toContain('json_object_agg(table_name, row_count ORDER BY table_name)');
+    expect(sql).not.toContain("'criticalCounts', json_build_object(");
+    for (const table of launchCriticalEvidenceTables) {
+      expect(sql).toContain(
+        `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
+      );
+    }
   });
   it('parses one PostgreSQL URL into a scrubbed process environment without secret argv', () => {
     const database = parsePostgresDatabaseUrl(sourceDatabaseUrl);

@@ -31,6 +31,12 @@ export function testConfig(): AppConfig {
   return {
     environment: 'test',
     api: { host: '127.0.0.1', port: 4100, trustedProxyHops: 0 },
+    accessIntents: { runtimeEnabled: true, edgeRateLimitConfirmed: true },
+    supportReceipts: {
+      customerAccessEnabled: true,
+      intakeEnabled: true,
+      hqQueueEnabled: true,
+    },
     database: {
       driver: 'pglite',
       path: ':memory:',
@@ -63,9 +69,45 @@ export interface ApiHarness {
 
 export async function createApiHarness(
   clock = createMutableClock(),
-  options: { readonly retentionSweepIntervalMs?: number } = {},
+  options: {
+    readonly retentionSweepIntervalMs?: number;
+    readonly accessIntentRequestLimitPerMinute?: number;
+    readonly accessIntentsEnabled?: boolean;
+    readonly accessIntentsEdgeGuardConfirmed?: boolean;
+    readonly supportReceiptsCustomerAccessEnabled?: boolean;
+    readonly supportReceiptsIntakeEnabled?: boolean;
+    readonly supportReceiptsHqQueueEnabled?: boolean;
+    readonly firstPartyContentEnabled?: boolean;
+    readonly dailyContentDraftsEnabled?: boolean;
+  } = {},
 ): Promise<ApiHarness> {
-  const config = testConfig();
+  const {
+    accessIntentsEnabled = true,
+    accessIntentsEdgeGuardConfirmed = accessIntentsEnabled,
+    supportReceiptsCustomerAccessEnabled = true,
+    supportReceiptsIntakeEnabled = supportReceiptsCustomerAccessEnabled,
+    supportReceiptsHqQueueEnabled = supportReceiptsIntakeEnabled,
+    firstPartyContentEnabled = false,
+    dailyContentDraftsEnabled = false,
+    ...buildOptions
+  } = options;
+  const baseConfig = testConfig();
+  const config: AppConfig = {
+    ...baseConfig,
+    accessIntents: {
+      runtimeEnabled: accessIntentsEnabled,
+      edgeRateLimitConfirmed: accessIntentsEdgeGuardConfirmed,
+    },
+    supportReceipts: {
+      customerAccessEnabled: supportReceiptsCustomerAccessEnabled,
+      intakeEnabled: supportReceiptsIntakeEnabled,
+      hqQueueEnabled: supportReceiptsHqQueueEnabled,
+    },
+    content: {
+      firstPartyPublishingEnabled: firstPartyContentEnabled,
+      dailyDraftGenerationEnabled: dailyContentDraftsEnabled,
+    },
+  };
   const database = await createPGliteDatabase(':memory:');
   const app = await buildApp({
     config,
@@ -73,7 +115,7 @@ export async function createApiHarness(
     closeDatabase: false,
     now: clock.now,
     logger: createLogger({ level: 'error', sink: () => undefined, clock: clock.now }),
-    ...options,
+    ...buildOptions,
   });
   return {
     app,

@@ -1,8 +1,10 @@
 import Link from 'next/link';
 
 import { ReferralCreditQueue } from '../../components/referral-credit-queue';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
-export default function ReferralsPage() {
+export default async function ReferralsPage() {
+  await protectProductionHqResource();
   const localOnlyEnabled = process.env.NODE_ENV !== 'production';
   return (
     <main className="hq-content" id="hq-main">

@@ -101,6 +101,7 @@ describe('verified provider commerce inbox', () => {
       Buffer.alloc(32, 23),
       1,
       sequentialIds(),
+      'local',
     );
     await database.query(
       `INSERT INTO commerce_subscriptions(
@@ -181,7 +182,7 @@ describe('verified provider commerce inbox', () => {
     expect(canonical.rows[0]).toEqual({ lifecycle: 'pending', source_verified: false });
   });
 
-  it('requires the exact founder for audited test gates and refuses live initiation', async () => {
+  it('requires the exact operator for audited gates and defaults live initiation off', async () => {
     const runtime = new CommerceRuntimeRepository(database, sequentialIds());
     await expect(
       runtime.changeStripeInitiationControl({
@@ -264,11 +265,13 @@ describe('verified provider commerce inbox', () => {
          live_approved, revision, changed_by_person_id, changed_at
        ) VALUES ('test','founding_household_v1','family_v1_monthly_1499','active',1,$1,
                  false,1,'person-hq-heidi',$2)`,
-      [
-        new Date(fixedTestNow.getTime() + 30 * 86_400_000).toISOString(),
-        fixedTestNow.toISOString(),
-      ],
+      [new Date('2099-01-01T00:00:00.000Z').toISOString(), fixedTestNow.toISOString()],
     );
+    const databaseClock = await database.query<{ readonly database_now: unknown }>(
+      'SELECT CURRENT_TIMESTAMP AS database_now',
+    );
+    const databaseNow = new Date(String(databaseClock.rows[0]?.database_now));
+    const eligibilityExpiresAt = new Date(databaseNow.getTime() + 60 * 60_000);
     const invitations = await Promise.allSettled(
       (['household-sunrise', 'household-harbor'] as const).map((householdId) =>
         runtime.changeStripeHouseholdEligibility({
@@ -278,7 +281,7 @@ describe('verified provider commerce inbox', () => {
           actorPersonId: 'person-hq-heidi',
           configuredFounderPersonId: 'person-hq-heidi',
           correlationId: `stripe-capacity-${householdId}`,
-          eligibilityExpiresAt: new Date(fixedTestNow.getTime() + 60 * 60_000),
+          eligibilityExpiresAt,
           now: fixedTestNow,
         }),
       ),
@@ -297,7 +300,14 @@ describe('verified provider commerce inbox', () => {
       'household-sunrise' | 'household-harbor';
     const waitingHousehold =
       originallyEligible === 'household-sunrise' ? 'household-harbor' : 'household-sunrise';
-    const afterExpiry = new Date(fixedTestNow.getTime() + 2 * 60 * 60_000);
+    await database.query(
+      `UPDATE commerce_stripe_eligible_households
+       SET invited_at = CURRENT_TIMESTAMP - interval '2 hours',
+           eligibility_expires_at = CURRENT_TIMESTAMP - interval '1 hour'
+       WHERE environment = 'test' AND household_id = $1`,
+      [originallyEligible],
+    );
+    const afterExpiry = new Date();
     await expect(
       runtime.changeStripeHouseholdEligibility({
         householdId: waitingHousehold,
@@ -323,7 +333,7 @@ describe('verified provider commerce inbox', () => {
     await expect(
       runtime.changeStripeLiveCohortApproval({
         nextApproved: true,
-        expectedRevision: 1,
+        expectedRevision: 0,
         actorPersonId: 'person-owner-alice',
         configuredFounderPersonId: 'person-hq-heidi',
         correlationId: 'stripe-live-approval-wrong-founder',
@@ -333,13 +343,13 @@ describe('verified provider commerce inbox', () => {
     await expect(
       runtime.changeStripeLiveCohortApproval({
         nextApproved: true,
-        expectedRevision: 1,
+        expectedRevision: 0,
         actorPersonId: 'person-hq-heidi',
         configuredFounderPersonId: 'person-hq-heidi',
         correlationId: 'stripe-live-approval-explicit',
         now: fixedTestNow,
       }),
-    ).resolves.toEqual({ approved: true, revision: 2 });
+    ).resolves.toEqual({ approved: true, revision: 1 });
     await expect(
       runtime.changeStripeHouseholdEligibility({
         householdId: rows.rows[0]?.household_id as 'household-sunrise' | 'household-harbor',
@@ -347,10 +357,23 @@ describe('verified provider commerce inbox', () => {
         nextState: 'eligible',
         actorPersonId: 'person-hq-heidi',
         configuredFounderPersonId: 'person-hq-heidi',
-        correlationId: 'stripe-production-eligibility-refused',
+        correlationId: 'stripe-production-eligibility-enabled',
         now: fixedTestNow,
       }),
-    ).rejects.toMatchObject({ code: 'not_authorized' });
+    ).resolves.toBe('eligible');
+    await expect(
+      runtime.changeStripeInitiationControl({
+        environment: 'production',
+        nextState: 'enabled',
+        reasonCode: 'founder_live_activation',
+        expectedRevision: 0,
+        actorPersonId: 'person-hq-heidi',
+        configuredFounderPersonId: 'person-hq-heidi',
+        correlationId: 'stripe-live-initiation-enabled',
+        runtimeInitiationPermitted: true,
+        now: fixedTestNow,
+      }),
+    ).resolves.toEqual({ state: 'enabled', revision: 1 });
     await expect(
       runtime.assertStripeInitiationAllowed({
         householdId: rows.rows[0]?.household_id as string,
@@ -358,7 +381,7 @@ describe('verified provider commerce inbox', () => {
         runtimeInitiationPermitted: true,
         now: fixedTestNow,
       }),
-    ).rejects.toMatchObject({ code: 'not_authorized' });
+    ).resolves.toBeUndefined();
     const liveApprovalAudit = await database.query<
       { readonly next_live_approved: boolean; readonly correlation_id: string } & Record<
         string,
@@ -366,7 +389,7 @@ describe('verified provider commerce inbox', () => {
       >
     >(
       `SELECT next_live_approved, correlation_id
-       FROM commerce_stripe_cohort_policy_events
+       FROM commerce_stripe_cohort_policy_events_v2
        WHERE environment = 'production'`,
     );
     expect(liveApprovalAudit.rows).toEqual([
@@ -408,6 +431,7 @@ describe('verified provider commerce inbox', () => {
         actor,
         environment: 'test',
         runtimeInitiationPermitted: false,
+        runtimePortalPermitted: true,
         now: fixedTestNow,
       }),
     ).resolves.toMatchObject({
@@ -415,6 +439,25 @@ describe('verified provider commerce inbox', () => {
       canonicalAccessActive: false,
       runtimeInitiationEnabled: false,
       portalAvailable: false,
+    });
+    await database.query(
+      `INSERT INTO commerce_provider_customers(
+         provider, environment, provider_customer_id, household_id, verified_at
+       ) VALUES ('stripe','test','cus_portal_independent','household-sunrise',$1)`,
+      [fixedTestNow.toISOString()],
+    );
+    await expect(
+      runtime.stripeBillingStatus({
+        actor,
+        environment: 'test',
+        runtimeInitiationPermitted: false,
+        runtimePortalPermitted: true,
+        now: fixedTestNow,
+      }),
+    ).resolves.toMatchObject({
+      checkoutState: 'eligible_disabled',
+      runtimeInitiationEnabled: false,
+      portalAvailable: true,
     });
     await expect(
       runtime.stripeBillingStatus({
@@ -467,6 +510,165 @@ describe('verified provider commerce inbox', () => {
       canonicalAccessActive: false,
       runtimeInitiationEnabled: false,
     });
+  });
+
+  it('retries an unused expired annual trial only with a new key and serializes the retry', async () => {
+    const runtime = new CommerceRuntimeRepository(database, sequentialIds());
+    const actor = await runtime.resolveActor({
+      householdId: 'household-harbor',
+      personId: 'person-owner-bob',
+      now: fixedTestNow,
+    });
+    const prepareAnnual = (idempotencyKey: string, now: Date) =>
+      runtime.prepareStripeCheckout({
+        actor,
+        offerId: 'family_annual_v2',
+        planVersionId: 'family_v3',
+        billingInterval: 'year',
+        providerPriceId: 'price_test_family_annual',
+        idempotencyKey,
+        environment: 'test',
+        now,
+      });
+
+    const first = await prepareAnnual('checkout-annual-unused-expiry-0001', fixedTestNow);
+    await expect(
+      prepareAnnual('checkout-annual-unused-expiry-0001', fixedTestNow),
+    ).resolves.toMatchObject({
+      intentId: first.intentId,
+      subscriptionId: first.subscriptionId,
+      duplicate: true,
+    });
+
+    const retryAt = new Date(first.expiresAt.getTime() + 1);
+    await expect(
+      prepareAnnual('checkout-annual-unused-expiry-0001', retryAt),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    const concurrent = await Promise.allSettled([
+      prepareAnnual('checkout-annual-unused-expiry-0002', retryAt),
+      prepareAnnual('checkout-annual-unused-expiry-0003', retryAt),
+    ]);
+    expect(concurrent.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const winner = concurrent.find((result) => result.status === 'fulfilled');
+    const loser = concurrent.find((result) => result.status === 'rejected');
+    if (winner?.status !== 'fulfilled' || loser?.status !== 'rejected') {
+      throw new Error('Expected exactly one serialized annual trial retry');
+    }
+    expect(winner.value).toMatchObject({ duplicate: false });
+    expect(loser.reason).toMatchObject({ code: 'conflict' });
+
+    const evidence = await database.query<
+      {
+        readonly reservation_id: string;
+        readonly original_checkout_intent_id: string;
+        readonly checkout_intent_id: string;
+        readonly attempt_number: number;
+        readonly idempotency_key: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT reservation.id AS reservation_id,
+              reservation.checkout_intent_id AS original_checkout_intent_id,
+              attempt.checkout_intent_id, attempt.attempt_number, attempt.idempotency_key
+       FROM commerce_stripe_trial_reservations reservation
+       JOIN commerce_stripe_trial_checkout_attempts attempt
+         ON attempt.reservation_id = reservation.id
+       WHERE reservation.environment = 'test'
+         AND reservation.household_id = 'household-harbor'
+         AND reservation.offer_family = 'family'
+       ORDER BY attempt.attempt_number`,
+    );
+    expect(evidence.rows).toEqual([
+      {
+        reservation_id: evidence.rows[0]?.reservation_id,
+        original_checkout_intent_id: first.intentId,
+        checkout_intent_id: first.intentId,
+        attempt_number: 1,
+        idempotency_key: 'checkout-annual-unused-expiry-0001',
+      },
+      {
+        reservation_id: evidence.rows[0]?.reservation_id,
+        original_checkout_intent_id: first.intentId,
+        checkout_intent_id: winner.value.intentId,
+        attempt_number: 2,
+        idempotency_key:
+          concurrent[0]?.status === 'fulfilled'
+            ? 'checkout-annual-unused-expiry-0002'
+            : 'checkout-annual-unused-expiry-0003',
+      },
+    ]);
+    await expect(
+      database.query(
+        `UPDATE commerce_stripe_trial_checkout_attempts
+         SET recorded_at = recorded_at + interval '1 second'
+         WHERE reservation_id = $1 AND attempt_number = 2`,
+        [evidence.rows[0]?.reservation_id],
+      ),
+    ).rejects.toThrow('append-only');
+  });
+
+  it('denies an annual trial after a canonical verified paid entitlement', async () => {
+    const runtime = new CommerceRuntimeRepository(database, sequentialIds());
+    const actor = await runtime.resolveActor({
+      householdId: 'household-harbor',
+      personId: 'person-owner-bob',
+      now: fixedTestNow,
+    });
+    const startsAt = new Date(fixedTestNow.getTime() - 2 * 86_400_000);
+    const endsAt = new Date(fixedTestNow.getTime() - 86_400_000);
+    await database.query(
+      `INSERT INTO commerce_subscriptions(
+         household_id, id, payer_person_id, plan_version_id, source, lifecycle,
+         source_verified, precedence, current_period_starts_at, current_period_ends_at,
+         ended_at, reconciliation_state, created_at, updated_at
+       ) VALUES (
+         'household-harbor','subscription-prior-paid-bob','person-owner-bob','family_v3',
+         'web','expired',true,300,$1,$2,$2,'reconciled',$1,$2
+       )`,
+      [startsAt.toISOString(), endsAt.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO commerce_provider_subscription_records(
+         id, household_id, subscription_id, provider, environment,
+         external_subscription_id, raw_state, provider_version, observed_at, verified_at
+       ) VALUES (
+         'provider-prior-paid-bob','household-harbor','subscription-prior-paid-bob',
+         'stripe','test','sub_prior_paid_bob','canceled','2026-07-29.dahlia',$1,$1
+       )`,
+      [endsAt.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO entitlement_grants(
+         household_id, id, source, capabilities, starts_at, ends_at,
+         source_verified, precedence, plan_version_id, subscription_id
+       ) VALUES (
+         'household-harbor','grant-prior-paid-bob','web','["check:text"]'::jsonb,$1,$2,
+         true,300,'family_v3','subscription-prior-paid-bob'
+       )`,
+      [startsAt.toISOString(), endsAt.toISOString()],
+    );
+
+    await expect(
+      runtime.prepareStripeCheckout({
+        actor,
+        offerId: 'family_annual_v2',
+        planVersionId: 'family_v3',
+        billingInterval: 'year',
+        providerPriceId: 'price_test_family_annual',
+        idempotencyKey: 'checkout-annual-after-paid-0001',
+        environment: 'test',
+        now: fixedTestNow,
+      }),
+    ).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'A prior verified membership is not eligible for a new annual trial',
+    });
+    const rolledBack = await database.query<{ readonly count: number }>(
+      `SELECT count(*)::integer AS count
+       FROM commerce_checkout_intents
+       WHERE household_id = 'household-harbor'
+         AND idempotency_key = 'checkout-annual-after-paid-0001'`,
+    );
+    expect(rolledBack.rows).toEqual([{ count: 0 }]);
   });
 
   it('serializes checkout dispatch and journals a stale lease retry under the same key', async () => {
@@ -845,6 +1047,7 @@ describe('verified provider commerce inbox', () => {
         kind: 'payment_confirmed',
         sourceInboxId: input.inboxId,
         evidence: {
+          offerId: 'founding_family_monthly_v1',
           providerInvoiceId: input.invoiceId,
           externalSubscriptionId,
           providerSubscriptionItemId: 'si-period-gap-proof',
@@ -997,6 +1200,7 @@ describe('verified provider commerce inbox', () => {
         kind: 'payment_failed',
         sourceInboxId: failed.id,
         evidence: {
+          offerId: 'founding_family_monthly_v1',
           providerInvoiceId: 'in-period-gap-failed',
           externalSubscriptionId,
           providerSubscriptionItemId: 'si-period-gap-proof',
@@ -1054,6 +1258,7 @@ describe('verified provider commerce inbox', () => {
           kind: 'payment_failed',
           sourceInboxId: failed.id,
           evidence: {
+            offerId: 'founding_family_monthly_v1',
             providerInvoiceId: 'in-period-gap-failed',
             externalSubscriptionId,
             providerSubscriptionItemId: 'si-period-gap-proof',
@@ -1298,6 +1503,7 @@ describe('verified provider commerce inbox', () => {
               kind: 'payment_confirmed',
               sourceInboxId: captured.id,
               evidence: {
+                offerId: 'founding_family_monthly_v1',
                 providerInvoiceId: 'in_growth_recovery',
                 externalSubscriptionId: 'sub-growth-lifecycle',
                 providerSubscriptionItemId: 'si_growth_lifecycle',
@@ -1326,6 +1532,7 @@ describe('verified provider commerce inbox', () => {
                 kind: 'payment_failed',
                 sourceInboxId: captured.id,
                 evidence: {
+                  offerId: 'founding_family_monthly_v1',
                   providerInvoiceId: 'in_growth_failure',
                   externalSubscriptionId: 'sub-growth-lifecycle',
                   providerSubscriptionItemId: 'si_growth_lifecycle',

@@ -1,13 +1,19 @@
 # Stripe First-Dollar Runbook
 
-Status: **local-fixture evidence only; provider test, deployed staging, live activation, and first payment remain blocked**
+Status: **NO-GO for production payment; default-off control plane and local fixture evidence only**
 
-Last reviewed: 2026-08-17
+Last reviewed: 2026-08-26
 
-This runbook prepares a founder-invited Founding Household for later review. It does not authorize a
-provider call, provider resource creation, test Checkout, live configuration, charge, refund, DNS
-change, or customer message. Never paste an API key, webhook secret, session cookie, or other secret
+This runbook defines the controlled Family first-payment rollout. It does not itself authorize a
+provider write, charge, refund, DNS change, or customer message. Never paste an API key, webhook secret, session cookie, or other secret
 into source, git, documentation, logs, screenshots, prompts, or support tickets.
+
+Current blocker: the historical `family_v1` catalog entry remains a `hypothesis`. Checkout can
+select that entry, but production entitlement verification refuses hypothesis backing from an
+authentic Stripe provider. A real payment could therefore reconcile without granting effective
+access. Do not provision or enable live payment initiation until a separately authorized,
+proof-gated repository repair makes the billed offer and effective entitlement semantics agree and
+the complete regression suite passes.
 
 ## Evidence boundary
 
@@ -17,7 +23,7 @@ into source, git, documentation, logs, screenshots, prompts, or support tickets.
 | `stripe_test` | **Blocked by founder-owned Stripe test resources, credentials, and an approved execution gate** | A real Stripe test account accepted/retrieved objects and delivered signed events. No such claim is made. |
 | `deployed_staging` | **Blocked** | The frozen build, Replit edge, HTTPS, worker, PostgreSQL, restore, identity, secret custody, and telemetry operated together. No such claim is made. |
 | `real_human` | **Blocked** | A founder-invited household completed the journey and gave consented feedback. No such claim is made. |
-| `live_production` | **Disabled and blocked** | Separate live resources and credentials were verified under a founder-approved production release. No such claim is made. |
+| `live_production` | **NO-GO; entitlement mismatch and external proof open** | Payment initiation remains closed. Repository semantics must first prove that the exact authentic paid Family offer grants the intended effective access without admitting local, test, stale, or mismatched backing. Resource provisioning and authentic live preflight receipts are also required. |
 | `first_real_charge` | **Not authorized and not performed** | Money moved and reconciled. No such claim is made. |
 
 Local tests use injected transports and fixture keys only. They do not call Stripe. Preserve that
@@ -27,29 +33,42 @@ distinction in every dossier and evidence record.
 
 - Offer ID: `founding_family_monthly_v1`.
 - Canonical plan: `family_v1`.
-- Price hypothesis: USD $14.99 monthly, quantity one.
-- Immediate card payment only.
+- Initial launch price: USD $14.99 monthly, quantity one.
+- Stripe Checkout selects eligible payment methods dynamically; the request does not hardcode payment-method types.
 - Promotion codes, automatic tax, adaptive pricing, trials, recovery links, upgrades, downgrades,
   proration, interval changes, and every legacy Plus/annual offer are outside this path.
-- Customer Portal behavior is cancel-only; subscription update is disabled.
-- Code-owned Stripe API version: `2026-02-25.clover`.
+- Customer Portal permits payment-method updates and cancel-at-period-end; plan changes, promotions, and proration are disabled.
+- Code-owned Stripe API version: `2026-07-29.dahlia`.
 
-The amount is an unvalidated hypothesis, not conversion or willingness-to-pay evidence. Tax and
-consumer-law decisions remain founder/legal/accounting gates.
+The amount is the fixed initial Family launch offer; conversion and willingness-to-pay evidence will
+come from the controlled rollout. Tax and consumer-law decisions remain legal/accounting gates.
 
 ## Access and initiation invariants
 
 Payment initiation and webhook ingestion are independent controls.
 
-1. Checkout requires all of: configured test mode, runtime test permission, an audited test
-   initiation control set to `enabled` by the provisioned founder identity, an audited
-   `founding_household_v1` eligibility record, an active billing authority, and a successful
-   resource preflight.
-2. Live values are an offline custody manifest only. API and worker startup reject `live` mode before
-   constructing routes, handlers, provider transports, or provider reads. Raw live secret environment
-   values are rejected, live initiation is false, and production startup retains the unconditional
-   managed-identity/KMS refusal. A syntactically complete live name manifest cannot make this
-   candidate initiate or read a live payment.
+The authenticated HQ resource-preflight action is also independent of payment initiation. It may
+perform only the four configured provider GETs and append their bounded receipt while the cohort,
+database initiation control, and `BB_STRIPE_LIVE_INITIATION_ENABLED` all remain closed. It never
+prepares a Checkout intent, creates a session-operation row, or sends a provider POST. This is the
+first arming check, not permission to accept money.
+
+Before Checkout or Portal can be initiated, the production customer Clerk default session-token
+claims must include `{"reverification_id":"{{session.reverification_id}}"}`. Clerk documents that
+this shortcode identifies the unique reverification and is minted again for each new reverification.
+The API combines it with the signed `fva` freshness claim, fingerprints it, binds it to the exact
+household/action/offer/amount/idempotency operation, and rejects reuse. Never substitute a user ID,
+session ID, or other long-lived value. See Clerk's
+[reverification guide](https://clerk.com/docs/guides/secure/reverification#correlate-a-reverification-with-a-specific-action).
+
+1. Checkout requires all of: the exact configured environment and runtime surface, runtime
+   initiation permission, a revisioned initiation control set to `enabled` by an active internal HQ
+   owner with recent MFA, an active unexpired `founding_household_v1` policy capped at one, exact
+   household eligibility, active billing authority, and successful resource preflight.
+2. Live API and worker startup require different restricted keys. API alone receives the webhook
+   secret and may set `BB_STRIPE_LIVE_INITIATION_ENABLED=true`; worker must keep it false. Even on API,
+   true is insufficient without the database control, approved max-one cohort, eligibility, and exact
+   live US-company account/resource preflight. No production control or cohort is seeded.
 3. Webhooks remain ingestible while the initiation control is disabled. Never disable ingestion merely
    to stop new Checkout sessions.
 4. A Checkout success redirect, URL parameter, `checkout.session.completed`, customer binding,
@@ -79,42 +98,44 @@ The API version is code-owned; there is no `BB_STRIPE_API_VERSION` override.
 
 | Setting | Test | Live | Notes |
 | --- | --- | --- | --- |
-| Mode | `BB_STRIPE_MODE=test` | `BB_STRIPE_MODE=live` | Keep `disabled` until the applicable founder gate. `live` parses only an offline name manifest; API and worker startup refuse it. |
-| Account | `BB_STRIPE_TEST_ACCOUNT_ID` | `BB_STRIPE_LIVE_ACCOUNT_ID` | Exact account returned by `/v1/account`; never reuse across environments. |
-| API key | `BB_STRIPE_TEST_API_KEY` | `BB_STRIPE_LIVE_API_KEY` | Test accepts only a restricted `rk_test_` key. A full `sk_test_` key is rejected. The live name is reserved for a future managed-custody adapter; setting a raw value now is refused. |
-| Webhook secret | `BB_STRIPE_TEST_WEBHOOK_SECRET` | `BB_STRIPE_LIVE_WEBHOOK_SECRET` | Test uses the exact endpoint secret; a CLI listener secret is not interchangeable. The raw live value is refused until managed custody exists. |
+| Mode | `BB_STRIPE_MODE=test` | `BB_STRIPE_MODE=live` | Default is `disabled`. Production refuses test mode and all `BB_STRIPE_TEST_*` fields. |
+| Runtime surface | not used | `BB_STRIPE_RUNTIME_SURFACE=api` or `worker` | Each live project declares exactly one surface. |
+| Initiation | runtime test configuration | `BB_STRIPE_LIVE_INITIATION_ENABLED` | API defaults false. After preflight and the max-one cohort rehearsal, set it true while the database initiation control is still disabled; enable that revisioned database control last. Worker requires false. |
+| Account | `BB_STRIPE_TEST_ACCOUNT_ID` | `BB_STRIPE_LIVE_ACCOUNT_ID` | Exact account returned by `/v1/account`; live preflight also requires charges and payouts enabled, country US, and business type company. |
+| API key | `BB_STRIPE_TEST_API_KEY` | `BB_STRIPE_LIVE_API_RESTRICTED_KEY` on API; `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY` on worker | Every value must be a restricted `rk_` credential and remain isolated to its surface. The deprecated `BB_STRIPE_LIVE_API_KEY` is rejected. |
+| Webhook secret | `BB_STRIPE_TEST_WEBHOOK_SECRET` | `BB_STRIPE_LIVE_WEBHOOK_SECRET` on API only | The exact endpoint secret is never copied to worker. A CLI listener secret is not interchangeable. |
 | Founding product | `BB_STRIPE_TEST_FOUNDING_PRODUCT_ID` | `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` | Exact environment-specific product. |
 | Monthly price | `BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID` | `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` | Exact USD 14.99/month (1,499 cents) recurring price. |
-| Portal config | `BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | Active, cancel enabled, subscription update disabled. |
+| Portal config | `BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | Active, payment-method update enabled, cancel-at-period-end enabled, subscription/price update disabled. |
 
 Also provision `BB_FOUNDER_PERSON_ID` to the stable application person ID for the exact active HQ
 owner whom the founder designates. This identifier is not a credential; the authenticated HQ session
 and role still have to match it. PostgreSQL, session, encryption, fingerprint, and safe-word secrets
 remain separate platform provisioning items.
 
-Configuration parsing rejects incomplete test resources, environment-mismatched test credentials,
-and every raw live API-key or webhook-secret value. Offline live resource names remain distinct from
-test names, but they do not authorize an online runtime.
+Configuration parsing rejects incomplete resources, mixed test/live fields, unrestricted or shared
+live keys, cross-surface credentials, an API manifest without its webhook secret, and any worker
+manifest containing that secret. Configuration never replaces the database control gates.
 
 ## Runtime restricted-key permission matrix
 
-Create provider resources manually with a separate founder/admin role. The application runtime key
-should have only these capabilities:
+Create provider resources manually with a separate founder/admin role. Create two different live
+restricted keys. Do not copy either key to the other runtime surface.
 
-| Stripe resource | Runtime access | Why |
-| --- | --- | --- |
-| Account | Read | Preflight exact account. |
-| Products, Prices | Read | Preflight immutable offer. |
-| Customer Portal configurations | Read | Preflight cancel-only behavior. |
-| Checkout Sessions | Write | Create a server-side subscription Checkout Session. |
-| Billing Portal Sessions | Write | Create a short-lived cancel-only Portal Session. |
-| Subscriptions | Read | Durable lifecycle reconciliation. |
-| Invoices and Invoice Payments | Read | Exact paid/failed invoice proof. |
-| PaymentIntents | Read | Confirm payment truth and amount. |
-| Charges | Read | Resolve refund/dispute lineage. |
-| Refunds | Read | Reconcile refund lifecycle. The runtime has no refund-create operation. |
-| Disputes | Read | Reconcile dispute creation/closure. |
-| Products, Prices, Portal configuration, Refunds | No write | Resource creation/configuration/refunds remain founder operations. |
+| Stripe resource | API restricted key | Worker restricted key | Why |
+| --- | --- | --- | --- |
+| Account | Read | Read | Exact account and live US-company preflight. |
+| Products, Prices | Read | None | API preflight of the immutable offer. |
+| Customer Portal configurations | Read | None | API preflight of bounded Portal behavior. |
+| Checkout Sessions | Write | None | API creates a server-side subscription Checkout Session. |
+| Billing Portal Sessions | Write | None | API creates a short-lived bounded Portal Session. |
+| Subscriptions | Read | Read | Lifecycle and inventory reconciliation. |
+| Invoices and Invoice Payments | Read | Read | Exact paid/failed invoice proof. |
+| PaymentIntents | Read | Read | Confirm payment truth and amount. |
+| Charges | Read | Read | Resolve refund/dispute lineage. |
+| Refunds | Read | Read | Reconcile refund lifecycle. The runtime has no refund-create operation. |
+| Disputes | Read | Read | Reconcile dispute creation/closure. |
+| Products, Prices, Portal configuration, Refunds | No write | No write | Resource creation, configuration, and refunds remain provider-console operations. |
 
 Stripe describes secret and restricted keys in its [API key documentation](https://docs.stripe.com/keys).
 Retain a redacted permission export and key identifier, never the key value.
@@ -125,9 +146,9 @@ No action in this section was executed while authoring this runbook.
 
 | Action | Method | Guard and ambiguity policy |
 | --- | --- | --- |
-| Resource preflight | GET account, product, price, Portal configuration | Runs only after the DB initiation/cohort gate for Checkout and before Portal creation. It asserts account, livemode, API contract, active resources, exact per-unit/no-trial price/amount/currency/interval, and the cancel/update/customer/payment controls exposed by the current Portal API. GETs are read-only and retryable. |
+| Resource preflight | GET account, product, price, Portal configuration | An explicit same-origin HQ owner action with recent MFA may run before the cohort, database initiation, and runtime initiation gates open. It asserts the exact configured environment/account, livemode, API contract, active resources, exact per-unit/no-trial price/amount/currency/interval, and the cancel/update/customer/payment controls exposed by the current Portal API, then appends a bounded receipt. GETs are read-only and retryable; this path has no provider POST or Checkout/session preparation. Checkout and Portal also perform fresh preflight reads before their own provider POST. |
 | Checkout creation | POST Checkout Session | One provider idempotency key is HMAC-derived from environment, action, household, and server operation ID. A `dispatch_started` receipt is appended before transport. A timeout, ambiguous response, or process death before the result is recorded leaves the operation unknown; a later pre-transport refusal cannot erase that earlier dispatch evidence. A durable lease retry reuses the same key, current gates, fresh preflight, and the API's reviewed customer-origin allowlist. The 23-hour requested provider deadline is rounded down once to a whole provider second before persistence; that exact second is sent and must be returned, while the local intent deadline is exactly five minutes later. Neither retry nor polling moves either deadline. An authenticated exact completion or expiry can repair a lost POST response. |
-| Portal creation | POST Billing Portal Session | Same durable operation/idempotency/outcome-unknown and customer-origin model. A proven pre-transport refusal is no-effect only when no earlier attempt has dispatch evidence. Production Portal creation remains disabled in this candidate. |
+| Portal creation | POST Billing Portal Session | Same durable operation/idempotency/outcome-unknown and customer-origin model. A proven pre-transport refusal is no-effect only when no earlier attempt has dispatch evidence. Live creation remains default-off behind the runtime and database controls. |
 | Financial reconciliation | GET subscription, invoice, PaymentIntent, charge, refund, dispute | Triggered from a durable job after authenticated inbox capture. Reads may retry. Evidence mismatch quarantines and opens owner attention; it never grants access. |
 | Inventory comparison | GET `/v1/account`, then `/v1/subscriptions?status=all&limit=100` and `starting_after` | The durable daily/manual job first verifies the exact account, then records account, environment, API version, stable operation/run, request cursor, next cursor, page number, `has_more`, count, and digest for every page. Only a final `has_more=false` page can complete; partial, malformed, repeated-cursor, over-limit, mismatch, or transport failure becomes owner attention and never `completed`. The adapter and local fixtures exist; an authentic provider run remains blocked. |
 
@@ -137,16 +158,20 @@ against Stripe's [Invoice object](https://docs.stripe.com/api/invoices/object) d
 
 ## Webhook allowlist
 
-Configure only the events the frozen adapter accepts:
+Configure only the events the reviewed release-candidate adapter accepts:
 
 ```text
 checkout.session.completed
+checkout.session.async_payment_succeeded
+checkout.session.async_payment_failed
 checkout.session.expired
 customer.subscription.created
 customer.subscription.updated
 customer.subscription.deleted
 invoice.paid
 invoice.payment_failed
+invoice.payment_action_required
+invoice.finalization_failed
 charge.refunded
 refund.created
 refund.updated
@@ -155,8 +180,14 @@ charge.dispute.created
 charge.dispute.closed
 ```
 
-Every other event is captured only far enough to quarantine it as not allowlisted. Invoice
-finalization events do not prove payment.
+Every other event is captured only far enough to quarantine it as not allowlisted. Async Checkout
+success still does not grant access without the separately authenticated canonical `invoice.paid`
+evidence. Async failure and `invoice.payment_action_required` restrict or route recovery; they never
+grant or extend entitlement. `invoice.finalization_failed` records append-only recovery evidence,
+creates bounded owner attention, and surfaces truthful customer guidance without changing access or
+claiming that a charge, collectible invoice, or receipt exists. It never proves payment. Authentic
+Stripe sandbox delivery, restart, replay, and recovery evidence remain required before first
+payment.
 
 ## Local verification (no provider account)
 
@@ -194,35 +225,46 @@ receipt is retained.
 
 ## Exact founder steps for an isolated Stripe test
 
-These steps are blocked until the founder explicitly authorizes provider-side test work.
+These steps are blocked until the founder types `CONFIRM NONCHARGING RELEASE SETUP` in the active
+task for the reviewed exact-SHA packet. The phrase authorizes noncharging provider setup only and
+does not authorize customer contact, a live Checkout window, a charge, or a refund.
 
 1. In the founder-owned Stripe organization, confirm account ID, company custody, MFA, two recovery
    owners, roles, and test/live separation.
-2. In test mode only, manually create one product and one active recurring USD $14.99 monthly price.
+2. For isolated test evidence, manually create one test product and one active recurring USD $14.99
+   monthly test price.
    Confirm the retained Price export has `billing_scheme=per_unit`, `custom_unit_amount=null`,
    `tiers_mode=null`, `transform_quantity=null`, `recurring.interval=month`,
    `recurring.interval_count=1`, `recurring.usage_type=licensed`, and
    `recurring.trial_period_days=null`. Do not create annual, Plus, trial, discount, Tax, or
    adaptive-pricing variants for this path.
-3. Manually create one active cancel-only Portal configuration. Confirm cancellation is exactly
-   `at_period_end`, proration is `none`, subscription update is disabled with no allowed updates,
-   and the customer/payment-method mutations exposed by the current API are disabled. The current
-   Clover configuration response does not expose a `subscription_pause` field, so do not invent an
-   API assertion for pause. Inspect pause and retention-offer/coupon settings in the founder-owned
-   Dashboard, confirm neither is available, and retain a redacted screenshot/export. Those items
-   remain manually blocked until that browser evidence exists.
+3. Manually create one active bounded Portal configuration. Confirm cancellation is exactly
+   `at_period_end`, payment-method updates are enabled, and subscription plan/price changes,
+   promotions, proration, pause, and retention offers are disabled. Retain a redacted configuration
+   export without a secret or customer record.
 4. Create a restricted test key with the exact permission matrix above and retain it only in the
    founder-controlled deployment secret store.
-5. On an approved HTTPS staging API, create `/v1/webhooks/stripe` with the exact event allowlist.
-   Set or update the endpoint API version to exactly `2026-02-25.clover`; an account-default or
+5. On an approved HTTPS staging API, create the separate BoomerBuddy 2.0
+   `https://api.boomerbuddy.net/v1/webhooks/stripe` endpoint with the exact event allowlist. Create it
+   only after the active-task confirmation gate. Do not edit, delete, reuse, or redirect the enabled
+   legacy `https://boomerbuddy.net/api/webhooks/stripe` endpoint. Set or update the new 2.0 endpoint
+   API version to exactly `2026-07-29.dahlia`; an account-default or
    endpoint version is not assumed. Put its secret only in the secret store and retain a redacted
    endpoint/version/allowlist receipt.
 6. Set the `BB_STRIPE_TEST_*` names, `BB_STRIPE_MODE=test`, and `BB_FOUNDER_PERSON_ID` in the isolated
    staging environment. Do not set any live name there.
 7. Deploy the frozen commit, run migrations, start API and worker, and verify the edge preserves the
    raw request body and `Stripe-Signature`. Retain redacted deployment and worker evidence.
-8. In a same-origin authenticated HQ founder session, without copying its cookie or CSRF material,
-   mark only the reviewed Founding Household eligible. Send this exact JSON body to
+8. Keep test Checkout initiation disabled and the cohort closed. In a same-origin authenticated HQ
+   founder session with recent MFA, run `POST /v1/hq/commerce/stripe/preflight` with
+   `{"environment":"test"}`. Confirm the persisted receipt names `test`, the exact configured
+   account/product/price/Portal contract, and provider-read evidence. Confirm Stripe request logs show
+   only GET account, product, price, and Portal configuration, with no Checkout or Portal Session POST.
+9. In the Stripe control screen, activate the revisioned test cohort with `maxActive=1` and a short,
+   explicit future expiry. Rehearse closing and reopening that cohort while initiation remains
+   disabled; use current revisions rather than guessed values.
+10. Without copying the founder session cookie or CSRF material, mark only the reviewed Founding
+   Household eligible. Send this exact JSON body to
    `POST /v1/hq/commerce/stripe/eligible-household` (replace placeholders, keep field names):
 
    ```json
@@ -236,7 +278,7 @@ These steps are blocked until the founder explicitly authorizes provider-side te
 
    Confirm the response is `state=eligible`. The environment-scoped cohort policy, benefit, capacity,
    and expiry still have to be active; eligibility alone does not enable Checkout.
-9. From that same-origin founder session, first GET
+11. From that same-origin founder session, first GET
    `/v1/hq/commerce/stripe/initiation-control?environment=test`. Use the returned current `revision`
    in this exact body to `POST /v1/hq/commerce/stripe/initiation-control`; never assume revision zero:
 
@@ -252,10 +294,10 @@ These steps are blocked until the founder explicitly authorizes provider-side te
 
    The integer `7` is illustrative only: replace it with the exact integer returned by the immediately
    preceding GET. Re-GET after any conflict; do not replay with a guessed revision.
-10. Confirm `/member/billing` shows `ready` for that household's billing manager. Execute only the
+12. Confirm `/member/billing` shows `ready` for that household's billing manager. Execute only the
     bounded test matrix the founder approved. Retain redacted object/event/inbox/job/canonical IDs and
     before/after state; do not retain card data, raw bodies, or secrets.
-11. Start the worker and observe the durable inventory run (or run
+13. Start the worker and observe the durable inventory run (or run
     `npm run stripe:inventory:enqueue` to enqueue the same bounded job manually). Verify every page
     receipt has the expected test account/environment/API version/run/cursor chain and that the final
     page says `has_more=false`. Any missing/error page must remain `attention`; do not call it clean.
@@ -271,7 +313,7 @@ canonical evidence have actually been retained.
 ## Founder-only bounded repair commands
 
 These controls enqueue provider work when the worker is running. They are therefore blocked by the
-same explicit founder provider-action gate as the isolated Stripe test above. A GET is a local
+same exact active-task confirmation phrase as the isolated Stripe test above. A GET is a local
 projection; a POST is not permission to infer provider truth, clear an ambiguity, create a replacement
 Checkout, or operate in live mode. Use only a same-origin authenticated founder HQ session; never copy
 session cookies, CSRF material, or provider secrets into a terminal, prompt, document, or screenshot.
@@ -386,24 +428,50 @@ be partial or pending; see [refunds](https://docs.stripe.com/refunds) and
 
 ## Live and first-charge gates
 
-Separate live environment names and livemode/account/resource checks exist as a design seam, but live
-initiation is intentionally unreachable. A future independently reviewed release is required before
-any live activation. It must retain production identity/KMS refusal until those controls are genuinely
-proven and must not turn a `GO_FOR_FOUNDER_ACTIVATION` verdict into automatic launch authority.
+Live initiation is not production-capable and remains default-off. The proposed bounded rollout is
+Family $14.99/month only, with at most one active household. Annual, Individual, referral, promotion, Tax, and Twilio
+paths remain disabled. Arm in this order so every earlier step is safe to rehearse without opening
+Checkout:
 
-Before the founder can even consider a first charge, all Run 3 production, PostgreSQL concurrency,
-restore, edge, observability, dependency, legal, privacy, tax, accounting, support, incident,
-provider-test, and human-evidence gates must be accepted; live resources must be separately created
-under company custody; and the founder must explicitly authorize both live initiation and the exact
-first payment. Neither authorization exists in this run.
+1. Create separate live Family product, monthly price, bounded Portal configuration, and webhook
+   endpoint under the exact company account. Do not reuse test resources.
+2. Place the API restricted key and webhook secret only in the API secret store. Place the different
+   worker restricted key only in the worker secret store. Set each project's exact
+   `BB_STRIPE_RUNTIME_SURFACE`; keep `BB_STRIPE_LIVE_INITIATION_ENABLED=false` everywhere and confirm
+   the database initiation control and cohort are absent or disabled.
+3. From the same-origin HQ Stripe control screen, as the configured active `hq_owner` with recent
+   MFA, run the read-only provider preflight. Record a live receipt proving the configured account
+   ID, `livemode=true`, API version, charges enabled, payouts enabled, country US, business type
+   company, exact $14.99/month resource, and bounded Portal behavior. Confirm provider logs contain
+   only the four expected GETs and no resource or Session POST. The receipt contains no customer PII.
+4. Prove production PostgreSQL concurrency, restore, edge, observability, legal/privacy/tax/accounting,
+   support, incident response, and provider-test behavior for the frozen candidate.
+5. While runtime and database initiation remain disabled, use current revisions to rehearse an
+   active, unexpired, live-approved cohort with `max_active_households=1`, its disable/rollback, and
+   its reactivation. Mark only the reviewed household eligible and verify its active billing
+   authority. None of these steps may create Checkout.
+6. Set `BB_STRIPE_LIVE_INITIATION_ENABLED=true` only on the API project and restart that exact frozen
+   build. The worker must retain false. Because the database initiation control is still disabled,
+   Checkout remains closed. Re-run the read-only preflight after restart; stop on any account,
+   environment, offer, Portal, custody, or evidence mismatch.
+7. Last, from the same-origin HQ control path, the configured active `hq_owner` with recent MFA uses
+   the immediately current revision to enable the database initiation control. Confirm the max-one
+   cohort, exact eligible household, and billing authority again immediately before this change.
+   Observe the exact first payment and canonical entitlement lineage; disable the revisioned database
+   control immediately on drift. If runtime rollback is needed, disable the database control first,
+   then return the API runtime switch to false while webhook ingestion and reconciliation continue.
+
+This document records the procedure, not proof that provider resources, deployed receipts, or a first
+charge already exist.
 
 ## Current disposition
 
 - `local_fixture`: scoped Stripe checks, independent local rereview, the mocked Edge billing
   journey, and the final integrated pre-commit repository suite (50 files / 367 tests) passed. Real
   PostgreSQL and authentic provider evidence remain open.
-- `stripe_test`: blocked by founder provisioning and explicit provider-action approval.
+- `stripe_test`: blocked by authentic provider-resource and signed-event evidence.
 - `deployed_staging`: blocked.
 - `real_human`: not performed.
-- `live_production`: disabled and blocked by code plus founder gates.
-- `first_real_charge`: not authorized and not performed.
+- `live_production`: NO-GO and default-off; the paid Family entitlement mismatch plus live resource,
+  custody, preflight, and deployment evidence remain open.
+- `first_real_charge`: not performed.

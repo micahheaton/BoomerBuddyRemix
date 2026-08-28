@@ -96,12 +96,45 @@ describe('Replit browser-to-API proxy', () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
+  it('canonicalizes equivalent production origins before authorization and forwarding', async () => {
+    const fetchImplementation = vi.fn(async (request: RequestInfo | URL, init?: RequestInit) => {
+      expect(request.toString()).toBe('https://api.example.invalid/v1/checks');
+      expect(new Headers(init?.headers).get('origin')).toBe('https://customer.example.invalid');
+      return Response.json({ ok: true });
+    });
+    const response = await proxyBrowserApi({
+      audience: 'customer',
+      environment: {
+        ...production,
+        BB_API_INTERNAL_ORIGIN: 'https://API.example.invalid:443/',
+        BB_PUBLIC_ORIGIN: 'https://CUSTOMER.example.invalid:443/',
+      },
+      fetchImplementation,
+      path: ['v1', 'checks'],
+      request: new Request('https://customer.example.invalid/api/v1/checks', {
+        body: '{}',
+        headers: { Origin: 'https://customer.example.invalid' },
+        method: 'POST',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchImplementation).toHaveBeenCalledOnce();
+  });
+
   it('refuses incomplete or insecure production upstream configuration', async () => {
     const fetchImplementation = vi.fn(async () => Response.json({ unexpected: true }));
     for (const environment of [
       { ...production, BB_API_INTERNAL_ORIGIN: 'http://api.example.invalid' },
       { ...production, BB_PUBLIC_ORIGIN: undefined },
       { ...production, BB_API_INTERNAL_ORIGIN: 'https://user:secret@api.example.invalid' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://customer.example.invalid/member' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://customer.example.invalid?' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://*.example.invalid' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://localhost' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://customer.\nexample.invalid' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://customer.\texample.invalid' },
+      { ...production, BB_PUBLIC_ORIGIN: 'https://customer.example.invalid\\' },
     ]) {
       const response = await proxyBrowserApi({
         audience: 'hq',

@@ -5,7 +5,9 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await signInCustomer(page);
   const localAccess = page.getByTestId('local-access-summary');
   await expect(localAccess).toContainText('Local access hypothesis');
-  await expect(localAccess).toContainText('Billing initiation is a separate, founder-gated flow');
+  await expect(localAccess).toContainText(
+    'The features you can use depend on this household, your role, and each person',
+  );
   await expect(localAccess).toContainText('Protected adults');
   await expect(localAccess).toContainText('Trusted Circle participants');
   await page.getByRole('link', { name: 'Check', exact: true }).click();
@@ -16,7 +18,8 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await page.getByRole('button', { name: 'Check it' }).click();
   const textResult = page.getByTestId('check-result');
   await expect(textResult).toBeVisible();
-  await expect(textResult).toContainText('Not calibrated');
+  await expect(textResult).toContainText('Important limit');
+  await expect(textResult).toContainText('This result can be wrong');
   await expect(textResult).toContainText('decision support, not proof');
   await expect(textResult.getByRole('heading', { name: 'Check result' })).toBeFocused();
   await expect(textResult).toContainText('No active relationship currently has permission');
@@ -26,7 +29,7 @@ test('login, text and URL checks, history, and user deletion work end to end', a
   await page.getByLabel('Website address (URL)').fill('https://account-alert.example.test/verify');
   await page.getByRole('button', { name: 'Check it' }).click();
   await expect(page.getByTestId('check-result')).toContainText(
-    /Provider: unknown|LocalUnknownProvider/,
+    'No live reputation provider is configured; no URL or external resource was contacted.',
   );
 
   await page.getByRole('link', { name: 'History', exact: true }).click();
@@ -109,9 +112,9 @@ test('sharing state is scoped to one result and resets for the next check', asyn
   await page.getByLabel('Suspicious message').fill('First local sharing-state check');
   await page.getByRole('button', { name: 'Check it' }).click();
   const firstResult = page.getByTestId('check-result');
-  await firstResult.getByRole('button', { name: 'Share with Terry Trusted' }).click();
+  await firstResult.getByRole('button', { name: 'Ask Terry Trusted to review' }).click();
   await expect(
-    firstResult.getByRole('button', { name: 'Shared with Terry Trusted' }),
+    firstResult.getByRole('button', { name: 'Help requested from Terry Trusted' }),
   ).toBeDisabled();
   await expect(firstResult).toContainText('No notification was sent');
 
@@ -119,7 +122,7 @@ test('sharing state is scoped to one result and resets for the next check', asyn
   await page.getByRole('button', { name: 'Check it' }).click();
   const secondResult = page.getByTestId('check-result');
   await expect(
-    secondResult.getByRole('button', { name: 'Share with Terry Trusted' }),
+    secondResult.getByRole('button', { name: 'Ask Terry Trusted to review' }),
   ).toBeEnabled();
-  await expect(secondResult).not.toContainText('Redacted result shared locally');
+  await expect(secondResult).not.toContainText('Help requested from Terry Trusted in BoomerBuddy');
 });

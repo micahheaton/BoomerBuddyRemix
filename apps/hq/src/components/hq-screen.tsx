@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from
 import type {
   BrowserSessionResponse,
   DevPersonaId,
+  HqOperationalHealthResponse,
   HqReviewQueueResponse,
   HqRevenueResponse,
   HqSupportQueueResponse,
@@ -12,11 +13,15 @@ import type {
   PrivacyRequestDto,
 } from '@boomerbuddy/contracts';
 import { apiPaths } from '@boomerbuddy/contracts';
+import { AccessIntentReceipts } from './access-intent-receipts';
 import { BusinessOsContent, type BusinessOsView } from './business-os';
+import { BillingAuthority } from './billing-authority';
 import { FeedbackLearning } from './feedback-learning';
 import { FounderProvisioning } from './founder-provisioning';
 import { FoundingHouseholds } from './founding-households';
 import { ProductionHqSignOut } from './production-identity';
+import { SupportReceiptQueue } from './support-receipt-queue';
+import { StripeControl } from './stripe-control';
 import { hqRequest, readableError } from '../lib/api';
 
 export type HqView =
@@ -24,12 +29,16 @@ export type HqView =
   | 'customers'
   | 'fraud'
   | 'support'
+  | 'support-receipts'
+  | 'access-intents'
   | 'revenue'
   | 'system'
   | 'privacy'
   | 'feedback'
   | 'provisioning'
   | 'founding-households'
+  | 'billing-authority'
+  | 'stripe-control'
   | Exclude<BusinessOsView, 'owner'>;
 type HouseholdResponse = {
   households: Array<{
@@ -80,13 +89,13 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   overview: {
     title: 'Owner operating view',
     subtitle: productionRuntime
-      ? 'Private-beta database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
+      ? 'Early-access database evidence only. Provider, human, and efficacy evidence remain separately labeled.'
       : 'Local and explicitly imported evidence only. Nothing here is production evidence.',
   },
   customers: {
     title: 'Customers and access',
     subtitle: productionRuntime
-      ? 'Bounded household, orientation, and entitlement summaries from the private-beta database.'
+      ? 'Bounded household, orientation, and entitlement summaries from the early-access database.'
       : 'Household, orientation, and entitlement summaries from local development data.',
   },
   fraud: {
@@ -98,9 +107,19 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
     title: 'Assigned support',
     subtitle: 'Only active cases assigned to this support employee. Customer content is excluded.',
   },
+  'support-receipts': {
+    title: 'Support receipt queue',
+    subtitle:
+      'Owner-only category, impact, state, and timing evidence. Customer content is never submitted.',
+  },
+  'access-intents': {
+    title: 'Early-access intent receipts',
+    subtitle:
+      'Owner-only, content-free receipt metadata. A receipt is not a lead, contact, message, subscription, or payment.',
+  },
   revenue: {
     title: 'Revenue workspace',
-    subtitle: 'Seeded research targets and follow-up cues—not a live CRM or verified pipeline.',
+    subtitle: 'Seeded research targets and follow-up cues, not a live CRM or verified pipeline.',
   },
   system: {
     title: 'System and audit',
@@ -125,12 +144,22 @@ const titles: Record<HqView, { title: string; subtitle: string }> = {
   'founding-households': {
     title: 'Founding Households',
     subtitle: productionRuntime
-      ? 'Founder-gated, finite, identity-bound sponsor access—no card, automatic messaging, or public enrollment.'
-      : 'Founder-gated, finite local sponsor access—no card, no messaging, and no production identity claim.',
+      ? 'Founder-gated, finite, identity-bound sponsor access: no card, automatic messaging, or public enrollment.'
+      : 'Founder-gated, finite local sponsor access: no card, no messaging, and no production identity claim.',
+  },
+  'billing-authority': {
+    title: 'Billing authority',
+    subtitle:
+      'Exact-household authority provisioning and incident revocation with immutable audit evidence.',
+  },
+  'stripe-control': {
+    title: 'Stripe control plane',
+    subtitle:
+      'Owner-only, revision-safe Checkout, cohort, eligibility, and persisted preflight controls.',
   },
   targets: {
     title: 'Credit-union segmentation',
-    subtitle: 'Official fixed-snapshot evidence for explainable fit—not leads or buyer intent.',
+    subtitle: 'Official fixed-snapshot evidence for explainable fit, not leads or buyer intent.',
   },
   pipeline: {
     title: 'Opportunity control plane',
@@ -156,7 +185,7 @@ function DataLabel({
       {state === 'seeded'
         ? 'Seeded research data'
         : productionRuntime
-          ? 'Private-beta database evidence'
+          ? 'Early-access database evidence'
           : 'Local development data (seed + this run)'}
     </span>
   );
@@ -198,9 +227,9 @@ function DevelopmentSignIn({ onSuccess }: { onSuccess: (me: MeResponse) => void 
             value={personaId}
             onChange={(event) => setPersonaId(event.target.value as DevPersonaId)}
           >
-            <option value="hq-heidi">Heidi — HQ owner</option>
-            <option value="hq-riley">Riley — HQ reviewer</option>
-            <option value="hq-sam">Sam — HQ support</option>
+            <option value="hq-heidi">Heidi - HQ owner</option>
+            <option value="hq-riley">Riley - HQ reviewer</option>
+            <option value="hq-sam">Sam - HQ support</option>
           </select>
           {error && (
             <p className="error" role="alert">
@@ -231,7 +260,6 @@ function Shell({
   const canReview = me.principal.roles.includes('hq_reviewer');
   const canSupport = me.principal.roles.includes('hq_support');
   const feedbackNavigationEnabled = process.env.NODE_ENV !== 'production' || isOwner;
-  const editorialNavigationEnabled = process.env.NODE_ENV !== 'production';
   return (
     <>
       <header className="hq-topbar">
@@ -240,7 +268,7 @@ function Shell({
           <span>BoomerBuddy HQ</span>
         </Link>
         <span className="environment">
-          {process.env.NODE_ENV === 'production' ? 'Private beta' : 'Local development'}
+          {process.env.NODE_ENV === 'production' ? 'Early access' : 'Local development'}
         </span>
         <span>{me.principal.displayName}</span>
       </header>
@@ -255,6 +283,22 @@ function Shell({
           {isOwner && (
             <Link aria-current={view === 'customers' ? 'page' : undefined} href="/customers">
               Customers
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'support-receipts' ? 'page' : undefined}
+              href="/support-receipts"
+            >
+              Support receipts
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'access-intents' ? 'page' : undefined}
+              href="/access-intents"
+            >
+              Intent receipts
             </Link>
           )}
           {(isOwner || canReview) && (
@@ -275,9 +319,7 @@ function Shell({
               Feedback learning
             </Link>
           )}
-          {editorialNavigationEnabled && (isOwner || canReview) && (
-            <Link href="/editorial">Editorial intelligence</Link>
-          )}
+          {(isOwner || canReview) && <Link href="/editorial">Editorial studio</Link>}
           {process.env.NODE_ENV !== 'production' && (isOwner || canReview) && (
             <Link href="/referrals">Referral credit evidence</Link>
           )}
@@ -324,6 +366,22 @@ function Shell({
               href="/founding-households"
             >
               Founding Households
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'billing-authority' ? 'page' : undefined}
+              href="/billing-authority"
+            >
+              Billing authority
+            </Link>
+          )}
+          {isOwner && (
+            <Link
+              aria-current={view === 'stripe-control' ? 'page' : undefined}
+              href="/stripe-control"
+            >
+              Stripe controls
             </Link>
           )}
           {isOwner && (
@@ -374,7 +432,7 @@ function Customers() {
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading private-beta customers…'
+          ? 'Loading early-access customers…'
           : 'Loading local development customers…'}
       </p>
     );
@@ -382,7 +440,7 @@ function Customers() {
     <div className="table-wrap">
       <table>
         <caption>
-          Household access summary — <DataLabel />
+          Household access summary - <DataLabel />
         </caption>
         <thead>
           <tr>
@@ -415,6 +473,7 @@ function Customers() {
   );
 }
 
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The horizontally scrollable review table must be reachable by keyboard. */
 function OwnerFraud() {
   const [data, setData] = useState<ChecksResponse>();
   const [error, setError] = useState('');
@@ -433,7 +492,7 @@ function OwnerFraud() {
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading the private-beta review queue…'
+          ? 'Loading the early-access review queue…'
           : 'Loading local development review queue…'}
       </p>
     );
@@ -443,10 +502,15 @@ function OwnerFraud() {
         <strong>Content exclusion:</strong> this response contains identifiers, kind, risk, provider
         state, and time only. It cannot display submitted text or URL content.
       </div>
-      <div className="table-wrap section">
+      <div
+        aria-label="Scrollable check metadata review table"
+        className="table-wrap section"
+        role="region"
+        tabIndex={0}
+      >
         <table>
           <caption>
-            Check metadata review — <DataLabel />
+            Check metadata review - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -484,6 +548,7 @@ function OwnerFraud() {
     </>
   );
 }
+/* eslint-enable jsx-a11y/no-noninteractive-tabindex */
 
 function AssignedReviewQueue() {
   const [data, setData] = useState<HqReviewQueueResponse>();
@@ -510,7 +575,7 @@ function AssignedReviewQueue() {
       <div className="table-wrap section">
         <table>
           <caption>
-            Assigned fraud work cases — <DataLabel />
+            Assigned fraud work cases - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -567,7 +632,7 @@ function SupportQueue() {
       <div className="table-wrap section">
         <table>
           <caption>
-            Assigned support cases — <DataLabel />
+            Assigned support cases - <DataLabel />
           </caption>
           <thead>
             <tr>
@@ -631,7 +696,7 @@ function Revenue() {
       <section className="section table-wrap">
         <table>
           <caption>
-            Target accounts — <DataLabel state="seeded" />
+            Target accounts - <DataLabel state="seeded" />
           </caption>
           <thead>
             <tr>
@@ -654,7 +719,7 @@ function Revenue() {
       <section className="section table-wrap">
         <table>
           <caption>
-            Opportunities — <DataLabel state="seeded" />
+            Opportunities - <DataLabel state="seeded" />
           </caption>
           <thead>
             <tr>
@@ -680,7 +745,7 @@ function Revenue() {
                     {new Date(opportunity.nextActionAt).toLocaleString()}
                   </div>
                 </td>
-                <td>{opportunity.stale ? 'Stale — review needed' : 'Current in seed data'}</td>
+                <td>{opportunity.stale ? 'Stale - review needed' : 'Current in seed data'}</td>
               </tr>
             ))}
           </tbody>
@@ -692,15 +757,18 @@ function Revenue() {
 
 function System() {
   const [providers, setProviders] = useState<ProvidersResponse>();
+  const [operational, setOperational] = useState<HqOperationalHealthResponse>();
   const [audit, setAudit] = useState<AuditResponse>();
   const [error, setError] = useState('');
   useEffect(() => {
     Promise.all([
       hqRequest<ProvidersResponse>(apiPaths.hqProviderHealth),
+      hqRequest<HqOperationalHealthResponse>(apiPaths.hqOperationalHealth),
       hqRequest<AuditResponse>(apiPaths.hqAudit),
     ])
-      .then(([providerData, auditData]) => {
+      .then(([providerData, operationalData, auditData]) => {
         setProviders(providerData);
+        setOperational(operationalData);
         setAudit(auditData);
       })
       .catch((caught) => setError(readableError(caught)));
@@ -711,16 +779,120 @@ function System() {
         {error}
       </p>
     );
-  if (!providers || !audit)
+  if (!providers || !operational || !audit)
     return (
       <p role="status">
         {productionRuntime
-          ? 'Loading private-beta system data…'
+          ? 'Loading early-access system data…'
           : 'Loading local development system data…'}
       </p>
     );
   return (
     <>
+      <section className="section" aria-labelledby="operational-health-heading">
+        <div className="notice">
+          <DataLabel />
+          <h2 id="operational-health-heading">Content-free operational health</h2>
+          <p>
+            Overall status: <strong>{operational.status}</strong>. This owner-only projection uses
+            aggregate heartbeat, durable-job, and production-worker-handled outbox metadata. It
+            contains no payload, customer, household, tenant, submitted content, or provider alert
+            delivery data.
+          </p>
+          <p className="source">
+            Generated {new Date(operational.generatedAt).toLocaleString()} | worker stale after{' '}
+            {operational.thresholds.workerStaleAfterSeconds} seconds | actionable backlog stale
+            after {operational.thresholds.backlogStaleAfterSeconds} seconds | future timestamp
+            tolerance {operational.thresholds.clockSkewToleranceSeconds} seconds
+          </p>
+        </div>
+        <div className="metric-grid section">
+          <article className="hq-card">
+            <h3>Worker heartbeats</h3>
+            <p>
+              <strong>{operational.workers.status}</strong>
+            </p>
+            <p>
+              {operational.workers.runningCount} running | {operational.workers.drainingCount}{' '}
+              draining | {operational.workers.stoppedCount} stopped |{' '}
+              {operational.workers.staleCount} stale
+            </p>
+            <p className="source">
+              Oldest active heartbeat age:{' '}
+              {operational.workers.oldestActiveHeartbeatAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+          <article className="hq-card">
+            <h3>Durable jobs</h3>
+            <p>
+              <strong>{operational.durableJobs.status}</strong>
+            </p>
+            <p>
+              {operational.durableJobs.queuedCount} queued | {operational.durableJobs.retryCount}{' '}
+              retry | {operational.durableJobs.runningCount} running |{' '}
+              {operational.durableJobs.staleRunningCount} stale running |{' '}
+              {operational.durableJobs.exhaustedCount} exhausted |{' '}
+              {operational.durableJobs.deadLetterCount} dead-letter
+            </p>
+            <p className="source">
+              {operational.durableJobs.actionableCount} actionable | oldest actionable age:{' '}
+              {operational.durableJobs.oldestActionableAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest stale-running age:{' '}
+              {operational.durableJobs.oldestStaleRunningAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest exhausted age:{' '}
+              {operational.durableJobs.oldestExhaustedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest dead-letter age:{' '}
+              {operational.durableJobs.oldestDeadLetterAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+          <article className="hq-card">
+            <h3>Outbox backlog</h3>
+            <p>
+              <strong>{operational.outbox.status}</strong>
+            </p>
+            <p>
+              {operational.outbox.unprocessedCount} unprocessed |{' '}
+              {operational.outbox.exhaustedCount} exhausted |{' '}
+              {operational.outbox.causallyBlockedCount} causally blocked |{' '}
+              {operational.outbox.deadLetterCount} dead-letter
+            </p>
+            <p className="source">
+              {operational.outbox.actionableCount} actionable | oldest actionable age:{' '}
+              {operational.outbox.oldestActionableAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest exhausted age:{' '}
+              {operational.outbox.oldestExhaustedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest causally blocked age:{' '}
+              {operational.outbox.oldestCausallyBlockedAgeSeconds ?? 'not available'} seconds
+            </p>
+            <p className="source">
+              Oldest dead-letter age:{' '}
+              {operational.outbox.oldestDeadLetterAgeSeconds ?? 'not available'} seconds
+            </p>
+          </article>
+        </div>
+        {operational.attentionCodes.length > 0 ? (
+          <div className="notice notice-warning" role="status">
+            <h3>Operational attention codes</h3>
+            <ul>
+              {operational.attentionCodes.map((code) => (
+                <li key={code}>{code.replaceAll('_', ' ')}</li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="notice">No operational attention code is active.</p>
+        )}
+      </section>
       <section className="metric-grid">
         {providers.providers.map((provider) => (
           <article className="hq-card" key={provider.key}>
@@ -738,7 +910,7 @@ function System() {
       </section>
       <section className="section table-wrap">
         <table>
-          <caption>Audit metadata — no artifact content</caption>
+          <caption>Audit metadata - no artifact content</caption>
           <thead>
             <tr>
               <th>Time</th>
@@ -972,7 +1144,7 @@ export function HqScreen({ view }: { view: HqView }) {
     return (
       <main id="hq-main" className="sign-in-shell">
         <div className="sign-in-card">
-          <span className="seed-label">Founder-only private beta</span>
+          <span className="seed-label">Founder-only early access</span>
           <h1>BoomerBuddy HQ</h1>
           <p>Authenticate through the separately configured HQ identity realm.</p>
           <Link href="/sign-in">Open secure HQ sign in</Link>
@@ -1007,6 +1179,10 @@ export function HqScreen({ view }: { view: HqView }) {
         )
       ) : view === 'support' ? (
         <SupportQueue />
+      ) : view === 'support-receipts' ? (
+        <SupportReceiptQueue />
+      ) : view === 'access-intents' ? (
+        <AccessIntentReceipts />
       ) : view === 'revenue' ? (
         <Revenue />
       ) : view === 'privacy' ? (
@@ -1017,6 +1193,10 @@ export function HqScreen({ view }: { view: HqView }) {
         <FounderProvisioning />
       ) : view === 'founding-households' ? (
         <FoundingHouseholds />
+      ) : view === 'billing-authority' ? (
+        <BillingAuthority />
+      ) : view === 'stripe-control' ? (
+        <StripeControl />
       ) : (
         <System />
       )}

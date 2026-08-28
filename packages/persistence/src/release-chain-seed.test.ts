@@ -41,6 +41,23 @@ const releaseMigrations = [
   '0025_run3_1_authenticated_feedback.sql',
   '0026_run3_1_production_founding_households.sql',
   '0027_run3_1_feedback_founding_quota.sql',
+  '0028_run3_1_billing_authority_workflow.sql',
+  '0029_run3_1_stripe_live_control_plane.sql',
+  '0030_run3_1_billing_reverification_binding.sql',
+  '0031_run3_1_mobile_session_retention.sql',
+  '0032_run3_1_private_beta_access_intents.sql',
+  '0033_run3_1_billing_recovery_evidence.sql',
+  '0034_run3_1_support_receipts.sql',
+  '0035_run3_1_paid_family_catalog.sql',
+  '0036_run3_1_protected_self_enrollment.sql',
+  '0037_run3_1_paid_family_entitlement_repair.sql',
+  '0038_run3_1_member_learning_feed.sql',
+  '0039_trusted_circle_customer_journey.sql',
+  '0040_run3_1_member_learning_idempotency.sql',
+  '0041_run3_1_family_safe_word_lifecycle.sql',
+  '0042_run3_1_regional_scam_guidance.sql',
+  '0043_governed_first_party_content.sql',
+  '0044_versioned_stripe_offer_catalog.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -112,14 +129,16 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0027 and seeds stable local Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0044 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);
     await expect(runMigrations(database)).resolves.toEqual([]);
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe('seeded');
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
+      'seeded',
+    );
     const countsAfterFirstSeed = await publicTableCounts(database);
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
     await expect(publicTableCounts(database)).resolves.toEqual(countsAfterFirstSeed);
@@ -208,7 +227,7 @@ describe('frozen release migration and demo seed chain', () => {
     ]);
   }, 60_000);
 
-  it('keeps an old marked run1 database untouched while applying 0019 through 0027', async () => {
+  it('keeps an old marked run1 database untouched while applying 0019 through 0044', async () => {
     const sourceDirectory = await migrationDirectory();
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-release-old-seed-'));
     await copyMigrationsThrough(
@@ -237,7 +256,7 @@ describe('frozen release migration and demo seed chain', () => {
     await expect(runMigrations(database, temporaryDirectory)).resolves.toEqual(
       releaseMigrations.slice(18),
     );
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
 
@@ -307,13 +326,15 @@ describe('frozen release migration and demo seed chain', () => {
     const before = await publicTableCounts(database);
     const failingDatabase = withSeedQueryFailure(database, 'INSERT INTO local_demo_bootstraps');
 
-    await expect(seedDemoData(failingDatabase, testArtifactProtection(), now)).rejects.toThrow(
-      'induced seed transaction failure',
-    );
+    await expect(
+      seedDemoData(failingDatabase, testArtifactProtection(), 'test', now),
+    ).rejects.toThrow('induced seed transaction failure');
     await expect(publicTableCounts(database)).resolves.toEqual(before);
 
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe('seeded');
-    await expect(seedDemoData(database, testArtifactProtection(), now)).resolves.toBe(
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
+      'seeded',
+    );
+    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
       'already_seeded',
     );
     const marker = await database.query<{ bootstrap_key: string }>(

@@ -12,7 +12,7 @@ import { createSeededTestDatabase } from '@boomerbuddy/testkit';
 
 import type { Database, QueryResult, SqlExecutor } from './database';
 import { appendConsentEvidence } from './consent';
-import { EntitlementRepository } from './entitlements';
+import { EntitlementRepository, protectedSelfEnrollmentConsent } from './entitlements';
 import { FamilyRepository } from './family';
 import { FeedbackRepository, type FeedbackIntakeRequest } from './feedback';
 import {
@@ -45,6 +45,57 @@ function operation(kind: 'policy' | 'invite' | 'accept' | 'invite-revoke' | 'off
 function sequentialIds(): IdFactory {
   let value = 0;
   return { next: (prefix) => `${prefix}-founding-${++value}` };
+}
+
+function labeledIds(label: string): IdFactory {
+  let value = 0;
+  return { next: (prefix) => `${prefix}-founding-${label}-${++value}` };
+}
+
+async function refreshExactProtectedSelfConsent(
+  database: Database,
+  input: {
+    readonly personId: string;
+    readonly identityId: string;
+    readonly identitySubject: string;
+    readonly sessionId: string;
+    readonly keyNamespace: string;
+    readonly correlationLabel: string;
+  },
+): Promise<void> {
+  const entitlements = new EntitlementRepository(
+    database,
+    labeledIds(input.correlationLabel),
+    'local',
+  );
+  await entitlements.withdrawProtectedSelfIdempotent({
+    householdId: 'household-sunrise',
+    personId: input.personId,
+    actorPersonId: input.personId,
+    operationKey: `protected-self-withdraw:${input.keyNamespace}-0000-4000-8000-000000000001`,
+    actorIdentityId: input.identityId,
+    actorIssuer: 'boomerbuddy-dev',
+    actorIdentitySubject: input.identitySubject,
+    sessionId: input.sessionId,
+    audience: 'customer',
+    correlationId: `correlation-founding-${input.correlationLabel}-withdraw`,
+    now,
+  });
+  await entitlements.enrollProtectedSelfIdempotent({
+    householdId: 'household-sunrise',
+    personId: input.personId,
+    actorPersonId: input.personId,
+    consentVersion: protectedSelfEnrollmentConsent.version,
+    ...protectedSelfEnrollmentConsent.documents,
+    operationKey: `protected-self-enroll:${input.keyNamespace}-0000-4000-8000-000000000002`,
+    actorIdentityId: input.identityId,
+    actorIssuer: 'boomerbuddy-dev',
+    actorIdentitySubject: input.identitySubject,
+    sessionId: input.sessionId,
+    audience: 'customer',
+    correlationId: `correlation-founding-${input.correlationLabel}-enroll`,
+    now,
+  });
 }
 
 interface QueryOverride {
@@ -1872,10 +1923,20 @@ describe('FoundingHouseholdRepository', () => {
     const aliceAccess: FoundingHouseholdMemberAccess = {
       actorPersonId: 'person-owner-alice',
       actorIssuer: 'boomerbuddy-dev',
+      actorIdentityId: 'identity-owner-alice',
+      actorIdentitySubject: 'owner-alice',
       sessionId: aliceSessionId,
       audience: 'customer',
       correlationId: 'correlation-founding-alice',
     };
+    await refreshExactProtectedSelfConsent(database, {
+      personId: aliceAccess.actorPersonId,
+      identityId: 'identity-owner-alice',
+      identitySubject: 'owner-alice',
+      sessionId: aliceSessionId,
+      keyNamespace: '40000000',
+      correlationLabel: 'alice-allocation-binding',
+    });
     await activatePolicy();
     const invitation = await createInvitation();
     const accepted = await repository.acceptInvitation({
@@ -1897,22 +1958,32 @@ describe('FoundingHouseholdRepository', () => {
       [accepted.enrollment.id],
     );
     const allocations = await database.query<Record<string, unknown>>(
-      `SELECT id, entitlement_grant_id FROM commerce_allowance_allocations
+      `SELECT allowance_key, subject_id, entitlement_grant_id
+       FROM commerce_allowance_allocations
        WHERE household_id = 'household-sunrise'
-         AND id IN ('allocation-sunrise-alice','allocation-sunrise-pat','allocation-sunrise-terry')
-       ORDER BY id`,
+         AND state = 'active'
+         AND (
+           (allowance_key = 'protected_members'
+             AND subject_id IN ('person-owner-alice','person-protected-pat'))
+           OR (allowance_key = 'trusted_circle_participants'
+             AND subject_id = 'person-trusted-terry')
+         )
+       ORDER BY allowance_key, subject_id`,
     );
     expect(allocations.rows).toEqual([
       {
-        id: 'allocation-sunrise-alice',
+        allowance_key: 'protected_members',
+        subject_id: 'person-owner-alice',
         entitlement_grant_id: grant.rows[0]?.entitlement_grant_id,
       },
       {
-        id: 'allocation-sunrise-pat',
+        allowance_key: 'protected_members',
+        subject_id: 'person-protected-pat',
         entitlement_grant_id: grant.rows[0]?.entitlement_grant_id,
       },
       {
-        id: 'allocation-sunrise-terry',
+        allowance_key: 'trusted_circle_participants',
+        subject_id: 'person-trusted-terry',
         entitlement_grant_id: grant.rows[0]?.entitlement_grant_id,
       },
     ]);
@@ -2043,10 +2114,20 @@ describe('FoundingHouseholdRepository', () => {
     const aliceAccess: FoundingHouseholdMemberAccess = {
       actorPersonId: 'person-owner-alice',
       actorIssuer: 'boomerbuddy-dev',
+      actorIdentityId: 'identity-owner-alice',
+      actorIdentitySubject: 'owner-alice',
       sessionId: aliceSessionId,
       audience: 'customer',
       correlationId: 'correlation-founding-alice-deduplicated',
     };
+    await refreshExactProtectedSelfConsent(database, {
+      personId: aliceAccess.actorPersonId,
+      identityId: 'identity-owner-alice',
+      identitySubject: 'owner-alice',
+      sessionId: aliceSessionId,
+      keyNamespace: '41000000',
+      correlationLabel: 'alice-deduplicated-binding',
+    });
     await activatePolicy({ benefitKey: 'plus_beta_v1' });
     const invitation = await createInvitation();
     const accepted = await repository.acceptInvitation({
@@ -2974,7 +3055,7 @@ describe('FoundingHouseholdRepository', () => {
         AND grant_record.id = enrollment.entitlement_grant_id
        WHERE enrollment.household_id = 'household-harbor'`,
     );
-    const entitlements = await new EntitlementRepository(database).forHousehold(
+    const entitlements = await new EntitlementRepository(database, undefined, 'local').forHousehold(
       'household-harbor',
       afterExpiry,
     );

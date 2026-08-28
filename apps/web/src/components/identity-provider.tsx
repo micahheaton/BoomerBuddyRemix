@@ -1,26 +1,28 @@
+import { canonicalPublicOrigin } from '@boomerbuddy/config/exact-origin';
 import { ClerkProvider } from '@clerk/nextjs';
+import { ProductionAuthenticationRecovery } from './production-auth-recovery';
 
 export function IdentityProvider({ children }: { children: React.ReactNode }) {
   const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
   if (process.env.NODE_ENV !== 'production') return children;
 
-  const publicOrigin = process.env.BB_PUBLIC_ORIGIN;
+  const publicOrigin = canonicalPublicOrigin(process.env.BB_PUBLIC_ORIGIN, true);
   if (!publishableKey || !publicOrigin) {
-    return <main role="alert">Production identity is unavailable.</main>;
+    return <main role="alert">Member sign in is temporarily unavailable.</main>;
   }
 
   return (
     <ClerkProvider
       publishableKey={publishableKey}
       signInUrl="/sign-in"
-      signUpUrl="/sign-in"
+      signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/member"
-      signUpFallbackRedirectUrl="/member"
+      signUpFallbackRedirectUrl="/member/billing"
       afterSignOutUrl="/sign-in"
       allowedRedirectOrigins={[publicOrigin]}
     >
-      {children}
+      <ProductionAuthenticationRecovery>{children}</ProductionAuthenticationRecovery>
     </ClerkProvider>
   );
 }

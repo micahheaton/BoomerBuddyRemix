@@ -15,9 +15,13 @@ function evidenceKind(evidence: FraudEvidence): DecisionRecord['evidence'][numbe
 }
 
 function evidenceLabel(evidence: FraudEvidence): string {
-  if (evidence.source.kind === 'artifact_derived') return 'Local pattern';
+  if (evidence.source.kind === 'artifact_derived') return 'Pattern in the submitted content';
   if (evidence.source.kind === 'missing_or_failed') return 'Evidence gap';
   return `${evidence.source.name} observation`.slice(0, 120);
+}
+
+function customerEvidenceLabel(label: string): string {
+  return label === 'Local pattern' ? 'Pattern in the submitted content' : label;
 }
 
 export function decisionFromAssessment(assessment: FraudAssessment): DecisionRecord {
@@ -75,7 +79,10 @@ export function checkDto(check: StoredCheck, actorPersonId: string): CheckResult
     evidenceSufficiency: check.evidenceSufficiency,
     calibration: check.calibration,
     summary: check.summary,
-    evidence: check.evidence.map((item) => ({ ...item })),
+    evidence: check.evidence.map((item) => ({
+      ...item,
+      label: customerEvidenceLabel(item.label),
+    })),
     actions: check.actions.map((item) => ({ ...item })),
     provider: { ...check.provider },
     rulesetVersion: check.rulesetVersion,
@@ -114,6 +121,11 @@ export function familyDto(
     invitations: family.invitations.map((invitation) => ({
       ...invitation,
       permissions: [...invitation.permissions],
+      expiresAt: invitation.expiresAt.toISOString(),
+      createdAt: invitation.createdAt.toISOString(),
+    })),
+    memberInvitations: family.memberInvitations.map((invitation) => ({
+      ...invitation,
       expiresAt: invitation.expiresAt.toISOString(),
       createdAt: invitation.createdAt.toISOString(),
     })),

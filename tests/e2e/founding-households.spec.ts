@@ -88,16 +88,14 @@ test('founder issues one local no-card credential and a household admin accepts 
   await signInCustomer(page, 'owner-bob');
   await page.getByRole('link', { name: 'Open Founding Household review' }).click();
   await expect(page).toHaveURL(`${customerUrl}/member/founding-household`);
-  await expect(
-    page.getByRole('heading', { name: 'Review finite sponsored beta access' }),
-  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Review finite sponsored access' })).toBeVisible();
   await page.getByLabel('Complete invitation credential').fill(credential as string);
   const previewResponsePromise = page.waitForResponse(
     (response) =>
       response.url().includes('/v1/founding-households/invitations/') &&
       response.url().endsWith('/preview'),
   );
-  await page.getByRole('button', { name: 'Review invitation — grant nothing yet' }).click();
+  await page.getByRole('button', { name: 'Review invitation - grant nothing yet' }).click();
   const previewPayload = (await (await previewResponsePromise).json()) as Record<string, string>;
   const renderedServiceDisclosure = previewPayload.serviceDisclosureText;
   if (renderedServiceDisclosure === undefined) {
@@ -164,7 +162,7 @@ test('founder issues one local no-card credential and a household admin accepts 
     });
   };
   await page.route(acceptPattern, authLossHandler);
-  await page.getByRole('button', { name: 'Accept finite sponsored beta — no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.locator('.error[role="alert"]')).toContainText(
     'Household authorization was lost',
   );
@@ -175,7 +173,7 @@ test('founder issues one local no-card credential and a household admin accepts 
   await signInCustomer(page, 'owner-bob');
   await page.getByRole('link', { name: 'Open Founding Household review' }).click();
   await page.getByLabel('Complete invitation credential').fill(credential as string);
-  await page.getByRole('button', { name: 'Review invitation — grant nothing yet' }).click();
+  await page.getByRole('button', { name: 'Review invitation - grant nothing yet' }).click();
   await page.getByLabel(/I accept the exact service disclosure and policy rendered above/u).check();
   await page
     .getByLabel(/I separately accept the exact protected-adult disclosure and policy rendered/u)
@@ -194,9 +192,9 @@ test('founder issues one local no-card credential and a household admin accepts 
     }
     await route.fulfill({ response });
   });
-  await page.getByRole('button', { name: 'Accept finite sponsored beta — no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.locator('.error[role="alert"]')).toBeVisible();
-  await page.getByRole('button', { name: 'Accept finite sponsored beta — no card' }).click();
+  await page.getByRole('button', { name: 'Accept finite sponsored access - no card' }).click();
   await expect(page.getByRole('status')).toContainText('No card was used');
   expect(acceptKeys).toHaveLength(2);
   expect(acceptKeys[1]).toBe(acceptKeys[0]);
@@ -222,12 +220,10 @@ test('founder issues one local no-card credential and a household admin accepts 
     }
     await route.fulfill({ response });
   });
-  await page
-    .getByLabel(/Withdraw Founding Household service consent and end only this sponsor grant/u)
-    .check();
-  await page.getByRole('button', { name: 'End sponsored beta access' }).click();
+  await page.getByLabel(/Withdraw service consent and end this sponsored access/u).check();
+  await page.getByRole('button', { name: 'End sponsored access' }).click();
   await expect(page.locator('.error[role="alert"]')).toBeVisible();
-  await page.getByRole('button', { name: 'End sponsored beta access' }).click();
+  await page.getByRole('button', { name: 'End sponsored access' }).click();
   await expect(page.getByRole('status')).toContainText('service consent was withdrawn');
   expect(withdrawalKeys).toHaveLength(2);
   expect(withdrawalKeys[1]).toBe(withdrawalKeys[0]);

@@ -56,6 +56,51 @@ function hqPrincipal(role: Extract<Role, 'hq_owner' | 'hq_reviewer' | 'hq_suppor
 }
 
 describe('deny-by-default authorization', () => {
+  it('keeps support receipts self-scoped while allowing only active HQ owners to operate the queue', () => {
+    const collection: Resource = {
+      kind: 'support_receipt_collection',
+      householdId: home,
+      ownerPersonId: person,
+    };
+    const receipt: Resource = {
+      kind: 'support_receipt',
+      householdId: home,
+      openedByPersonId: person,
+    };
+    for (const action of ['support_receipt:list', 'support_receipt:create'] as const) {
+      expect(authorize({ principal: principal(), action, resource: collection }).allowed).toBe(
+        true,
+      );
+      expect(
+        authorize({
+          principal: principal({ personId: protectedPerson }),
+          action,
+          resource: collection,
+        }).reason,
+      ).toBe('not_owner_or_shared');
+    }
+    expect(
+      authorize({ principal: principal(), action: 'support_receipt:withdraw', resource: receipt })
+        .allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: principal(),
+        action: 'support_receipt:withdraw',
+        resource: { ...receipt, openedByPersonId: protectedPerson },
+      }).reason,
+    ).toBe('not_owner_or_shared');
+    for (const action of ['hq:support_receipts:read', 'hq:support_receipts:manage'] as const) {
+      expect(
+        authorize({ principal: hqPrincipal('hq_owner'), action, resource: { kind: 'hq' } }).allowed,
+      ).toBe(true);
+      expect(
+        authorize({ principal: hqPrincipal('hq_support'), action, resource: { kind: 'hq' } })
+          .reason,
+      ).toBe('insufficient_role');
+    }
+  });
+
   it('denies missing principals, wrong audiences, cross-tenant access, and missing capabilities', () => {
     const resource: Resource = {
       kind: 'check_collection',
@@ -105,6 +150,17 @@ describe('deny-by-default authorization', () => {
     expect(
       authorize({
         principal: administratorAndProtected,
+        action: 'family:invite_member',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: administratorAndProtected,
         action: 'check:create',
         resource: {
           kind: 'check_collection',
@@ -149,6 +205,37 @@ describe('deny-by-default authorization', () => {
         },
       }).reason,
     ).toBe('insufficient_role');
+    expect(
+      authorize({
+        principal: administrator,
+        action: 'family:invite_member',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: principal({
+          roles: ['household_administrator'],
+          households: [
+            householdScope({
+              isAdministrator: true,
+              isProtectedMember: false,
+              capabilities: [],
+            }),
+          ],
+        }),
+        action: 'family:revoke_member_invitation',
+        resource: {
+          kind: 'family',
+          householdId: home,
+          scope: { kind: 'member_invitation' },
+        },
+      }).allowed,
+    ).toBe(true);
   });
 
   it('limits Trusted Circle reads and orientation help to the exact protected pair', () => {
@@ -257,6 +344,40 @@ describe('deny-by-default authorization', () => {
     expect(
       authorize({ principal: billing, action: 'entitlement:view', resource: entitlement }).allowed,
     ).toBe(true);
+  });
+
+  it('limits HQ billing-authority provisioning to the exact configured founder owner', () => {
+    const founder = hqPrincipal('hq_owner');
+    const resource: Resource = {
+      kind: 'billing_authority_workflow',
+      configuredFounderPersonId: founder.personId,
+    };
+    expect(
+      authorize({ principal: founder, action: 'hq:billing_authority:read', resource }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({ principal: founder, action: 'hq:billing_authority:manage', resource }).allowed,
+    ).toBe(true);
+    expect(
+      authorize({
+        principal: founder,
+        action: 'hq:billing_authority:manage',
+        resource: {
+          kind: 'billing_authority_workflow',
+          configuredFounderPersonId: ids.person('person-other-founder'),
+        },
+      }).reason,
+    ).toBe('insufficient_role');
+    expect(
+      authorize({
+        principal: hqPrincipal('hq_reviewer'),
+        action: 'hq:billing_authority:manage',
+        resource,
+      }).allowed,
+    ).toBe(false);
+    expect(
+      authorize({ principal: principal(), action: 'hq:billing_authority:manage', resource }).reason,
+    ).toBe('wrong_audience');
   });
 
   it('models development invitations as unbound and production invitations as identity-bound', () => {

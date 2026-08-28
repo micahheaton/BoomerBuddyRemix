@@ -11,12 +11,16 @@ import type {
   ProviderFailedPaymentEvidence,
   ProviderFinancialRestrictionEvidence,
   ProviderReconciliationPort,
-  StripeFoundingOffer,
+  StripeOffer,
+  StripeOfferId,
   StripeInventoryPage,
   StripeInventoryPort,
   StripePreflightEvidence,
   StripePreflightPort,
 } from './commerce';
+import { isStripeFailedPaymentEventType } from './commerce';
+
+export const stripeCheckoutIntegrationIdentifier = 'boomerbuddy_cqmfjzpt' as const;
 
 export interface StripeTransport {
   readonly postForm: (input: {
@@ -266,30 +270,47 @@ function exactSubscriptionEnvelope(
   );
 }
 
-function isExactFixedMonthlyPrice(price: Readonly<Record<string, unknown>>): boolean {
+function isExactFixedPrice(
+  price: Readonly<Record<string, unknown>>,
+  offer: Pick<
+    StripeOffer,
+    'providerProductId' | 'providerPriceId' | 'unitAmountMinor' | 'billingInterval'
+  >,
+): boolean {
   const recurring = objectRecord(price.recurring);
   return (
     price.active === true &&
     price.currency === 'usd' &&
-    price.unit_amount === 1499 &&
-    price.unit_amount_decimal === '1499' &&
+    price.unit_amount === offer.unitAmountMinor &&
+    price.unit_amount_decimal === String(offer.unitAmountMinor) &&
     price.type === 'recurring' &&
     price.billing_scheme === 'per_unit' &&
     price.custom_unit_amount === null &&
     price.tiers_mode === null &&
     price.transform_quantity === null &&
-    recurring?.interval === 'month' &&
+    recurring?.interval === offer.billingInterval &&
     recurring.interval_count === 1 &&
     recurring.usage_type === 'licensed' &&
-    recurring.trial_period_days === null
+    recurring.trial_period_days === null &&
+    safeText(price.id) === offer.providerPriceId &&
+    (safeText(price.product) ?? safeText(objectRecord(price.product)?.id)) ===
+      offer.providerProductId
   );
 }
 
-function subscriptionCommerceEvidence(object: Readonly<Record<string, unknown>>): {
+function subscriptionCommerceEvidence(
+  object: Readonly<Record<string, unknown>>,
+  offers: readonly StripeOffer[],
+): {
   readonly providerPriceId?: string;
   readonly providerProductId?: string;
   readonly providerSubscriptionItemId?: string;
+  readonly offerId?: StripeOfferId;
+  readonly unitAmountMinor?: number;
   readonly billingInterval?: 'month' | 'year';
+  readonly trialStartsAt?: Date;
+  readonly trialEndsAt?: Date;
+  readonly paymentMethodPresent?: true;
   readonly currentPeriodStartsAt?: Date;
   readonly currentPeriodEndsAt?: Date;
   readonly subscriptionOfferExact?: true;
@@ -308,17 +329,52 @@ function subscriptionCommerceEvidence(object: Readonly<Record<string, unknown>>)
   const providerProductId =
     safeText(line.price.product) ?? safeText(objectRecord(line.price.product)?.id);
   const providerSubscriptionItemId = safeText(line.item.id);
+  const amount =
+    typeof line.price.unit_amount === 'number' && Number.isSafeInteger(line.price.unit_amount)
+      ? line.price.unit_amount
+      : undefined;
+  const binding = canonicalBinding(object);
+  const matchingOffers =
+    providerPriceId === undefined || providerProductId === undefined || amount === undefined
+      ? []
+      : offers.filter(
+          (offer) =>
+            offer.providerPriceId === providerPriceId &&
+            offer.providerProductId === providerProductId &&
+            offer.unitAmountMinor === amount &&
+            offer.billingInterval === interval &&
+            binding !== undefined &&
+            offer.planVersionId === binding.planVersionId &&
+            isExactFixedPrice(line.price, offer),
+        );
+  const resolvedOffer = matchingOffers.length === 1 ? matchingOffers[0] : undefined;
+  const trialStartsAt = integerDate(object.trial_start);
+  const trialEndsAt = integerDate(object.trial_end);
+  const paymentMethodPresent = safeText(object.default_payment_method) !== undefined;
+  const trialShapeExact =
+    object.status !== 'trialing' ||
+    (resolvedOffer?.trialPeriodDays === 7 &&
+      trialStartsAt !== undefined &&
+      trialEndsAt !== undefined &&
+      trialEndsAt.getTime() - trialStartsAt.getTime() === 7 * 24 * 60 * 60_000 &&
+      paymentMethodPresent);
   const exact =
     providerPriceId !== undefined &&
     providerProductId !== undefined &&
     providerSubscriptionItemId !== undefined &&
     line.item.quantity === 1 &&
-    isExactFixedMonthlyPrice(line.price);
+    resolvedOffer !== undefined &&
+    trialShapeExact;
   return {
     ...(providerPriceId === undefined ? {} : { providerPriceId }),
     ...(providerProductId === undefined ? {} : { providerProductId }),
     ...(providerSubscriptionItemId === undefined ? {} : { providerSubscriptionItemId }),
+    ...(resolvedOffer === undefined ? {} : { offerId: resolvedOffer.offerId }),
+    ...(amount === undefined ? {} : { unitAmountMinor: amount }),
     ...(interval === 'month' || interval === 'year' ? { billingInterval: interval } : {}),
+    ...(trialStartsAt === undefined ? {} : { trialStartsAt }),
+    ...(trialEndsAt === undefined ? {} : { trialEndsAt }),
+    ...(paymentMethodPresent ? { paymentMethodPresent: true as const } : {}),
     ...(startsAt === undefined ? {} : { currentPeriodStartsAt: startsAt }),
     ...(endsAt === undefined ? {} : { currentPeriodEndsAt: endsAt }),
     ...(exact ? { subscriptionOfferExact: true as const } : {}),
@@ -394,6 +450,7 @@ function paidInvoicePeriodEvidence(
   externalSubscriptionId: string,
   paymentIntent: Readonly<Record<string, unknown>>,
   expectedLivemode: boolean,
+  offers: readonly StripeOffer[],
 ): ProviderPaidPeriodEvidence | undefined {
   if (
     invoice.object !== 'invoice' ||
@@ -436,6 +493,16 @@ function paidInvoicePeriodEvidence(
   const currentPeriodStartsAt = integerDate(period?.start);
   const currentPeriodEndsAt = integerDate(period?.end);
   const providerInvoiceId = safeText(invoice.id);
+  const binding = canonicalBinding(invoice);
+  const matchingOffers = offers.filter(
+    (offer) =>
+      offer.providerPriceId === providerPriceId &&
+      offer.providerProductId === providerProductId &&
+      offer.unitAmountMinor === line.amount &&
+      binding !== undefined &&
+      offer.planVersionId === binding.planVersionId,
+  );
+  const offer = matchingOffers.length === 1 ? matchingOffers[0] : undefined;
   const payments = objectRecord(invoice.payments);
   const paymentRows = Array.isArray(payments?.data)
     ? payments.data.map((value) => objectRecord(value)).filter((value) => value !== undefined)
@@ -455,19 +522,20 @@ function paidInvoicePeriodEvidence(
     providerInvoiceId === undefined ||
     providerInvoicePaymentId === undefined ||
     providerPaymentIntentId === undefined ||
+    offer === undefined ||
     paymentIntent.object !== 'payment_intent' ||
     safeText(paymentIntent.id) !== providerPaymentIntentId ||
     paymentIntent.livemode !== expectedLivemode ||
     paymentIntent.status !== 'succeeded' ||
-    paymentIntent.amount !== 1499 ||
-    paymentIntent.amount_received !== 1499 ||
+    paymentIntent.amount !== offer.unitAmountMinor ||
+    paymentIntent.amount_received !== offer.unitAmountMinor ||
     paymentIntent.currency !== 'usd' ||
     (billingReason !== 'subscription_create' && billingReason !== 'subscription_cycle') ||
-    invoice.amount_paid !== 1499 ||
+    invoice.amount_paid !== offer.unitAmountMinor ||
     invoice.amount_remaining !== 0 ||
     invoice.currency !== 'usd' ||
-    invoice.subtotal !== 1499 ||
-    invoice.total !== 1499 ||
+    invoice.subtotal !== offer.unitAmountMinor ||
+    invoice.total !== offer.unitAmountMinor ||
     !explicitlyEmptyArrayOrNull(invoice, 'total_discount_amounts') ||
     !explicitlyEmptyArrayOrNull(invoice, 'total_pretax_credit_amounts') ||
     !explicitlyEmptyArrayOrNull(invoice, 'total_taxes') ||
@@ -485,13 +553,13 @@ function paidInvoicePeriodEvidence(
     payment.livemode !== expectedLivemode ||
     payment?.status !== 'paid' ||
     payment?.is_default !== true ||
-    payment?.amount_paid !== 1499 ||
-    payment?.amount_requested !== 1499 ||
+    payment?.amount_paid !== offer.unitAmountMinor ||
+    payment?.amount_requested !== offer.unitAmountMinor ||
     payment?.currency !== 'usd' ||
     paymentReference?.type !== 'payment_intent' ||
     safeText(payment?.invoice) !== providerInvoiceId ||
     line.object !== 'line_item' ||
-    line.amount !== 1499 ||
+    line.amount !== offer.unitAmountMinor ||
     line.currency !== 'usd' ||
     quantity !== 1 ||
     !explicitlyEmptyArrayOrNull(line, 'discount_amounts') ||
@@ -506,6 +574,7 @@ function paidInvoicePeriodEvidence(
     return undefined;
   }
   return {
+    offerId: offer.offerId,
     providerInvoiceId,
     externalSubscriptionId,
     providerSubscriptionItemId: lineage.subscriptionItemId,
@@ -515,7 +584,7 @@ function paidInvoicePeriodEvidence(
     providerPaymentIntentId,
     providerPriceId,
     billingReason,
-    amountPaid: 1499,
+    amountPaid: offer.unitAmountMinor,
     amountRemaining: 0,
     currency: 'usd',
     quantity: 1,
@@ -535,16 +604,14 @@ function failedInvoiceEvidence(
   externalSubscriptionId: string,
   paymentIntent: Readonly<Record<string, unknown>> | undefined,
   expectedLivemode: boolean,
+  offers: readonly StripeOffer[],
 ): ProviderFailedPaymentEvidence | undefined {
   if (
     invoice.object !== 'invoice' ||
     invoice.status !== 'open' ||
     invoice.livemode !== expectedLivemode ||
     subscriptionReference(invoice) !== externalSubscriptionId ||
-    invoice.amount_due !== 1499 ||
     invoice.currency !== 'usd' ||
-    invoice.subtotal !== 1499 ||
-    invoice.total !== 1499 ||
     !explicitlyEmptyArrayOrNull(invoice, 'total_discount_amounts') ||
     !explicitlyEmptyArrayOrNull(invoice, 'total_taxes') ||
     typeof invoice.attempt_count !== 'number' ||
@@ -590,17 +657,30 @@ function failedInvoiceEvidence(
   const providerInvoiceLineId = safeText(candidate?.line.id);
   const providerProductId =
     candidate === undefined ? undefined : invoiceLineProductId(candidate.line);
+  const providerPriceId = candidate === undefined ? undefined : invoiceLinePriceId(candidate.line);
+  const binding = canonicalBinding(invoice);
+  const matchingOffers = offers.filter(
+    (offer) =>
+      offer.providerPriceId === providerPriceId &&
+      offer.providerProductId === providerProductId &&
+      offer.unitAmountMinor === candidate?.line.amount &&
+      binding !== undefined &&
+      offer.planVersionId === binding.planVersionId,
+  );
+  const offer = matchingOffers.length === 1 ? matchingOffers[0] : undefined;
   if (
     candidate === undefined ||
     candidate.line.object !== 'line_item' ||
     invoiceLinePriceId(candidate.line) === undefined ||
     providerProductId === undefined ||
+    providerPriceId === undefined ||
+    offer === undefined ||
     providerInvoiceLineId === undefined ||
     lineProration !== false ||
     currentPeriodStartsAt === undefined ||
     currentPeriodEndsAt === undefined ||
     currentPeriodEndsAt <= currentPeriodStartsAt ||
-    candidate.line.amount !== 1499 ||
+    candidate.line.amount !== offer.unitAmountMinor ||
     candidate.line.currency !== 'usd' ||
     candidate.line.quantity !== 1 ||
     !explicitlyEmptyArrayOrNull(candidate.line, 'discount_amounts') ||
@@ -613,6 +693,13 @@ function failedInvoiceEvidence(
     invoice.discounts.length > 0 ||
     invoice.pre_payment_credit_notes_amount !== 0 ||
     invoice.post_payment_credit_notes_amount !== 0
+  ) {
+    return undefined;
+  }
+  if (
+    invoice.amount_due !== offer.unitAmountMinor ||
+    invoice.subtotal !== offer.unitAmountMinor ||
+    invoice.total !== offer.unitAmountMinor
   ) {
     return undefined;
   }
@@ -643,7 +730,7 @@ function failedInvoiceEvidence(
     payment.livemode !== expectedLivemode ||
     payment?.status !== 'open' ||
     payment?.is_default !== true ||
-    payment?.amount_requested !== 1499 ||
+    payment?.amount_requested !== offer.unitAmountMinor ||
     payment?.currency !== 'usd' ||
     paymentReference?.type !== 'payment_intent' ||
     safeText(payment?.invoice) !== providerObjectId(invoice) ||
@@ -655,6 +742,7 @@ function failedInvoiceEvidence(
     return undefined;
   }
   return {
+    offerId: offer.offerId,
     providerInvoiceId: providerObjectId(invoice),
     externalSubscriptionId,
     providerSubscriptionItemId: candidate.lineage.subscriptionItemId,
@@ -662,9 +750,9 @@ function failedInvoiceEvidence(
     providerInvoicePaymentId,
     providerProductId,
     ...(paymentIntentId === undefined ? {} : { providerPaymentIntentId: paymentIntentId }),
-    providerPriceId: invoiceLinePriceId(candidate.line) as string,
+    providerPriceId,
     billingReason: billingReason as ProviderFailedPaymentEvidence['billingReason'],
-    amountDue: 1499 as const,
+    amountDue: offer.unitAmountMinor,
     currency: 'usd' as const,
     quantity: 1 as const,
     attemptCount: invoice.attempt_count,
@@ -674,8 +762,6 @@ function failedInvoiceEvidence(
     currentPeriodEndsAt,
   };
 }
-
-const resolvableInvoiceEventTypes = new Set(['invoice.paid', 'invoice.payment_failed']);
 
 function withBoundedGrace(
   lifecycle: NormalizedCommerceLifecycle,
@@ -693,10 +779,14 @@ function canonicalBinding(
   object: Readonly<Record<string, unknown>>,
 ): NormalizedProviderCommerceEvent['canonicalBinding'] {
   const subscriptionDetails = objectRecord(object.subscription_details);
+  const parent = objectRecord(object.parent);
+  const parentSubscriptionDetails =
+    parent?.type === 'subscription_details' ? objectRecord(parent.subscription_details) : undefined;
   const expandedSubscription = objectRecord(object.subscription);
   const candidates = [
     objectRecord(object.metadata),
     objectRecord(subscriptionDetails?.metadata),
+    objectRecord(parentSubscriptionDetails?.metadata),
     objectRecord(expandedSubscription?.metadata),
   ];
   for (const metadata of candidates) {
@@ -713,6 +803,7 @@ function canonicalBinding(
 
 export function normalizeStripeEvent(
   verified: VerifiedStripeEvent,
+  offers: readonly StripeOffer[],
 ): NormalizedProviderCommerceEvent {
   const { envelope } = verified;
   const object = envelope.data.object;
@@ -729,16 +820,31 @@ export function normalizeStripeEvent(
   const customer = safeText(object.customer);
   const subscription = subscriptionReference(object);
   const binding = canonicalBinding(object);
-  if (envelope.type === 'checkout.session.completed') {
+  const metadataOfferId = safeText(objectRecord(object.metadata)?.offer_id);
+  const checkoutOffers = offers.filter(
+    (offer) =>
+      offer.offerId === metadataOfferId &&
+      binding !== undefined &&
+      offer.planVersionId === binding.planVersionId,
+  );
+  const checkoutOffer = checkoutOffers.length === 1 ? checkoutOffers[0] : undefined;
+  if (
+    envelope.type === 'checkout.session.completed' ||
+    envelope.type === 'checkout.session.async_payment_succeeded'
+  ) {
     const expiresAt = integerDate(object.expires_at);
     if (
       object.object !== 'checkout.session' ||
       object.livemode !== envelope.livemode ||
       object.mode !== 'subscription' ||
       object.status !== 'complete' ||
-      object.payment_status !== 'paid' ||
-      object.amount_total !== 1499 ||
+      checkoutOffer === undefined ||
+      object.payment_status !==
+        (checkoutOffer.trialPeriodDays === 7 ? 'no_payment_required' : 'paid') ||
+      object.amount_total !==
+        (checkoutOffer.trialPeriodDays === 7 ? 0 : checkoutOffer.unitAmountMinor) ||
       object.currency !== 'usd' ||
+      object.payment_method_collection !== 'always' ||
       subscription === undefined ||
       customer === undefined ||
       expiresAt === undefined ||
@@ -762,12 +868,39 @@ export function normalizeStripeEvent(
       canonicalBinding: binding,
       checkoutCompletion: {
         sessionStatus: 'complete',
-        paymentStatus: 'paid',
-        amountTotal: 1499,
+        paymentStatus: checkoutOffer.trialPeriodDays === 7 ? 'no_payment_required' : 'paid',
+        amountTotal: checkoutOffer.trialPeriodDays === 7 ? 0 : checkoutOffer.unitAmountMinor,
         currency: 'usd',
+        paymentMethodCollection: 'always',
+        offerId: checkoutOffer.offerId,
         providerExpiresAt: expiresAt,
       },
       requiresReconciliation: false,
+    };
+  }
+  if (envelope.type === 'checkout.session.async_payment_failed') {
+    const expiresAt = integerDate(object.expires_at);
+    const exactFailedSession =
+      object.object === 'checkout.session' &&
+      object.livemode === envelope.livemode &&
+      object.mode === 'subscription' &&
+      object.status === 'complete' &&
+      object.payment_status === 'unpaid' &&
+      checkoutOffer !== undefined &&
+      checkoutOffer.trialPeriodDays === 0 &&
+      object.amount_total === checkoutOffer.unitAmountMinor &&
+      object.currency === 'usd' &&
+      subscription !== undefined &&
+      customer !== undefined &&
+      expiresAt !== undefined &&
+      binding !== undefined;
+    return {
+      ...base,
+      ...(subscription === undefined ? {} : { externalSubscriptionId: subscription }),
+      ...(customer === undefined ? {} : { providerCustomerId: customer }),
+      ...(binding === undefined ? {} : { canonicalBinding: binding }),
+      requiresReconciliation: true,
+      ...(exactFailedSession ? {} : { acknowledgementRequired: true }),
     };
   }
   if (envelope.type === 'checkout.session.expired') {
@@ -778,7 +911,9 @@ export function normalizeStripeEvent(
       object.status !== 'expired' ||
       object.payment_status !== 'unpaid' ||
       object.mode !== 'subscription' ||
-      object.amount_total !== 1499 ||
+      checkoutOffer === undefined ||
+      object.amount_total !==
+        (checkoutOffer.trialPeriodDays === 7 ? 0 : checkoutOffer.unitAmountMinor) ||
       object.currency !== 'usd' ||
       expiresAt === undefined ||
       binding === undefined
@@ -796,7 +931,7 @@ export function normalizeStripeEvent(
         sessionStatus: 'expired',
         paymentStatus: 'unpaid',
         mode: 'subscription',
-        amountTotal: 1499,
+        amountTotal: checkoutOffer.trialPeriodDays === 7 ? 0 : checkoutOffer.unitAmountMinor,
         currency: 'usd',
         providerExpiresAt: expiresAt,
       },
@@ -813,7 +948,7 @@ export function normalizeStripeEvent(
     exactSubscriptionEnvelope(object, providerObjectId(object), envelope.livemode);
   const commerceEvidence = withBoundedGrace(
     lifecycle ?? 'pending',
-    subscriptionEnvelopeExact ? subscriptionCommerceEvidence(object) : {},
+    subscriptionEnvelopeExact ? subscriptionCommerceEvidence(object, offers) : {},
     new Date(envelope.created * 1_000),
   );
   if (envelope.type.startsWith('customer.subscription.')) {
@@ -829,12 +964,18 @@ export function normalizeStripeEvent(
         commerceEvidence.subscriptionOfferExact !== true ||
         commerceEvidence.billingInterval === undefined ||
         commerceEvidence.currentPeriodStartsAt === undefined ||
-        commerceEvidence.currentPeriodEndsAt === undefined,
+        commerceEvidence.currentPeriodEndsAt === undefined ||
+        ((lifecycle === 'trialing' ||
+          (lifecycle === 'cancel_at_period_end' && object.status === 'trialing')) &&
+          (commerceEvidence.trialStartsAt === undefined ||
+            commerceEvidence.trialEndsAt === undefined ||
+            commerceEvidence.paymentMethodPresent !== true)),
     };
   }
   const lifecycleByEvent: Readonly<Record<string, NormalizedCommerceLifecycle>> = {
     'invoice.paid': 'active',
     'invoice.payment_failed': 'delinquent',
+    'invoice.payment_action_required': 'delinquent',
   };
   const eventLifecycle = lifecycleByEvent[envelope.type];
   return {
@@ -883,6 +1024,7 @@ function checkoutResponseSession(
     safeText(metadata?.household_id) !== input.actor.householdId ||
     safeText(metadata?.canonical_subscription_id) !== input.canonicalSubscriptionId ||
     safeText(metadata?.plan_version_id) !== input.planVersionId ||
+    safeText(metadata?.offer_id) !== input.offerId ||
     (input.customerReference === undefined
       ? value.customer !== null
       : safeText(value.customer) !== input.customerReference)
@@ -949,7 +1091,8 @@ export interface StripeAdapterConfiguration {
   readonly accountId: string;
   readonly apiVersion: string;
   readonly portalConfigurationId: string;
-  readonly offer: StripeFoundingOffer;
+  readonly defaultOfferId: StripeOfferId;
+  readonly offers: readonly StripeOffer[];
 }
 
 export class StripeAdapter
@@ -967,15 +1110,25 @@ export class StripeAdapter
     private readonly configuration: StripeAdapterConfiguration,
   ) {}
 
-  async verifyConfiguredResources(): Promise<StripePreflightEvidence> {
+  private configuredOffer(offerId: StripeOfferId): StripeOffer {
+    const matches = this.configuration.offers.filter((offer) => offer.offerId === offerId);
+    const offer = matches[0];
+    if (matches.length !== 1 || offer === undefined) {
+      throw new StripeWebhookError('stripe.offer_mapping_mismatch');
+    }
+    return offer;
+  }
+
+  async verifyConfiguredResources(offerId?: StripeOfferId): Promise<StripePreflightEvidence> {
+    const offer = this.configuredOffer(offerId ?? this.configuration.defaultOfferId);
     const expectedLivemode = this.configuration.environment === 'production';
     const [account, product, price, portal] = await Promise.all([
       this.transport.get({ path: '/v1/account' }),
       this.transport.get({
-        path: `/v1/products/${encodeURIComponent(this.configuration.offer.providerProductId)}`,
+        path: `/v1/products/${encodeURIComponent(offer.providerProductId)}`,
       }),
       this.transport.get({
-        path: `/v1/prices/${encodeURIComponent(this.configuration.offer.providerPriceId)}`,
+        path: `/v1/prices/${encodeURIComponent(offer.providerPriceId)}`,
       }),
       this.transport.get({
         path: `/v1/billing_portal/configurations/${encodeURIComponent(this.configuration.portalConfigurationId)}`,
@@ -986,20 +1139,32 @@ export class StripeAdapter
     const subscriptionUpdate = objectRecord(features?.subscription_update);
     const paymentMethodUpdate = objectRecord(features?.payment_method_update);
     const customerUpdate = objectRecord(features?.customer_update);
+    const invoiceHistory = objectRecord(features?.invoice_history);
+    const observedLivemode = product.livemode;
+    const accountChargesEnabled = account.charges_enabled === true;
+    const accountPayoutsEnabled = account.payouts_enabled === true;
+    const accountCountry = safeText(account.country) ?? null;
+    const accountBusinessType = safeText(account.business_type) ?? null;
     if (
       account.object !== 'account' ||
       safeText(account.id) !== this.configuration.accountId ||
+      (expectedLivemode &&
+        (!accountChargesEnabled ||
+          !accountPayoutsEnabled ||
+          accountCountry !== 'US' ||
+          accountBusinessType !== 'company')) ||
       product.object !== 'product' ||
-      product.livemode !== expectedLivemode ||
+      typeof observedLivemode !== 'boolean' ||
+      observedLivemode !== expectedLivemode ||
       price.object !== 'price' ||
-      price.livemode !== expectedLivemode ||
+      price.livemode !== observedLivemode ||
       portal.object !== 'billing_portal.configuration' ||
-      portal.livemode !== expectedLivemode ||
-      safeText(product.id) !== this.configuration.offer.providerProductId ||
+      portal.livemode !== observedLivemode ||
+      safeText(product.id) !== offer.providerProductId ||
       product.active !== true ||
-      safeText(price.id) !== this.configuration.offer.providerPriceId ||
-      !isExactFixedMonthlyPrice(price) ||
-      safeText(price.product) !== this.configuration.offer.providerProductId ||
+      safeText(price.id) !== offer.providerPriceId ||
+      !isExactFixedPrice(price, offer) ||
+      safeText(price.product) !== offer.providerProductId ||
       safeText(portal.id) !== this.configuration.portalConfigurationId ||
       portal.active !== true ||
       subscriptionCancel?.enabled !== true ||
@@ -1008,19 +1173,24 @@ export class StripeAdapter
       subscriptionUpdate?.enabled !== false ||
       !Array.isArray(subscriptionUpdate.default_allowed_updates) ||
       subscriptionUpdate.default_allowed_updates.length !== 0 ||
-      paymentMethodUpdate?.enabled !== false ||
+      paymentMethodUpdate?.enabled !== true ||
       customerUpdate?.enabled !== false ||
       !Array.isArray(customerUpdate.allowed_updates) ||
-      customerUpdate.allowed_updates.length !== 0
+      customerUpdate.allowed_updates.length !== 0 ||
+      invoiceHistory?.enabled !== true
     ) {
       throw new StripeWebhookError('stripe.preflight_resource_mismatch');
     }
     return {
       environment: this.configuration.environment,
       accountId: this.configuration.accountId,
-      livemode: expectedLivemode,
+      accountChargesEnabled,
+      accountPayoutsEnabled,
+      accountCountry,
+      accountBusinessType,
+      livemode: observedLivemode,
       apiVersion: this.configuration.apiVersion,
-      offer: this.configuration.offer,
+      offer,
       portalConfigurationId: this.configuration.portalConfigurationId,
       productActive: true,
       priceActive: true,
@@ -1029,6 +1199,8 @@ export class StripeAdapter
       portalCancellationMode: 'at_period_end',
       portalProrationBehavior: 'none',
       portalSubscriptionUpdateDefaultsEmpty: true,
+      portalPaymentMethodUpdateEnabled: true,
+      portalInvoiceHistoryEnabled: true,
       retentionCouponEvidence: 'manual_founder_browser_required',
       promotionsEnabled: false,
       automaticTaxEnabled: false,
@@ -1042,9 +1214,11 @@ export class StripeAdapter
     let dispatchAttempted = false;
     try {
       assertActor(input.actor);
+      const offer = this.configuredOffer(input.offerId);
       if (
-        input.planVersionId !== this.configuration.offer.planVersionId ||
-        input.providerPriceId !== this.configuration.offer.providerPriceId
+        offer.customerSelectable !== true ||
+        input.planVersionId !== offer.planVersionId ||
+        input.providerPriceId !== offer.providerPriceId
       ) {
         throw new StripeWebhookError('stripe.offer_mapping_mismatch');
       }
@@ -1072,11 +1246,11 @@ export class StripeAdapter
         idempotencyKey: input.idempotencyKey,
         form: {
           mode: 'subscription',
+          integration_identifier: stripeCheckoutIntegrationIdentifier,
           'automatic_tax[enabled]': 'false',
           allow_promotion_codes: 'false',
           'adaptive_pricing[enabled]': 'false',
           'after_expiration[recovery][enabled]': 'false',
-          'payment_method_types[0]': 'card',
           payment_method_collection: 'always',
           'line_items[0][price]': input.providerPriceId,
           'line_items[0][quantity]': '1',
@@ -1086,9 +1260,17 @@ export class StripeAdapter
           'metadata[household_id]': input.actor.householdId,
           'metadata[canonical_subscription_id]': input.canonicalSubscriptionId,
           'metadata[plan_version_id]': input.planVersionId,
+          'metadata[offer_id]': offer.offerId,
           'subscription_data[metadata][household_id]': input.actor.householdId,
           'subscription_data[metadata][canonical_subscription_id]': input.canonicalSubscriptionId,
           'subscription_data[metadata][plan_version_id]': input.planVersionId,
+          'subscription_data[metadata][offer_id]': offer.offerId,
+          ...(offer.trialPeriodDays === 0
+            ? {}
+            : {
+                'subscription_data[trial_period_days]': String(offer.trialPeriodDays),
+                'subscription_data[trial_settings][end_behavior][missing_payment_method]': 'cancel',
+              }),
           expires_at: String(providerExpiresAt.getTime() / 1_000),
           ...(input.customerReference === undefined ? {} : { customer: input.customerReference }),
         },
@@ -1177,7 +1359,7 @@ export class StripeAdapter
     const lifecycle = subscriptionLifecycle(object);
     const commerceEvidence = withBoundedGrace(
       lifecycle,
-      subscriptionCommerceEvidence(object),
+      subscriptionCommerceEvidence(object, this.configuration.offers),
       input.observedAt,
     );
     return {
@@ -1196,8 +1378,7 @@ export class StripeAdapter
       lifecycle,
       requiresReconciliation:
         commerceEvidence.providerPriceId === undefined ||
-        commerceEvidence.providerPriceId !== this.configuration.offer.providerPriceId ||
-        commerceEvidence.providerProductId !== this.configuration.offer.providerProductId ||
+        commerceEvidence.offerId === undefined ||
         commerceEvidence.subscriptionOfferExact !== true ||
         commerceEvidence.billingInterval === undefined ||
         commerceEvidence.currentPeriodStartsAt === undefined ||
@@ -1348,19 +1529,27 @@ export class StripeAdapter
       readonly subscription: string | null;
       readonly providerPaymentIntentId: string | null;
       readonly providerInvoiceId: string | null;
+      readonly providerChargeAmount: number | null;
     }> => {
       const charge = await this.transport.get({
         path: `/v1/charges/${encodeURIComponent(chargeId)}`,
       });
       const expectedLivemode = this.configuration.environment === 'production';
       const paymentIntent = safeText(charge.payment_intent);
+      const chargeAmount =
+        typeof charge.amount === 'number' && Number.isSafeInteger(charge.amount)
+          ? charge.amount
+          : undefined;
+      const chargeAmountSupported = this.configuration.offers.some(
+        (offer) => offer.unitAmountMinor === chargeAmount,
+      );
       if (
         charge.object !== 'charge' ||
         safeText(charge.id) !== chargeId ||
         charge.livemode !== expectedLivemode ||
         charge.status !== 'succeeded' ||
         charge.paid !== true ||
-        charge.amount !== 1499 ||
+        !chargeAmountSupported ||
         charge.currency !== 'usd' ||
         paymentIntent === undefined
       ) {
@@ -1369,6 +1558,7 @@ export class StripeAdapter
           subscription: null,
           providerPaymentIntentId: null,
           providerInvoiceId: null,
+          providerChargeAmount: null,
         };
       }
       const intent = await this.transport.get({
@@ -1379,8 +1569,8 @@ export class StripeAdapter
         safeText(intent.id) !== paymentIntent ||
         intent.livemode !== expectedLivemode ||
         intent.status !== 'succeeded' ||
-        intent.amount !== 1499 ||
-        intent.amount_received !== 1499 ||
+        intent.amount !== chargeAmount ||
+        intent.amount_received !== chargeAmount ||
         intent.currency !== 'usd' ||
         safeText(intent.latest_charge) !== chargeId
       ) {
@@ -1389,6 +1579,7 @@ export class StripeAdapter
           subscription: null,
           providerPaymentIntentId: null,
           providerInvoiceId: null,
+          providerChargeAmount: null,
         };
       }
       const payments = await this.transport.get({
@@ -1408,8 +1599,8 @@ export class StripeAdapter
         payment.livemode !== expectedLivemode ||
         payment.status !== 'paid' ||
         payment.is_default !== true ||
-        payment.amount_paid !== 1499 ||
-        payment.amount_requested !== 1499 ||
+        payment.amount_paid !== chargeAmount ||
+        payment.amount_requested !== chargeAmount ||
         payment.currency !== 'usd' ||
         paymentReference?.type !== 'payment_intent' ||
         safeText(paymentReference.payment_intent) !== paymentIntent ||
@@ -1420,6 +1611,7 @@ export class StripeAdapter
           subscription: null,
           providerPaymentIntentId: null,
           providerInvoiceId: null,
+          providerChargeAmount: null,
         };
       }
       return {
@@ -1427,11 +1619,14 @@ export class StripeAdapter
         subscription: await invoiceSubscription(invoiceId),
         providerPaymentIntentId: paymentIntent,
         providerInvoiceId: invoiceId,
+        providerChargeAmount: chargeAmount as number,
       };
     };
 
     if (input.eventType.startsWith('invoice.')) {
-      if (!resolvableInvoiceEventTypes.has(input.eventType)) return null;
+      if (input.eventType !== 'invoice.paid' && !isStripeFailedPaymentEventType(input.eventType)) {
+        return null;
+      }
       const evidence = await invoiceEvidence(input.providerObjectId);
       const subscription =
         evidence.subscription === null
@@ -1440,7 +1635,9 @@ export class StripeAdapter
               path: `/v1/subscriptions/${encodeURIComponent(evidence.subscription)}`,
             });
       const currentSubscription =
-        subscription === undefined ? undefined : subscriptionCommerceEvidence(subscription);
+        subscription === undefined
+          ? undefined
+          : subscriptionCommerceEvidence(subscription, this.configuration.offers);
       const currentSubscriptionExact =
         subscription !== undefined &&
         exactSubscriptionEnvelope(
@@ -1449,8 +1646,11 @@ export class StripeAdapter
           this.configuration.environment === 'production',
         ) &&
         currentSubscription?.subscriptionOfferExact === true &&
-        currentSubscription.providerPriceId === this.configuration.offer.providerPriceId &&
-        currentSubscription.providerProductId === this.configuration.offer.providerProductId;
+        currentSubscription.offerId !== undefined;
+      const currentOffer =
+        currentSubscription?.offerId === undefined
+          ? undefined
+          : this.configuredOffer(currentSubscription.offerId);
       const paymentIntentId = invoicePaymentIntent(evidence.invoice);
       const paymentIntent =
         paymentIntentId === undefined
@@ -1467,28 +1667,34 @@ export class StripeAdapter
               evidence.subscription,
               paymentIntent,
               this.configuration.environment === 'production',
+              this.configuration.offers,
             )
           : undefined;
       const paidPeriod =
-        candidatePaidPeriod?.providerPriceId === this.configuration.offer.providerPriceId &&
-        candidatePaidPeriod.providerProductId === this.configuration.offer.providerProductId &&
+        currentOffer !== undefined &&
+        candidatePaidPeriod?.offerId === currentOffer.offerId &&
+        candidatePaidPeriod.providerPriceId === currentOffer.providerPriceId &&
+        candidatePaidPeriod.providerProductId === currentOffer.providerProductId &&
         currentSubscriptionExact &&
         candidatePaidPeriod.providerSubscriptionItemId ===
           currentSubscription.providerSubscriptionItemId
           ? candidatePaidPeriod
           : undefined;
       const candidateFailedPayment =
-        input.eventType === 'invoice.payment_failed' && evidence.subscription !== null
+        isStripeFailedPaymentEventType(input.eventType) && evidence.subscription !== null
           ? failedInvoiceEvidence(
               evidence.invoice,
               evidence.subscription,
               paymentIntent,
               this.configuration.environment === 'production',
+              this.configuration.offers,
             )
           : undefined;
       const failedPayment =
-        candidateFailedPayment?.providerPriceId === this.configuration.offer.providerPriceId &&
-        candidateFailedPayment.providerProductId === this.configuration.offer.providerProductId &&
+        currentOffer !== undefined &&
+        candidateFailedPayment?.offerId === currentOffer.offerId &&
+        candidateFailedPayment.providerPriceId === currentOffer.providerPriceId &&
+        candidateFailedPayment.providerProductId === currentOffer.providerProductId &&
         currentSubscriptionExact &&
         candidateFailedPayment.providerSubscriptionItemId ===
           currentSubscription.providerSubscriptionItemId
@@ -1502,7 +1708,7 @@ export class StripeAdapter
             ...(failedPayment === undefined ? {} : { failedPaymentEvidence: failedPayment }),
             requiresAttention:
               (input.eventType === 'invoice.paid' && paidPeriod === undefined) ||
-              (input.eventType === 'invoice.payment_failed' && failedPayment === undefined),
+              (isStripeFailedPaymentEventType(input.eventType) && failedPayment === undefined),
           };
     }
     if (input.eventType === 'charge.refunded') {
@@ -1532,8 +1738,10 @@ export class StripeAdapter
       );
       const providerPaymentIntentId = evidence.providerPaymentIntentId;
       const providerInvoiceId = evidence.providerInvoiceId;
+      const providerChargeAmount = evidence.providerChargeAmount;
       const allRefundRowsExact =
         providerPaymentIntentId !== null &&
+        providerChargeAmount !== null &&
         exactRefunds.every(({ refund }) => {
           const paymentIntentReference = Object.hasOwn(refund, 'payment_intent')
             ? refund.payment_intent
@@ -1544,7 +1752,7 @@ export class StripeAdapter
             typeof refund.amount === 'number' &&
             Number.isSafeInteger(refund.amount) &&
             refund.amount > 0 &&
-            refund.amount <= 1499 &&
+            refund.amount <= providerChargeAmount &&
             refund.currency === 'usd' &&
             safeText(refund.charge) === input.providerObjectId &&
             (paymentIntentReference === null ||
@@ -1555,7 +1763,8 @@ export class StripeAdapter
       const succeededRefunds = exactRefunds.filter(({ refund }) => refund.status === 'succeeded');
       const fullRefund =
         evidence.charge.refunded === true &&
-        amount === 1499 &&
+        providerChargeAmount !== null &&
+        amount === providerChargeAmount &&
         evidence.charge.currency === 'usd' &&
         typeof refunded === 'number' &&
         Number.isSafeInteger(refunded) &&
@@ -1583,7 +1792,7 @@ export class StripeAdapter
                   providerInvoiceId: providerInvoiceId as string,
                   externalSubscriptionId: evidence.subscription as string,
                   eventState: 'opened' as const,
-                  providerChargeAmount: 1499 as const,
+                  providerChargeAmount: providerChargeAmount as number,
                   restrictionAmount: refund.amount as number,
                   currency: 'usd' as const,
                 }),
@@ -1613,7 +1822,8 @@ export class StripeAdapter
         refund.object === 'refund' &&
         safeText(refund.id) === input.providerObjectId &&
         refund.livemode === (this.configuration.environment === 'production') &&
-        chargeAmount === 1499 &&
+        evidence.providerChargeAmount !== null &&
+        chargeAmount === evidence.providerChargeAmount &&
         evidence.charge.currency === 'usd' &&
         refund.currency === 'usd' &&
         typeof refund.amount === 'number' &&
@@ -1658,7 +1868,7 @@ export class StripeAdapter
                   providerInvoiceId: evidence.providerInvoiceId,
                   externalSubscriptionId: evidence.subscription,
                   eventState: restrictionState,
-                  providerChargeAmount: 1499 as const,
+                  providerChargeAmount: evidence.providerChargeAmount as number,
                   restrictionAmount: refund.amount as number,
                   currency: 'usd' as const,
                   ...(failedRefund
@@ -1693,7 +1903,8 @@ export class StripeAdapter
         typeof dispute.amount === 'number' &&
         Number.isSafeInteger(dispute.amount) &&
         dispute.amount >= 1 &&
-        dispute.amount <= 1499 &&
+        evidence.providerChargeAmount !== null &&
+        dispute.amount <= evidence.providerChargeAmount &&
         dispute.currency === 'usd' &&
         evidence.providerPaymentIntentId !== null &&
         (disputePaymentIntentReference === null ||
@@ -1740,7 +1951,7 @@ export class StripeAdapter
                       providerInvoiceId: evidence.providerInvoiceId,
                       externalSubscriptionId: evidence.subscription,
                       eventState: restrictionState,
-                      providerChargeAmount: 1499 as const,
+                      providerChargeAmount: evidence.providerChargeAmount as number,
                       restrictionAmount: dispute.amount as number,
                       currency: 'usd' as const,
                       ...(status === 'won'
@@ -1775,16 +1986,24 @@ export class StripeTestAdapter extends StripeAdapter {
       accountId: 'acct_fixture1234',
       apiVersion,
       portalConfigurationId: 'bpc_cancel_only_fixture',
-      offer: {
-        offerId: 'founding_family_monthly_v1',
-        planVersionId: 'family_v1',
-        billingInterval: 'month',
-        providerProductId: 'prod_family_fixture',
-        providerPriceId: 'price_family_month_fixture',
-        currency: 'usd',
-        unitAmountMinor: 1499,
-        quantity: 1,
-      },
+      defaultOfferId: 'founding_family_monthly_v1',
+      offers: [
+        {
+          offerId: 'founding_family_monthly_v1',
+          planVersionId: 'family_v1',
+          plan: 'family',
+          displayName: 'Family',
+          billingInterval: 'month',
+          providerProductId: 'prod_family_fixture',
+          providerPriceId: 'price_family_month_fixture',
+          currency: 'usd',
+          unitAmountMinor: 1499,
+          quantity: 1,
+          trialPeriodDays: 0,
+          customerSelectable: true,
+          defaultAcquisitionOffer: true,
+        },
+      ],
     });
   }
 }

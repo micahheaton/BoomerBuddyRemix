@@ -2,7 +2,9 @@
 
 import { useClerk } from '@clerk/nextjs';
 import { useState } from 'react';
-import { apiRequest, setSelectedHouseholdId } from '../lib/api';
+import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
+import { apiRequest } from '../lib/api';
+import { clearCustomerSessionState, productionSessionRecoveryPath } from '../lib/auth-recovery';
 
 export function ProductionSignOut() {
   const clerk = useClerk();
@@ -16,8 +18,11 @@ export function ProductionSignOut() {
       // Clerk remains the upstream session authority. Always revoke it even if the local
       // session record is already unavailable or the API cannot be reached.
     } finally {
-      setSelectedHouseholdId('');
-      await clerk.signOut({ redirectUrl: '/sign-in' });
+      clearCustomerSessionState(window.sessionStorage);
+      const outcome = await settleIdentitySignOut({
+        clearIdentitySession: () => clerk.signOut(),
+      });
+      window.location.replace(outcome === 'cleared' ? '/sign-in' : productionSessionRecoveryPath);
     }
   }
 

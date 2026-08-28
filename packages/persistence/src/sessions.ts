@@ -223,7 +223,7 @@ export class SessionRepository {
     readonly issuer: string;
     readonly subject: string;
     readonly providerSessionId: string;
-    readonly audience: 'customer' | 'hq';
+    readonly audience: 'customer' | 'mobile' | 'hq';
     readonly issuedAt: Date;
     readonly expiresAt: Date;
     readonly now: Date;

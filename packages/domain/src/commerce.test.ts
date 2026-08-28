@@ -85,16 +85,16 @@ function commerceContext(options: ContextOptions = {}): CommerceEntitlementConte
 }
 
 describe('immutable commerce catalog', () => {
-  it('publishes the explicit Free, Plus, and Family hypotheses', () => {
+  it('keeps entitlement fixtures separate from the active revenue hypothesis registry', () => {
     expect(seededCommercePlanVersions.free.prices).toEqual([
       { interval: 'month', amountMinor: 0, currency: 'USD', kind: 'list' },
       { interval: 'year', amountMinor: 0, currency: 'USD', kind: 'list' },
     ]);
     expect(seededCommercePlanVersions.plus.prices.map((price) => price.amountMinor)).toEqual([
-      899, 8_900,
+      899, 8_990,
     ]);
     expect(seededCommercePlanVersions.family.prices.map((price) => price.amountMinor)).toEqual([
-      1_499, 14_900, 11_900,
+      1_499, 14_990,
     ]);
     expect(seededCommercePlanVersions.plus.allowances).toEqual([
       { kind: 'protected_members', limit: 1 },

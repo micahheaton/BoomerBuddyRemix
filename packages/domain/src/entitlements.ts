@@ -8,6 +8,8 @@ import type {
   PersonId,
 } from './identifiers';
 
+export const protectedSelfEnrollmentConsentVersion = 'protected-self-enrollment-v1' as const;
+
 export const entitlementSources = [
   'local',
   'web',

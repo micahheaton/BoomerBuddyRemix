@@ -1,26 +1,71 @@
 {
   "expo": {
     "name": "BoomerBuddy",
-    "slug": "boomerbuddy-2-local",
-    "scheme": "boomerbuddy-local",
+    "slug": "boomerbuddy",
+    "scheme": "boomerbuddy",
     "version": "0.1.0",
+    "icon": "./assets/icon.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "net.boomerbuddy.local"
+      "bundleIdentifier": "net.boomerbuddy.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        }
+      }
     },
     "android": {
-      "package": "net.boomerbuddy.local"
+      "package": "net.boomerbuddy.app",
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.VIBRATE"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F7F5EF"
+      }
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
-    "plugins": ["expo-secure-store"],
+    "plugins": [
+      [
+        "expo-secure-store",
+        {
+          "faceIDPermission": false
+        }
+      ],
+      "@clerk/expo",
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "color": "#255B57",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F5EF"
+        }
+      ]
+    ],
     "extra": {
-      "deepLinkStatus": "scaffolded_not_device_verified",
+      "deepLinkStatus": "route_only_registered_not_device_verified",
+      "mobileJwtTemplate": "boomerbuddy-mobile",
       "nativeSharingStatus": "blocked_not_device_verified",
-      "providerMode": "local_unknown"
+      "providerMode": "clerk_customer_native_registration_required"
     }
   }
 }

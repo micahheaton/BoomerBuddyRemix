@@ -68,7 +68,11 @@ function config(): AppConfig {
   };
 }
 
-function customerToken(subject: string, providerSessionId: string): VerifiedIdentityToken {
+function customerToken(
+  subject: string,
+  providerSessionId: string,
+  firstFactorAgeSeconds = 30,
+): VerifiedIdentityToken {
   return {
     issuer: customerIssuer,
     subject,
@@ -77,6 +81,7 @@ function customerToken(subject: string, providerSessionId: string): VerifiedIden
     issuedAt: new Date(now.getTime() - 30_000),
     expiresAt: new Date(now.getTime() + 60_000),
     authorizedParty: customerOrigin,
+    firstFactorAgeSeconds,
   };
 }
 
@@ -103,6 +108,9 @@ describe('production Trusted Circle identity binding', () => {
         if (token === 'customer-two-token') {
           return customerToken('user_customer_two', 'sess_customer_two');
         }
+        if (token === 'customer-one-stale-token') {
+          return customerToken('user_customer_one', 'sess_customer_one', 600);
+        }
         throw new Error('invalid token');
       },
     };
@@ -122,47 +130,150 @@ describe('production Trusted Circle identity binding', () => {
     await database.close();
   });
 
-  it('requires one exact active customer subject and rejects self or client authority fields', async () => {
+  it('uses an opaque rotatable recipient code without granting invitation authority', async () => {
     const first = await app.inject({ method: 'GET', url: '/v1/me', headers: firstHeaders });
+    const secondHeaders = { origin: customerOrigin, cookie: '__session=customer-two-token' };
     const second = await app.inject({
       method: 'GET',
       url: '/v1/me',
-      headers: { origin: customerOrigin, cookie: '__session=customer-two-token' },
+      headers: secondHeaders,
     });
     expect(first.statusCode).toBe(200);
     expect(second.statusCode).toBe(200);
     const householdId = String(first.json().principal.households[0].id);
+    const codeState = () =>
+      database.query<{
+        codes: number;
+        rate_buckets: number;
+        audit_events: number;
+        outbox_events: number;
+      }>(
+        `SELECT
+           (SELECT count(*)::int FROM trusted_circle_recipient_codes) AS codes,
+           (SELECT count(*)::int FROM trusted_circle_authenticated_rate_buckets)
+             AS rate_buckets,
+           (SELECT count(*)::int FROM audit_events) AS audit_events,
+           (SELECT count(*)::int FROM outbox_events) AS outbox_events`,
+      );
+    const beforeStaleCodeAttempt = await codeState();
+    const staleCodeAttempt = await app.inject({
+      method: 'POST',
+      url: '/v1/family/recipient-connection-codes',
+      headers: { origin: customerOrigin, cookie: '__session=customer-one-stale-token' },
+      payload: {},
+    });
+    expect(staleCodeAttempt.statusCode, staleCodeAttempt.body).toBe(403);
+    expect(staleCodeAttempt.json().error).toMatchObject({
+      message: 'Sign in again before changing household access',
+      details: {
+        action: 'sign_in_again',
+        reason: 'recent_authentication_required',
+      },
+    });
+    expect((await codeState()).rows).toEqual(beforeStaleCodeAttempt.rows);
+    const firstCode = await app.inject({
+      method: 'POST',
+      url: '/v1/family/recipient-connection-codes',
+      headers: secondHeaders,
+      payload: {},
+    });
+    const secondCode = await app.inject({
+      method: 'POST',
+      url: '/v1/family/recipient-connection-codes',
+      headers: secondHeaders,
+      payload: {},
+    });
+    expect(firstCode.statusCode, firstCode.body).toBe(201);
+    expect(secondCode.statusCode, secondCode.body).toBe(201);
+    const firstRecipientCode = String(firstCode.json().recipientConnectionCode);
+    const recipientConnectionCode = String(secondCode.json().recipientConnectionCode);
+    expect(firstRecipientCode).not.toBe(recipientConnectionCode);
+
+    const beforeStaleAttempt = await database.query<{
+      invitations: number;
+      member_invitations: number;
+      rate_buckets: number;
+      active_codes: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM invitations) AS invitations,
+         (SELECT count(*)::int FROM household_member_invitations) AS member_invitations,
+         (SELECT count(*)::int FROM trusted_circle_authenticated_rate_buckets) AS rate_buckets,
+         (SELECT count(*)::int FROM trusted_circle_recipient_codes WHERE state = 'active')
+           AS active_codes`,
+    );
+    const staleAttempt = await app.inject({
+      method: 'POST',
+      url: '/v1/family/member-invitations',
+      headers: {
+        origin: customerOrigin,
+        cookie: '__session=customer-one-stale-token',
+        'x-bb-household-id': householdId,
+      },
+      payload: { recipientConnectionCode },
+    });
+    expect(staleAttempt.statusCode, staleAttempt.body).toBe(403);
+    expect(staleAttempt.json().error).toMatchObject({
+      message: 'Sign in again before changing household access',
+      details: {
+        action: 'sign_in_again',
+        reason: 'recent_authentication_required',
+      },
+    });
+    const afterStaleAttempt = await database.query<{
+      invitations: number;
+      member_invitations: number;
+      rate_buckets: number;
+      active_codes: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM invitations) AS invitations,
+         (SELECT count(*)::int FROM household_member_invitations) AS member_invitations,
+         (SELECT count(*)::int FROM trusted_circle_authenticated_rate_buckets) AS rate_buckets,
+         (SELECT count(*)::int FROM trusted_circle_recipient_codes WHERE state = 'active')
+           AS active_codes`,
+    );
+    expect(afterStaleAttempt.rows).toEqual(beforeStaleAttempt.rows);
+
     const request = (payload: Record<string, unknown>) =>
       app.inject({
         method: 'POST',
         url: '/v1/family/invitations',
         headers: { ...firstHeaders, 'x-bb-household-id': householdId },
         payload: {
-          inviteeDisplayName: 'Ignored client display name',
           permissions: ['view_shared_checks'],
           ...payload,
         },
       });
 
     expect((await request({})).statusCode).toBe(400);
-    expect((await request({ intendedCustomerSubject: 'user_customer_missing' })).statusCode).toBe(
-      404,
-    );
-    expect((await request({ intendedCustomerSubject: 'user_customer_one' })).statusCode).toBe(400);
+    expect((await request({ intendedCustomerSubject: 'user_customer_two' })).statusCode).toBe(400);
     expect(
       (
         await request({
-          intendedCustomerSubject: 'user_customer_two',
+          recipientConnectionCode,
           householdId: 'household-attacker',
           role: 'hq_owner',
         })
       ).statusCode,
     ).toBe(400);
 
-    // The exact second identity resolves successfully, then the server-side protected-member
-    // authorization gate denies this administrator-only bootstrap. Identity lookup alone grants
-    // neither enrollment nor invitation authority.
-    expect((await request({ intendedCustomerSubject: 'user_customer_two' })).statusCode).toBe(403);
+    // A recipient-created code identifies the exact active account, but it grants no invitation
+    // authority to an administrator who has not separately enrolled as protected.
+    expect((await request({ recipientConnectionCode })).statusCode).toBe(403);
     expect((await database.query('SELECT id FROM invitations')).rowCount).toBe(0);
+    const codeRows = await database.query<{
+      state: string;
+      code_fingerprint: string;
+    }>('SELECT state, code_fingerprint FROM trusted_circle_recipient_codes ORDER BY created_at');
+    expect(codeRows.rows.map((row) => row.state)).toEqual(['rotated', 'active']);
+    expect(JSON.stringify(codeRows.rows)).not.toContain(firstRecipientCode);
+    expect(JSON.stringify(codeRows.rows)).not.toContain(recipientConnectionCode);
+    const evidence = await database.query<{ payload: unknown }>(
+      `SELECT payload FROM outbox_events
+       WHERE aggregate_type = 'recipient_connection_code' ORDER BY occurred_at`,
+    );
+    expect(JSON.stringify(evidence.rows)).not.toContain(firstRecipientCode);
+    expect(JSON.stringify(evidence.rows)).not.toContain(recipientConnectionCode);
   });
 });

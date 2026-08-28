@@ -90,10 +90,60 @@ export const deleteCheckResponseSchema = z.object({
 });
 
 export const shareCheckRequestSchema = z.object({ sharedWithPersonId: opaqueIdSchema }).strict();
+export const checkShareLifecycleStateSchema = z.enum(['shared', 'acknowledged', 'closed']);
+export const checkShareClosureReasonSchema = z.enum([
+  'safer_action_completed',
+  'no_longer_needs_help',
+]);
+export const checkShareLifecycleSchema = z
+  .object({
+    checkId: opaqueIdSchema,
+    sharedWithPersonId: opaqueIdSchema,
+    sharedWithDisplayName: z.string().min(1).max(120),
+    state: checkShareLifecycleStateSchema,
+    sharedAt: isoDateTimeSchema,
+    acknowledgedAt: isoDateTimeSchema.optional(),
+    closedAt: isoDateTimeSchema.optional(),
+    closureReason: checkShareClosureReasonSchema.optional(),
+  })
+  .superRefine((value, context) => {
+    const valid =
+      (value.state === 'shared' &&
+        value.acknowledgedAt === undefined &&
+        value.closedAt === undefined &&
+        value.closureReason === undefined) ||
+      (value.state === 'acknowledged' &&
+        value.acknowledgedAt !== undefined &&
+        value.closedAt === undefined &&
+        value.closureReason === undefined) ||
+      (value.state === 'closed' &&
+        value.acknowledgedAt !== undefined &&
+        value.closedAt !== undefined &&
+        value.closureReason !== undefined);
+    if (!valid) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Check share lifecycle evidence does not match its state',
+      });
+    }
+  });
 export const shareCheckResponseSchema = z.object({
   checkId: opaqueIdSchema,
   sharedWithPersonId: opaqueIdSchema,
   state: z.literal('active'),
+  lifecycle: checkShareLifecycleSchema,
+});
+export const checkShareListResponseSchema = z.object({
+  shares: z.array(checkShareLifecycleSchema),
+});
+export const acknowledgeCheckShareResponseSchema = z.object({
+  share: checkShareLifecycleSchema,
+});
+export const closeCheckShareRequestSchema = z
+  .object({ resolution: checkShareClosureReasonSchema })
+  .strict();
+export const closeCheckShareResponseSchema = z.object({
+  share: checkShareLifecycleSchema,
 });
 
 export type CheckKind = z.infer<typeof checkKindSchema>;
@@ -105,3 +155,6 @@ export type CheckResult = z.infer<typeof checkResultSchema>;
 export type CreateCheckResponse = z.infer<typeof createCheckResponseSchema>;
 export type CheckListResponse = z.infer<typeof checkListResponseSchema>;
 export type ShareCheckRequest = z.infer<typeof shareCheckRequestSchema>;
+export type CheckShareLifecycle = z.infer<typeof checkShareLifecycleSchema>;
+export type CheckShareClosureReason = z.infer<typeof checkShareClosureReasonSchema>;
+export type CheckShareListResponse = z.infer<typeof checkShareListResponseSchema>;

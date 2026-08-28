@@ -464,6 +464,7 @@ describe('growth runtime projection', () => {
       database,
       Buffer.alloc(32, 19),
       labeledIds('orientation-events'),
+      'local',
     );
     const businessOs = new BusinessOsRepository(database, labeledIds('suppression'));
     const startedAt = new Date(fixedTestNow.getTime() + 60_000);
@@ -552,6 +553,7 @@ describe('growth runtime projection', () => {
       database,
       testArtifactProtection(),
       labeledIds('later-check'),
+      'local',
     );
     const checkedAt = new Date(completedAt.getTime() + 60_000);
     await checks.create({
@@ -603,6 +605,7 @@ describe('growth runtime projection', () => {
       Buffer.alloc(32, 29),
       1,
       labeledIds('referral-events'),
+      'local',
     );
     const sessions = new SessionRepository(database, labeledIds('referral-sessions'));
     const invitedAt = new Date(fixedTestNow.getTime() + 60_000);
@@ -630,6 +633,7 @@ describe('growth runtime projection', () => {
       correlationId: 'growth-referral-create',
       now: invitedAt,
     });
+    if (created.delivery !== 'local_only') throw new TypeError('Expected a local invitation');
     const credential = await family.validateInvitationCredential(
       created.invitation.id,
       created.localInviteCode,

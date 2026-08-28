@@ -1,6 +1,13 @@
 import { BusinessOsRepository } from '@boomerbuddy/persistence';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { browserHeaders, createApiHarness, hqOrigin, login, type ApiHarness } from './support';
+import {
+  bearerHeaders,
+  browserHeaders,
+  createApiHarness,
+  hqOrigin,
+  login,
+  type ApiHarness,
+} from './support';
 
 describe('HQ Business OS API', () => {
   let harness: ApiHarness;
@@ -445,5 +452,91 @@ describe('HQ Business OS API', () => {
       headers: browserHeaders(reviewer.cookie as string, hqOrigin),
     });
     expect(denied.statusCode).toBe(403);
+  });
+
+  it('accepts confirmed person-scoped deletion for an unassigned mobile identity and recovers duplicates through GET', async () => {
+    const unassignedMobile = await login(harness.app, 'trusted-jordan', 'mobile');
+    const mobileHeaders = bearerHeaders(unassignedMobile.token as string);
+
+    const unconfirmed = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: mobileHeaders,
+      payload: { requestKind: 'delete' },
+    });
+    expect(unconfirmed.statusCode, unconfirmed.body).toBe(400);
+
+    const created = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: mobileHeaders,
+      payload: { requestKind: 'delete', confirmation: 'DELETE_MY_ACCOUNT' },
+    });
+    expect(created.statusCode, created.body).toBe(202);
+    expect(created.json()).toMatchObject({
+      id: expect.any(String),
+      state: 'received',
+      identityVerificationState: 'pending',
+      dueAt: expect.any(String),
+    });
+    const requestId = created.json<{ id: string }>().id;
+
+    const persisted = await harness.database.query<{
+      household_id: string | null;
+      person_id: string;
+      request_kind: string;
+    }>('SELECT person_id, household_id, request_kind FROM privacy_requests WHERE id = $1', [
+      requestId,
+    ]);
+    expect(persisted.rows).toEqual([
+      {
+        person_id: 'person-trusted-jordan',
+        household_id: null,
+        request_kind: 'delete',
+      },
+    ]);
+
+    const duplicate = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: mobileHeaders,
+      payload: { requestKind: 'delete', confirmation: 'DELETE_MY_ACCOUNT' },
+    });
+    expect(duplicate.statusCode, duplicate.body).toBe(409);
+
+    const recovered = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/privacy-requests',
+      headers: mobileHeaders,
+    });
+    expect(recovered.statusCode, recovered.body).toBe(200);
+    expect(recovered.json()).toMatchObject({
+      requests: [
+        {
+          id: requestId,
+          personId: 'person-trusted-jordan',
+          requestKind: 'delete',
+          state: 'received',
+        },
+      ],
+    });
+    expect(JSON.stringify(recovered.json())).not.toContain('householdId');
+
+    const unassignedBrowser = await login(harness.app, 'trusted-jordan');
+    const missingOrigin = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: { cookie: unassignedBrowser.cookie as string },
+      payload: { requestKind: 'delete', confirmation: 'DELETE_MY_ACCOUNT' },
+    });
+    expect(missingOrigin.statusCode).toBe(403);
+
+    const householdScopedKind = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/privacy-requests',
+      headers: mobileHeaders,
+      payload: { requestKind: 'export' },
+    });
+    expect(householdScopedKind.statusCode).toBe(403);
   });
 });

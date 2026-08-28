@@ -37,7 +37,15 @@ test('HQ labels local runtime provenance and excludes customer artifact content'
 
   await page.getByRole('link', { name: 'System & audit' }).click();
   await expect(page.getByRole('heading', { name: 'System and audit' })).toBeVisible();
+  await expect(
+    page.getByRole('heading', { name: 'Content-free operational health' }),
+  ).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Worker heartbeats' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Durable jobs' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Outbox backlog' })).toBeVisible();
+  await expect(page.locator('body')).toContainText('worker stale after 60 seconds');
   await expect(page.locator('body')).toContainText('no artifact content');
+  await expect(page.locator('body')).not.toContainText('HQ-MUST-NEVER-SHOW-THIS-ARTIFACT');
 });
 
 test('HQ reviewer is routed to an assigned metadata-minimal review queue', async ({ page }) => {

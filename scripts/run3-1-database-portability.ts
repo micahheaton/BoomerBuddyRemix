@@ -38,25 +38,44 @@ export const criticalPortabilityTables = [
   'artifacts',
   'analyses',
   'check_shares',
+  'check_share_lifecycle_events',
   'public_check_contexts',
   'public_check_results',
   'public_check_conversions',
+  'public_check_attribution_aggregates',
+  'acquisition_touchpoints',
   'consents',
   'consent_evidence',
   'consent_current_projections',
   'invitations',
   'trusted_circle_relationships',
+  'trusted_circle_recipient_codes',
+  'trusted_circle_authenticated_rate_buckets',
+  'household_member_invitations',
   'orientation_states',
+  'member_learning_progress',
+  'member_learning_preferences',
+  'member_in_app_feed_receipts',
+  'member_learning_operation_receipts',
+  'member_scam_guidance_briefs',
   'safe_word_verifiers',
+  'family_safe_word_rate_buckets',
+  'family_safe_word_lifecycle_events',
   'organizations',
+  'commerce_product_versions',
+  'commerce_plan_versions',
   'commerce_subscriptions',
   'commerce_provider_subscription_records',
+  'commerce_storefront_policies',
+  'commerce_checkout_intents',
+  'commerce_provider_customers',
   'commerce_sponsorships',
   'commerce_sponsorship_allocations',
   'entitlement_grants',
   'commerce_allowance_allocations',
   'protected_members',
   'commerce_event_inbox',
+  'commerce_reconciliation_runs',
   'durable_jobs',
   'durable_job_attempts',
   'durable_consumer_receipts',
@@ -91,6 +110,46 @@ export const criticalPortabilityTables = [
   'feedback_payload_erasure_events',
   'feedback_authenticated_quota_buckets',
   'feedback_authenticated_quota_charges',
+  'household_billing_authority_events',
+  'commerce_stripe_offer_contracts',
+  'commerce_stripe_initiation_controls',
+  'commerce_stripe_initiation_control_events',
+  'commerce_stripe_eligible_households',
+  'commerce_stripe_eligibility_events',
+  'commerce_stripe_preflight_records',
+  'commerce_stripe_session_operations',
+  'commerce_stripe_checkout_completions',
+  'commerce_stripe_paid_invoice_evidence',
+  'commerce_stripe_failed_invoice_evidence',
+  'commerce_stripe_financial_restriction_resolutions',
+  'commerce_stripe_inventory_reconciliation_runs',
+  'commerce_stripe_inventory_mismatches',
+  'commerce_stripe_session_operation_attempts',
+  'commerce_stripe_session_retry_repair_events',
+  'commerce_stripe_cohort_policies',
+  'commerce_stripe_cohort_policy_events',
+  'commerce_stripe_invoice_authority_facts',
+  'commerce_stripe_dunning_events',
+  'commerce_stripe_financial_restriction_events',
+  'commerce_stripe_inventory_run_attempts',
+  'commerce_stripe_inventory_page_receipts',
+  'commerce_stripe_reconciliation_repair_events',
+  'commerce_stripe_checkout_dependency_wakes',
+  'commerce_stripe_cohort_policy_events_v2',
+  'commerce_billing_reverification_mutex',
+  'commerce_billing_reverification_bindings',
+  'private_beta_access_intent_gate',
+  'private_beta_access_intent_receipts',
+  'private_beta_access_intent_rate_buckets',
+  'private_beta_access_intent_aggregates',
+  'commerce_stripe_invoice_recovery_events',
+  'support_receipt_gate',
+  'support_receipts',
+  'support_receipt_operations',
+  'support_receipt_events',
+  'support_receipt_rate_buckets',
+  'protected_self_enrollment_household_gates',
+  'protected_self_enrollment_operations',
 ] as const;
 
 export type CriticalPortabilityTable = (typeof criticalPortabilityTables)[number];
@@ -483,10 +542,19 @@ export function buildPgRestoreInvocation(input: {
 }
 
 const snapshotSql = `SELECT json_build_object(
-  'criticalCounts', json_build_object(
-    ${criticalPortabilityTables
-      .map((table) => `'${table}', (SELECT count(*)::bigint FROM "public"."${table}")`)
-      .join(',\n    ')}
+  'criticalCounts', COALESCE(
+    (
+      SELECT json_object_agg(table_name, row_count ORDER BY table_name)
+      FROM (
+        ${criticalPortabilityTables
+          .map(
+            (table) =>
+              `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
+          )
+          .join('\n        UNION ALL\n        ')}
+      ) AS critical_counts
+    ),
+    '{}'::json
   ),
   'migrations', COALESCE(
     (SELECT json_agg(version || ':' || checksum ORDER BY version) FROM "public"."schema_migrations"),

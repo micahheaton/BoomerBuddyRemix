@@ -40,7 +40,6 @@ export function FoundingHouseholds() {
   const [data, setData] = useState<FoundingHouseholdFounderConsoleResponse>();
   const [draft, setDraft] = useState<PolicyDraft>(initialPolicy);
   const [oneTimeCredential, setOneTimeCredential] = useState('');
-  const [intendedCustomerSubject, setIntendedCustomerSubject] = useState('');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -71,7 +70,6 @@ export function FoundingHouseholds() {
       pendingOperations.current.clear();
       setData(undefined);
       setOneTimeCredential('');
-      setIntendedCustomerSubject('');
       setLostInvitationId('');
       setNotice('');
       setAuthorizationLost(true);
@@ -108,7 +106,6 @@ export function FoundingHouseholds() {
           pendingOperations.current.clear();
           setData(undefined);
           setOneTimeCredential('');
-          setIntendedCustomerSubject('');
           setLostInvitationId('');
           setAuthorizationLost(true);
         }
@@ -196,11 +193,10 @@ export function FoundingHouseholds() {
     setNotice('');
     try {
       if (!data) throw new Error('Founding Household policy is unavailable.');
-      const subject = intendedCustomerSubject.trim();
-      if (data.environment === 'production' && !subject) {
-        throw new Error('Enter the exact Clerk customer subject for the intended household.');
+      if (data.environment === 'production') {
+        throw new Error('New sponsored-access invitations are disabled in production.');
       }
-      const payload = data.environment === 'production' ? { intendedCustomerSubject: subject } : {};
+      const payload = {};
       const signature = JSON.stringify({ policyRevision: data.policy.revision, ...payload });
       const result = await hqRequest<CreateFoundingHouseholdInvitationResponse>(
         `${apiPaths.hqFoundingHouseholds}/invitations`,
@@ -226,7 +222,6 @@ export function FoundingHouseholds() {
       }
       setLostInvitationId('');
       setOneTimeCredential(result.invitationCredential);
-      setIntendedCustomerSubject('');
       setNotice(
         'One identity-bound credential was issued for founder-only manual delivery. It is displayed once and has not been emailed, texted, logged, or placed in a contact list.',
       );
@@ -326,7 +321,7 @@ export function FoundingHouseholds() {
       ) : null}
       {oneTimeCredential ? (
         <section className="hq-card section" aria-label="One-time invitation credential">
-          <span className="seed-label">Displayed once — founder manual handoff only</span>
+          <span className="seed-label">Displayed once - founder manual handoff only</span>
           <h2>Founding Household invitation</h2>
           <code>{oneTimeCredential}</code>
           <p className="source">
@@ -364,7 +359,27 @@ export function FoundingHouseholds() {
         </section>
       ) : null}
 
-      {data ? (
+      {data?.environment === 'production' ? (
+        <section className="hq-card action-panel section">
+          <h2>New sponsored enrollment is disabled</h2>
+          <p className="source">
+            Production cannot activate a sponsored-access policy or issue a new invitation.
+            Historical records and their withdrawal controls remain available below.
+          </p>
+          {data.policy.state !== 'disabled' ? (
+            <button
+              className="secondary"
+              type="button"
+              disabled={Boolean(busy)}
+              onClick={() => void disablePolicy()}
+            >
+              Disable policy and invalidate pending credentials
+            </button>
+          ) : (
+            <p className="source">The sponsored-access policy is disabled.</p>
+          )}
+        </section>
+      ) : data ? (
         <details className="hq-card action-panel section">
           <summary>Configure the finite {label(data.environment)} cohort policy</summary>
           <form className="form-grid" onSubmit={configure}>
@@ -380,17 +395,17 @@ export function FoundingHouseholds() {
                 }
               >
                 <option value="family_beta_v1">
-                  Founding Family beta — 3 protected / 6 trusted
+                  Founding Family beta - 3 protected / 6 trusted
                 </option>
-                <option value="plus_beta_v1">Founding Plus beta — 1 protected / 2 trusted</option>
+                <option value="plus_beta_v1">Founding Plus beta - 1 protected / 2 trusted</option>
               </select>
             </label>
             <label>
-              Maximum households (1–{data.environment === 'production' ? 5 : 25})
+              Maximum households (1-25)
               <input
                 type="number"
                 min={1}
-                max={data.environment === 'production' ? 5 : 25}
+                max={25}
                 value={draft.maxHouseholds}
                 onChange={(event) =>
                   setDraft({ ...draft, maxHouseholds: Number(event.target.value) })
@@ -398,7 +413,7 @@ export function FoundingHouseholds() {
               />
             </label>
             <label>
-              Invitation lifetime, days (1–14)
+              Invitation lifetime, days (1-14)
               <input
                 type="number"
                 min={1}
@@ -410,7 +425,7 @@ export function FoundingHouseholds() {
               />
             </label>
             <label>
-              Sponsored access, days (1–180)
+              Sponsored access, days (1-180)
               <input
                 type="number"
                 min={1}
@@ -452,50 +467,37 @@ export function FoundingHouseholds() {
         </details>
       ) : null}
 
-      <section className="hq-card section">
-        <h2>
-          {data?.environment === 'production' ? 'Identity-bound invitation' : 'Invitation issuance'}
-        </h2>
-        <p>
-          The server stores only an HMAC fingerprint. It never accepts a client-selected household,
-          person, role, or entitlement, and it has no automatic delivery path.
-        </p>
-        {data?.environment === 'production' ? (
-          <label>
-            Exact Clerk customer subject
-            <input
-              type="text"
-              autoComplete="off"
-              minLength={1}
-              maxLength={200}
-              value={intendedCustomerSubject}
-              onChange={(event) => {
-                setIntendedCustomerSubject(event.target.value);
-                resolveOperation('invite');
-              }}
-            />
-            <span className="source">
-              The server combines this subject with the configured customer issuer and resolves the
-              immutable customer bootstrap before creating anything.
-            </span>
-          </label>
-        ) : null}
-        <button
-          className="primary"
-          type="button"
-          disabled={
-            Boolean(busy) ||
-            Boolean(oneTimeCredential) ||
-            Boolean(lostInvitationId) ||
-            data?.policy.state !== 'active' ||
-            data.capacity.remaining < 1 ||
-            (data.environment === 'production' && !intendedCustomerSubject.trim())
-          }
-          onClick={() => void createInvitation()}
-        >
-          {busy === 'invite' ? 'Issuing…' : 'Issue one manual-delivery credential'}
-        </button>
-      </section>
+      {data?.environment === 'production' ? (
+        <section className="hq-card section">
+          <h2>New invitations are disabled</h2>
+          <p>
+            Production cannot issue another sponsored-access invitation. Pending historical
+            invitations can still be revoked below.
+          </p>
+        </section>
+      ) : (
+        <section className="hq-card section">
+          <h2>Invitation issuance</h2>
+          <p>
+            The server stores only an HMAC fingerprint. It never accepts a client-selected
+            household, person, role, or entitlement, and it has no automatic delivery path.
+          </p>
+          <button
+            className="primary"
+            type="button"
+            disabled={
+              Boolean(busy) ||
+              Boolean(oneTimeCredential) ||
+              Boolean(lostInvitationId) ||
+              data?.policy.state !== 'active' ||
+              data.capacity.remaining < 1
+            }
+            onClick={() => void createInvitation()}
+          >
+            {busy === 'invite' ? 'Issuing…' : 'Issue one manual-delivery credential'}
+          </button>
+        </section>
+      )}
 
       {lostInvitationId ? (
         <p className="error" role="alert">

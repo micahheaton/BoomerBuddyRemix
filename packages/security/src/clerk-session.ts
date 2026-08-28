@@ -1,22 +1,35 @@
 import { verifyToken } from '@clerk/backend';
 
-export type ProductionIdentityAudience = 'customer' | 'hq';
+export type ProductionIdentityAudience = 'customer' | 'mobile' | 'hq';
+
+export const mobileClerkJwtTemplate = 'boomerbuddy-mobile' as const;
+export const mobileClerkAudience = 'boomerbuddy-mobile' as const;
+export const mobileClerkSurface = 'mobile' as const;
+export const mobileClerkMaximumLifetimeSeconds = 60;
 
 export interface ClerkIdentityRealm {
   readonly issuer: string;
   readonly audience: string;
   readonly jwtKey: string;
   readonly authorizedParties: readonly string[];
+  readonly mobileAuthorizedParties?: readonly string[];
   readonly maxSecondFactorAgeSeconds?: number;
 }
 
-export interface IdentityTokenVerificationInput {
-  readonly token: string;
-  readonly audience: ProductionIdentityAudience;
-  readonly origin: string;
-  readonly realm: ClerkIdentityRealm;
-  readonly now: Date;
-}
+export type IdentityTokenVerificationInput =
+  | {
+      readonly token: string;
+      readonly audience: 'customer' | 'hq';
+      readonly origin: string;
+      readonly realm: ClerkIdentityRealm;
+      readonly now: Date;
+    }
+  | {
+      readonly token: string;
+      readonly audience: 'mobile';
+      readonly realm: ClerkIdentityRealm;
+      readonly now: Date;
+    };
 
 export interface VerifiedIdentityToken {
   readonly issuer: string;
@@ -25,8 +38,10 @@ export interface VerifiedIdentityToken {
   readonly audience: ProductionIdentityAudience;
   readonly issuedAt: Date;
   readonly expiresAt: Date;
-  readonly authorizedParty: string;
+  readonly authorizedParty?: string;
+  readonly firstFactorAgeSeconds?: number;
   readonly secondFactorAgeSeconds?: number;
+  readonly reverificationId?: string;
 }
 
 export interface IdentityTokenVerifier {
@@ -35,7 +50,7 @@ export interface IdentityTokenVerifier {
 
 interface ClerkVerificationOptions {
   readonly audience?: string;
-  readonly authorizedParties: string[];
+  readonly authorizedParties?: string[];
   readonly clockSkewInMs: number;
   readonly jwtKey: string;
 }
@@ -110,6 +125,58 @@ function hqSecondFactorAgeSeconds(claims: Record<string, unknown>, maximum: numb
   return secondFactorSeconds;
 }
 
+interface CustomerFactorAges {
+  readonly firstFactorAgeSeconds: number;
+  readonly secondFactorAgeSeconds?: number;
+}
+
+function effectiveFactorAgeSeconds(minutes: number, elapsedSinceIssueSeconds: number) {
+  const seconds = minutes * 60 + elapsedSinceIssueSeconds;
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
+}
+
+function customerFactorAges(
+  claims: Record<string, unknown>,
+  elapsedSinceIssueSeconds: number,
+): CustomerFactorAges | undefined {
+  const factorAges = claims.fva;
+  if (
+    !Array.isArray(factorAges) ||
+    factorAges.length !== 2 ||
+    factorAges.some((age) => typeof age !== 'number' || !Number.isSafeInteger(age) || age < -1)
+  ) {
+    return undefined;
+  }
+  const firstFactorMinutes = factorAges[0] as number;
+  const secondFactorMinutes = factorAges[1] as number;
+  if (firstFactorMinutes < 0) return undefined;
+  const firstFactorAgeSeconds = effectiveFactorAgeSeconds(
+    firstFactorMinutes,
+    elapsedSinceIssueSeconds,
+  );
+  if (firstFactorAgeSeconds === undefined) return undefined;
+  if (secondFactorMinutes < 0) return { firstFactorAgeSeconds };
+  const secondFactorAgeSeconds = effectiveFactorAgeSeconds(
+    secondFactorMinutes,
+    elapsedSinceIssueSeconds,
+  );
+  return secondFactorAgeSeconds === undefined
+    ? undefined
+    : { firstFactorAgeSeconds, secondFactorAgeSeconds };
+}
+
+function optionalReverificationId(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length < 1 ||
+    value.length > 512 ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/u.test(value)
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
 /**
  * Thin defensive adapter around Clerk's supported verifier. Clerk owns JWT parsing,
  * signature validation, key handling, audience validation, and authorized-party validation;
@@ -123,18 +190,22 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
   ) {}
 
   async verify(input: IdentityTokenVerificationInput): Promise<VerifiedIdentityToken> {
-    if (
-      input.token.length < 16 ||
-      input.token.length > 8_192 ||
-      !input.realm.authorizedParties.includes(input.origin)
-    ) {
+    const mobile = input.audience === 'mobile';
+    if (input.token.length < 16 || input.token.length > 8_192) {
+      fail();
+    }
+    if (!mobile && !input.realm.authorizedParties.includes(input.origin)) {
       fail();
     }
     let rawClaims: unknown;
     try {
       rawClaims = await this.verifyClerkToken(input.token, {
-        ...(input.audience === 'hq' ? { audience: input.realm.audience } : {}),
-        authorizedParties: [...input.realm.authorizedParties],
+        ...(mobile
+          ? { audience: mobileClerkAudience }
+          : input.audience === 'hq'
+            ? { audience: input.realm.audience }
+            : {}),
+        ...(mobile ? {} : { authorizedParties: [...input.realm.authorizedParties] }),
         clockSkewInMs: clockSkewSeconds * 1_000,
         jwtKey: input.realm.jwtKey,
       });
@@ -144,21 +215,30 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
     const claims = record(rawClaims);
     const issuer = boundedText(claims.iss);
     const subject = boundedString(claims.sub);
-    const providerSessionId = boundedString(claims.sid);
-    const authorizedParty = boundedText(claims.azp);
+    const providerSessionId = boundedString(mobile ? claims.jti : claims.sid);
+    const authorizedParty = claims.azp === undefined ? undefined : boundedText(claims.azp);
     const issuedAtSeconds = numericDate(claims.iat);
     const notBeforeSeconds = numericDate(claims.nbf);
     const expiresAtSeconds = numericDate(claims.exp);
     const nowSeconds = Math.floor(input.now.getTime() / 1_000);
-    const audienceMatches =
-      claims.aud === undefined
+    const audienceMatches = mobile
+      ? claims.aud === mobileClerkAudience
+      : claims.aud === undefined
         ? input.audience === 'customer'
         : matchesAudience(claims.aud, input.realm.audience);
+    const browserPartyMatches = mobile
+      ? authorizedParty === undefined ||
+        (input.realm.mobileAuthorizedParties ?? []).includes(authorizedParty)
+      : authorizedParty === input.origin && input.realm.authorizedParties.includes(authorizedParty);
+    const mobileClaimsMatch =
+      !mobile ||
+      (claims.bb_surface === mobileClerkSurface &&
+        expiresAtSeconds - issuedAtSeconds <= mobileClerkMaximumLifetimeSeconds);
     if (
       Number.isNaN(input.now.getTime()) ||
       issuer !== input.realm.issuer ||
-      authorizedParty !== input.origin ||
-      !input.realm.authorizedParties.includes(authorizedParty) ||
+      !browserPartyMatches ||
+      !mobileClaimsMatch ||
       !audienceMatches ||
       claims.act !== undefined ||
       claims.sts === 'pending' ||
@@ -173,12 +253,22 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
     }
 
     const hqMaximum = input.realm.maxSecondFactorAgeSeconds;
+    const elapsedSinceIssueSeconds = Math.max(0, nowSeconds - issuedAtSeconds);
+    const customerFactors =
+      input.audience === 'customer'
+        ? customerFactorAges(claims, elapsedSinceIssueSeconds)
+        : undefined;
+    const firstFactorAgeSeconds = customerFactors?.firstFactorAgeSeconds;
     const secondFactorAgeSeconds =
       input.audience === 'hq'
         ? hqSecondFactorAgeSeconds(
             claims,
             hqMaximum === undefined || hqMaximum < 0 ? fail() : hqMaximum,
           )
+        : customerFactors?.secondFactorAgeSeconds;
+    const reverificationId =
+      input.audience === 'customer'
+        ? optionalReverificationId(claims.reverification_id)
         : undefined;
     if (input.audience === 'hq' && nowSeconds - issuedAtSeconds > (hqMaximum as number)) {
       fail();
@@ -191,8 +281,10 @@ export class ClerkSessionTokenVerifier implements IdentityTokenVerifier {
       audience: input.audience,
       issuedAt: new Date(issuedAtSeconds * 1_000),
       expiresAt: new Date(expiresAtSeconds * 1_000),
-      authorizedParty,
+      ...(authorizedParty === undefined ? {} : { authorizedParty }),
+      ...(firstFactorAgeSeconds === undefined ? {} : { firstFactorAgeSeconds }),
       ...(secondFactorAgeSeconds === undefined ? {} : { secondFactorAgeSeconds }),
+      ...(reverificationId === undefined ? {} : { reverificationId }),
     };
   }
 }

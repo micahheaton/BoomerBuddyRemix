@@ -1,3 +1,5 @@
+import { canonicalPublicOrigin } from '@boomerbuddy/config/exact-origin';
+
 const maximumBodyBytes = 1_048_576;
 const forwardedRequestHeaders = [
   'accept',
@@ -14,27 +16,6 @@ export interface BrowserApiProxyInput {
   readonly fetchImplementation?: FetchLike;
   readonly path: readonly string[];
   readonly request: Request;
-}
-
-function exactOrigin(value: string | undefined, production: boolean): string | undefined {
-  if (value === undefined) return undefined;
-  try {
-    const url = new URL(value);
-    if (
-      (production && url.protocol !== 'https:') ||
-      (!production && url.protocol !== 'https:' && url.protocol !== 'http:') ||
-      url.username !== '' ||
-      url.password !== '' ||
-      url.pathname !== '/' ||
-      url.search !== '' ||
-      url.hash !== ''
-    ) {
-      return undefined;
-    }
-    return url.origin;
-  } catch {
-    return undefined;
-  }
 }
 
 function safePath(path: readonly string[]): string | undefined {
@@ -100,8 +81,11 @@ async function boundedBody(request: Request): Promise<ArrayBuffer | undefined | 
 
 export async function proxyBrowserApi(input: BrowserApiProxyInput): Promise<Response> {
   const production = input.environment.NODE_ENV === 'production';
-  const upstreamOrigin = exactOrigin(input.environment.BB_API_INTERNAL_ORIGIN, production);
-  const applicationOrigin = exactOrigin(input.environment.BB_PUBLIC_ORIGIN, production);
+  const upstreamOrigin = canonicalPublicOrigin(
+    input.environment.BB_API_INTERNAL_ORIGIN,
+    production,
+  );
+  const applicationOrigin = canonicalPublicOrigin(input.environment.BB_PUBLIC_ORIGIN, production);
   const path = safePath(input.path);
   if (upstreamOrigin === undefined || applicationOrigin === undefined || path === undefined) {
     return error(503, 'service_unavailable', 'The application service is not configured');

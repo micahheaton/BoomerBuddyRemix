@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import {
+  stripeCohortControlProjectionSchema,
+  stripeCohortControlQuerySchema,
+  stripeCohortControlRequestSchema,
   stripeBillingStatusResponseSchema,
   stripeCheckoutRequestSchema,
   stripeCheckoutResponseSchema,
   stripeControlResponseSchema,
+  stripeControlStatusProjectionSchema,
+  stripeControlStatusQuerySchema,
   stripeHouseholdEligibilityRequestSchema,
   stripeInitiationControlProjectionSchema,
   stripeInitiationControlQuerySchema,
@@ -17,6 +22,8 @@ import {
   stripeSessionRetryRepairQuerySchema,
   stripeSessionRetryRepairRequestSchema,
   stripeSessionRetryRepairResponseSchema,
+  stripeTrialReminderAcknowledgeRequestSchema,
+  stripeTrialReminderAcknowledgeResponseSchema,
   stripeWebhookResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError } from '@boomerbuddy/domain';
@@ -29,21 +36,38 @@ import {
   type CommerceAuthorizationPort,
   type StripeTransport,
 } from '@boomerbuddy/integrations';
-import { deriveStripeProviderIdempotencyKey } from '@boomerbuddy/persistence';
+import {
+  deriveBillingReverificationBinding,
+  deriveStripeProviderIdempotencyKey,
+} from '@boomerbuddy/persistence';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import { assertMutationOrigin, authenticate, selectedHousehold } from '../auth';
+import {
+  assertMutationOrigin,
+  assertRecentHqMfa,
+  authenticate,
+  customerBillingReverificationEvidence,
+  customerBillingReverificationHint,
+  selectedHousehold,
+  type AuthContext,
+} from '../auth';
 import type { ApiContext } from '../context';
+import { publicCommerceCatalog } from '../public-commerce-catalog';
 
 type StripeEnvironment = 'test' | 'production';
 
 const stripeEventAllowlist = new Set([
   'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed',
   'checkout.session.expired',
   'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',
+  'customer.subscription.trial_will_end',
   'invoice.paid',
   'invoice.payment_failed',
+  'invoice.payment_action_required',
+  'invoice.finalization_failed',
   'charge.refunded',
   'refund.created',
   'refund.updated',
@@ -56,7 +80,7 @@ function unavailable(requestId: string) {
   return {
     error: {
       code: 'integration_unavailable',
-      message: 'Stripe is disabled or its founder gate is closed',
+      message: 'Online billing is temporarily unavailable.',
       requestId,
     },
   };
@@ -167,9 +191,10 @@ export function registerCommerceRoutes(
     'local_fixture' | 'stripe_test' | 'deployed_staging' | 'live_production' = 'stripe_test',
 ): void {
   const stripe = context.config.commerce.stripe;
-  // Live configuration is an offline manifest only until managed identity/KMS custody exists.
-  // Even an injected transport cannot make live routes or reads reachable in this candidate.
-  const runtimeStripe = stripe.mode === 'test' ? stripe : undefined;
+  const runtimeStripe =
+    stripe.mode === 'test' || (stripe.mode === 'live' && stripe.runtimeSurface === 'api')
+      ? stripe
+      : undefined;
   const runtimeRunId = `api-${randomUUID()}`;
   const transportKind = evidenceLevel === 'local_fixture' ? 'injected_fixture' : 'stripe_https';
   const authenticityKind =
@@ -193,10 +218,38 @@ export function registerCommerceRoutes(
             accountId: runtimeStripe.accountId,
             apiVersion: runtimeStripe.apiVersion,
             portalConfigurationId: runtimeStripe.cancelOnlyPortalConfigurationId,
-            offer: runtimeStripe.offer,
+            defaultOfferId: runtimeStripe.defaultOfferId,
+            offers: runtimeStripe.offers,
           },
         )
       : undefined;
+
+  const stripeControlStatus = async (environment: StripeEnvironment, auth: AuthContext) => {
+    const projection = await context.repositories.commerceRuntime.stripeControlStatusProjection({
+      environment,
+      actorPersonId: auth.principal.personId,
+      ...(context.config.identity.founderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+      now: context.now(),
+    });
+    return stripeControlStatusProjectionSchema.parse({
+      ...projection,
+      preflight:
+        projection.preflight.state === 'unknown'
+          ? projection.preflight
+          : { ...projection.preflight, checkedAt: projection.preflight.checkedAt.toISOString() },
+      eligibleHouseholds: projection.eligibleHouseholds.map((household) => ({
+        ...household,
+        eligibilityExpiresAt: household.eligibilityExpiresAt.toISOString(),
+        occurredAt: household.occurredAt.toISOString(),
+      })),
+      evidence: projection.evidence.map((entry) => ({
+        ...entry,
+        occurredAt: entry.occurredAt.toISOString(),
+      })),
+    });
+  };
 
   app.post('/v1/hq/commerce/stripe/initiation-control', async (request) => {
     const auth = await authenticate(
@@ -207,6 +260,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeInitiationControlRequestSchema.parse(request.body);
     const changed = await context.repositories.commerceRuntime.changeStripeInitiationControl({
       ...body,
@@ -214,6 +268,8 @@ export function registerCommerceRoutes(
       ...(context.config.identity.founderPersonId === undefined
         ? {}
         : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+      runtimeInitiationPermitted:
+        runtimeStripe?.environment === body.environment && runtimeStripe.runtimeInitiationPermitted,
       now: context.now(),
     });
     return stripeControlResponseSchema.parse({
@@ -232,6 +288,7 @@ export function registerCommerceRoutes(
       ['hq'],
       context.now(),
     );
+    assertRecentHqMfa(auth, context.config);
     const query = stripeInitiationControlQuerySchema.parse(request.query);
     const projection = await context.repositories.commerceRuntime.stripeInitiationControlProjection(
       {
@@ -240,10 +297,78 @@ export function registerCommerceRoutes(
         ...(context.config.identity.founderPersonId === undefined
           ? {}
           : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+        runtimeInitiationPermitted:
+          runtimeStripe?.environment === query.environment &&
+          runtimeStripe.runtimeInitiationPermitted,
       },
     );
     return stripeInitiationControlProjectionSchema.parse({
       ...projection,
+      ...(projection.changedAt === undefined
+        ? {}
+        : { changedAt: projection.changedAt.toISOString() }),
+    });
+  });
+
+  app.post('/v1/hq/commerce/stripe/cohort-control', async (request) => {
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['hq'],
+      context.now(),
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
+    const body = stripeCohortControlRequestSchema.parse(request.body);
+    const changed = await context.repositories.commerceRuntime.changeStripeCohortPolicy({
+      environment: body.environment,
+      nextState: body.nextState,
+      maxActive: body.maxActive,
+      ...(body.policyExpiresAt === undefined
+        ? {}
+        : { policyExpiresAt: new Date(body.policyExpiresAt) }),
+      liveApproved: body.liveApproved,
+      expectedRevision: body.expectedRevision,
+      reasonCode: body.reasonCode,
+      correlationId: body.correlationId,
+      actorPersonId: auth.principal.personId,
+      ...(context.config.identity.founderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+      now: context.now(),
+    });
+    return stripeCohortControlProjectionSchema.parse({
+      ...changed,
+      ...(changed.policyExpiresAt === undefined
+        ? {}
+        : { policyExpiresAt: changed.policyExpiresAt.toISOString() }),
+      ...(changed.changedAt === undefined ? {} : { changedAt: changed.changedAt.toISOString() }),
+    });
+  });
+
+  app.get('/v1/hq/commerce/stripe/cohort-control', async (request) => {
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['hq'],
+      context.now(),
+    );
+    assertRecentHqMfa(auth, context.config);
+    const query = stripeCohortControlQuerySchema.parse(request.query);
+    const projection = await context.repositories.commerceRuntime.stripeCohortControlProjection({
+      environment: query.environment,
+      actorPersonId: auth.principal.personId,
+      ...(context.config.identity.founderPersonId === undefined
+        ? {}
+        : { configuredFounderPersonId: context.config.identity.founderPersonId }),
+    });
+    return stripeCohortControlProjectionSchema.parse({
+      ...projection,
+      ...(projection.policyExpiresAt === undefined
+        ? {}
+        : { policyExpiresAt: projection.policyExpiresAt.toISOString() }),
       ...(projection.changedAt === undefined
         ? {}
         : { changedAt: projection.changedAt.toISOString() }),
@@ -259,6 +384,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeHouseholdEligibilityRequestSchema.parse(request.body);
     const state = await context.repositories.commerceRuntime.changeStripeHouseholdEligibility({
       ...body,
@@ -273,6 +399,54 @@ export function registerCommerceRoutes(
       state,
       recordedAt: context.now().toISOString(),
     });
+  });
+
+  app.post('/v1/hq/commerce/stripe/preflight', async (request, reply) => {
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['hq'],
+      context.now(),
+    );
+    assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
+    const body = stripeControlStatusQuerySchema.parse(request.body);
+    await stripeControlStatus(body.environment, auth);
+    if (
+      runtimeStripe === undefined ||
+      adapter === undefined ||
+      runtimeStripe.environment !== body.environment
+    ) {
+      return reply.code(503).send(unavailable(request.id));
+    }
+    try {
+      const preflight = await adapter.verifyConfiguredResources();
+      await context.repositories.commerceRuntime.recordStripePreflight({
+        evidence: preflight,
+        evidenceLevel,
+        transportKind,
+        runtimeRunId,
+        authenticityKind,
+        now: context.now(),
+      });
+    } catch (error) {
+      throw safeProviderFailure(error);
+    }
+    return stripeControlStatus(body.environment, auth);
+  });
+
+  app.get('/v1/hq/commerce/stripe/status', async (request) => {
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['hq'],
+      context.now(),
+    );
+    assertRecentHqMfa(auth, context.config);
+    const query = stripeControlStatusQuerySchema.parse(request.query);
+    return stripeControlStatus(query.environment, auth);
   });
 
   app.get('/v1/hq/commerce/stripe/reconciliation-repair', async (request) => {
@@ -303,6 +477,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeReconciliationRepairRequestSchema.parse(request.body);
     const repaired = await context.repositories.commerce.requestStripeReconciliationRepair({
       ...body,
@@ -351,6 +526,7 @@ export function registerCommerceRoutes(
       context.now(),
     );
     assertMutationOrigin(request, context.config, auth);
+    assertRecentHqMfa(auth, context.config);
     const body = stripeSessionRetryRepairRequestSchema.parse(request.body);
     const repaired = await context.repositories.commerceRuntime.requestStripeSessionRetryRepair({
       ...body,
@@ -358,7 +534,8 @@ export function registerCommerceRoutes(
       ...(context.config.identity.founderPersonId === undefined
         ? {}
         : { configuredFounderPersonId: context.config.identity.founderPersonId }),
-      runtimeInitiationPermitted: runtimeStripe?.runtimeInitiationPermitted === true,
+      runtimeInitiationPermitted:
+        runtimeStripe?.environment === body.environment && runtimeStripe.runtimeInitiationPermitted,
       now: context.now(),
     });
     return stripeSessionRetryRepairResponseSchema.parse({
@@ -387,13 +564,38 @@ export function registerCommerceRoutes(
       actor,
       environment,
       runtimeInitiationPermitted: runtimeStripe?.runtimeInitiationPermitted === true,
+      runtimePortalPermitted: runtimeStripe !== undefined && adapter !== undefined,
       now,
+    });
+    const trialEndingReminder =
+      await context.repositories.commerceRuntime.stripeTrialReminderProjection({
+        actor,
+        environment,
+        now,
+      });
+    const catalog = publicCommerceCatalog({
+      individualOffersEnabled:
+        runtimeStripe?.offers.some(
+          (offer) => offer.plan === 'individual' && offer.customerSelectable,
+        ) === true,
     });
     return stripeBillingStatusResponseSchema.parse({
       billing: {
         householdId: household.householdId,
-        offerId: 'founding_family_monthly_v1',
+        offerId: catalog.defaultOfferId,
+        ...catalog,
         ...billing,
+        ...(trialEndingReminder === undefined
+          ? {}
+          : {
+              trialEndingReminder: {
+                ...trialEndingReminder,
+                trialEndsAt: trialEndingReminder.trialEndsAt.toISOString(),
+                ...(trialEndingReminder.acknowledgedAt === undefined
+                  ? {}
+                  : { acknowledgedAt: trialEndingReminder.acknowledgedAt.toISOString() }),
+              },
+            }),
         ...(billing.pendingOperation === undefined
           ? {}
           : {
@@ -411,7 +613,38 @@ export function registerCommerceRoutes(
             }),
       },
       evidenceNotice:
-        'Success redirects and provider status snapshots do not grant BoomerBuddy access.',
+        'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.',
+    });
+  });
+
+  app.post('/v1/commerce/stripe/trial-reminders/acknowledge', async (request) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    const household = selectedHousehold(auth, request);
+    const body = stripeTrialReminderAcknowledgeRequestSchema.parse(request.body);
+    const actor = await context.repositories.commerceRuntime.resolveActor({
+      householdId: household.householdId,
+      personId: auth.principal.personId,
+      now,
+    });
+    const environment = stripe.mode === 'disabled' ? 'test' : stripe.environment;
+    const acknowledged = await context.repositories.commerceRuntime.acknowledgeStripeTrialReminder({
+      actor,
+      environment,
+      intentId: body.intentId,
+      idempotencyKey: body.idempotencyKey,
+      now,
+    });
+    return stripeTrialReminderAcknowledgeResponseSchema.parse({
+      ...acknowledged,
+      acknowledgedAt: acknowledged.acknowledgedAt.toISOString(),
     });
   });
 
@@ -429,20 +662,62 @@ export function registerCommerceRoutes(
     );
     assertMutationOrigin(request, context.config, auth);
     const household = selectedHousehold(auth, request);
-    stripeCheckoutRequestSchema.parse(request.body);
+    const checkoutRequest = stripeCheckoutRequestSchema.parse(request.body);
     const serverOperationId = operationId(request.headers['idempotency-key']);
-    await context.repositories.commerceRuntime.assertStripeInitiationAllowed({
-      householdId: household.householdId,
-      environment: runtimeStripe.environment,
-      runtimeInitiationPermitted: runtimeStripe.runtimeInitiationPermitted,
-    });
     const actor = await context.repositories.commerceRuntime.resolveActor({
       householdId: household.householdId,
       personId: auth.principal.personId,
       now,
     });
-    const preflight = await adapter.verifyConfiguredResources();
-    await context.repositories.commerceRuntime.recordStripePreflight({
+    const selectedOffer = runtimeStripe.offers.find(
+      (offer) => offer.offerId === checkoutRequest.offerId && offer.customerSelectable,
+    );
+    if (selectedOffer === undefined) {
+      throw new DomainError('not_found', 'The selected billing offer is unavailable');
+    }
+    if (
+      runtimeStripe.environment === 'production' &&
+      runtimeStripe.billingOperationalReadiness.state !== 'ready'
+    ) {
+      return reply.code(503).send(unavailable(request.id));
+    }
+    await context.repositories.commerceRuntime.assertStripeInitiationAllowed({
+      householdId: household.householdId,
+      environment: runtimeStripe.environment,
+      runtimeInitiationPermitted: runtimeStripe.runtimeInitiationPermitted,
+    });
+    const reverification = customerBillingReverificationEvidence(auth);
+    if (reverification === undefined) {
+      return reply.code(403).send(customerBillingReverificationHint());
+    }
+    if (reverification.kind === 'clerk') {
+      const intent = {
+        personId: actor.personId,
+        householdId: household.householdId,
+        action: 'checkout',
+        environment: runtimeStripe.environment,
+        serverOperationId,
+        offerId: selectedOffer.offerId,
+        amountMinor: selectedOffer.unitAmountMinor,
+        currency: 'usd',
+        factorLevel: reverification.factorLevel,
+      } as const;
+      const binding = await context.repositories.commerceRuntime.bindBillingReverification({
+        ...intent,
+        ...deriveBillingReverificationBinding({
+          ...intent,
+          reverificationId: reverification.reverificationId,
+          key: context.config.secrets.fingerprintKey,
+        }),
+        effectiveFactorAgeSeconds: reverification.effectiveFactorAgeSeconds,
+        now,
+      });
+      if (binding.kind === 'reverification_reused') {
+        return reply.code(403).send(customerBillingReverificationHint());
+      }
+    }
+    const preflight = await adapter.verifyConfiguredResources(selectedOffer.offerId);
+    const preflightReceipt = await context.repositories.commerceRuntime.recordStripePreflight({
       evidence: preflight,
       evidenceLevel,
       transportKind,
@@ -463,10 +738,10 @@ export function registerCommerceRoutes(
     });
     const prepared = await context.repositories.commerceRuntime.prepareStripeCheckout({
       actor,
-      offerId: runtimeStripe.offer.offerId,
-      planVersionId: runtimeStripe.offer.planVersionId,
-      billingInterval: runtimeStripe.offer.billingInterval,
-      providerPriceId: runtimeStripe.offer.providerPriceId,
+      offerId: selectedOffer.offerId,
+      planVersionId: selectedOffer.planVersionId,
+      billingInterval: selectedOffer.billingInterval,
+      providerPriceId: selectedOffer.providerPriceId,
       idempotencyKey: serverOperationId,
       serverOperationId,
       providerIdempotencyKey,
@@ -483,10 +758,11 @@ export function registerCommerceRoutes(
       environment: runtimeStripe.environment,
       serverOperationId,
       providerIdempotencyKey,
+      preflightRecordId: preflightReceipt.id,
       actorPersonId: actor.personId,
       requestedExpiresAt: prepared.providerExpiresAt,
       canonicalSubscriptionId: prepared.subscriptionId,
-      providerPriceId: runtimeStripe.offer.providerPriceId,
+      providerPriceId: selectedOffer.providerPriceId,
       ...(customerReference === null ? {} : { providerCustomerId: customerReference }),
       successUrl,
       cancelUrl,
@@ -510,21 +786,22 @@ export function registerCommerceRoutes(
               expiresAt: dispatch.returnedExpiresAt.toISOString(),
             },
             limitation:
-              'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+              'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
           }),
         );
       }
       throw new DomainError(
         'conflict',
-        'This Checkout operation is pending same-key provider reconciliation',
+        'This billing request is still being confirmed. Please wait before trying again.',
       );
     }
     try {
       const session = await adapter.createCheckout({
         actor,
         canonicalSubscriptionId: prepared.subscriptionId,
+        offerId: selectedOffer.offerId,
         planVersionId: prepared.planVersionId,
-        providerPriceId: runtimeStripe.offer.providerPriceId,
+        providerPriceId: selectedOffer.providerPriceId,
         ...(customerReference === null ? {} : { customerReference }),
         successUrl,
         cancelUrl,
@@ -557,7 +834,7 @@ export function registerCommerceRoutes(
             expiresAt: session.expiresAt.toISOString(),
           },
           limitation:
-            'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+            'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
         }),
       );
     } catch (error) {
@@ -608,6 +885,36 @@ export function registerCommerceRoutes(
       personId: auth.principal.personId,
       now,
     });
+    const reverification = customerBillingReverificationEvidence(auth);
+    if (reverification === undefined) {
+      return reply.code(403).send(customerBillingReverificationHint());
+    }
+    if (reverification.kind === 'clerk') {
+      const intent = {
+        personId: actor.personId,
+        householdId: household.householdId,
+        action: 'portal',
+        environment: runtimeStripe.environment,
+        serverOperationId,
+        offerId: 'cancel_only_portal_v1',
+        amountMinor: 0,
+        currency: 'usd',
+        factorLevel: reverification.factorLevel,
+      } as const;
+      const binding = await context.repositories.commerceRuntime.bindBillingReverification({
+        ...intent,
+        ...deriveBillingReverificationBinding({
+          ...intent,
+          reverificationId: reverification.reverificationId,
+          key: context.config.secrets.fingerprintKey,
+        }),
+        effectiveFactorAgeSeconds: reverification.effectiveFactorAgeSeconds,
+        now,
+      });
+      if (binding.kind === 'reverification_reused') {
+        return reply.code(403).send(customerBillingReverificationHint());
+      }
+    }
     const customerId = await context.repositories.commerceRuntime.resolveStripeCustomer({
       actor,
       environment: runtimeStripe.environment,
@@ -616,7 +923,7 @@ export function registerCommerceRoutes(
       throw new DomainError('not_found', 'No verified Stripe customer is available');
     }
     const preflight = await adapter.verifyConfiguredResources();
-    await context.repositories.commerceRuntime.recordStripePreflight({
+    const preflightReceipt = await context.repositories.commerceRuntime.recordStripePreflight({
       evidence: preflight,
       evidenceLevel,
       transportKind,
@@ -639,6 +946,7 @@ export function registerCommerceRoutes(
       environment: runtimeStripe.environment,
       serverOperationId,
       providerIdempotencyKey,
+      preflightRecordId: preflightReceipt.id,
       actorPersonId: actor.personId,
       providerCustomerId: customerId,
       providerConfigurationId: runtimeStripe.cancelOnlyPortalConfigurationId,
@@ -667,7 +975,7 @@ export function registerCommerceRoutes(
       }
       throw new DomainError(
         'conflict',
-        'This Portal operation is pending same-key provider reconciliation',
+        'This billing request is still being confirmed. Please wait before trying again.',
       );
     }
     try {
@@ -756,7 +1064,7 @@ export function registerCommerceRoutes(
           supportedApiVersions: new Set([runtimeStripe.apiVersion]),
         });
         signatureVerifiedAt = verified.signedAt;
-        normalized = normalizeStripeEvent(verified);
+        normalized = normalizeStripeEvent(verified, runtimeStripe.offers);
       } catch (error) {
         if (error instanceof StripeWebhookError) {
           throw new DomainError('invalid_input', 'Stripe webhook verification failed');
@@ -777,7 +1085,7 @@ export function registerCommerceRoutes(
           : { normalizedLifecycle: normalized.lifecycle }),
         evidenceTier: evidenceLevel,
         transportKind,
-        transportLivemode: false,
+        transportLivemode: runtimeStripe.environment === 'production',
         runtimeRunId,
         signatureVerifiedAt,
         now: context.now(),
@@ -794,41 +1102,87 @@ export function registerCommerceRoutes(
           application: 'quarantined',
         });
       }
-      if (normalized.eventType === 'checkout.session.completed') {
+      if (
+        normalized.eventType === 'checkout.session.completed' ||
+        normalized.eventType === 'checkout.session.async_payment_succeeded'
+      ) {
         if (
           normalized.checkoutCompletion === undefined ||
           normalized.externalSubscriptionId === undefined ||
           normalized.providerCustomerId === undefined ||
           normalized.canonicalBinding === undefined
         ) {
-          await context.repositories.commerce.quarantineProviderEvent({
+          if (
+            captured.evidenceTier === undefined ||
+            captured.transportKind === undefined ||
+            captured.runtimeRunId === undefined
+          ) {
+            throw new DomainError('conflict', 'Persisted Stripe event provenance is incomplete');
+          }
+          await queueReconciliation(context, {
             inboxId: captured.id,
-            errorCode: 'stripe.checkout_completion_evidence_invalid',
+            ...(normalized.externalSubscriptionId === undefined
+              ? {}
+              : { externalSubscriptionId: normalized.externalSubscriptionId }),
+            eventType: normalized.eventType,
+            providerObjectId: normalized.providerObjectId,
+            providerEventCreatedAt: normalized.eventCreatedAt,
+            environment: runtimeStripe.environment,
+            evidenceTier: captured.evidenceTier,
+            transportKind: captured.transportKind,
+            runtimeRunId: captured.runtimeRunId,
+            ...(normalized.canonicalBinding === undefined
+              ? {}
+              : { binding: normalized.canonicalBinding }),
+          });
+          return reply.code(202).send(
+            stripeWebhookResponseSchema.parse({
+              received: true,
+              duplicate: captured.duplicate,
+              application: 'reconciliation_queued',
+            }),
+          );
+        }
+        if (normalized.checkoutCompletion.offerId === 'founding_family_monthly_v1') {
+          await context.repositories.commerceRuntime.recordStripeCheckoutCompletion({
+            inboxId: captured.id,
+            externalEventId: normalized.externalEventId,
+            environment: runtimeStripe.environment,
+            providerSessionId: normalized.providerObjectId,
+            providerSubscriptionId: normalized.externalSubscriptionId,
+            providerCustomerId: normalized.providerCustomerId,
+            ...(normalized.providerPaymentIntentId === undefined
+              ? {}
+              : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
+            canonicalBinding: normalized.canonicalBinding,
+            amountTotal: 1499,
+            currency: normalized.checkoutCompletion.currency,
+            providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
+            providerEventCreatedAt: normalized.eventCreatedAt,
             now: context.now(),
           });
-          return reply.code(202).send({
-            received: true,
-            duplicate: captured.duplicate,
-            application: 'quarantined',
+        } else {
+          await context.repositories.commerceRuntime.recordStripeCheckoutCompletionV2({
+            inboxId: captured.id,
+            externalEventId: normalized.externalEventId,
+            environment: runtimeStripe.environment,
+            providerSessionId: normalized.providerObjectId,
+            providerSubscriptionId: normalized.externalSubscriptionId,
+            providerCustomerId: normalized.providerCustomerId,
+            ...(normalized.providerPaymentIntentId === undefined
+              ? {}
+              : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
+            canonicalBinding: normalized.canonicalBinding,
+            offerId: normalized.checkoutCompletion.offerId,
+            paymentStatus: normalized.checkoutCompletion.paymentStatus,
+            paymentMethodCollection: normalized.checkoutCompletion.paymentMethodCollection,
+            amountTotal: normalized.checkoutCompletion.amountTotal,
+            currency: normalized.checkoutCompletion.currency,
+            providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
+            providerEventCreatedAt: normalized.eventCreatedAt,
+            now: context.now(),
           });
         }
-        await context.repositories.commerceRuntime.recordStripeCheckoutCompletion({
-          inboxId: captured.id,
-          externalEventId: normalized.externalEventId,
-          environment: runtimeStripe.environment,
-          providerSessionId: normalized.providerObjectId,
-          providerSubscriptionId: normalized.externalSubscriptionId,
-          providerCustomerId: normalized.providerCustomerId,
-          ...(normalized.providerPaymentIntentId === undefined
-            ? {}
-            : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
-          canonicalBinding: normalized.canonicalBinding,
-          amountTotal: normalized.checkoutCompletion.amountTotal,
-          currency: normalized.checkoutCompletion.currency,
-          providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
-          providerEventCreatedAt: normalized.eventCreatedAt,
-          now: context.now(),
-        });
         await context.repositories.commerce.completeProviderOperationalEvent({
           inboxId: captured.id,
           now: context.now(),
@@ -953,10 +1307,12 @@ export function registerCommerceRoutes(
       ) {
         throw new DomainError('conflict', 'Persisted Stripe event provenance is incomplete');
       }
+      const eventOffer = runtimeStripe.offers.find((offer) => offer.offerId === normalized.offerId);
       const evidenceMatches =
         normalized.lifecycle !== undefined &&
+        eventOffer !== undefined &&
         normalized.providerPriceId === binding.providerPriceId &&
-        normalized.providerProductId === runtimeStripe.offer.providerProductId &&
+        normalized.providerProductId === eventOffer.providerProductId &&
         normalized.subscriptionOfferExact === true &&
         normalized.billingInterval === binding.billingInterval &&
         normalized.currentPeriodStartsAt !== undefined &&
@@ -1000,7 +1356,25 @@ export function registerCommerceRoutes(
         lifecycle: normalized.lifecycle as NonNullable<typeof normalized.lifecycle>,
         currentPeriodStartsAt: normalized.currentPeriodStartsAt as Date,
         currentPeriodEndsAt: normalized.currentPeriodEndsAt as Date,
-        accessEvidence: { kind: 'non_payment' },
+        accessEvidence:
+          (normalized.offerId === 'family_annual_v2' ||
+            normalized.offerId === 'individual_annual_v1') &&
+          (normalized.lifecycle === 'trialing' ||
+            normalized.lifecycle === 'cancel_at_period_end') &&
+          normalized.trialStartsAt !== undefined &&
+          normalized.trialEndsAt !== undefined &&
+          normalized.paymentMethodPresent === true
+            ? {
+                kind: 'trial_confirmed',
+                sourceInboxId: captured.id,
+                evidence: {
+                  offerId: normalized.offerId,
+                  trialStartsAt: normalized.trialStartsAt,
+                  trialEndsAt: normalized.trialEndsAt,
+                  paymentMethodPresent: true,
+                },
+              }
+            : { kind: 'non_payment' },
         now: context.now(),
       });
       if (applied.outcome === 'quarantined') {
@@ -1020,6 +1394,23 @@ export function registerCommerceRoutes(
           received: true,
           duplicate: captured.duplicate,
           application: 'reconciliation_queued',
+        });
+      }
+      if (
+        normalized.eventType === 'customer.subscription.trial_will_end' &&
+        (normalized.offerId === 'family_annual_v2' ||
+          normalized.offerId === 'individual_annual_v1') &&
+        normalized.trialEndsAt !== undefined
+      ) {
+        await context.repositories.commerceRuntime.recordStripeTrialReminderIntent({
+          environment: runtimeStripe.environment,
+          householdId: binding.householdId,
+          subscriptionId: binding.subscriptionId,
+          providerSubscriptionId: normalized.externalSubscriptionId,
+          sourceInboxId: captured.id,
+          offerId: normalized.offerId,
+          trialEndsAt: normalized.trialEndsAt,
+          now: context.now(),
         });
       }
       return stripeWebhookResponseSchema.parse({

@@ -9,6 +9,11 @@ import { createPGliteDatabase, type Database } from './database';
 import { founderProvisioningDefinitionDigest } from './founder-provisioning';
 import { migrationDirectory, runMigrations } from './migrations';
 
+const founderProvisioning0017LegacyDefinitionDigests: Readonly<Record<string, string>> = {
+  replit: 'vVZsCo6BGaVr9JmIW9nOrmHHYh_OmvtZ_H0o_NvWQcQ',
+  stripe: 'iVIfICLRt0h1kCAvDIaTfRktEpYRBVnykxdRAHW7iLs',
+};
+
 async function copyMigrationsThrough(
   sourceDirectory: string,
   targetDirectory: string,
@@ -143,7 +148,9 @@ describe('founder provisioning forward migration', () => {
 
     expect(catalogue.rows).toEqual(
       founderProvisioningCatalogue.map((entry) => ({
-        definition_digest: founderProvisioningDefinitionDigest(entry),
+        definition_digest:
+          founderProvisioning0017LegacyDefinitionDigests[entry.key] ??
+          founderProvisioningDefinitionDigest(entry),
         workstream_key: entry.key,
       })),
     );

@@ -15,6 +15,41 @@ describe('provider-neutral commerce and household allowances', () => {
     harness = undefined;
   });
 
+  it('rejects the test-only protected enrollment seam outside the local runtime', async () => {
+    harness = await createApiHarness();
+    const productionRepository = new EntitlementRepository(harness.database);
+    const now = harness.clock.now();
+    expect(() =>
+      productionRepository.testOnlyEnrollProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-trusted-terry',
+        actorPersonId: 'person-trusted-terry',
+        consentVersion: 'must-not-enroll-outside-local',
+        now,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'not_authorized' }));
+    expect(() =>
+      productionRepository.testOnlyRevokeProtectedSelf({
+        householdId: 'household-sunrise',
+        personId: 'person-owner-alice',
+        actorPersonId: 'person-owner-alice',
+        now,
+      }),
+    ).toThrowError(expect.objectContaining({ code: 'not_authorized' }));
+    const state = await harness.database.query<
+      { readonly terry: number; readonly alice_status: string } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM protected_members
+          WHERE household_id = 'household-sunrise'
+            AND person_id = 'person-trusted-terry') AS terry,
+         (SELECT status FROM protected_members
+          WHERE household_id = 'household-sunrise'
+            AND person_id = 'person-owner-alice') AS alice_status`,
+    );
+    expect(state.rows[0]).toEqual({ terry: 0, alice_status: 'accepted' });
+  });
+
   it('resolves billing authority and payer facts independently and refuses admin-only actors', async () => {
     harness = await createApiHarness();
     const aliceAuthority = await resolveActiveBillingAuthority(
@@ -72,16 +107,21 @@ describe('provider-neutral commerce and household allowances', () => {
 
     const publicConfig = await harness.app.inject({ method: 'GET', url: '/v1/public/config' });
     expect(publicConfig.statusCode).toBe(200);
-    expect(publicConfig.json().pricing).toEqual([
-      expect.objectContaining({ key: 'free', monthlyUsd: 0, annualUsd: 0, hypothesis: true }),
-      expect.objectContaining({ key: 'plus', monthlyUsd: 8.99, annualUsd: 89 }),
-      expect.objectContaining({
-        key: 'family',
-        monthlyUsd: 14.99,
-        annualUsd: 149,
-        foundingAnnualUsd: 119,
-      }),
-    ]);
+    expect(publicConfig.json()).toMatchObject({
+      liveProvidersEnabled: false,
+      pricing: [
+        {
+          key: 'family',
+          name: 'Family',
+          monthlyUsd: 14.99,
+          annualUsd: 149.9,
+          hypothesis: false,
+        },
+      ],
+      commerceCatalog: {
+        defaultOfferId: 'family_annual_v2',
+      },
+    });
 
     const aliceEntitlements = await harness.app.inject({
       method: 'GET',
@@ -300,7 +340,7 @@ describe('provider-neutral commerce and household allowances', () => {
       `INSERT INTO commerce_plan_versions(
          id, product_version_id, plan_key, version, display_name, state,
          capabilities, allowances, prices, available_from, created_at
-       ) SELECT 'family_retired_v3', product_version_id, plan_key, 3, 'Retired Family',
+       ) SELECT 'family_retired_v4', product_version_id, plan_key, 4, 'Retired Family',
            'retired', capabilities, allowances, prices, available_from, $1
          FROM commerce_plan_versions WHERE id = 'family_v1'`,
       [harness.clock.now().toISOString()],
@@ -310,7 +350,7 @@ describe('provider-neutral commerce and household allowances', () => {
          household_id, id, plan_version_id, source, lifecycle, source_verified, precedence,
          current_period_starts_at, current_period_ends_at, reconciliation_state,
          created_at, updated_at
-       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v3',
+       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v4',
          'local','active',true,999,$1,$2,'not_required',$1,$1),
          ('household-sunrise','subscription-web-hypothesis','plus_v1',
          'web','active',true,998,$1,$2,'pending',$1,$1)`,
@@ -334,16 +374,17 @@ describe('provider-neutral commerce and household allowances', () => {
        ) VALUES
          ('household-sunrise','grant-retired-local','local',
           '["check:text","family:manage"]'::jsonb,$1,true,999,
-          'family_retired_v3','subscription-retired-local'),
+          'family_retired_v4','subscription-retired-local'),
          ('household-sunrise','grant-web-hypothesis','web',
           '["check:text","family:manage"]'::jsonb,$1,true,998,
           'plus_v1','subscription-web-hypothesis')`,
       [harness.clock.now().toISOString()],
     );
-    const entitlements = await new EntitlementRepository(harness.database).forHousehold(
-      'household-sunrise',
-      harness.clock.now(),
-    );
+    const entitlements = await new EntitlementRepository(
+      harness.database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', harness.clock.now());
     expect(entitlements.portfolio.primarySource?.subscriptionId).toBe('subscription-local-sunrise');
     expect(
       entitlements.portfolio.sources
@@ -355,7 +396,13 @@ describe('provider-neutral commerce and household allowances', () => {
         .every((source) => source.accessState !== 'effective'),
     ).toBe(true);
 
-    const commerce = new CommerceOperationsRepository(harness.database, Buffer.alloc(32, 11), 1);
+    const commerce = new CommerceOperationsRepository(
+      harness.database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     const first = await commerce.captureLocalEvent({
       environment: 'test',
       externalEventId: 'event-local-1',
@@ -489,9 +536,9 @@ describe('provider-neutral commerce and household allowances', () => {
 
   it('enforces exact participant limits at acceptance and reuses a released seat', async () => {
     harness = await createApiHarness();
-    const entitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
     await expect(
-      entitlements.enrollProtectedSelf({
+      entitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-harbor',
         personId: 'person-owner-bob',
         actorPersonId: 'person-owner-bob',
@@ -611,7 +658,7 @@ describe('provider-neutral commerce and household allowances', () => {
 
   it('reuses one active Trusted Circle membership across separately consented protected pairs', async () => {
     harness = await createApiHarness();
-    const entitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
     await harness.database.query(
       `INSERT INTO household_memberships(
          household_id, id, person_id, membership_kind, status, created_at
@@ -619,7 +666,7 @@ describe('provider-neutral commerce and household allowances', () => {
          'member','active',$1)`,
       [harness.clock.now().toISOString()],
     );
-    await entitlements.enrollProtectedSelf({
+    await entitlements.testOnlyEnrollProtectedSelf({
       householdId: 'household-sunrise',
       personId: 'person-protected-olivia',
       actorPersonId: 'person-protected-olivia',
@@ -791,7 +838,14 @@ describe('provider-neutral commerce and household allowances', () => {
       [now.toISOString()],
     );
 
-    const entitlements = new EntitlementRepository(harness.database);
+    const productionEntitlements = new EntitlementRepository(harness.database);
+    const entitlements = new EntitlementRepository(harness.database, undefined, 'local');
+    const testOnlyEntitlements = entitlements;
+    const productionOverlapped = await productionEntitlements.forHousehold(
+      'household-sunrise',
+      now,
+    );
+    expect(productionOverlapped.portfolio.primarySource).toBeNull();
     const overlapped = await entitlements.forHousehold('household-sunrise', now);
     expect(overlapped.portfolio.primarySource?.planKey).toBe('family');
     expect(
@@ -806,7 +860,13 @@ describe('provider-neutral commerce and household allowances', () => {
     const alice = await login(harness.app, 'owner-alice');
     const pat = await login(harness.app, 'protected-pat');
     const terry = await login(harness.app, 'trusted-terry');
-    const commerce = new CommerceOperationsRepository(harness.database, Buffer.alloc(32, 17), 1);
+    const commerce = new CommerceOperationsRepository(
+      harness.database,
+      Buffer.alloc(32, 17),
+      1,
+      undefined,
+      'local',
+    );
     const eventCreatedAt = new Date(now.getTime() + 1_000);
     const captured = await commerce.captureVerifiedProviderEvent({
       provider: 'stripe',
@@ -906,7 +966,7 @@ describe('provider-neutral commerce and household allowances', () => {
     });
 
     await expect(
-      entitlements.enrollProtectedSelf({
+      testOnlyEntitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-sunrise',
         personId: 'person-owner-alice',
         actorPersonId: 'person-owner-alice',
@@ -924,7 +984,7 @@ describe('provider-neutral commerce and household allowances', () => {
       isProtectedMember: true,
     });
     await expect(
-      entitlements.enrollProtectedSelf({
+      testOnlyEntitlements.testOnlyEnrollProtectedSelf({
         householdId: 'household-sunrise',
         personId: 'person-protected-pat',
         actorPersonId: 'person-protected-pat',
@@ -1068,6 +1128,7 @@ describe('provider-neutral commerce and household allowances', () => {
           kind: 'payment_confirmed',
           sourceInboxId: replacementEvent.id,
           evidence: {
+            offerId: 'founding_family_monthly_v1',
             providerInvoiceId: 'in_sunrise_family_replacement',
             externalSubscriptionId: 'sub_sunrise_family_replacement_test',
             providerSubscriptionItemId: 'si_sunrise_family_replacement',

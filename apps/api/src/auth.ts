@@ -22,6 +22,110 @@ export interface AuthContext {
   readonly transport: Credential['transport'];
   readonly resolved: ResolvedSession;
   readonly principal: Principal;
+  readonly assurance:
+    | {
+        readonly kind: 'development';
+      }
+    | {
+        readonly kind: 'clerk';
+        readonly firstFactorAgeSeconds?: number;
+        readonly secondFactorAgeSeconds?: number;
+        readonly reverificationId?: string;
+      };
+}
+
+export const customerBillingSecondFactorMaximumAgeSeconds = 10 * 60;
+export const customerSensitiveChangeMaximumAgeSeconds = 10 * 60;
+
+export function assertRecentCustomerAuthentication(auth: AuthContext): void {
+  if (auth.audience !== 'customer' && auth.audience !== 'mobile') {
+    throw new DomainError('not_authorized', 'A customer identity confirmation is required');
+  }
+  if (auth.assurance.kind === 'development') return;
+  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
+  if (
+    firstFactorAge === undefined ||
+    !Number.isSafeInteger(firstFactorAge) ||
+    firstFactorAge < 0 ||
+    firstFactorAge >= customerSensitiveChangeMaximumAgeSeconds
+  ) {
+    throw new DomainError('not_authorized', 'Sign in again before changing household access', {
+      action: 'sign_in_again',
+      reason: 'recent_authentication_required',
+    });
+  }
+}
+
+export function assertRecentHqMfa(auth: AuthContext, config: AppConfig): void {
+  if (auth.audience !== 'hq') {
+    throw new DomainError('not_authorized', 'HQ controls require HQ authentication');
+  }
+  if (auth.assurance.kind === 'development') {
+    if (config.environment === 'production') {
+      throw new DomainError('not_authorized', 'Production HQ controls require recent MFA');
+    }
+    return;
+  }
+  const maximumAge = config.identity.clerk?.hq.maxSecondFactorAgeSeconds ?? 10 * 60;
+  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
+  const secondFactorAge = auth.assurance.secondFactorAgeSeconds;
+  if (
+    firstFactorAge === undefined ||
+    secondFactorAge === undefined ||
+    !Number.isSafeInteger(firstFactorAge) ||
+    !Number.isSafeInteger(secondFactorAge) ||
+    firstFactorAge < 0 ||
+    secondFactorAge < 0 ||
+    firstFactorAge >= maximumAge ||
+    secondFactorAge >= maximumAge
+  ) {
+    throw new DomainError('not_authorized', 'HQ controls require recent MFA');
+  }
+}
+
+export type CustomerBillingReverificationEvidence =
+  | { readonly kind: 'development' }
+  | {
+      readonly kind: 'clerk';
+      readonly reverificationId: string;
+      readonly factorLevel: 'multi_factor';
+      readonly effectiveFactorAgeSeconds: number;
+    };
+
+export function customerBillingReverificationEvidence(
+  auth: AuthContext,
+): CustomerBillingReverificationEvidence | undefined {
+  if (auth.audience !== 'customer') return undefined;
+  if (auth.assurance.kind === 'development') return { kind: 'development' };
+  const reverificationId = auth.assurance.reverificationId;
+  if (reverificationId === undefined || reverificationId.length === 0) return undefined;
+  const firstFactorAge = auth.assurance.firstFactorAgeSeconds;
+  const secondFactorAge = auth.assurance.secondFactorAgeSeconds;
+  return firstFactorAge !== undefined &&
+    secondFactorAge !== undefined &&
+    Number.isSafeInteger(firstFactorAge) &&
+    Number.isSafeInteger(secondFactorAge) &&
+    firstFactorAge >= 0 &&
+    secondFactorAge >= 0 &&
+    firstFactorAge < customerBillingSecondFactorMaximumAgeSeconds &&
+    secondFactorAge < customerBillingSecondFactorMaximumAgeSeconds
+    ? {
+        kind: 'clerk',
+        reverificationId,
+        factorLevel: 'multi_factor',
+        effectiveFactorAgeSeconds: Math.max(firstFactorAge, secondFactorAge),
+      }
+    : undefined;
+}
+
+export function customerBillingReverificationHint() {
+  return {
+    clerk_error: {
+      type: 'forbidden',
+      reason: 'reverification-error',
+      metadata: { reverification: 'strict_mfa' },
+    },
+  } as const;
 }
 
 function bearerToken(request: FastifyRequest): string | undefined {
@@ -70,14 +174,20 @@ function credential(
   const clerk = request.cookies[clerkSessionCookieName];
   const bearer = bearerToken(request);
   if (config.environment === 'production') {
+    if (bearer !== undefined) {
+      if (
+        request.headers.origin !== undefined ||
+        request.headers.cookie !== undefined ||
+        customer !== undefined ||
+        hq !== undefined ||
+        clerk !== undefined
+      ) {
+        throw new DomainError('not_authenticated', 'Authentication is required');
+      }
+      return { audience: 'mobile', token: bearer, transport: 'bearer' };
+    }
     const exactClerk = exactProductionClerkCookie(request);
-    if (
-      bearer !== undefined ||
-      customer !== undefined ||
-      hq !== undefined ||
-      clerk === undefined ||
-      exactClerk !== clerk
-    ) {
+    if (customer !== undefined || hq !== undefined || clerk === undefined || exactClerk !== clerk) {
       throw new DomainError('not_authenticated', 'Authentication is required');
     }
     const audience = matchingOriginAudience(request, config);
@@ -208,32 +318,46 @@ export async function authenticate(
     assertTrustedOrigin(request, config, selected.audience === 'hq' ? 'hq' : 'customer');
   }
   if (config.environment === 'production') {
-    if (selected.audience === 'mobile' || config.identity.clerk === undefined) {
+    if (config.identity.clerk === undefined) {
       throw new DomainError('not_authenticated', 'Session is invalid or expired');
     }
     const realm =
       selected.audience === 'hq' ? config.identity.clerk.hq : config.identity.clerk.customer;
     let verification;
     try {
-      verification = await repository.verifyProductionToken({
-        token: selected.token,
-        audience: selected.audience,
-        origin: originFor(request),
-        realm,
-        now,
-      });
+      verification = await repository.verifyProductionToken(
+        selected.audience === 'mobile'
+          ? {
+              token: selected.token,
+              audience: 'mobile',
+              realm,
+              now,
+            }
+          : {
+              token: selected.token,
+              audience: selected.audience,
+              origin: originFor(request),
+              realm,
+              now,
+            },
+      );
     } catch {
       throw new DomainError('not_authenticated', 'Session is invalid or expired');
     }
     if (
       verification.audience !== selected.audience ||
       verification.issuer !== realm.issuer ||
-      verification.authorizedParty !== originFor(request)
+      (selected.audience === 'mobile'
+        ? verification.authorizedParty !== undefined &&
+          !(config.identity.clerk.customer.mobileAuthorizedParties ?? []).includes(
+            verification.authorizedParty,
+          )
+        : verification.authorizedParty !== originFor(request))
     ) {
       throw new DomainError('not_authenticated', 'Session is invalid or expired');
     }
     const identity = await repository.resolveProductionIdentity({
-      audience: selected.audience,
+      audience: selected.audience === 'mobile' ? 'customer' : selected.audience,
       issuer: verification.issuer,
       subject: verification.subject,
       now,
@@ -267,6 +391,18 @@ export async function authenticate(
       transport: selected.transport,
       resolved,
       principal: toAuthorizationPrincipal(resolved),
+      assurance: {
+        kind: 'clerk',
+        ...(verification.firstFactorAgeSeconds === undefined
+          ? {}
+          : { firstFactorAgeSeconds: verification.firstFactorAgeSeconds }),
+        ...(verification.secondFactorAgeSeconds === undefined
+          ? {}
+          : { secondFactorAgeSeconds: verification.secondFactorAgeSeconds }),
+        ...(verification.reverificationId === undefined
+          ? {}
+          : { reverificationId: verification.reverificationId }),
+      },
     };
   }
   const verification = verifyDevSession(selected.token, config.secrets.session, {
@@ -289,6 +425,7 @@ export async function authenticate(
     transport: selected.transport,
     resolved,
     principal: toAuthorizationPrincipal(resolved),
+    assurance: { kind: 'development' },
   };
 }
 

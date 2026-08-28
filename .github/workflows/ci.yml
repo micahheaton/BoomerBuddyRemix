@@ -30,6 +30,7 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
       - run: npm run verify:production-ui
+      - run: npm run verify:next-resource-auth
       - run: npm run build -w @boomerbuddy/worker
       - run: npm run verify:run3-1-deps
         env:
@@ -51,6 +52,28 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:e2e
+
+  accessibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.13.1
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium firefox webkit
+      - run: npm run test:e2e:accessibility-matrix
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: accessibility-playwright-${{ github.sha }}
+          path: |
+            playwright-report/accessibility
+            test-results/accessibility
+          if-no-files-found: ignore
+          retention-days: 14
 
   postgres:
     runs-on: ubuntu-latest

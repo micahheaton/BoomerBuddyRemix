@@ -1,6 +1,8 @@
 import Link from 'next/link';
+import { protectProductionMemberResource } from '../../../lib/resource-auth';
 
 export default async function MemberFeedbackPage() {
+  await protectProductionMemberResource();
   const form = await import('../../../components/feedback-form').then(({ FeedbackForm }) => (
     <FeedbackForm mode="authenticated" />
   ));

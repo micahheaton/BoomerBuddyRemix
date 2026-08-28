@@ -3,6 +3,7 @@
 import { SignIn, useAuth, useClerk } from '@clerk/nextjs';
 import { useState } from 'react';
 import { apiPaths } from '@boomerbuddy/contracts';
+import { settleIdentitySignOut } from '@boomerbuddy/security/identity-sign-out';
 import { hqRequest } from '../lib/api';
 
 export function ProductionHqSignIn() {
@@ -35,7 +36,7 @@ export function ProductionHqSignIn() {
   return (
     <main id="hq-main" className="sign-in-shell">
       <div className="sign-in-card">
-        <span className="seed-label">Founder-only private beta</span>
+        <span className="seed-label">Founder-only early access</span>
         <h1>BoomerBuddy HQ</h1>
         <p>
           Use the separately configured HQ Clerk identity. Customer identities and development
@@ -64,8 +65,9 @@ export function ProductionHqSignOut({ onSignedOut }: { onSignedOut: () => void }
     } catch {
       // Always revoke Clerk's upstream session even if the local session is already unavailable.
     } finally {
-      await clerk.signOut({ redirectUrl: '/sign-in' });
+      await settleIdentitySignOut({ clearIdentitySession: () => clerk.signOut() });
       onSignedOut();
+      window.location.replace('/sign-in');
     }
   }
 

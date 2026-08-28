@@ -134,7 +134,7 @@ export function FeedbackLearning() {
       </section>
       <section className="section table-wrap">
         <table>
-          <caption>Role-scoped feedback metadata — no submitted content</caption>
+          <caption>Role-scoped feedback metadata - no submitted content</caption>
           <thead>
             <tr>
               <th>Received</th>

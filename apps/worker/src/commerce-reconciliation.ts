@@ -1,4 +1,7 @@
-import type { ProviderReconciliationPort } from '@boomerbuddy/integrations';
+import {
+  isStripeFailedPaymentEventType,
+  type ProviderReconciliationPort,
+} from '@boomerbuddy/integrations';
 import type {
   BusinessOsRepository,
   CommerceOperationsRepository,
@@ -35,7 +38,7 @@ function invoiceSnapshotIsCompatible(eventType: string, lifecycle: string | unde
   if (eventType === 'invoice.paid') {
     return lifecycle === 'active' || lifecycle === 'cancel_at_period_end';
   }
-  if (eventType === 'invoice.payment_failed') {
+  if (isStripeFailedPaymentEventType(eventType)) {
     return ['grace', 'delinquent', 'paused', 'hold', 'canceled', 'expired'].includes(
       lifecycle ?? '',
     );
@@ -95,7 +98,9 @@ export function createStripeReconciliationHandler(input: {
     const observedAt = clock();
     if (
       eventType.startsWith('invoice.') &&
-      !['invoice.paid', 'invoice.payment_failed'].includes(eventType)
+      eventType !== 'invoice.paid' &&
+      eventType !== 'invoice.finalization_failed' &&
+      !isStripeFailedPaymentEventType(eventType)
     ) {
       await input.commerce.quarantineProviderEvent({
         inboxId,
@@ -123,14 +128,19 @@ export function createStripeReconciliationHandler(input: {
       });
       return;
     }
-    const automaticAttemptCount = await input.commerce.claimProviderReconciliationAutomaticAttempt({
+    const automaticClaim = await input.commerce.claimProviderReconciliationAutomaticAttempt({
       id: reconciliationRunId,
+      inboxId,
       provider: 'stripe',
       environment,
       repairGeneration,
       now: observedAt,
     });
-    if (automaticAttemptCount === null) {
+    if (automaticClaim.kind === 'already_terminal') return;
+    if (automaticClaim.kind === 'binding_invalid') {
+      throw new JobExecutionError('commerce_reconciliation_payload_invalid', false);
+    }
+    if (automaticClaim.kind === 'unavailable') {
       await input.commerce.markProviderReconciliationAttention({
         id: reconciliationRunId,
         provider: 'stripe',
@@ -152,7 +162,71 @@ export function createStripeReconciliationHandler(input: {
       });
       throw new JobExecutionError('stripe.automatic_reconciliation_budget_exhausted', false);
     }
+    const automaticAttemptCount = automaticClaim.automaticAttemptCount;
     try {
+      if (eventType === 'invoice.finalization_failed') {
+        const hasCanonicalBinding =
+          householdId !== undefined && subscriptionId !== undefined && planVersionId !== undefined;
+        const binding =
+          suppliedExternalSubscriptionId === undefined
+            ? null
+            : await input.commerceRuntime.resolveStripeEventBinding({
+                environment,
+                externalSubscriptionId: suppliedExternalSubscriptionId,
+                providerEventCreatedAt,
+                ...(hasCanonicalBinding
+                  ? {
+                      canonicalBinding: {
+                        householdId: householdId as string,
+                        subscriptionId: subscriptionId as string,
+                        planVersionId: planVersionId as string,
+                      },
+                    }
+                  : {}),
+              });
+        const recordedRecoveryState = await input.commerce.recordStripeInvoiceFinalizationRecovery({
+          environment,
+          sourceInboxId: inboxId,
+          providerInvoiceId: providerObjectId,
+          ...(suppliedExternalSubscriptionId === undefined
+            ? {}
+            : { providerSubscriptionId: suppliedExternalSubscriptionId }),
+          ...(binding === null
+            ? {}
+            : {
+                householdId: binding.householdId,
+                subscriptionId: binding.subscriptionId,
+              }),
+          observedAt,
+        });
+        const recoveryState =
+          recordedRecoveryState === 'resolved'
+            ? 'resolved'
+            : await input.commerce.ensureStripeInvoiceFinalizationAttention({
+                environment,
+                sourceInboxId: inboxId,
+                providerInvoiceId: providerObjectId,
+                now: observedAt,
+              });
+        const sourceDispositionRecorded =
+          await input.commerce.ignoreProviderEventAfterReconciliation({
+            inboxId,
+            now: observedAt,
+          });
+        if (!sourceDispositionRecorded) {
+          throw new JobExecutionError('commerce_reconciliation_source_disposition_invalid', false);
+        }
+        const completed = await input.commerce.completeReconciliation({
+          id: reconciliationRunId,
+          provider: 'stripe',
+          environment,
+          checkedCount: 1,
+          mismatchCount: recoveryState === 'attention' ? 1 : 0,
+          now: observedAt,
+        });
+        if (!completed) throw new JobExecutionError('commerce_reconciliation_run_lost', false);
+        return;
+      }
       const requiresEventResolution =
         suppliedExternalSubscriptionId === undefined ||
         eventType.startsWith('invoice.') ||
@@ -249,16 +323,34 @@ export function createStripeReconciliationHandler(input: {
       const proposedLifecycle = eventResolution?.lifecycleOverride ?? snapshot.lifecycle;
       const paidPeriod = eventResolution?.paidPeriodEvidence;
       const failedPayment = eventResolution?.failedPaymentEvidence;
+      const trialPeriod =
+        [
+          'customer.subscription.created',
+          'customer.subscription.updated',
+          'customer.subscription.trial_will_end',
+        ].includes(eventType) &&
+        (snapshot.offerId === 'family_annual_v2' || snapshot.offerId === 'individual_annual_v1') &&
+        (proposedLifecycle === 'trialing' || proposedLifecycle === 'cancel_at_period_end') &&
+        snapshot.trialStartsAt !== undefined &&
+        snapshot.trialEndsAt !== undefined &&
+        snapshot.paymentMethodPresent === true
+          ? {
+              offerId: snapshot.offerId,
+              trialStartsAt: snapshot.trialStartsAt,
+              trialEndsAt: snapshot.trialEndsAt,
+              paymentMethodPresent: true as const,
+            }
+          : undefined;
       const appliedPeriodStartsAt =
         eventType === 'invoice.paid'
           ? paidPeriod?.currentPeriodStartsAt
-          : eventType === 'invoice.payment_failed'
+          : isStripeFailedPaymentEventType(eventType)
             ? failedPayment?.currentPeriodStartsAt
             : snapshot.currentPeriodStartsAt;
       const appliedPeriodEndsAt =
         eventType === 'invoice.paid'
           ? paidPeriod?.currentPeriodEndsAt
-          : eventType === 'invoice.payment_failed'
+          : isStripeFailedPaymentEventType(eventType)
             ? failedPayment?.currentPeriodEndsAt
             : snapshot.currentPeriodEndsAt;
       const paidEvidenceMatches =
@@ -272,7 +364,7 @@ export function createStripeReconciliationHandler(input: {
             snapshot.currentPeriodStartsAt?.getTime() &&
           paidPeriod.currentPeriodEndsAt.getTime() === snapshot.currentPeriodEndsAt?.getTime());
       const failedEvidenceMatches =
-        eventType !== 'invoice.payment_failed' ||
+        !isStripeFailedPaymentEventType(eventType) ||
         (failedPayment !== undefined &&
           failedPayment.externalSubscriptionId === externalSubscriptionId &&
           failedPayment.providerPriceId === binding?.providerPriceId &&
@@ -355,7 +447,14 @@ export function createStripeReconciliationHandler(input: {
         billingInterval: snapshot.billingInterval,
         currentPeriodStartsAt: appliedPeriodStartsAt?.toISOString(),
         currentPeriodEndsAt: appliedPeriodEndsAt?.toISOString(),
-        accessEvidence: eventType === 'invoice.paid' ? 'payment_confirmed' : 'non_payment',
+        accessEvidence:
+          eventType === 'invoice.paid'
+            ? 'payment_confirmed'
+            : isStripeFailedPaymentEventType(eventType)
+              ? 'payment_failed'
+              : trialPeriod === undefined
+                ? 'non_payment'
+                : 'trial_confirmed',
         lifecycle: effectiveLifecycle,
         observedAt: observedAt.toISOString(),
       });
@@ -399,13 +498,19 @@ export function createStripeReconciliationHandler(input: {
                 sourceInboxId: inboxId,
                 evidence: paidPeriod as NonNullable<typeof paidPeriod>,
               }
-            : eventType === 'invoice.payment_failed'
+            : isStripeFailedPaymentEventType(eventType)
               ? {
                   kind: 'payment_failed',
                   sourceInboxId: inboxId,
                   evidence: failedPayment as NonNullable<typeof failedPayment>,
                 }
-              : { kind: 'non_payment', sourceInboxId: inboxId },
+              : trialPeriod === undefined
+                ? { kind: 'non_payment', sourceInboxId: inboxId }
+                : {
+                    kind: 'trial_confirmed',
+                    sourceInboxId: inboxId,
+                    evidence: trialPeriod,
+                  },
         authoritativeSnapshot: true,
         now: observedAt,
       });
@@ -432,6 +537,27 @@ export function createStripeReconciliationHandler(input: {
             'The verified snapshot was quarantined by a canonical billing invariant.',
         });
         return;
+      }
+      if (eventType === 'invoice.paid') {
+        await input.commerce.resolveStripeInvoiceFinalizationAttentionFromPaidEvidence({
+          environment,
+          householdId: binding.householdId,
+          subscriptionId: binding.subscriptionId,
+          evidence: paidPeriod as NonNullable<typeof paidPeriod>,
+          now: observedAt,
+        });
+      }
+      if (eventType === 'customer.subscription.trial_will_end' && trialPeriod !== undefined) {
+        await input.commerceRuntime.recordStripeTrialReminderIntent({
+          environment,
+          householdId: binding.householdId,
+          subscriptionId: binding.subscriptionId,
+          providerSubscriptionId: externalSubscriptionId,
+          sourceInboxId: inboxId,
+          offerId: trialPeriod.offerId,
+          trialEndsAt: trialPeriod.trialEndsAt,
+          now: observedAt,
+        });
       }
       const sourceDispositionRecorded = await input.commerce.ignoreProviderEventAfterReconciliation(
         { inboxId, now: observedAt },

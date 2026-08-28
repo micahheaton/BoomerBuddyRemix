@@ -1,5 +1,7 @@
 import { HqScreen } from '../../components/hq-screen';
+import { protectProductionHqResource } from '../../lib/resource-auth';
 
-export default function ProvisioningPage() {
+export default async function ProvisioningPage() {
+  await protectProductionHqResource();
   return <HqScreen view="provisioning" />;
 }

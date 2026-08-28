@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { assertStripeOnlineRuntimePermitted, type AppConfig } from '@boomerbuddy/config';
 import { publicConfigResponseSchema } from '@boomerbuddy/contracts';
-import { DomainError, seededCommercePlanVersions } from '@boomerbuddy/domain';
+import { DomainError } from '@boomerbuddy/domain';
 import { StripeHttpTransport, type StripeTransport } from '@boomerbuddy/integrations';
 import { createLogger, createRequestId, type Logger } from '@boomerbuddy/observability';
 import { ClerkSessionTokenVerifier, type IdentityTokenVerifier } from '@boomerbuddy/security';
@@ -17,21 +17,29 @@ import {
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { createRepositories, type ApiContext } from './context';
+import { publicCommerceCatalog } from './public-commerce-catalog';
+import { registerAccessIntentRoutes } from './routes/access-intents';
 import { registerCheckRoutes } from './routes/checks';
+import { registerBillingAuthorityRoutes } from './routes/billing-authority';
 import { registerBusinessOsRoutes } from './routes/business-os';
 import { registerCommerceRoutes } from './routes/commerce';
 import { registerEditorialIntelligenceRoutes } from './routes/editorial-intelligence';
+import { registerGovernedContentRoutes } from './routes/governed-content';
 import { registerFamilyRoutes } from './routes/family';
+import { registerFamilySafeWordRoutes } from './routes/family-safe-word';
 import { registerFeedbackRoutes } from './routes/feedback';
 import { registerFounderProvisioningRoutes } from './routes/founder-provisioning';
 import { registerFoundingHouseholdRoutes } from './routes/founding-households';
 import { registerHqRoutes } from './routes/hq';
 import { registerMessagingRoutes } from './routes/messaging';
+import { registerMemberLearningRoutes } from './routes/member-learning';
 import { registerOrientationRoutes } from './routes/orientation';
 import { registerPublicCheckRoutes } from './routes/public-checks';
 import { registerPrivacyRoutes } from './routes/privacy';
 import { registerReferralRoutes } from './routes/referrals';
 import { registerSessionRoutes } from './routes/sessions';
+import { registerSupportReceiptRoutes } from './routes/support-receipts';
+import { registerTrustedCircleAttentionRoutes } from './routes/trusted-circle-attention';
 
 export interface BuildAppOptions {
   readonly config: AppConfig;
@@ -42,6 +50,8 @@ export interface BuildAppOptions {
   readonly closeDatabase?: boolean;
   /** Test/local override; production scheduling is deliberately blocked in Build Run 1. */
   readonly retentionSweepIntervalMs?: number;
+  /** Test seam for the process-local, content-free access-intent database-pressure guard. */
+  readonly accessIntentRequestLimitPerMinute?: number;
   /** Deterministic fixture transport for tests; runtime otherwise uses Stripe HTTPS in test mode. */
   readonly stripeTransport?: StripeTransport;
   readonly stripeEvidenceLevel?:
@@ -52,6 +62,19 @@ export interface BuildAppOptions {
 
 const retentionBatchSize = 100;
 const retentionMaxBatchesPerSweep = 10;
+const mobileBearerAuthorization = /^Bearer [A-Za-z0-9._~-]+$/u;
+const authenticatedPrivateCacheControl = 'private, no-store, max-age=0';
+
+function unrefTimer(timer: unknown): void {
+  if (
+    typeof timer === 'object' &&
+    timer !== null &&
+    'unref' in timer &&
+    typeof timer.unref === 'function'
+  ) {
+    timer.unref();
+  }
+}
 
 export async function connectDatabase(config: AppConfig): Promise<Database> {
   return config.database.driver === 'pglite'
@@ -148,35 +171,33 @@ function registerBaseRoutes(app: FastifyInstance, context: ApiContext): void {
       return reply.code(503).send({ status: 'not_ready' });
     }
   });
-  app.get('/v1/public/config', () =>
-    publicConfigResponseSchema.parse({
+  app.get('/v1/public/config', () => {
+    const stripe = context.config.commerce.stripe;
+    const commerceCatalog = publicCommerceCatalog({
+      individualOffersEnabled:
+        stripe.mode !== 'disabled' &&
+        stripe.offers.some((offer) => offer.plan === 'individual' && offer.customerSelectable),
+    });
+    return publicConfigResponseSchema.parse({
       productName: 'BoomerBuddy',
       environment: context.config.environment,
       checkKinds: ['text', 'url'],
       nativeSharingImplemented: false,
-      liveProvidersEnabled: false,
-      pricing: Object.values(seededCommercePlanVersions).map((plan) => {
-        const monthly = plan.prices.find(
-          (price) => price.kind === 'list' && price.interval === 'month',
-        );
-        const annual = plan.prices.find(
-          (price) => price.kind === 'list' && price.interval === 'year',
-        );
-        const founding = plan.prices.find((price) => price.kind === 'founding_experiment');
-        if (monthly === undefined || annual === undefined) {
-          throw new TypeError('Public pricing hypothesis is incomplete');
-        }
-        return {
-          key: plan.key,
-          name: plan.displayName,
-          monthlyUsd: monthly.amountMinor / 100,
-          annualUsd: annual.amountMinor / 100,
-          ...(founding === undefined ? {} : { foundingAnnualUsd: founding.amountMinor / 100 }),
-          hypothesis: true,
-        };
-      }),
-    }),
-  );
+      liveProvidersEnabled:
+        context.config.commerce.stripe.mode === 'live' &&
+        context.config.commerce.stripe.runtimeNetworkPermitted,
+      pricing: [
+        {
+          key: 'family',
+          name: 'Family',
+          monthlyUsd: 14.99,
+          annualUsd: 149.9,
+          hypothesis: false,
+        },
+      ],
+      commerceCatalog,
+    });
+  });
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -187,13 +208,18 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? 'local_fixture'
       : options.config.commerce.stripe.mode === 'test'
         ? 'stripe_test'
-        : 'local_fixture');
+        : options.config.commerce.stripe.mode === 'live'
+          ? 'live_production'
+          : 'local_fixture');
   if (
     (options.stripeTransport !== undefined && stripeEvidenceLevel !== 'local_fixture') ||
     (options.stripeTransport === undefined &&
       options.config.commerce.stripe.mode === 'test' &&
-      stripeEvidenceLevel === 'local_fixture') ||
-    stripeEvidenceLevel === 'live_production'
+      stripeEvidenceLevel !== 'stripe_test') ||
+    (options.stripeTransport === undefined &&
+      options.config.commerce.stripe.mode === 'live' &&
+      stripeEvidenceLevel !== 'live_production') ||
+    (options.config.commerce.stripe.mode === 'disabled' && stripeEvidenceLevel !== 'local_fixture')
   ) {
     throw new TypeError('Stripe evidence tier does not match the runtime transport boundary');
   }
@@ -212,17 +238,46 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     ...(identityTokenVerifier === undefined ? {} : { identityTokenVerifier }),
   };
   const drainDueRetention = async (): Promise<boolean> => {
-    let moreDue = false;
+    let checksMoreDue = false;
     for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
       const deleted = await context.repositories.checks.purgeDue({
         now: context.now(),
         limit: retentionBatchSize,
       });
       if (deleted.length < retentionBatchSize) break;
-      moreDue = batch === retentionMaxBatchesPerSweep - 1;
+      checksMoreDue = batch === retentionMaxBatchesPerSweep - 1;
     }
     await context.repositories.publicChecks.purgeExpired(context.now());
-    return moreDue;
+    let accessIntentsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.accessIntents.purgeExpired(
+        context.now(),
+        retentionBatchSize,
+      );
+      if (!cleanup.saturated) break;
+      accessIntentsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    let supportReceiptsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.supportReceipts.purgeTerminal(retentionBatchSize);
+      if (!cleanup.saturated) break;
+      supportReceiptsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    let familySafeWordRateBucketsMoreDue = false;
+    for (let batch = 0; batch < retentionMaxBatchesPerSweep; batch += 1) {
+      const cleanup = await context.repositories.familySafeWords.purgeExpiredRateBuckets(
+        context.now(),
+        retentionBatchSize,
+      );
+      if (!cleanup.saturated) break;
+      familySafeWordRateBucketsMoreDue = batch === retentionMaxBatchesPerSweep - 1;
+    }
+    return (
+      checksMoreDue ||
+      accessIntentsMoreDue ||
+      supportReceiptsMoreDue ||
+      familySafeWordRateBucketsMoreDue
+    );
   };
   let retentionNeedsContinuation = false;
   try {
@@ -238,6 +293,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
           fingerprintKey: options.config.secrets.fingerprintKey,
           fingerprintKeyVersion: 1,
         },
+        options.config.environment,
         context.now(),
       );
     }
@@ -279,7 +335,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       retentionContinuation = undefined;
       runRetentionSweep();
     }, 0);
-    retentionContinuation.unref();
+    unrefTimer(retentionContinuation);
   };
   const runRetentionSweep = (): void => {
     if (closing || retentionSweep !== undefined) return;
@@ -299,7 +355,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
       ? undefined
       : setInterval(runRetentionSweep, options.retentionSweepIntervalMs);
   if (retentionNeedsContinuation) scheduleRetentionContinuation();
-  retentionInterval?.unref();
+  unrefTimer(retentionInterval);
   await app.register(cookie);
   await app.register(cors, {
     credentials: true,
@@ -313,6 +369,13 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   app.addHook('onRequest', (request, reply, done) => {
     void reply.header('x-request-id', request.id);
     done();
+  });
+  app.addHook('onSend', (request, reply, payload, done) => {
+    const authorization = request.headers.authorization;
+    if (typeof authorization === 'string' && mobileBearerAuthorization.test(authorization)) {
+      void reply.header('Cache-Control', authenticatedPrivateCacheControl);
+    }
+    done(null, payload);
   });
   app.addHook('onResponse', (request, reply, done) => {
     logger.info('api.request_completed', {
@@ -334,23 +397,43 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
   });
   installErrors(app, logger);
   registerBaseRoutes(app, context);
+  registerAccessIntentRoutes(app, context, {
+    ...(options.accessIntentRequestLimitPerMinute === undefined
+      ? {}
+      : { maximumApplicationRequestsPerMinute: options.accessIntentRequestLimitPerMinute }),
+    mutationEnabled:
+      context.config.accessIntents?.runtimeEnabled === true &&
+      context.config.accessIntents.edgeRateLimitConfirmed === true,
+  });
+  registerSupportReceiptRoutes(app, context, {
+    customerAccessEnabled: context.config.supportReceipts?.customerAccessEnabled === true,
+    intakeEnabled:
+      context.config.supportReceipts?.customerAccessEnabled === true &&
+      context.config.supportReceipts.intakeEnabled === true &&
+      context.config.supportReceipts.hqQueueEnabled === true,
+    hqQueueEnabled: context.config.supportReceipts?.hqQueueEnabled === true,
+  });
   registerPublicCheckRoutes(app, context, context.repositories.publicChecks);
   registerPrivacyRoutes(app, context);
   registerSessionRoutes(app, context);
   registerCheckRoutes(app, context);
+  registerTrustedCircleAttentionRoutes(app, context);
   registerFamilyRoutes(app, context);
+  registerFamilySafeWordRoutes(app, context);
   registerEditorialIntelligenceRoutes(app, {
     config: context.config,
     sessions: context.repositories.sessions,
     editorial: context.repositories.editorial,
     now: context.now,
   });
+  registerGovernedContentRoutes(app, context);
   registerFeedbackRoutes(app, {
     config: context.config,
     sessions: context.repositories.sessions,
     feedback: context.repositories.feedback,
     now: context.now,
   });
+  registerMemberLearningRoutes(app, context);
   registerOrientationRoutes(app, context);
   registerCommerceRoutes(
     app,
@@ -361,10 +444,17 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
             context.config.commerce.stripe.apiKey,
             context.config.commerce.stripe.apiVersion,
           )
-        : undefined),
+        : context.config.commerce.stripe.mode === 'live' &&
+            context.config.commerce.stripe.runtimeSurface === 'api'
+          ? new StripeHttpTransport(
+              context.config.commerce.stripe.apiRestrictedKey,
+              context.config.commerce.stripe.apiVersion,
+            )
+          : undefined),
     stripeEvidenceLevel,
   );
   registerHqRoutes(app, context);
+  registerBillingAuthorityRoutes(app, context);
   registerMessagingRoutes(app, context);
   registerReferralRoutes(app, context);
   registerFounderProvisioningRoutes(app, context);

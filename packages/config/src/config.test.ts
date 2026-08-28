@@ -1,5 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { assertStripeOnlineRuntimePermitted, loadConfig } from './index';
+
+const publishedDevelopmentSecretDefaults = {
+  artifactEncryptionKey: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
+  fingerprintKey: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=',
+  safeWordPepper: 'local-safe-word-pepper-not-for-production',
+} as const;
 
 function developmentEnvironment(): NodeJS.ProcessEnv {
   return {
@@ -41,6 +48,7 @@ function productionEnvironment(): NodeJS.ProcessEnv {
     BB_CLERK_CUSTOMER_AUDIENCE: 'boomerbuddy-customer',
     BB_CLERK_CUSTOMER_JWT_KEY:
       '-----BEGIN PUBLIC KEY-----\ncustomer-fixture-key-material\n-----END PUBLIC KEY-----',
+    BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'none',
     BB_CLERK_HQ_ISSUER: 'https://hq.clerk.test',
     BB_CLERK_HQ_AUDIENCE: 'boomerbuddy-hq',
     BB_CLERK_HQ_JWT_KEY:
@@ -62,6 +70,19 @@ describe('typed configuration', () => {
     });
     expect(config.identity.customerOrigins).toEqual(['http://127.0.0.1:3000']);
     expect(config.api.trustedProxyHops).toBe(0);
+    expect(config.accessIntents).toEqual({
+      runtimeEnabled: false,
+      edgeRateLimitConfirmed: false,
+    });
+    expect(config.supportReceipts).toEqual({
+      customerAccessEnabled: false,
+      intakeEnabled: false,
+      hqQueueEnabled: false,
+    });
+    expect(config.content).toEqual({
+      firstPartyPublishingEnabled: false,
+      dailyDraftGenerationEnabled: false,
+    });
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
     expect(config.messaging).toEqual({
@@ -77,6 +98,81 @@ describe('typed configuration', () => {
     const environment = developmentEnvironment();
     delete environment.BB_SEED_DEMO;
     expect(loadConfig(environment).database.seedDemo).toBe(false);
+  });
+
+  it('keeps the published development secret defaults usable outside production', () => {
+    const config = loadConfig({
+      ...developmentEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: publishedDevelopmentSecretDefaults.artifactEncryptionKey,
+      BB_FINGERPRINT_KEY_BASE64: publishedDevelopmentSecretDefaults.fingerprintKey,
+      BB_SAFE_WORD_PEPPER: publishedDevelopmentSecretDefaults.safeWordPepper,
+    });
+
+    expect(config.secrets.artifactEncryptionKey).toEqual(Buffer.alloc(32));
+    expect(config.secrets.fingerprintKey).toEqual(Buffer.alloc(32, 1));
+    expect(config.secrets.safeWordPepper.toString('utf8')).toBe(
+      publishedDevelopmentSecretDefaults.safeWordPepper,
+    );
+  });
+
+  it('keeps access-intent mutation off unless runtime and independent edge evidence are explicit', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: false, edgeRateLimitConfirmed: false });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: false, edgeRateLimitConfirmed: true });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED: 'true',
+        BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED: 'true',
+      }).accessIntents,
+    ).toEqual({ runtimeEnabled: true, edgeRateLimitConfirmed: true });
+  });
+
+  it('keeps support receipts off by default and refuses unattended intake', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: 'true',
+      }).supportReceipts,
+    ).toEqual({ customerAccessEnabled: true, intakeEnabled: false, hqQueueEnabled: false });
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: 'true',
+      }),
+    ).toThrow('requires customer history and the HQ queue');
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: 'true',
+        BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: 'true',
+        BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED: 'true',
+      }).supportReceipts,
+    ).toEqual({ customerAccessEnabled: true, intakeEnabled: true, hqQueueEnabled: true });
+  });
+
+  it('keeps governed publication and daily draft generation separately default-off', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_FIRST_PARTY_CONTENT_ENABLED: 'true',
+      }).content,
+    ).toEqual({ firstPartyPublishingEnabled: true, dailyDraftGenerationEnabled: false });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_DAILY_CONTENT_DRAFTS_ENABLED: 'true',
+      }).content,
+    ).toEqual({ firstPartyPublishingEnabled: false, dailyDraftGenerationEnabled: true });
   });
 
   it('requires an explicit bounded trusted-proxy hop count', () => {
@@ -142,6 +238,76 @@ describe('typed configuration', () => {
   });
 
   it.each([
+    ['BB_ARTIFACT_KEY_BASE64', publishedDevelopmentSecretDefaults.artifactEncryptionKey],
+    ['BB_FINGERPRINT_KEY_BASE64', publishedDevelopmentSecretDefaults.fingerprintKey],
+    ['BB_SAFE_WORD_PEPPER', publishedDevelopmentSecretDefaults.safeWordPepper],
+  ] as const)('refuses the exact published production default for %s', (name, value) => {
+    expect(() => loadConfig({ ...productionEnvironment(), [name]: value })).toThrow(
+      `published .env.example default for ${name}`,
+    );
+  });
+
+  it.each([
+    ['BB_ARTIFACT_KEY_BASE64', publishedDevelopmentSecretDefaults.artifactEncryptionKey],
+    ['BB_FINGERPRINT_KEY_BASE64', publishedDevelopmentSecretDefaults.fingerprintKey],
+  ] as const)('rejects the published key material for %s after decoding', (name, value) => {
+    expect(() =>
+      loadConfig({ ...productionEnvironment(), [name]: value.replace(/=+$/u, '') }),
+    ).toThrow(`published .env.example default for ${name}`);
+  });
+
+  it('accepts exact-value near misses for otherwise valid production material', () => {
+    const artifactEncryptionKey = Buffer.from(
+      publishedDevelopmentSecretDefaults.artifactEncryptionKey,
+      'base64',
+    );
+    const fingerprintKey = Buffer.from(publishedDevelopmentSecretDefaults.fingerprintKey, 'base64');
+    artifactEncryptionKey[artifactEncryptionKey.byteLength - 1] = 1;
+    fingerprintKey[fingerprintKey.byteLength - 1] = 2;
+
+    const config = loadConfig({
+      ...productionEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: artifactEncryptionKey.toString('base64'),
+      BB_FINGERPRINT_KEY_BASE64: fingerprintKey.toString('base64'),
+      BB_SAFE_WORD_PEPPER: `${publishedDevelopmentSecretDefaults.safeWordPepper}-rotated`,
+    });
+
+    expect(config.secrets.artifactEncryptionKey.equals(artifactEncryptionKey)).toBe(true);
+    expect(config.secrets.fingerprintKey.equals(fingerprintKey)).toBe(true);
+    expect(config.secrets.safeWordPepper.toString('utf8')).toBe(
+      `${publishedDevelopmentSecretDefaults.safeWordPepper}-rotated`,
+    );
+  });
+
+  it('accepts freshly generated valid production secret material', () => {
+    const artifactEncryptionKey = randomBytes(32);
+    const fingerprintKey = randomBytes(32);
+    artifactEncryptionKey[0] = 2;
+    fingerprintKey[0] = 3;
+    const safeWordPepper = `production-${randomBytes(24).toString('base64url')}`;
+
+    const config = loadConfig({
+      ...productionEnvironment(),
+      BB_ARTIFACT_KEY_BASE64: artifactEncryptionKey.toString('base64'),
+      BB_FINGERPRINT_KEY_BASE64: fingerprintKey.toString('base64'),
+      BB_SAFE_WORD_PEPPER: safeWordPepper,
+    });
+
+    expect(config.secrets.artifactEncryptionKey.equals(artifactEncryptionKey)).toBe(true);
+    expect(config.secrets.fingerprintKey.equals(fingerprintKey)).toBe(true);
+    expect(config.secrets.safeWordPepper.equals(Buffer.from(safeWordPepper, 'utf8'))).toBe(true);
+  });
+
+  it('continues to refuse development session signing material in production', () => {
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_SESSION_SECRET: 'unused-production-session-secret-value',
+      }),
+    ).toThrow('unused development session signing material');
+  });
+
+  it.each([
     ['BB_ALLOW_DEV_IDENTITY', 'true'],
     ['BB_DATABASE_DRIVER', 'pglite'],
     ['BB_SEED_DEMO', 'true'],
@@ -159,6 +325,7 @@ describe('typed configuration', () => {
         issuer: 'https://customer.clerk.test',
         audience: 'boomerbuddy-customer',
         authorizedParties: ['https://customer.test'],
+        mobileAuthorizedParties: [],
       },
       hq: {
         issuer: 'https://hq.clerk.test',
@@ -183,6 +350,7 @@ describe('typed configuration', () => {
       'BB_CLERK_CUSTOMER_ISSUER',
       'BB_CLERK_CUSTOMER_AUDIENCE',
       'BB_CLERK_CUSTOMER_JWT_KEY',
+      'BB_CLERK_MOBILE_AUTHORIZED_PARTIES',
       'BB_CLERK_HQ_ISSUER',
       'BB_CLERK_HQ_AUDIENCE',
       'BB_CLERK_HQ_JWT_KEY',
@@ -212,12 +380,6 @@ describe('typed configuration', () => {
     expect(() =>
       loadConfig({
         ...productionEnvironment(),
-        BB_SESSION_SECRET: 'unused-production-session-secret-value',
-      }),
-    ).toThrow('unused development session signing material');
-    expect(() =>
-      loadConfig({
-        ...productionEnvironment(),
         BB_CLERK_HQ_ISSUER: 'http://hq.clerk.test',
       }),
     ).toThrow('HTTPS issuer origin');
@@ -227,6 +389,24 @@ describe('typed configuration', () => {
         BB_CLERK_HQ_JWT_KEY: 'not-a-pem-key',
       }),
     ).toThrow('bounded PEM public key');
+    expect(
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'https://native-auth.test',
+      }).identity.clerk?.customer.mobileAuthorizedParties,
+    ).toEqual(['https://native-auth.test']);
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'https://customer.test',
+      }),
+    ).toThrow('disjoint from customer and HQ browser origins');
+    expect(() =>
+      loadConfig({
+        ...productionEnvironment(),
+        BB_CLERK_MOBILE_AUTHORIZED_PARTIES: 'http://native-auth.test',
+      }),
+    ).toThrow('exact HTTPS origins');
   });
 
   it('refuses shared encryption/fingerprint keys and malformed origins', () => {
@@ -273,11 +453,12 @@ describe('typed configuration', () => {
       BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
       BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
       BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+      BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID: 'price_family_annual_fixture',
     });
     expect(config.commerce.stripe).toMatchObject({
       mode: 'test',
       environment: 'test',
-      apiVersion: '2026-02-25.clover',
+      apiVersion: '2026-07-29.dahlia',
       runtimeInitiationPermitted: true,
       offer: {
         offerId: 'founding_family_monthly_v1',
@@ -296,6 +477,7 @@ describe('typed configuration', () => {
         BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
         BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
         BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+        BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID: 'price_family_annual_fixture',
       }),
     ).toThrow('complete environment-specific credentials');
     expect(() =>
@@ -307,15 +489,13 @@ describe('typed configuration', () => {
     ).toThrow('test mode refuses live Stripe configuration values');
   });
 
-  it('refuses raw live secrets and inactive Stripe environment families in every mode', () => {
-    for (const [name, value] of [
-      ['BB_STRIPE_LIVE_API_KEY', 'sk_live_fixture_12345678'],
-      ['BB_STRIPE_LIVE_WEBHOOK_SECRET', 'whsec_live_fixture_12345678'],
-    ] as const) {
-      expect(() => loadConfig({ ...developmentEnvironment(), [name]: value })).toThrow(
-        'Live Stripe secrets cannot be loaded from raw environment keys',
-      );
-    }
+  it('refuses legacy shared live keys and inactive Stripe environment families', () => {
+    expect(() =>
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_STRIPE_LIVE_API_KEY: 'sk_live_fixture_12345678',
+      }),
+    ).toThrow('legacy shared API key');
     expect(() =>
       loadConfig({
         ...developmentEnvironment(),
@@ -340,42 +520,120 @@ describe('typed configuration', () => {
     }
   });
 
-  it('accepts reviewed test keys and keeps live configuration offline without raw secrets', () => {
+  it('accepts separate least-privilege live API and worker custody while defaulting initiation off', () => {
     const commonLive = {
-      ...developmentEnvironment(),
+      ...productionEnvironment(),
       BB_STRIPE_MODE: 'live',
       BB_STRIPE_LIVE_ACCOUNT_ID: 'acct_livefixture1',
       BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_live_cancel_fixture',
       BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: 'prod_live_family_fixture',
       BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: 'price_live_family_fixture',
+      BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID: 'price_live_family_annual_fixture',
     };
-    expect(() =>
-      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'sk_live_fixture_12345678' }),
-    ).toThrow('raw environment keys');
-    expect(() =>
-      loadConfig({ ...commonLive, BB_STRIPE_LIVE_API_KEY: 'rk_test_fixture_12345678' }),
-    ).toThrow('raw environment keys');
-    const liveConfig = loadConfig(commonLive);
-    expect(liveConfig.commerce.stripe).toMatchObject({
-      mode: 'live',
-      environment: 'production',
-      runtimeInitiationPermitted: false,
-      runtimeNetworkPermitted: false,
-      credentialCustody: 'managed_identity_kms_unavailable',
-      requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
-    });
-    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'api')).toThrow(
-      'offline-only; api startup is refused',
-    );
-    expect(() => assertStripeOnlineRuntimePermitted(liveConfig, 'worker')).toThrow(
-      'offline-only; worker startup is refused',
-    );
     expect(() =>
       loadConfig({
         ...commonLive,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'sk_live_fixture_12345678',
         BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
       }),
-    ).toThrow('raw environment keys');
+    ).toThrow('restricted key custody');
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+        BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
+        BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+      }),
+    ).toThrow('restricted key custody');
+    const apiConfig = loadConfig({
+      ...commonLive,
+      BB_STRIPE_RUNTIME_SURFACE: 'api',
+      BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+      BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+    });
+    expect(apiConfig.commerce.stripe).toMatchObject({
+      mode: 'live',
+      environment: 'production',
+      runtimeSurface: 'api',
+      runtimeInitiationPermitted: false,
+      runtimeNetworkPermitted: true,
+      credentialCustody: 'separate_replit_runtime_restricted_keys',
+    });
+    expect(() => assertStripeOnlineRuntimePermitted(apiConfig, 'api')).not.toThrow();
+    expect(() => assertStripeOnlineRuntimePermitted(apiConfig, 'worker')).toThrow(
+      'worker startup refuses api credential custody',
+    );
+    const workerConfig = loadConfig({
+      ...commonLive,
+      BB_STRIPE_RUNTIME_SURFACE: 'worker',
+      BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
+    });
+    expect(workerConfig.commerce.stripe).toMatchObject({
+      mode: 'live',
+      runtimeSurface: 'worker',
+      runtimeInitiationPermitted: false,
+      runtimeNetworkPermitted: true,
+    });
+    expect(() => assertStripeOnlineRuntimePermitted(workerConfig, 'worker')).not.toThrow();
+    const liveInitiationReadiness = {
+      BB_BILLING_PUBLIC_SUPPORT_EMAIL: 'support@example.invalid',
+      BB_BILLING_PUBLIC_SUPPORT_URL: 'https://app.example.invalid/support',
+      BB_BILLING_PUBLIC_PRIVACY_URL: 'https://app.example.invalid/privacy',
+      BB_BILLING_PUBLIC_TERMS_URL: 'https://app.example.invalid/terms',
+      BB_BILLING_PUBLIC_BILLING_TERMS_URL: 'https://app.example.invalid/billing-terms',
+      BB_BILLING_POLICY_VERSION: 'billing-v1',
+      BB_BILLING_POLICY_EFFECTIVE_AT: '2026-08-28T00:00:00.000Z',
+      BB_BILLING_SUPPORT_OPERATIONS_READY: 'true',
+      BB_BILLING_SUPPORT_RECEIPT_ID: 'support-readiness-fixture',
+      BB_BILLING_TAX_TREATMENT_REVIEW_COMPLETE: 'true',
+      BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY: 'us-only-fixture',
+      BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID: 'tax-review-fixture',
+    } as const;
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        ...liveInitiationReadiness,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+        BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+        BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+      }),
+    ).toThrow('trial-reminder delivery receipt');
+    const readyLiveApi = loadConfig({
+      ...commonLive,
+      ...liveInitiationReadiness,
+      BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE: 'stripe_automatic_email',
+      BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID: 'trial-email-setting-fixture',
+      BB_STRIPE_RUNTIME_SURFACE: 'api',
+      BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+      BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+      BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+    });
+    expect(readyLiveApi.commerce.stripe).toMatchObject({
+      mode: 'live',
+      runtimeInitiationPermitted: true,
+      billingOperationalReadiness: {
+        state: 'ready',
+        trialReminderDeliveryMode: 'stripe_automatic_email',
+        trialReminderDeliveryReceiptId: 'trial-email-setting-fixture',
+        taxTreatmentReviewComplete: true,
+        taxReviewedLaunchGeography: 'us-only-fixture',
+        taxTreatmentReviewReceiptId: 'tax-review-fixture',
+      },
+    });
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        ...liveInitiationReadiness,
+        BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE: 'stripe_automatic_email',
+        BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID: 'trial-email-setting-fixture',
+        BB_STRIPE_RUNTIME_SURFACE: 'worker',
+        BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
+        BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+      }),
+    ).toThrow('restricted key custody');
     expect(() =>
       loadConfig({
         ...commonLive,

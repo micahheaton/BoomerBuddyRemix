@@ -294,15 +294,49 @@ export const createPrivacyRequestSchema = z
     message: 'A person or household subject is required.',
   });
 
-export const createSelfPrivacyRequestSchema = z.object({
-  requestKind: z.enum(['access', 'export', 'delete', 'correct', 'restrict']),
-});
+export const createSelfPrivacyRequestSchema = z
+  .object({
+    requestKind: z.enum(['access', 'export', 'delete', 'correct', 'restrict']),
+    confirmation: z.literal('DELETE_MY_ACCOUNT').optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.requestKind === 'delete' && value.confirmation !== 'DELETE_MY_ACCOUNT') {
+      context.addIssue({
+        code: 'custom',
+        path: ['confirmation'],
+        message: 'Account deletion requests require explicit confirmation.',
+      });
+    }
+    if (value.requestKind !== 'delete' && value.confirmation !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['confirmation'],
+        message: 'Deletion confirmation is valid only for account deletion requests.',
+      });
+    }
+  });
 
 export const createPrivacyRequestResponseSchema = z.object({
   id: opaqueIdSchema,
   state: z.literal('received'),
   identityVerificationState: z.literal('pending'),
   dueAt: isoDateTimeSchema,
+});
+
+export const privacyDataCategoryGuidanceSchema = z.object({
+  category: attributionTokenSchema,
+  description: z.string().min(1).max(240),
+  sourceStores: z.array(attributionTokenSchema).min(1).max(20),
+  accessExportHandling: z.literal('content_free_inventory_pending_verified_fulfillment'),
+  deletionHandling: z.enum([
+    'review_delete_or_deidentify_subject_data',
+    'review_retain_minimum_required_evidence',
+  ]),
+  retentionHandling: z.enum([
+    'apply_approved_subject_data_schedule',
+    'apply_security_legal_or_accounting_schedule',
+  ]),
 });
 
 export const privacyRequestSchema = z.object({
@@ -326,6 +360,8 @@ export const privacyRequestSchema = z.object({
         'restriction_plan',
       ]),
       dataCategories: z.array(attributionTokenSchema).max(50),
+      categoryGuidanceVersion: z.literal('privacy-category-guidance-v1'),
+      categoryGuidance: z.array(privacyDataCategoryGuidanceSchema).max(50),
       recordCounts: z.record(z.string(), z.number().int().nonnegative()),
       containsCustomerContent: z.literal(false),
       requiresProfessionalReview: z.boolean(),

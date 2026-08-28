@@ -23,12 +23,18 @@ export const actions = [
   'check:share',
   'family:view',
   'family:invite',
+  'family:invite_member',
   'family:revoke_invitation',
+  'family:revoke_member_invitation',
+  'family:revoke_member',
   'family:accept_invitation',
   'family:revoke',
   'orientation:view',
   'orientation:update',
   'entitlement:view',
+  'support_receipt:list',
+  'support_receipt:create',
+  'support_receipt:withdraw',
   'founding_household:view',
   'founding_household:accept',
   'founding_household:offboard',
@@ -36,6 +42,8 @@ export const actions = [
   'hq:households:list',
   'hq:reviews:list',
   'hq:support_queue:list',
+  'hq:support_receipts:read',
+  'hq:support_receipts:manage',
   'hq:review_queue:list',
   'hq:audit:list',
   'hq:business_os:read',
@@ -44,6 +52,8 @@ export const actions = [
   'hq:founder_provisioning:manage',
   'hq:founding_households:read',
   'hq:founding_households:manage',
+  'hq:billing_authority:read',
+  'hq:billing_authority:manage',
   'hq:support_case:view',
   'hq:restricted_resource:read',
 ] as const;
@@ -74,7 +84,14 @@ export type Resource =
       readonly scope:
         | { readonly kind: 'roster' }
         | { readonly kind: 'subject_relationships'; readonly subjectPersonId: PersonId }
+        | { readonly kind: 'self_membership'; readonly memberPersonId: PersonId }
         | { readonly kind: 'subject_invitation'; readonly protectedPersonId: PersonId }
+        | { readonly kind: 'member_invitation' }
+        | {
+            readonly kind: 'member_membership';
+            readonly membershipId: string;
+            readonly memberPersonId: PersonId;
+          }
         | {
             readonly kind: 'pairwise_relationship';
             readonly relationshipId: RelationshipId;
@@ -96,6 +113,16 @@ export type Resource =
     }
   | { readonly kind: 'entitlement'; readonly householdId: HouseholdId }
   | {
+      readonly kind: 'support_receipt_collection';
+      readonly householdId: HouseholdId;
+      readonly ownerPersonId: PersonId;
+    }
+  | {
+      readonly kind: 'support_receipt';
+      readonly householdId: HouseholdId;
+      readonly openedByPersonId: PersonId;
+    }
+  | {
       readonly kind: 'support_case';
       readonly householdId: HouseholdId;
       readonly caseId: SupportCaseId;
@@ -113,6 +140,10 @@ export type Resource =
     }
   | {
       readonly kind: 'founding_household_program';
+      readonly configuredFounderPersonId?: string;
+    }
+  | {
+      readonly kind: 'billing_authority_workflow';
       readonly configuredFounderPersonId?: string;
     }
   | {
@@ -211,7 +242,7 @@ function requiredCapability(action: Action, resource: Resource): Capability | un
       : 'check:text';
   }
   if (action === 'check:list' || action === 'check:read') return 'history:read';
-  if (action === 'family:invite') return 'family:manage';
+  if (action === 'family:invite' || action === 'family:invite_member') return 'family:manage';
   if (action.startsWith('orientation:')) return 'orientation:use';
   return undefined;
 }
@@ -269,11 +300,15 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       action === 'hq:founder_provisioning:read' ||
       action === 'hq:founder_provisioning:manage' ||
       action === 'hq:founding_households:read' ||
-      action === 'hq:founding_households:manage'
+      action === 'hq:founding_households:manage' ||
+      action === 'hq:billing_authority:read' ||
+      action === 'hq:billing_authority:manage'
     ) {
       const expectedResource = action.startsWith('hq:founder_provisioning:')
         ? 'founder_provisioning'
-        : 'founding_household_program';
+        : action.startsWith('hq:founding_households:')
+          ? 'founding_household_program'
+          : 'billing_authority_workflow';
       if (resource.kind !== expectedResource) {
         return deny('unsupported_action_resource');
       }
@@ -325,6 +360,7 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
     resource.kind === 'hq' ||
     resource.kind === 'founder_provisioning' ||
     resource.kind === 'founding_household_program' ||
+    resource.kind === 'billing_authority_workflow' ||
     resource.kind === 'support_case' ||
     resource.kind === 'restricted_customer_resource'
   ) {
@@ -363,6 +399,22 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       return { allowed: true, reason: 'allowed_by_policy' };
     }
     return deny('unsupported_action_resource');
+  }
+
+  if (resource.kind === 'support_receipt_collection') {
+    if (
+      (action === 'support_receipt:list' || action === 'support_receipt:create') &&
+      resource.ownerPersonId === principal.personId
+    ) {
+      return { allowed: true, reason: 'allowed_by_policy' };
+    }
+    return deny('not_owner_or_shared');
+  }
+
+  if (resource.kind === 'support_receipt') {
+    return action === 'support_receipt:withdraw' && resource.openedByPersonId === principal.personId
+      ? { allowed: true, reason: 'allowed_by_policy' }
+      : deny('not_owner_or_shared');
   }
 
   const capability = requiredCapability(action, resource);
@@ -431,6 +483,12 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
         return { allowed: true, reason: 'allowed_by_policy' };
       }
       if (
+        resource.scope.kind === 'self_membership' &&
+        resource.scope.memberPersonId === principal.personId
+      ) {
+        return { allowed: true, reason: 'allowed_by_policy' };
+      }
+      if (
         resource.scope.kind === 'pairwise_relationship' &&
         (resource.scope.protectedPersonId === principal.personId ||
           resource.scope.trustedPersonId === principal.personId)
@@ -450,6 +508,11 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
               : 'insufficient_role',
           );
     }
+    if (action === 'family:invite_member') {
+      return relationship.isAdministrator && resource.scope.kind === 'member_invitation'
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('insufficient_role');
+    }
     if (action === 'family:revoke_invitation') {
       if (resource.scope.kind !== 'subject_invitation') {
         return deny('unsupported_action_resource');
@@ -458,6 +521,19 @@ export function authorize(input: AuthorizationInput): AuthorizationDecision {
       // Withdrawal remains available after protected enrollment or entitlement lapses.
       const protectedSubjectMayCancel = resource.scope.protectedPersonId === principal.personId;
       return relationship.isAdministrator || protectedSubjectMayCancel
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('not_owner_or_shared');
+    }
+    if (action === 'family:revoke_member_invitation') {
+      return relationship.isAdministrator && resource.scope.kind === 'member_invitation'
+        ? { allowed: true, reason: 'allowed_by_policy' }
+        : deny('insufficient_role');
+    }
+    if (action === 'family:revoke_member') {
+      if (resource.scope.kind !== 'member_membership') {
+        return deny('unsupported_action_resource');
+      }
+      return relationship.isAdministrator || resource.scope.memberPersonId === principal.personId
         ? { allowed: true, reason: 'allowed_by_policy' }
         : deny('not_owner_or_shared');
     }

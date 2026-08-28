@@ -25,7 +25,7 @@ export async function createMigratedTestDatabase(): Promise<Database> {
 
 export async function createSeededTestDatabase(now: Date = fixedTestNow): Promise<Database> {
   const database = await createMigratedTestDatabase();
-  await seedDemoData(database, testArtifactProtection(), now);
+  await seedDemoData(database, testArtifactProtection(), 'test', now);
   return database;
 }
 

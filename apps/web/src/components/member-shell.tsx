@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import { apiRequest, setSelectedHouseholdId } from '../lib/api';
+import { apiRequest } from '../lib/api';
+import { clearCustomerSessionState } from '../lib/auth-recovery';
 import { Brand } from './brand';
 import { householdScopeSummary, useHousehold } from './household-context';
 import { ProductionSignOut } from './production-sign-out';
@@ -23,18 +24,15 @@ export function MemberHeader() {
       selectedScope?.trustedCircleGrants.some((grant) =>
         grant.permissions.includes('view_shared_checks'),
       ) === true);
-  const canUseFamily =
-    me.principal.households.length === 0 ||
-    selectedScope?.isAdministrator === true ||
-    selectedScope?.isProtectedMember === true ||
-    (selectedScope?.trustedCircleGrants.length ?? 0) > 0;
+  const canUseFamily = me.principal.households.length === 0 || selectedScope !== undefined;
+  const canUseLearning = isProtectedMember && capabilities.includes('orientation:use');
 
   async function signOut() {
     setBusy(true);
     try {
       await apiRequest('/v1/sessions/current', { method: 'DELETE' });
     } finally {
-      setSelectedHouseholdId('');
+      clearCustomerSessionState(window.sessionStorage);
       router.push('/sign-in');
       router.refresh();
     }
@@ -46,9 +44,16 @@ export function MemberHeader() {
         <Brand href="/member" />
         <nav className="member-nav" aria-label="Member navigation">
           <Link href="/member">Home</Link>
+          <Link href="/member/protection">Protected access</Link>
+          {canUseLearning ? (
+            <Link href="/member/orientation#learn-updates">Learn &amp; updates</Link>
+          ) : null}
           {canCheck ? <Link href="/member/check">Check</Link> : null}
           {canReadHistory ? <Link href="/member/history">History</Link> : null}
           {canUseFamily ? <Link href="/member/family">Family</Link> : null}
+          <Link href="/member/support">Support</Link>
+          <Link href="/member/account-security">Account security</Link>
+          <Link href="/billing-terms">Billing terms</Link>
           {process.env.NODE_ENV === 'production' ? (
             <ProductionSignOut />
           ) : (
@@ -67,7 +72,7 @@ export function MemberHeader() {
             >
               {me.principal.households.map((scope, index) => (
                 <option key={scope.id} value={scope.id}>
-                  {householdName(scope.id, index)} — {householdScopeSummary(scope)}
+                  {householdName(scope.id, index)} - {householdScopeSummary(scope)}
                 </option>
               ))}
             </select>

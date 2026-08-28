@@ -2,9 +2,16 @@
 
 import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { CheckKind, CheckResult, CreateCheckResponse } from '@boomerbuddy/contracts';
+import type {
+  CheckKind,
+  CheckResult,
+  CreateCheckResponse,
+  FamilyResponse,
+  MeResponse,
+  PrincipalDto,
+} from '@boomerbuddy/contracts';
 import { PublicFooter, PublicHeader } from '../../components/public-shell';
-import { ApiError, apiRequest, readableError } from '../../lib/api';
+import { ApiError, apiRequest, readableError, setSelectedHouseholdId } from '../../lib/api';
 
 type PublicAttribution = {
   source: 'direct' | 'organic' | 'partner' | 'campaign';
@@ -47,6 +54,12 @@ type PublicCheckResult = {
   };
 };
 
+type PublicHouseholdChoice = {
+  id: string;
+  label: string;
+  detail: string;
+};
+
 const riskText: Record<CheckResult['risk'], string> = {
   caution: 'Use caution',
   high_concern: 'High concern',
@@ -64,9 +77,19 @@ const redactionText: Record<
   string
 > = {
   payment_card: 'payment-card pattern',
-  authorization_credential: 'authorization credential',
+  authorization_credential: 'password or access-code pattern',
   one_time_code: 'one-time code',
 };
+
+function householdChoiceDetail(scope: PrincipalDto['households'][number]): string {
+  return [
+    scope.isAdministrator ? 'administrator' : 'member',
+    scope.isProtectedMember ? 'protected adult' : '',
+    scope.isBillingManager ? 'billing manager' : '',
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
 
 function attributionFromLocation(): PublicAttribution {
   if (typeof window === 'undefined') return { source: 'direct', campaign: 'none' };
@@ -85,6 +108,14 @@ function attributionFromLocation(): PublicAttribution {
   };
 }
 
+function captureAttributionAndCanonicalize(): PublicAttribution {
+  const attribution = attributionFromLocation();
+  if (typeof window !== 'undefined' && window.location.search.length > 0) {
+    window.history.replaceState(null, '', window.location.pathname);
+  }
+  return attribution;
+}
+
 export default function PublicCheckPage() {
   const [kind, setKind] = useState<CheckKind>('text');
   const [content, setContent] = useState('');
@@ -95,11 +126,18 @@ export default function PublicCheckPage() {
   const [error, setError] = useState('');
   const [saveStatus, setSaveStatus] = useState('');
   const [needsSignIn, setNeedsSignIn] = useState(false);
+  const [householdChoices, setHouseholdChoices] = useState<PublicHouseholdChoice[]>([]);
+  const [saveHouseholdId, setSaveHouseholdId] = useState('');
+  const attribution = useRef<PublicAttribution | undefined>(undefined);
   const resultHeading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     if (result) resultHeading.current?.focus();
   }, [result]);
+
+  useEffect(() => {
+    attribution.current ??= captureAttributionAndCanonicalize();
+  }, []);
 
   async function currentContext(): Promise<PublicContext> {
     if (
@@ -109,9 +147,11 @@ export default function PublicCheckPage() {
     ) {
       return context;
     }
+    const capturedAttribution = attribution.current ?? captureAttributionAndCanonicalize();
+    attribution.current = capturedAttribution;
     const response = await apiRequest<{ context: PublicContext }>('/v1/public/check-contexts', {
       method: 'POST',
-      body: JSON.stringify({ attribution: attributionFromLocation() }),
+      body: JSON.stringify({ attribution: capturedAttribution }),
     });
     setContext(response.context);
     return response.context;
@@ -123,6 +163,8 @@ export default function PublicCheckPage() {
     setError('');
     setSaveStatus('');
     setNeedsSignIn(false);
+    setHouseholdChoices([]);
+    setSaveHouseholdId('');
     setSavedCheck(undefined);
     setResult(undefined);
     try {
@@ -147,6 +189,31 @@ export default function PublicCheckPage() {
     }
   }
 
+  async function loadHouseholdChoices(): Promise<number> {
+    const me = await apiRequest<MeResponse>('/v1/me', {
+      publicCheckHandoff: 'household_discovery',
+    });
+    const eligibleScopes = me.principal.households.filter((scope) => scope.isProtectedMember);
+    const choices = await Promise.all(
+      eligibleScopes.map(async (scope, index): Promise<PublicHouseholdChoice> => {
+        let label = `Household ${index + 1}`;
+        try {
+          const family = await apiRequest<FamilyResponse>('/v1/family', {
+            publicCheckHandoff: 'household_name',
+            headers: { 'X-BB-Household-Id': scope.id },
+          });
+          label = family.household.name;
+        } catch {
+          // A numbered fallback avoids exposing opaque IDs when a name is unavailable.
+        }
+        return { id: scope.id, label, detail: householdChoiceDetail(scope) };
+      }),
+    );
+    setHouseholdChoices(choices);
+    setSaveHouseholdId('');
+    return choices.length;
+  }
+
   async function saveToHousehold() {
     if (!result || savedCheck) return;
     setBusy('save');
@@ -158,6 +225,7 @@ export default function PublicCheckPage() {
         `/v1/public/checks/${encodeURIComponent(result.id)}/save`,
         {
           method: 'POST',
+          publicCheckHandoff: 'conversion_save',
           body: JSON.stringify({
             conversionToken: result.conversionGrant.token,
             saveConsent: true,
@@ -167,14 +235,36 @@ export default function PublicCheckPage() {
       );
       setSavedCheck(response.check);
       setSaveStatus(
-        'Saved to your active household after explicit consent. Retrying the same save for the same owner and consent returns this one saved Check.',
+        'Saved to your active household with your permission. If the connection is interrupted, trying again returns this same saved Check instead of creating another.',
       );
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         setNeedsSignIn(true);
         setSaveStatus(
-          'Sign in in another tab, return here, and choose save again before the grant expires.',
+          'Sign in in another tab, return here, and choose Save again before this result expires.',
         );
+      } else if (
+        caught instanceof ApiError &&
+        caught.status === 409 &&
+        caught.code === 'conflict'
+      ) {
+        try {
+          const eligibleHouseholdCount = await loadHouseholdChoices();
+          setSaveStatus(
+            eligibleHouseholdCount > 0
+              ? 'Choose the household that should receive this Check, then choose Save.'
+              : 'Your account does not have an eligible protected-adult household for saving this Check.',
+          );
+        } catch (householdError) {
+          if (householdError instanceof ApiError && householdError.status === 401) {
+            setNeedsSignIn(true);
+            setSaveStatus(
+              'Sign in in another tab, return here, and choose Save again before this result expires.',
+            );
+          } else {
+            setSaveStatus(readableError(householdError));
+          }
+        }
       } else {
         setSaveStatus(readableError(caught));
       }
@@ -193,8 +283,8 @@ export default function PublicCheckPage() {
         <span className="eyebrow">Public Check · no account required</span>
         <h1 className="page-title">Pause before you act.</h1>
         <p className="lede">
-          Check suspicious message text or a website address without signing in. This local build
-          uses rules-only analysis, never opens a submitted URL, and can be wrong.
+          Check suspicious message text or a website address without signing in. BoomerBuddy uses a
+          fixed set of checks, never opens a submitted website address, and can be wrong.
         </p>
         <div className="member-grid public-check-grid">
           <form className="card form-stack" onSubmit={submit}>
@@ -275,22 +365,21 @@ export default function PublicCheckPage() {
             <ul className="plain-list">
               <li>No account or household is attached to an anonymous Check.</li>
               <li>
-                Common card, credential, and one-time-code patterns are redacted before the
-                temporary conversion payload is encrypted.
+                Common card, password, and one-time-code patterns are removed before a temporary
+                copy is protected.
               </li>
               <li>
-                The save grant creates at most one owned Check. A matching retry can recover that
-                same saved Check. The initial save opportunity expires after 15 minutes, and a
-                retention sweep clears expired payloads; refreshing immediately discards the
-                memory-only grants.
+                You may choose to save the result once. The save option expires after 15 minutes,
+                and the temporary copy is then deleted automatically. Refreshing this page clears
+                the save option immediately.
               </li>
               <li>
-                A separate short-lived continuity proof keeps this tab usable through ordinary
-                network changes. Current-network quotas and concurrency controls still apply.
+                Short-lived browser protection keeps this page working through ordinary connection
+                changes. Limits protect the service from abuse.
               </li>
               <li>
-                Acquisition context accepts only bounded source and campaign categories. Raw URL
-                parameters and submitted artifacts are not sent as attribution.
+                Submitted messages and website addresses are never used to identify a marketing
+                source.
               </li>
             </ul>
           </aside>
@@ -300,7 +389,7 @@ export default function PublicCheckPage() {
               data-testid="public-check-result"
               aria-live="polite"
             >
-              <span className="dev-pill">Anonymous local result</span>
+              <span className="dev-pill">Anonymous result</span>
               <h2 ref={resultHeading} tabIndex={-1}>
                 Check result
               </h2>
@@ -310,16 +399,16 @@ export default function PublicCheckPage() {
               </p>
               <p>{result.summary}</p>
               <dl className="definition-grid">
-                <dt>Evidence sufficiency</dt>
+                <dt>How much information was available</dt>
                 <dd>
-                  {sufficiencyText[result.evidenceSufficiency]} — available supporting information,
-                  not a probability.
+                  {sufficiencyText[result.evidenceSufficiency]} - this describes what the check
+                  could examine, not the chance that something is safe or harmful.
                 </dd>
-                <dt>Calibration</dt>
-                <dd>Not calibrated. This result is decision support, not proof or certainty.</dd>
-                <dt>Temporary grant expires</dt>
+                <dt>Important limit</dt>
+                <dd>This result can be wrong. It is decision support, not proof or certainty.</dd>
+                <dt>Save option expires</dt>
                 <dd>{new Date(result.expiresAt).toLocaleString()}</dd>
-                <dt>Input safety</dt>
+                <dt>Sensitive information check</dt>
                 <dd>
                   {totalRedactions === 0
                     ? 'No supported sensitive pattern was redacted. This is not a guarantee that the input contained no sensitive data.'
@@ -345,7 +434,7 @@ export default function PublicCheckPage() {
                   .sort((left, right) => left.priority - right.priority)
                   .map((action) => (
                     <li key={action.key}>
-                      <strong>{action.title}</strong> — {action.detail}
+                      <strong>{action.title}</strong> - {action.detail}
                       {action.officialChannelOnly
                         ? ' Use a contact channel you verify independently.'
                         : ''}
@@ -359,15 +448,43 @@ export default function PublicCheckPage() {
               <section className="card" aria-labelledby="optional-save-heading">
                 <h3 id="optional-save-heading">Optional: save to your household</h3>
                 <p>
-                  Saving is never automatic. It requires an authenticated protected-adult scope,
-                  this explicit action, and the unexpired single-success grant. A matching retry can
-                  return only the same owned Check. The saved Check uses the already-redacted
-                  payload.
+                  Saving is never automatic. You must sign in, choose Save, and have permission in
+                  the selected household. BoomerBuddy saves the version with supported sensitive
+                  patterns already removed. Trying again can return only this same saved Check.
                 </p>
+                {householdChoices.length > 0 ? (
+                  <div className="form-stack">
+                    <label htmlFor="public-check-household">Household for this saved Check</label>
+                    <select
+                      id="public-check-household"
+                      value={saveHouseholdId}
+                      onChange={(event) => {
+                        const householdId = event.target.value;
+                        setSaveHouseholdId(householdId);
+                        setSelectedHouseholdId(householdId);
+                      }}
+                    >
+                      <option value="">Choose a household</option>
+                      {householdChoices.map((choice) => (
+                        <option key={choice.id} value={choice.id}>
+                          {choice.label} - {choice.detail}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="help">
+                      This choice stays in this tab and is used only for requests you make while the
+                      tab remains open.
+                    </p>
+                  </div>
+                ) : null}
                 <button
                   className="button-secondary"
                   type="button"
-                  disabled={busy !== '' || Boolean(savedCheck)}
+                  disabled={
+                    busy !== '' ||
+                    Boolean(savedCheck) ||
+                    (householdChoices.length > 0 && !saveHouseholdId)
+                  }
                   onClick={() => void saveToHousehold()}
                 >
                   {savedCheck
@@ -384,9 +501,9 @@ export default function PublicCheckPage() {
                 {needsSignIn ? (
                   <p>
                     <Link href="/sign-in" target="_blank" rel="noopener noreferrer">
-                      Open development sign in in a new tab
+                      Open member sign in in a new tab
                     </Link>
-                    . Keep this tab open; the grant is intentionally memory-only.
+                    . Keep this tab open so the save option remains available.
                   </p>
                 ) : null}
                 {savedCheck ? <Link href="/member/history">Open member history</Link> : null}

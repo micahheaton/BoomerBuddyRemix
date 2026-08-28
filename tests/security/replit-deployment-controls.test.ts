@@ -7,6 +7,9 @@ import { describe, expect, it } from 'vitest';
 const root = process.cwd();
 const replitServiceScript = join(root, 'scripts/replit-service.mjs');
 const provenanceFixtureRoot = join(root, 'tmp');
+const canonicalGitHubOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git';
+const canonicalGitHubOriginWithoutGitSuffix = 'https://github.com/micahheaton/BoomerBuddyRemix';
+const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git';
 const canonicalReplitConfig = [
   'entrypoint = "scripts/replit-service.mjs"',
   'modules = ["nodejs-22"]',
@@ -86,6 +89,8 @@ async function createProvenanceFixture(
     inventory?: (directory: string) => Record<string, unknown>;
     inventoryExitCode?: 0 | 1;
     lockfile?: () => Record<string, unknown>;
+    originUrl?: string | null;
+    pushOriginUrl?: string;
   } = {},
 ): Promise<ProvenanceFixture> {
   await mkdir(provenanceFixtureRoot, { recursive: true });
@@ -123,6 +128,13 @@ async function createProvenanceFixture(
   await chmod(join(binDirectory, 'npm'), 0o755);
   runGit(directory, ['init']);
   runGit(directory, ['config', 'core.autocrlf', 'false']);
+  const originUrl = options.originUrl === undefined ? canonicalGitHubOrigin : options.originUrl;
+  if (originUrl !== null) {
+    runGit(directory, ['remote', 'add', 'origin', originUrl]);
+    if (options.pushOriginUrl !== undefined) {
+      runGit(directory, ['remote', 'set-url', '--push', 'origin', options.pushOriginUrl]);
+    }
+  }
   runGit(directory, ['add', '--all']);
   const releaseCommit = commitFixture(directory, 'Release candidate');
   const tag = `run3-1-replit-founding-household-${releaseCommit.slice(0, 12)}`;
@@ -134,6 +146,7 @@ async function createProvenanceFixture(
 function runFixtureBuild(
   fixture: ProvenanceFixture,
   service: 'api' | 'hq' | 'web' | 'worker' = 'worker',
+  environmentOverrides: NodeJS.ProcessEnv = {},
 ) {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
@@ -142,6 +155,10 @@ function runFixtureBuild(
     BB_RUN3_1_RELEASE_TAG: fixture.tag,
     NODE_ENV: 'production',
     REPLIT_DEPLOYMENT: '1',
+    ...(service === 'web' || service === 'hq'
+      ? { BB_PUBLIC_ORIGIN: `https://${service}.example.invalid` }
+      : {}),
+    ...environmentOverrides,
   };
   const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
   environment[pathKey] =
@@ -223,6 +240,48 @@ function reviewedOptionalLockfile(): Record<string, unknown> {
 }
 
 describe('Run 3.1 Replit deployment controls', () => {
+  it('keeps operator runbooks aligned with exact checkout-commit enforcement', async () => {
+    const [manifest, goLive] = await Promise.all([
+      readFile(join(root, 'docs/run-3-1/REPLIT-ENVIRONMENT-MANIFEST.md'), 'utf8'),
+      readFile(join(root, 'docs/run-3-1/FOUNDING-HOUSEHOLD-GO-LIVE.md'), 'utf8'),
+    ]);
+    const runbooks = `${manifest}\n${goLive}`;
+
+    for (const runbook of [manifest, goLive]) {
+      expect(runbook).toContain('`git rev-parse HEAD` equals `BB_RUN3_1_RELEASE_COMMIT`');
+    }
+    expect(runbooks).toMatch(
+      /different (?:Replit |provider-generated )?snapshot commit is rejected/iu,
+    );
+    expect(runbooks).not.toMatch(
+      /snapshot HEAD may differ|may package the same tree under a different snapshot commit|may package the reviewed source tree beneath a different provider-generated snapshot commit|different Replit snapshot commit is permitted/iu,
+    );
+    expect(goLive).toContain('https://github.com/micahheaton/BoomerBuddyRemix.git');
+    expect(goLive).toContain('`https://github.com/micahheaton/BoomerBuddyRemix`');
+    expect(goLive).toMatch(/any other\s+URL spelling/u);
+  });
+
+  it('keeps GitHub authoritative and excludes the legacy Replit project', async () => {
+    const instructions = await readFile(join(root, 'AGENTS.md'), 'utf8');
+
+    expect(instructions).toContain('https://github.com/micahheaton/BoomerBuddyRemix.git');
+    for (const service of [
+      '`boomerbuddy-web` serves the customer web application at `app.boomerbuddy.net`',
+      '`boomerbuddy-api` serves `api.boomerbuddy.net`',
+      '`boomerbuddy-worker` runs background work',
+      '`boomerbuddy-hq` serves `hq.boomerbuddy.net`',
+    ]) {
+      expect(instructions).toContain(service);
+    }
+    expect(instructions).toContain('Never push code from a Replit service back to GitHub');
+    expect(instructions).toContain(
+      'The separate Replit project named `BoomerBuddy`, serving `boomerbuddy.net`, is the legacy site',
+    );
+    expect(instructions).toContain(
+      'Do not edit, synchronize, republish, or retire that legacy project',
+    );
+  });
+
   it('uses one exact service selector and excludes the mobile build graph', async () => {
     const source = await readFile(join(root, 'scripts/replit-service.mjs'), 'utf8');
     const replit = await readFile(join(root, '.replit'), 'utf8');
@@ -251,6 +310,16 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain("['@expo/metro', 'expo', 'image-size', 'metro', 'react-native']");
     expect(source).toContain("'--include-workspace-root=false'");
     expect(source).toContain("process.env.REPLIT_DEPLOYMENT !== '1'");
+    expect(source).toContain(
+      "const canonicalGitHubHttpsOrigin = 'https://github.com/micahheaton/BoomerBuddyRemix.git'",
+    );
+    expect(source).toContain("'https://github.com/micahheaton/BoomerBuddyRemix'");
+    expect(source).toContain(
+      "const canonicalGitHubDeployKeyOrigin = 'git@github.com:micahheaton/BoomerBuddyRemix.git'",
+    );
+    expect(source.indexOf('assertCanonicalGitHubOrigin();')).toBeLessThan(
+      source.indexOf("if (mode === 'start')"),
+    );
     expect(source).toContain('const tagReference = `refs/tags/${expectedTag}`');
     expect(source).toContain("captureGit(['cat-file', '-t', tagReference])");
     expect(source).toContain("captureGit(['rev-parse', '--verify', 'HEAD^{tree}'])");
@@ -270,7 +339,11 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(source).toContain('reviewNpmProblems(inventory)');
     expect(source).toContain('hashes and filenames only');
     expect(source).toContain('expectedTag.endsWith(expectedCommit.slice(0, 12))');
-    expect(source).toContain('{ ...process.env, BB_API_PORT: providerApiPort }');
+    expect(source).toContain('{ ...serviceEnvironment, BB_API_PORT: providerApiPort }');
+    expect(source).toContain('canonicalProductionPublicOrigin(process.env.BB_PUBLIC_ORIGIN)');
+    expect(source).toContain(
+      'serviceEnvironment = { ...process.env, BB_PUBLIC_ORIGIN: publicOrigin }',
+    );
     expect(source).toContain('A configured BB_API_PORT must equal the provider PORT');
     expect(worker).toContain('new ProductionIdentityRepository(database).assertFounderBinding');
     expect(worker).toContain('await runReplitWorkerLifecycle(');
@@ -305,6 +378,158 @@ describe('Run 3.1 Replit deployment controls', () => {
       });
       expect(result.status).not.toBe(0);
       expect(`${result.stdout}${result.stderr}`).not.toContain('npm run start');
+    }
+  });
+
+  it('canonicalizes safe web origins and rejects unsafe values before a Replit build', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      for (const publicOrigin of [
+        'https://web.example.invalid/',
+        'https://WEB.example.invalid',
+        'https://web.example.invalid:443',
+        'https://b\u00fccher.example',
+      ]) {
+        const result = runFixtureBuild(fixture, 'web', { BB_PUBLIC_ORIGIN: publicOrigin });
+        expect(commandOutput(result), publicOrigin).toContain(
+          'Replit web build passed with an isolated production dependency graph.',
+        );
+        expect(result.status, publicOrigin).toBe(0);
+      }
+
+      for (const publicOrigin of [
+        'http://web.example.invalid',
+        'https://*.example.invalid',
+        'https://user@web.example.invalid',
+        'https://web.example.invalid/member',
+        'https://web.example.invalid?',
+        'https://web.example.invalid#',
+        'https://localhost',
+        'https://127.0.0.2',
+        'https://[::ffff:127.0.0.1]',
+        'https://web.\nexample.invalid',
+        'https://web.\texample.invalid',
+        'https://web.\u007fexample.invalid',
+        'https://web.example.invalid\\',
+      ]) {
+        const result = runFixtureBuild(fixture, 'web', { BB_PUBLIC_ORIGIN: publicOrigin });
+        expect(result.status, publicOrigin).not.toBe(0);
+        expect(commandOutput(result), publicOrigin).toContain(
+          'requires one safe canonicalizable HTTPS BB_PUBLIC_ORIGIN',
+        );
+        expect(commandOutput(result), publicOrigin).not.toContain('Replit web build passed');
+      }
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('accepts only the exact credential-free HTTPS and deploy-key SSH canonical origins', async () => {
+    for (const originUrl of [
+      canonicalGitHubOrigin,
+      canonicalGitHubOriginWithoutGitSuffix,
+      canonicalGitHubDeployKeyOrigin,
+    ]) {
+      const fixture = await createProvenanceFixture({ originUrl });
+      try {
+        const result = runFixtureBuild(fixture);
+        expect(result.status, originUrl).toBe(0);
+        expect(commandOutput(result), originUrl).toContain(
+          'Replit worker build passed with an isolated production dependency graph.',
+        );
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    }
+  });
+
+  it('rejects missing or noncanonical GitHub origin metadata before build or start', async () => {
+    const originCases = [
+      { label: 'missing', originUrl: null },
+      {
+        label: 'credentialed URL',
+        originUrl: 'https://credential-sentinel@github.com/micahheaton/BoomerBuddyRemix.git',
+      },
+      {
+        label: 'foreign repository',
+        originUrl: 'https://github.com/example/BoomerBuddyRemix.git',
+      },
+      {
+        label: 'foreign deploy-key repository',
+        originUrl: 'git@github.com:example/BoomerBuddyRemix.git',
+      },
+      {
+        label: 'alternate SSH spelling',
+        originUrl: 'ssh://git@github.com/micahheaton/BoomerBuddyRemix.git',
+      },
+      {
+        label: 'rewritten SSH host alias',
+        originUrl: 'git@github-boomerbuddy:micahheaton/BoomerBuddyRemix.git',
+      },
+    ] as const;
+
+    for (const originCase of originCases) {
+      const fixture = await createProvenanceFixture({ originUrl: originCase.originUrl });
+      try {
+        const result = runFixtureBuild(fixture);
+        const output = commandOutput(result);
+        expect(result.status, originCase.label).not.toBe(0);
+        expect(output, originCase.label).toContain(
+          'The Replit checkout must have the exact canonical BoomerBuddyRemix GitHub origin',
+        );
+        expect(output, originCase.label).not.toContain('credential-sentinel');
+        expect(output, originCase.label).not.toContain('Replit worker build passed');
+      } finally {
+        await rm(fixture.directory, { force: true, recursive: true });
+      }
+    }
+
+    const fixture = await createProvenanceFixture({
+      pushOriginUrl: 'https://github.com/example/BoomerBuddyRemix.git',
+    });
+    try {
+      const result = spawnSync(process.execPath, [replitServiceScript, 'start'], {
+        cwd: fixture.directory,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          BB_REPLIT_SERVICE: 'worker',
+          BB_RUN3_1_RELEASE_COMMIT: fixture.releaseCommit,
+          BB_RUN3_1_RELEASE_TAG: fixture.tag,
+          NODE_ENV: 'production',
+          REPLIT_DEPLOYMENT: '1',
+        },
+        shell: false,
+      });
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain(
+        'The Replit checkout must have the exact canonical BoomerBuddyRemix GitHub origin',
+      );
+      expect(output).not.toContain('npm run start');
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+
+    const multipleFetchOrigins = await createProvenanceFixture();
+    try {
+      runGit(multipleFetchOrigins.directory, [
+        'remote',
+        'set-url',
+        '--add',
+        'origin',
+        'https://github.com/example/BoomerBuddyRemix.git',
+      ]);
+      const result = runFixtureBuild(multipleFetchOrigins);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain(
+        'The Replit checkout must have the exact canonical BoomerBuddyRemix GitHub origin',
+      );
+      expect(output).not.toContain('https://github.com/example');
+      expect(output).not.toContain('Replit worker build passed');
+    } finally {
+      await rm(multipleFetchOrigins.directory, { force: true, recursive: true });
     }
   });
 
@@ -441,14 +666,10 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(`${wrongSuffix.stdout}${wrongSuffix.stderr}`).toContain('release tag suffix must match');
   });
 
-  it('accepts a clean Replit snapshot commit with the exact annotated candidate tree', async () => {
+  it('accepts a clean Replit checkout at the exact annotated candidate commit', async () => {
     const fixture = await createProvenanceFixture();
     try {
-      const snapshotCommit = commitFixture(fixture.directory, 'Replit snapshot', ['--allow-empty']);
-      expect(snapshotCommit).not.toBe(fixture.releaseCommit);
-      expect(runGit(fixture.directory, ['rev-parse', 'HEAD^{tree}'])).toBe(
-        runGit(fixture.directory, ['rev-parse', `refs/tags/${fixture.tag}^{tree}`]),
-      );
+      expect(runGit(fixture.directory, ['rev-parse', 'HEAD^{commit}'])).toBe(fixture.releaseCommit);
 
       const result = runFixtureBuild(fixture);
       expect(result.status, commandOutput(result)).toBe(0);
@@ -463,10 +684,6 @@ describe('Run 3.1 Replit deployment controls', () => {
   it('normalizes only the exact Replit Autoscale overlay before requiring a clean checkout', async () => {
     const fixture = await createProvenanceFixture();
     try {
-      const snapshotCommit = commitFixture(fixture.directory, 'Replit Autoscale snapshot', [
-        '--allow-empty',
-      ]);
-      expect(snapshotCommit).not.toBe(fixture.releaseCommit);
       await writeFile(join(fixture.directory, '.replit'), autoscaleReplitConfig, 'utf8');
 
       const result = runFixtureBuild(fixture, 'web');
@@ -877,6 +1094,31 @@ describe('Run 3.1 Replit deployment controls', () => {
       expect(output).toContain('tag -> HEAD name-status paths: 1');
       expect(output).toContain('    M "tracked.txt"');
       expect(output).not.toContain(contentSentinel);
+    } finally {
+      await rm(fixture.directory, { force: true, recursive: true });
+    }
+  });
+
+  it('rejects a different HEAD commit even when its tree matches the tagged candidate', async () => {
+    const fixture = await createProvenanceFixture();
+    try {
+      const headCommit = commitFixture(fixture.directory, 'Different commit with same tree', [
+        '--allow-empty',
+      ]);
+      expect(headCommit).not.toBe(fixture.releaseCommit);
+      expect(runGit(fixture.directory, ['rev-parse', 'HEAD^{tree}'])).toBe(
+        runGit(fixture.directory, ['rev-parse', `refs/tags/${fixture.tag}^{tree}`]),
+      );
+
+      const result = runFixtureBuild(fixture);
+      const output = commandOutput(result);
+      expect(result.status).not.toBe(0);
+      expect(output).toContain(
+        'The Replit checkout HEAD does not match the configured release commit',
+      );
+      expect(output).not.toContain(
+        'The Replit checkout tree does not match the tagged Run 3.1 candidate',
+      );
     } finally {
       await rm(fixture.directory, { force: true, recursive: true });
     }

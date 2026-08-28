@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CheckRepository, type DecisionRecord } from './checks';
 import { CommerceOperationsRepository } from './commerce';
 import type { Database } from './database';
+import { EntitlementRepository, protectedSelfEnrollmentConsent } from './entitlements';
 import {
   foundingHouseholdProtectedDocuments,
   FoundingHouseholdRepository,
@@ -57,13 +58,50 @@ describe('runtime-environment entitlement threading', () => {
       issuedAt: now,
       expiresAt: new Date(now.getTime() + 180 * 86_400_000),
     });
+    const actorIdentityId = 'identity-owner-alice';
+    const actorIdentitySubject = 'owner-alice';
     aliceAccess = {
       actorPersonId: 'person-owner-alice',
       actorIssuer: 'boomerbuddy-dev',
+      actorIdentityId,
+      actorIdentitySubject,
       sessionId,
       audience: 'customer',
       correlationId: 'correlation:runtime-environment-alice',
     };
+    const protectedEnrollment = new EntitlementRepository(
+      database,
+      labeledIds('protected-consent'),
+      'local',
+    );
+    await protectedEnrollment.withdrawProtectedSelfIdempotent({
+      householdId: 'household-sunrise',
+      personId: aliceAccess.actorPersonId,
+      actorPersonId: aliceAccess.actorPersonId,
+      operationKey: 'protected-self-withdraw:00000000-0000-4000-8000-000000000080',
+      actorIdentityId,
+      actorIssuer: aliceAccess.actorIssuer,
+      actorIdentitySubject,
+      sessionId: aliceAccess.sessionId,
+      audience: aliceAccess.audience,
+      correlationId: 'correlation:runtime-environment-consent-withdraw',
+      now,
+    });
+    await protectedEnrollment.enrollProtectedSelfIdempotent({
+      householdId: 'household-sunrise',
+      personId: aliceAccess.actorPersonId,
+      actorPersonId: aliceAccess.actorPersonId,
+      consentVersion: protectedSelfEnrollmentConsent.version,
+      ...protectedSelfEnrollmentConsent.documents,
+      operationKey: 'protected-self-enroll:00000000-0000-4000-8000-000000000081',
+      actorIdentityId,
+      actorIssuer: aliceAccess.actorIssuer,
+      actorIdentitySubject,
+      sessionId: aliceAccess.sessionId,
+      audience: aliceAccess.audience,
+      correlationId: 'correlation:runtime-environment-consent-enroll',
+      now,
+    });
   });
 
   afterEach(async () => database.close());
@@ -246,7 +284,7 @@ describe('runtime-environment entitlement threading', () => {
     expect(unrelatedGrant.rows).toEqual([{ id: 'grant-local-sunrise', revoked_at: null }]);
   });
 
-  it('keeps the local Founding allocation locally and restores it to an unrelated eligible grant in production reconciliation', async () => {
+  it('keeps Founding allocation bound when production sees only test-backed Family evidence', async () => {
     await enrollSunriseInLocalFoundingHousehold();
     const periodEndsAt = new Date(now.getTime() + 365 * 86_400_000);
     await database.query(
@@ -308,8 +346,14 @@ describe('runtime-environment entitlement threading', () => {
       >(
         `SELECT entitlement_grant_id FROM commerce_allowance_allocations
          WHERE household_id = 'household-sunrise'
-           AND id IN ('allocation-sunrise-alice','allocation-sunrise-pat','allocation-sunrise-terry')
-         ORDER BY id`,
+           AND state = 'active'
+           AND (
+             (allowance_key = 'protected_members'
+               AND subject_id IN ('person-owner-alice','person-protected-pat'))
+             OR (allowance_key = 'trusted_circle_participants'
+               AND subject_id = 'person-trusted-terry')
+           )
+         ORDER BY subject_id`,
       );
       return result.rows.map((row) => row.entitlement_grant_id);
     };
@@ -339,11 +383,7 @@ describe('runtime-environment entitlement threading', () => {
       ),
       2,
     );
-    await expect(allocationGrantIds()).resolves.toEqual([
-      'grant-local-sunrise',
-      'grant-local-sunrise',
-      'grant-local-sunrise',
-    ]);
+    await expect(allocationGrantIds()).resolves.toEqual(foundingGrantIds);
     const unrelatedGrant = await database.query<
       { readonly source: string; readonly revoked_at: unknown } & Record<string, unknown>
     >(

@@ -7,11 +7,13 @@ import {
   normalizeStripeEvent,
   signStripeFixture,
   StoreServerEventError,
+  StripeAdapter,
   StripeTestAdapter,
   StripeWebhookError,
   verifyStripeWebhook,
   type CommerceAuthorizationPort,
   type StoreServerEventVerifier,
+  type StripeOffer,
   type StripeTransport,
 } from './index';
 
@@ -19,6 +21,23 @@ const now = new Date('2026-08-16T12:00:00.000Z');
 const timestamp = Math.floor(now.getTime() / 1_000);
 const endpointSecret = 'whsec_fixture_only_1234567890';
 const apiVersion = '2026-07-29.fixture';
+const normalizedStripeOffers: readonly StripeOffer[] = [
+  {
+    offerId: 'founding_family_monthly_v1',
+    planVersionId: 'family_v1',
+    plan: 'family',
+    displayName: 'Family',
+    billingInterval: 'month',
+    providerProductId: 'prod_fixture',
+    providerPriceId: 'price_fixture',
+    currency: 'usd',
+    unitAmountMinor: 1499,
+    quantity: 1,
+    trialPeriodDays: 0,
+    customerSelectable: true,
+    defaultAcquisitionOffer: true,
+  },
+];
 
 function stripeBody(overrides: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
@@ -34,6 +53,12 @@ function stripeBody(overrides: Readonly<Record<string, unknown>> = {}): string {
         livemode: false,
         customer: 'cus_fixture_1',
         status: 'active',
+        metadata: {
+          household_id: 'household-one',
+          canonical_subscription_id: 'subscription-one',
+          plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
+        },
         cancel_at_period_end: false,
         current_period_start: timestamp - 86_400,
         current_period_end: timestamp + 30 * 86_400,
@@ -82,7 +107,7 @@ describe('Stripe test adapter', () => {
       now,
       supportedApiVersions: new Set([apiVersion]),
     });
-    expect(normalizeStripeEvent(verified)).toMatchObject({
+    expect(normalizeStripeEvent(verified, normalizedStripeOffers)).toMatchObject({
       provider: 'stripe',
       environment: 'test',
       externalEventId: 'evt_fixture_1',
@@ -170,6 +195,7 @@ describe('Stripe test adapter', () => {
         now,
         supportedApiVersions: new Set([apiVersion]),
       }),
+      normalizedStripeOffers,
     );
     expect(normalized.requiresReconciliation).toBe(true);
     expect(normalized.subscriptionOfferExact).toBeUndefined();
@@ -298,7 +324,7 @@ describe('Stripe test adapter', () => {
     }
   });
 
-  it('preflights the exact account, livemode, offer, and cancel-only Portal resources', async () => {
+  it('preflights the exact account, livemode, offer, and bounded Portal resources', async () => {
     const resource = async (path: string): Promise<Record<string, unknown>> => {
       if (path === '/v1/account') return { object: 'account', id: 'acct_fixture1234' };
       if (path === '/v1/products/prod_family_fixture') {
@@ -339,8 +365,9 @@ describe('Stripe test adapter', () => {
             proration_behavior: 'none',
           },
           subscription_update: { enabled: false, default_allowed_updates: [] },
-          payment_method_update: { enabled: false },
+          payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
         },
       };
     };
@@ -355,6 +382,10 @@ describe('Stripe test adapter', () => {
     await expect(adapter.verifyConfiguredResources()).resolves.toMatchObject({
       environment: 'test',
       accountId: 'acct_fixture1234',
+      accountChargesEnabled: false,
+      accountPayoutsEnabled: false,
+      accountCountry: null,
+      accountBusinessType: null,
       livemode: false,
       apiVersion,
       portalCancelOnly: true,
@@ -362,6 +393,7 @@ describe('Stripe test adapter', () => {
       portalCancellationMode: 'at_period_end',
       portalProrationBehavior: 'none',
       portalSubscriptionUpdateDefaultsEmpty: true,
+      portalInvoiceHistoryEnabled: true,
       retentionCouponEvidence: 'manual_founder_browser_required',
       promotionsEnabled: false,
       automaticTaxEnabled: false,
@@ -462,6 +494,13 @@ describe('Stripe test adapter', () => {
           delete subscriptionUpdate.default_allowed_updates;
         },
       },
+      {
+        path: '/v1/billing_portal/configurations/bpc_cancel_only_fixture',
+        mutate: (value) => {
+          const features = value.features as Record<string, Record<string, unknown>>;
+          features.invoice_history = { enabled: false };
+        },
+      },
     ];
     for (const hostile of hostileResources) {
       get.mockImplementation(async ({ path }: { readonly path: string }) => {
@@ -469,6 +508,120 @@ describe('Stripe test adapter', () => {
         if (path === hostile.path) hostile.mutate(exact);
         return exact;
       });
+      await expect(adapter.verifyConfiguredResources()).rejects.toMatchObject({
+        code: 'stripe.preflight_resource_mismatch',
+      });
+    }
+  });
+
+  it('requires exact enabled US company account capabilities for live preflight', async () => {
+    const exactAccount = {
+      object: 'account',
+      id: 'acct_livefixture1',
+      charges_enabled: true,
+      payouts_enabled: true,
+      country: 'US',
+      business_type: 'company',
+    } as const;
+    let accountResponse: Record<string, unknown> = exactAccount;
+    const resource = async ({ path }: { readonly path: string }) => {
+      if (path === '/v1/account') return accountResponse;
+      if (path === '/v1/products/prod_live_family_fixture') {
+        return {
+          id: 'prod_live_family_fixture',
+          object: 'product',
+          livemode: true,
+          active: true,
+        };
+      }
+      if (path === '/v1/prices/price_live_family_fixture') {
+        return {
+          id: 'price_live_family_fixture',
+          object: 'price',
+          livemode: true,
+          active: true,
+          product: 'prod_live_family_fixture',
+          currency: 'usd',
+          unit_amount: 1499,
+          unit_amount_decimal: '1499',
+          type: 'recurring',
+          billing_scheme: 'per_unit',
+          custom_unit_amount: null,
+          tiers_mode: null,
+          transform_quantity: null,
+          recurring: {
+            interval: 'month',
+            interval_count: 1,
+            usage_type: 'licensed',
+            trial_period_days: null,
+          },
+        };
+      }
+      return {
+        id: 'bpc_live_cancel_fixture',
+        object: 'billing_portal.configuration',
+        livemode: true,
+        active: true,
+        features: {
+          subscription_cancel: {
+            enabled: true,
+            mode: 'at_period_end',
+            proration_behavior: 'none',
+          },
+          subscription_update: { enabled: false, default_allowed_updates: [] },
+          payment_method_update: { enabled: true },
+          customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
+        },
+      };
+    };
+    const get = vi.fn(resource);
+    const adapter = new StripeAdapter(
+      { postForm: vi.fn(async () => ({})), get },
+      { authorize: vi.fn(async () => ({ allowed: false, reason: 'unused' })) },
+      new Set(),
+      {
+        environment: 'production',
+        accountId: 'acct_livefixture1',
+        apiVersion: '2026-07-29.dahlia',
+        portalConfigurationId: 'bpc_live_cancel_fixture',
+        defaultOfferId: 'founding_family_monthly_v1',
+        offers: [
+          {
+            offerId: 'founding_family_monthly_v1',
+            planVersionId: 'family_v1',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'month',
+            providerProductId: 'prod_live_family_fixture',
+            providerPriceId: 'price_live_family_fixture',
+            currency: 'usd',
+            unitAmountMinor: 1499,
+            quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: true,
+            defaultAcquisitionOffer: true,
+          },
+        ],
+      },
+    );
+
+    await expect(adapter.verifyConfiguredResources()).resolves.toMatchObject({
+      environment: 'production',
+      accountId: 'acct_livefixture1',
+      accountChargesEnabled: true,
+      accountPayoutsEnabled: true,
+      accountCountry: 'US',
+      accountBusinessType: 'company',
+      livemode: true,
+    });
+    for (const hostileAccount of [
+      { ...exactAccount, charges_enabled: false },
+      { ...exactAccount, payouts_enabled: false },
+      { ...exactAccount, country: 'CA' },
+      { ...exactAccount, business_type: 'individual' },
+    ]) {
+      accountResponse = hostileAccount;
       await expect(adapter.verifyConfiguredResources()).rejects.toMatchObject({
         code: 'stripe.preflight_resource_mismatch',
       });
@@ -498,6 +651,12 @@ describe('Stripe test adapter', () => {
             livemode: false,
             status: 'past_due',
             cancel_at_period_end: true,
+            metadata: {
+              household_id: 'household-one',
+              canonical_subscription_id: 'subscription-one',
+              plan_version_id: 'family_v1',
+              offer_id: 'founding_family_monthly_v1',
+            },
             current_period_start: timestamp - 30 * 86_400,
             current_period_end: providerPeriodEnd,
             items: {
@@ -544,6 +703,7 @@ describe('Stripe test adapter', () => {
           now,
           supportedApiVersions: new Set([apiVersion]),
         }),
+        normalizedStripeOffers,
       );
       expect(normalized.lifecycle).toBe('grace');
       expect(normalized.currentPeriodEndsAt?.toISOString()).toBe(
@@ -580,6 +740,18 @@ describe('Stripe test adapter', () => {
       },
       period: { start: timestamp, end: timestamp + 30 * 86_400 },
     };
+    const invoiceParent = {
+      type: 'subscription_details',
+      subscription_details: {
+        subscription: 'sub_invoice_fixture',
+        metadata: {
+          household_id: 'household-one',
+          canonical_subscription_id: 'subscription-one',
+          plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
+        },
+      },
+    } as const;
     const get = vi.fn(async ({ path }: { readonly path: string }) => {
       if (path === '/v1/subscriptions/sub_invoice_fixture') {
         return {
@@ -588,6 +760,12 @@ describe('Stripe test adapter', () => {
           livemode: false,
           status: currentEventType === 'invoice.paid' ? 'active' : 'past_due',
           customer: 'cus_invoice_fixture',
+          metadata: {
+            household_id: 'household-one',
+            canonical_subscription_id: 'subscription-one',
+            plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
+          },
           current_period_start: timestamp,
           current_period_end: timestamp + 30 * 86_400,
           items: {
@@ -635,7 +813,10 @@ describe('Stripe test adapter', () => {
               id: 'pi_invoice_fixture',
               object: 'payment_intent',
               livemode: false,
-              status: 'requires_payment_method',
+              status:
+                currentEventType === 'invoice.payment_action_required'
+                  ? 'requires_action'
+                  : 'requires_payment_method',
             };
       }
       return currentEventType === 'invoice.paid'
@@ -659,7 +840,7 @@ describe('Stripe test adapter', () => {
             starting_balance: 0,
             ending_balance: 0,
             amount_overpaid: 0,
-            parent: { subscription_details: { subscription: 'sub_invoice_fixture' } },
+            parent: invoiceParent,
             payments: {
               object: 'list',
               has_more: false,
@@ -698,7 +879,7 @@ describe('Stripe test adapter', () => {
             pre_payment_credit_notes_amount: 0,
             post_payment_credit_notes_amount: 0,
             attempt_count: 1,
-            parent: { subscription_details: { subscription: 'sub_invoice_fixture' } },
+            parent: invoiceParent,
             payments: {
               object: 'list',
               has_more: false,
@@ -735,7 +916,11 @@ describe('Stripe test adapter', () => {
     ).resolves.toBeNull();
     expect(get).not.toHaveBeenCalled();
 
-    for (const eventType of ['invoice.paid', 'invoice.payment_failed']) {
+    for (const eventType of [
+      'invoice.paid',
+      'invoice.payment_failed',
+      'invoice.payment_action_required',
+    ]) {
       currentEventType = eventType;
       const resolved = await adapter.resolveEventSubscription({
         environment: 'test',
@@ -760,11 +945,14 @@ describe('Stripe test adapter', () => {
           providerInvoiceId: 'in_invoice_fixture',
           providerInvoicePaymentId: 'inpay_invoice_fixture',
           providerPaymentIntentId: 'pi_invoice_fixture',
-          failureStatus: 'requires_payment_method',
+          failureStatus:
+            eventType === 'invoice.payment_action_required'
+              ? 'requires_action'
+              : 'requires_payment_method',
         });
       }
     }
-    expect(get).toHaveBeenCalledTimes(6);
+    expect(get).toHaveBeenCalledTimes(9);
   });
 
   it.each([
@@ -1251,6 +1439,7 @@ describe('Stripe test adapter', () => {
           household_id: 'household-one',
           canonical_subscription_id: 'subscription-canonical-one',
           plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
         },
         expires_at: Math.floor((now.getTime() + 30 * 60_000) / 1_000),
       })),
@@ -1282,6 +1471,7 @@ describe('Stripe test adapter', () => {
       adapter.createCheckout({
         actor,
         canonicalSubscriptionId: 'subscription-canonical-one',
+        offerId: 'founding_family_monthly_v1',
         planVersionId: 'family_v1',
         providerPriceId: 'price_family_month_fixture',
         successUrl: 'https://app.boomerbuddy.test/member/billing/success',
@@ -1293,11 +1483,14 @@ describe('Stripe test adapter', () => {
     expect(transport.postForm).toHaveBeenCalledWith(
       expect.objectContaining({
         form: expect.objectContaining({
+          integration_identifier: 'boomerbuddy_cqmfjzpt',
           'metadata[canonical_subscription_id]': 'subscription-canonical-one',
           'subscription_data[metadata][canonical_subscription_id]': 'subscription-canonical-one',
         }),
       }),
     );
+    const checkoutForm = vi.mocked(transport.postForm).mock.calls[0]?.[0].form;
+    expect(checkoutForm).not.toHaveProperty('payment_method_types[0]');
     expect(authorization.authorize).toHaveBeenCalledWith({
       actor,
       action: 'checkout:create',
@@ -1337,6 +1530,7 @@ describe('Stripe test adapter', () => {
         household_id: actor.householdId,
         canonical_subscription_id: 'subscription-canonical-one',
         plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
       },
       expires_at: Math.floor((now.getTime() + 30 * 60_000) / 1_000),
     };
@@ -1366,6 +1560,7 @@ describe('Stripe test adapter', () => {
     const checkoutInput = {
       actor,
       canonicalSubscriptionId: 'subscription-canonical-one',
+      offerId: 'founding_family_monthly_v1',
       planVersionId: 'family_v1',
       providerPriceId: 'price_family_month_fixture',
       successUrl: 'https://app.boomerbuddy.test/member/billing/success',
@@ -1453,6 +1648,7 @@ describe('Stripe test adapter', () => {
         payment_status: eventType.endsWith('completed') ? 'paid' : 'unpaid',
         amount_total: 1499,
         currency: 'usd',
+        payment_method_collection: 'always',
         expires_at: timestamp + 3600,
         customer: 'cus_fixture_1',
         subscription: 'sub_fixture_1',
@@ -1460,6 +1656,7 @@ describe('Stripe test adapter', () => {
           household_id: 'household-one',
           canonical_subscription_id: 'subscription-one',
           plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
         },
       };
       for (const mutate of [
@@ -1496,12 +1693,86 @@ describe('Stripe test adapter', () => {
             now,
             supportedApiVersions: new Set([apiVersion]),
           }),
+          normalizedStripeOffers,
         );
         expect(normalized.requiresReconciliation).toBe(true);
         expect(normalized.checkoutCompletion).toBeUndefined();
         expect(normalized.checkoutExpiration).toBeUndefined();
       }
     }
+  });
+
+  it('normalizes asynchronous Checkout success and holds asynchronous failure for reconciliation', () => {
+    const checkoutObject = {
+      id: 'cs_test_async_fixture',
+      object: 'checkout.session',
+      livemode: false,
+      mode: 'subscription',
+      status: 'complete',
+      payment_status: 'paid',
+      amount_total: 1499,
+      currency: 'usd',
+      payment_method_collection: 'always',
+      expires_at: timestamp + 3600,
+      customer: 'cus_fixture_1',
+      subscription: 'sub_fixture_1',
+      payment_intent: 'pi_fixture_1',
+      metadata: {
+        household_id: 'household-one',
+        canonical_subscription_id: 'subscription-one',
+        plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
+      },
+    } as const;
+    const normalize = (
+      eventType:
+        'checkout.session.async_payment_succeeded' | 'checkout.session.async_payment_failed',
+      paymentStatus: 'paid' | 'unpaid',
+    ) => {
+      const rawBody = JSON.stringify({
+        id: `evt_${eventType}`,
+        type: eventType,
+        created: timestamp,
+        livemode: false,
+        api_version: apiVersion,
+        data: { object: { ...checkoutObject, payment_status: paymentStatus } },
+      });
+      return normalizeStripeEvent(
+        verifyStripeWebhook({
+          rawBody,
+          signatureHeader: signStripeFixture({
+            rawBody,
+            endpointSecret,
+            timestampSeconds: timestamp,
+          }),
+          endpointSecret,
+          environment: 'test',
+          now,
+          supportedApiVersions: new Set([apiVersion]),
+        }),
+        normalizedStripeOffers,
+      );
+    };
+
+    expect(normalize('checkout.session.async_payment_succeeded', 'paid')).toMatchObject({
+      eventType: 'checkout.session.async_payment_succeeded',
+      externalSubscriptionId: 'sub_fixture_1',
+      providerCustomerId: 'cus_fixture_1',
+      requiresReconciliation: false,
+      checkoutCompletion: {
+        sessionStatus: 'complete',
+        paymentStatus: 'paid',
+        amountTotal: 1499,
+        currency: 'usd',
+      },
+    });
+    expect(normalize('checkout.session.async_payment_failed', 'unpaid')).toMatchObject({
+      eventType: 'checkout.session.async_payment_failed',
+      externalSubscriptionId: 'sub_fixture_1',
+      providerCustomerId: 'cus_fixture_1',
+      requiresReconciliation: true,
+      acknowledgementRequired: false,
+    });
   });
 
   it('paginates the complete Stripe subscription inventory and rejects partial page truth', async () => {

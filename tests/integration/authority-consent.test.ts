@@ -26,6 +26,7 @@ async function createAuthorityHarness(): Promise<AuthorityHarness> {
       fingerprintKey: Buffer.alloc(32, 11),
       fingerprintKeyVersion: 1,
     },
+    'test',
     now,
   );
   return {
@@ -199,38 +200,81 @@ describe('authority and consent persistence', () => {
           'identity-jordan-verified','jordan-verified','session-jordan-verified',$1,$1,$2,$1)`,
       [now.toISOString(), expiresAt.toISOString()],
     );
-    const family = new FamilyRepository(harness.database, Buffer.alloc(32, 11), 1);
+    await harness.database.query(
+      `INSERT INTO households(id, name, created_at)
+       VALUES ('household-jordan-bootstrap','Jordan bootstrap household',$1)`,
+      [now.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO household_memberships(
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES (
+         'household-jordan-bootstrap','membership-jordan-bootstrap',
+         'person-trusted-jordan','member','active',$1
+       )`,
+      [now.toISOString()],
+    );
+    await harness.database.query(
+      `INSERT INTO production_customer_bootstraps(
+         identity_id, issuer, subject, person_id, household_id, membership_id, created_at
+       ) VALUES (
+         'identity-jordan-verified','verified-idp','jordan-verified',
+         'person-trusted-jordan','household-jordan-bootstrap',
+         'membership-jordan-bootstrap',$1
+       )`,
+      [now.toISOString()],
+    );
+    const family = new FamilyRepository(
+      harness.database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
     const base = {
       householdId: 'household-sunrise',
       invitedByPersonId: 'person-protected-pat',
       protectedPersonId: 'person-protected-pat',
-      inviteeDisplayName: 'Jordan Verified',
       permissions: ['view_shared_checks'] as const,
       audience: 'customer' as const,
       sessionId: 'session-pat-verified',
       correlationId: 'correlation-verified-invitation',
       now,
     };
+    const recipient = await family.createRecipientConnectionCode({
+      identityId: 'identity-jordan-verified',
+      personId: 'person-trusted-jordan',
+      actorIssuer: 'verified-idp',
+      actorSubject: 'jordan-verified',
+      audience: 'customer',
+      correlationId: 'correlation-jordan-connection-code',
+      now,
+    });
     await expect(
       family.createInvitation({
         ...base,
         actorIssuer: 'boomerbuddy-dev',
-        intendedIdentity: { issuer: 'boomerbuddy-dev', subject: 'trusted-jordan' },
+        recipientConnectionCode: recipient.recipientConnectionCode,
       }),
     ).rejects.toMatchObject({ code: 'invalid_input' });
     await expect(
-      family.createInvitation({ ...base, actorIssuer: 'verified-idp' }),
+      family.createInvitation({
+        ...base,
+        actorIssuer: 'verified-idp',
+        inviteeDisplayName: 'Jordan Verified',
+      }),
     ).rejects.toMatchObject({ code: 'invalid_input' });
 
     const created = await family.createInvitation({
       ...base,
       actorIssuer: 'verified-idp',
-      intendedIdentity: { issuer: 'verified-idp', subject: 'jordan-verified' },
+      recipientConnectionCode: recipient.recipientConnectionCode,
     });
     expect(created.invitation.identityBindingState).toBe('verified_identity');
+    expect(created).toMatchObject({ delivery: 'recipient_manual_only', reused: false });
     const credential = await family.validateInvitationCredential(
       created.invitation.id,
-      created.localInviteCode,
+      recipient.recipientConnectionCode,
       now,
     );
     expect(credential).toMatchObject({
@@ -239,7 +283,7 @@ describe('authority and consent persistence', () => {
     });
     const accepted = await family.acceptInvitation({
       invitationId: created.invitation.id,
-      localInviteCode: created.localInviteCode,
+      localInviteCode: recipient.recipientConnectionCode,
       previewVersion: credential!.consentVersion,
       acceptingPersonId: 'person-trusted-jordan',
       audience: 'customer',
@@ -249,9 +293,12 @@ describe('authority and consent persistence', () => {
       now,
     });
     expect(accepted).toMatchObject({
-      protectedPersonId: 'person-protected-pat',
-      trustedPersonId: 'person-trusted-jordan',
-      state: 'active',
+      reused: false,
+      relationship: {
+        protectedPersonId: 'person-protected-pat',
+        trustedPersonId: 'person-trusted-jordan',
+        state: 'active',
+      },
     });
     const identity = await harness.database.query<{
       accepted_identity_issuer: string;

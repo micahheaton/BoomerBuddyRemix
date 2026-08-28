@@ -199,7 +199,7 @@ export function FounderProvisioning() {
               >
                 {data.workstreams.map((workstream) => (
                   <option key={workstream.key} value={workstream.key}>
-                    {workstream.provider} — {label(workstream.status)}
+                    {workstream.provider} - {label(workstream.status)}
                   </option>
                 ))}
               </select>
@@ -297,7 +297,7 @@ export function FounderProvisioning() {
               fails closed.
             </p>
             <button className="primary form-span" type="submit" disabled={busy}>
-              {busy ? 'Recording status…' : 'Record status only — run no external action'}
+              {busy ? 'Recording status...' : 'Record status only - run no external action'}
             </button>
           </form>
         </details>
@@ -330,7 +330,7 @@ export function FounderProvisioning() {
               <div>
                 <dt>Evidence observation</dt>
                 <dd>
-                  {label(workstream.latestEvidence.kind)} —{' '}
+                  {label(workstream.latestEvidence.kind)} -{' '}
                   {label(workstream.latestEvidence.result)}
                 </dd>
               </div>

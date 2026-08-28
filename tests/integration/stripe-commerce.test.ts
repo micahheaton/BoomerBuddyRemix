@@ -27,7 +27,8 @@ import { createMutableClock, testConfig } from './support';
 const customerOrigin = 'https://customer.boomerbuddy.test';
 const hqOrigin = 'https://hq.boomerbuddy.test';
 const endpointSecret = 'whsec_fixture_12345678';
-const apiVersion = '2026-02-25.clover';
+const liveEndpointSecret = ['whsec', 'live', 'fixture_12345678'].join('_');
+const apiVersion = '2026-07-29.dahlia';
 
 function stripeConfig(): AppConfig {
   const base = testConfig();
@@ -49,67 +50,663 @@ function stripeConfig(): AppConfig {
         runtimeNetworkPermitted: true,
         runtimeInitiationPermitted: true,
         cancelOnlyPortalConfigurationId: 'bpc_cancel_only_fixture',
+        defaultOfferId: 'family_annual_v2',
         offer: {
           offerId: 'founding_family_monthly_v1',
           planVersionId: 'family_v1',
+          plan: 'family',
+          displayName: 'Family',
           billingInterval: 'month',
           providerProductId: 'prod_family_fixture',
           providerPriceId: 'price_family_month_fixture',
           currency: 'usd',
           unitAmountMinor: 1499,
           quantity: 1,
+          trialPeriodDays: 0,
+          customerSelectable: false,
+          defaultAcquisitionOffer: false,
         },
+        offers: [
+          {
+            offerId: 'founding_family_monthly_v1',
+            planVersionId: 'family_v1',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'month',
+            providerProductId: 'prod_family_fixture',
+            providerPriceId: 'price_family_month_fixture',
+            currency: 'usd',
+            unitAmountMinor: 1499,
+            quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: true,
+            defaultAcquisitionOffer: false,
+          },
+          {
+            offerId: 'family_annual_v2',
+            planVersionId: 'family_v3',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'year',
+            providerProductId: 'prod_family_fixture',
+            providerPriceId: 'price_family_annual_fixture',
+            currency: 'usd',
+            unitAmountMinor: 14_990,
+            quantity: 1,
+            trialPeriodDays: 7,
+            customerSelectable: true,
+            defaultAcquisitionOffer: true,
+          },
+        ],
+        billingOperationalReadiness: { state: 'incomplete' },
       },
     },
   };
 }
 
-describe('Stripe live runtime boundary', () => {
-  it('refuses API startup from an offline live manifest even with an injected transport', async () => {
-    const base = stripeConfig();
-    const liveConfig: AppConfig = {
-      ...base,
-      commerce: {
-        stripe: {
-          mode: 'live',
-          environment: 'production',
-          accountId: 'acct_livefixture1',
-          apiVersion,
-          runtimeInitiationPermitted: false,
-          runtimeNetworkPermitted: false,
-          credentialCustody: 'managed_identity_kms_unavailable',
-          requiredSecretNames: ['BB_STRIPE_LIVE_API_KEY', 'BB_STRIPE_LIVE_WEBHOOK_SECRET'],
-          cancelOnlyPortalConfigurationId: 'bpc_live_cancel_fixture',
-          offer: {
+function liveApiConfig(runtimeInitiationPermitted: boolean): AppConfig {
+  const base = stripeConfig();
+  return {
+    ...base,
+    commerce: {
+      stripe: {
+        mode: 'live',
+        environment: 'production',
+        runtimeSurface: 'api',
+        accountId: 'acct_livefixture1',
+        apiRestrictedKey: ['rk', 'live', 'fixture_12345678'].join('_'),
+        webhookSecret: liveEndpointSecret,
+        apiVersion,
+        runtimeInitiationPermitted,
+        runtimeNetworkPermitted: true,
+        credentialCustody: 'separate_replit_runtime_restricted_keys',
+        cancelOnlyPortalConfigurationId: 'bpc_live_cancel_fixture',
+        defaultOfferId: 'family_annual_v2',
+        offer: {
+          offerId: 'founding_family_monthly_v1',
+          planVersionId: 'family_v1',
+          plan: 'family',
+          displayName: 'Family',
+          billingInterval: 'month',
+          providerProductId: 'prod_live_family_fixture',
+          providerPriceId: 'price_live_family_fixture',
+          currency: 'usd',
+          unitAmountMinor: 1499,
+          quantity: 1,
+          trialPeriodDays: 0,
+          customerSelectable: false,
+          defaultAcquisitionOffer: false,
+        },
+        offers: [
+          {
             offerId: 'founding_family_monthly_v1',
             planVersionId: 'family_v1',
+            plan: 'family',
+            displayName: 'Family',
             billingInterval: 'month',
             providerProductId: 'prod_live_family_fixture',
             providerPriceId: 'price_live_family_fixture',
             currency: 'usd',
             unitAmountMinor: 1499,
             quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: true,
+            defaultAcquisitionOffer: false,
           },
+          {
+            offerId: 'family_annual_v2',
+            planVersionId: 'family_v3',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'year',
+            providerProductId: 'prod_live_family_fixture',
+            providerPriceId: 'price_live_family_annual_fixture',
+            currency: 'usd',
+            unitAmountMinor: 14_990,
+            quantity: 1,
+            trialPeriodDays: 7,
+            customerSelectable: true,
+            defaultAcquisitionOffer: true,
+          },
+        ],
+        billingOperationalReadiness: {
+          state: 'ready',
+          supportEmail: 'support@boomerbuddy.test',
+          supportUrl: 'https://customer.boomerbuddy.test/support',
+          privacyUrl: 'https://customer.boomerbuddy.test/privacy',
+          termsUrl: 'https://customer.boomerbuddy.test/terms',
+          billingTermsUrl: 'https://customer.boomerbuddy.test/billing-terms',
+          policyVersion: 'test-policy-v1',
+          policyEffectiveAt: '2026-08-01',
+          supportOperationsReady: true,
+          supportReceiptId: 'test-support-receipt-v1',
+          trialReminderDeliveryMode: 'stripe_automatic_email',
+          trialReminderDeliveryReceiptId: 'test-trial-email-receipt-v1',
+          taxTreatmentReviewComplete: true,
+          taxReviewedLaunchGeography: 'test-us-fixture',
+          taxTreatmentReviewReceiptId: 'test-tax-review-receipt-v1',
         },
       },
+    },
+  };
+}
+
+function livePreflightFixture(path: string): Readonly<Record<string, unknown>> {
+  if (path === '/v1/account') {
+    return {
+      id: 'acct_livefixture1',
+      object: 'account',
+      charges_enabled: true,
+      payouts_enabled: true,
+      country: 'US',
+      business_type: 'company',
     };
+  }
+  if (path === '/v1/products/prod_live_family_fixture') {
+    return {
+      id: 'prod_live_family_fixture',
+      object: 'product',
+      livemode: true,
+      active: true,
+    };
+  }
+  if (path === '/v1/prices/price_live_family_fixture') {
+    return {
+      id: 'price_live_family_fixture',
+      object: 'price',
+      livemode: true,
+      active: true,
+      product: 'prod_live_family_fixture',
+      currency: 'usd',
+      unit_amount: 1499,
+      unit_amount_decimal: '1499',
+      type: 'recurring',
+      billing_scheme: 'per_unit',
+      custom_unit_amount: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      recurring: {
+        interval: 'month',
+        interval_count: 1,
+        usage_type: 'licensed',
+        trial_period_days: null,
+      },
+    };
+  }
+  if (path === '/v1/prices/price_live_family_annual_fixture') {
+    return {
+      id: 'price_live_family_annual_fixture',
+      object: 'price',
+      livemode: true,
+      active: true,
+      product: 'prod_live_family_fixture',
+      currency: 'usd',
+      unit_amount: 14_990,
+      unit_amount_decimal: '14990',
+      type: 'recurring',
+      billing_scheme: 'per_unit',
+      custom_unit_amount: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      recurring: {
+        interval: 'year',
+        interval_count: 1,
+        usage_type: 'licensed',
+        trial_period_days: null,
+      },
+    };
+  }
+  if (path === '/v1/billing_portal/configurations/bpc_live_cancel_fixture') {
+    return {
+      id: 'bpc_live_cancel_fixture',
+      object: 'billing_portal.configuration',
+      livemode: true,
+      active: true,
+      features: {
+        subscription_cancel: {
+          enabled: true,
+          mode: 'at_period_end',
+          proration_behavior: 'none',
+        },
+        subscription_update: { enabled: false, default_allowed_updates: [] },
+        payment_method_update: { enabled: true },
+        customer_update: { enabled: false, allowed_updates: [] },
+        invoice_history: { enabled: true },
+      },
+    };
+  }
+  return {};
+}
+
+describe('Stripe live runtime boundary', () => {
+  it('accepts the API-scoped live boundary while keeping injected evidence local-only', async () => {
+    const liveConfig = liveApiConfig(false);
     const injectedTransport: StripeTransport = {
       get: vi.fn(async () => ({})),
       postForm: vi.fn(async () => ({})),
     };
-    await expect(
-      buildApp({ config: liveConfig, stripeTransport: injectedTransport, initialize: false }),
-    ).rejects.toThrow('offline-only; api startup is refused');
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveConfig,
+      database,
+      closeDatabase: false,
+      stripeTransport: injectedTransport,
+    });
+    const publicConfiguration = await app.inject({ method: 'GET', url: '/v1/public/config' });
+    expect(publicConfiguration.statusCode, publicConfiguration.body).toBe(200);
+    expect(publicConfiguration.json()).toMatchObject({
+      liveProvidersEnabled: true,
+      pricing: [
+        {
+          key: 'family',
+          monthlyUsd: 14.99,
+          annualUsd: 149.9,
+          hypothesis: false,
+        },
+      ],
+      commerceCatalog: {
+        defaultOfferId: 'family_annual_v2',
+      },
+    });
     expect(injectedTransport.get).not.toHaveBeenCalled();
     expect(injectedTransport.postForm).not.toHaveBeenCalled();
+    await app.close();
+    await database.close();
     await expect(
       buildApp({
-        config: stripeConfig(),
+        config: liveConfig,
         stripeTransport: injectedTransport,
-        stripeEvidenceLevel: 'stripe_test',
+        stripeEvidenceLevel: 'live_production',
         initialize: false,
       }),
     ).rejects.toThrow('evidence tier does not match the runtime transport boundary');
+  });
+
+  it('denies a non-owner HQ preflight before any provider transport call', async () => {
+    const get = vi.fn(async ({ path }: Parameters<StripeTransport['get']>[0]) =>
+      livePreflightFixture(path),
+    );
+    const postForm = vi.fn(async () => ({}));
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveApiConfig(false),
+      database,
+      closeDatabase: false,
+      stripeTransport: { get, postForm },
+    });
+    const reviewer = await loginHq(app, 'hq-riley');
+    const denied = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers: { cookie: reviewer, origin: hqOrigin },
+      payload: { environment: 'production' },
+    });
+    expect(denied.statusCode, denied.body).toBe(403);
+    expect(get).not.toHaveBeenCalled();
+    expect(postForm).not.toHaveBeenCalled();
+    const evidence = await database.query<{ readonly count: number } & Record<string, unknown>>(
+      `SELECT count(*)::int AS count FROM commerce_stripe_preflight_records`,
+    );
+    expect(evidence.rows[0]?.count).toBe(0);
+    await app.close();
+    await database.close();
+  });
+
+  it('records founder preflight through four GETs while every live initiation gate stays closed', async () => {
+    const get = vi.fn(async ({ path }: Parameters<StripeTransport['get']>[0]) =>
+      livePreflightFixture(path),
+    );
+    const postForm = vi.fn(async () => ({}));
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveApiConfig(false),
+      database,
+      closeDatabase: false,
+      stripeTransport: { get, postForm },
+    });
+    const founder = await loginHq(app);
+    const headers = { cookie: founder, origin: hqOrigin };
+    const initiation = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/initiation-control?environment=production',
+      headers,
+    });
+    expect(initiation.statusCode, initiation.body).toBe(200);
+    expect(initiation.json()).toMatchObject({
+      state: 'absent',
+      revision: 0,
+      liveEnableAvailable: false,
+    });
+    const cohort = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/cohort-control?environment=production',
+      headers,
+    });
+    expect(cohort.statusCode, cohort.body).toBe(200);
+    expect(cohort.json()).toMatchObject({ state: 'absent', maxActive: 0, revision: 0 });
+
+    const wrongEnvironment = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers,
+      payload: { environment: 'test' },
+    });
+    expect(wrongEnvironment.statusCode, wrongEnvironment.body).toBe(503);
+    expect(get).not.toHaveBeenCalled();
+
+    const preflight = await app.inject({
+      method: 'POST',
+      url: '/v1/hq/commerce/stripe/preflight',
+      headers,
+      payload: { environment: 'production' },
+    });
+    expect(preflight.statusCode, preflight.body).toBe(200);
+    expect(preflight.json()).toMatchObject({
+      environment: 'production',
+      preflight: {
+        state: 'configured',
+        evidenceLevel: 'local_fixture',
+        authenticityKind: 'fixture_assertion',
+        transportKind: 'injected_fixture',
+        checks: {
+          accountReady: true,
+          offerReady: true,
+          portalReady: true,
+          checkoutPolicyReady: true,
+        },
+      },
+      eligibleHouseholds: [],
+    });
+    expect(get.mock.calls.map(([request]) => request.path).sort()).toEqual(
+      [
+        '/v1/account',
+        '/v1/billing_portal/configurations/bpc_live_cancel_fixture',
+        '/v1/prices/price_live_family_annual_fixture',
+        '/v1/products/prod_live_family_fixture',
+      ].sort(),
+    );
+    expect(postForm).not.toHaveBeenCalled();
+    const rows = await database.query<
+      {
+        readonly preflight_records: number;
+        readonly checkout_intents: number;
+        readonly session_operations: number;
+        readonly initiation_controls: number;
+        readonly cohort_policies: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_preflight_records) AS preflight_records,
+         (SELECT count(*)::int FROM commerce_checkout_intents) AS checkout_intents,
+         (SELECT count(*)::int FROM commerce_stripe_session_operations) AS session_operations,
+         (SELECT count(*)::int FROM commerce_stripe_initiation_controls) AS initiation_controls,
+         (SELECT count(*)::int FROM commerce_stripe_cohort_policies) AS cohort_policies`,
+    );
+    expect(rows.rows[0]).toMatchObject({
+      preflight_records: 1,
+      checkout_intents: 0,
+      session_operations: 0,
+      initiation_controls: 0,
+      cohort_policies: 0,
+    });
+    await app.close();
+    await database.close();
+  });
+
+  it('fails Portal closed when its runtime configuration and adapter are absent', async () => {
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: testConfig(),
+      database,
+      closeDatabase: false,
+    });
+    const portal = await app.inject({ method: 'POST', url: '/v1/commerce/stripe/portal' });
+    expect(portal.statusCode, portal.body).toBe(503);
+    expect(portal.json()).toMatchObject({
+      error: { code: 'integration_unavailable' },
+    });
+    await app.close();
+    await database.close();
+  });
+
+  it('keeps verified-customer Portal available while live Checkout initiation is off', async () => {
+    const liveConfig = liveApiConfig(false);
+    const liveNow = new Date();
+    const postForm = vi.fn(async ({ path, form }) => {
+      if (path !== '/v1/billing_portal/sessions') throw new Error('Unexpected Stripe mutation');
+      return {
+        id: 'bps_live_portal_independent',
+        object: 'billing_portal.session',
+        livemode: true,
+        url: 'https://billing.stripe.com/p/session/live-portal-independent',
+        customer: form.customer,
+        configuration: form.configuration,
+        return_url: form.return_url,
+      };
+    });
+    const transport: StripeTransport = {
+      postForm,
+      get: vi.fn(async ({ path }) => {
+        if (path === '/v1/account') {
+          return {
+            id: 'acct_livefixture1',
+            object: 'account',
+            charges_enabled: true,
+            payouts_enabled: true,
+            country: 'US',
+            business_type: 'company',
+          };
+        }
+        if (path === '/v1/products/prod_live_family_fixture') {
+          return {
+            id: 'prod_live_family_fixture',
+            object: 'product',
+            livemode: true,
+            active: true,
+          };
+        }
+        if (path === '/v1/prices/price_live_family_fixture') {
+          return {
+            id: 'price_live_family_fixture',
+            object: 'price',
+            livemode: true,
+            active: true,
+            product: 'prod_live_family_fixture',
+            currency: 'usd',
+            unit_amount: 1499,
+            unit_amount_decimal: '1499',
+            type: 'recurring',
+            billing_scheme: 'per_unit',
+            custom_unit_amount: null,
+            tiers_mode: null,
+            transform_quantity: null,
+            recurring: {
+              interval: 'month',
+              interval_count: 1,
+              usage_type: 'licensed',
+              trial_period_days: null,
+            },
+          };
+        }
+        if (path === '/v1/prices/price_live_family_annual_fixture') {
+          return {
+            id: 'price_live_family_annual_fixture',
+            object: 'price',
+            livemode: true,
+            active: true,
+            product: 'prod_live_family_fixture',
+            currency: 'usd',
+            unit_amount: 14_990,
+            unit_amount_decimal: '14990',
+            type: 'recurring',
+            billing_scheme: 'per_unit',
+            custom_unit_amount: null,
+            tiers_mode: null,
+            transform_quantity: null,
+            recurring: {
+              interval: 'year',
+              interval_count: 1,
+              usage_type: 'licensed',
+              trial_period_days: null,
+            },
+          };
+        }
+        if (path === '/v1/billing_portal/configurations/bpc_live_cancel_fixture') {
+          return {
+            id: 'bpc_live_cancel_fixture',
+            object: 'billing_portal.configuration',
+            livemode: true,
+            active: true,
+            features: {
+              subscription_cancel: {
+                enabled: true,
+                mode: 'at_period_end',
+                proration_behavior: 'none',
+              },
+              subscription_update: { enabled: false, default_allowed_updates: [] },
+              payment_method_update: { enabled: true },
+              customer_update: { enabled: false, allowed_updates: [] },
+              invoice_history: { enabled: true },
+            },
+          };
+        }
+        return {};
+      }),
+    };
+    const database = await createPGliteDatabase(':memory:');
+    const app = await buildApp({
+      config: liveConfig,
+      database,
+      closeDatabase: false,
+      stripeTransport: transport,
+      now: () => liveNow,
+    });
+    await database.query(
+      `INSERT INTO commerce_provider_customers(
+         provider, environment, provider_customer_id, household_id, verified_at
+       ) VALUES ('stripe','production','cus_live_portal_independent','household-sunrise',CURRENT_TIMESTAMP)`,
+    );
+    const cookie = await login(app, 'owner-alice');
+    const customerHeaders = {
+      cookie,
+      origin: customerOrigin,
+      'x-bb-household-id': 'household-sunrise',
+    };
+    const billing = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: customerHeaders,
+    });
+    expect(billing.statusCode, billing.body).toBe(200);
+    expect(billing.json()).toMatchObject({
+      billing: { runtimeInitiationEnabled: false, portalAvailable: true },
+    });
+    const checkout = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: { ...customerHeaders, 'idempotency-key': 'live-disabled-checkout-request-0001' },
+      payload: { offerId: 'founding_family_monthly_v1' },
+    });
+    expect(checkout.statusCode, checkout.body).toBe(403);
+    const portal = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/portal',
+      headers: { ...customerHeaders, 'idempotency-key': 'live-independent-portal-request-0001' },
+    });
+    expect(portal.statusCode, portal.body).toBe(200);
+    expect(portal.json()).toMatchObject({
+      portal: { environment: 'production', sessionId: 'bps_live_portal_independent' },
+    });
+    expect(postForm).toHaveBeenCalledTimes(1);
+    expect(postForm).toHaveBeenCalledWith(
+      expect.objectContaining({ path: '/v1/billing_portal/sessions' }),
+    );
+    const webhookCreated = Math.floor(liveNow.getTime() / 1_000);
+    const rawWebhook = JSON.stringify({
+      id: 'evt_live_async_payment_failed_initiation_off',
+      type: 'checkout.session.async_payment_failed',
+      created: webhookCreated,
+      livemode: true,
+      account: 'acct_livefixture1',
+      api_version: apiVersion,
+      data: {
+        object: {
+          id: 'cs_live_async_payment_failed_initiation_off',
+          object: 'checkout.session',
+          livemode: true,
+          mode: 'subscription',
+          status: 'complete',
+          payment_status: 'unpaid',
+          amount_total: 1499,
+          currency: 'usd',
+          expires_at: webhookCreated + 3600,
+          customer: 'cus_live_async_payment_failed_initiation_off',
+          subscription: 'sub_live_async_payment_failed_initiation_off',
+          metadata: {
+            household_id: 'household-sunrise',
+            canonical_subscription_id: 'subscription-live-async-payment-failed-initial-off',
+            plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
+          },
+        },
+      },
+    });
+    const webhook = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': signStripeFixture({
+          rawBody: rawWebhook,
+          endpointSecret: liveEndpointSecret,
+          timestampSeconds: webhookCreated,
+        }),
+      },
+      payload: rawWebhook,
+    });
+    expect(webhook.statusCode, webhook.body).toBe(202);
+    expect(webhook.json()).toMatchObject({
+      received: true,
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const queuedWebhook = await database.query<
+      { readonly job_type: string; readonly payload: unknown } & Record<string, unknown>
+    >(
+      `SELECT job_type, payload FROM durable_jobs
+       WHERE job_type = 'commerce.reconcile'
+       ORDER BY created_at DESC LIMIT 1`,
+    );
+    expect(queuedWebhook.rows[0]).toMatchObject({
+      job_type: 'commerce.reconcile',
+      payload: expect.objectContaining({
+        environment: 'production',
+        eventType: 'checkout.session.async_payment_failed',
+        externalSubscriptionId: 'sub_live_async_payment_failed_initiation_off',
+      }),
+    });
+    const hqCookie = await loginHq(app);
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/hq/commerce/stripe/status?environment=production',
+      headers: { cookie: hqCookie, origin: hqOrigin },
+    });
+    expect(status.statusCode, status.body).toBe(200);
+    expect(status.json()).toMatchObject({
+      environment: 'production',
+      preflight: {
+        state: 'configured',
+        checks: {
+          accountReady: true,
+          offerReady: true,
+          portalReady: true,
+          checkoutPolicyReady: true,
+        },
+      },
+    });
+    expect(JSON.stringify(status.json())).not.toMatch(/apiRestrictedKey|provider_product_id|raw/u);
+    await app.close();
+    await database.close();
   });
 
   it('composes worker Checkout and Portal retries with the configured customer origin and exact keys', async () => {
@@ -133,6 +730,7 @@ describe('Stripe live runtime boundary', () => {
               household_id: form['metadata[household_id]'],
               canonical_subscription_id: form['metadata[canonical_subscription_id]'],
               plan_version_id: form['metadata[plan_version_id]'],
+              offer_id: form['metadata[offer_id]'],
             },
             expires_at: Number(form.expires_at),
           }
@@ -154,7 +752,8 @@ describe('Stripe live runtime boundary', () => {
         accountId: 'acct_fixture1234',
         apiVersion,
         portalConfigurationId: 'bpc_cancel_only_fixture',
-        offer: configuredStripe.offer,
+        defaultOfferId: configuredStripe.defaultOfferId,
+        offers: configuredStripe.offers,
       },
     });
     const actor = {
@@ -167,6 +766,7 @@ describe('Stripe live runtime boundary', () => {
       adapter.createCheckout({
         actor,
         canonicalSubscriptionId: 'subscription-worker-composition',
+        offerId: 'founding_family_monthly_v1',
         planVersionId: 'family_v1',
         providerPriceId: 'price_family_month_fixture',
         successUrl: `${customerOrigin}/member/billing/success`,
@@ -246,7 +846,13 @@ async function runReconciliation(
     {
       'commerce.reconcile': createStripeReconciliationHandler({
         businessOs: new BusinessOsRepository(database),
-        commerce: new CommerceOperationsRepository(database, Buffer.alloc(32, 11), 1),
+        commerce: new CommerceOperationsRepository(
+          database,
+          Buffer.alloc(32, 11),
+          1,
+          undefined,
+          'local',
+        ),
         commerceRuntime: new CommerceRuntimeRepository(database),
         jobs,
         provider: new StripeTestAdapter(
@@ -338,6 +944,8 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
   readonly fixtureKey: string;
   readonly periodStart: number;
   readonly periodEnd: number;
+  readonly checkoutEventType?:
+    'checkout.session.completed' | 'checkout.session.async_payment_succeeded';
 }): Promise<void> {
   const checkoutExpiry = await input.database.query<
     { readonly provider_returned_expires_at: unknown } & Record<string, unknown>
@@ -371,7 +979,7 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
   };
   const checkout = await send({
     id: `evt_${input.fixtureKey}_checkout_completed`,
-    type: 'checkout.session.completed',
+    type: input.checkoutEventType ?? 'checkout.session.completed',
     created: input.periodStart,
     livemode: false,
     api_version: apiVersion,
@@ -386,6 +994,7 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
         payment_intent: `pi_${input.fixtureKey}_checkout`,
         status: 'complete',
         payment_status: 'paid',
+        payment_method_collection: 'always',
         amount_total: 1499,
         currency: 'usd',
         expires_at: providerCheckoutExpiry.getTime() / 1_000,
@@ -393,6 +1002,7 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
           household_id: 'household-sunrise',
           canonical_subscription_id: input.canonicalSubscriptionId,
           plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
         },
       },
     },
@@ -405,6 +1015,12 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
     object: 'subscription',
     livemode: false,
     customer: input.providerCustomerId,
+    metadata: {
+      household_id: 'household-sunrise',
+      canonical_subscription_id: input.canonicalSubscriptionId,
+      plan_version_id: 'family_v1',
+      offer_id: 'founding_family_monthly_v1',
+    },
     status: 'active',
     cancel_at_period_end: false,
     created: input.periodStart,
@@ -461,7 +1077,18 @@ async function activateCompletedCheckoutWithPaidInvoice(input: {
         starting_balance: 0,
         ending_balance: 0,
         amount_overpaid: 0,
-        parent: { subscription_details: { subscription: input.externalSubscriptionId } },
+        parent: {
+          type: 'subscription_details',
+          subscription_details: {
+            subscription: input.externalSubscriptionId,
+            metadata: {
+              household_id: 'household-sunrise',
+              canonical_subscription_id: input.canonicalSubscriptionId,
+              plan_version_id: 'family_v1',
+              offer_id: 'founding_family_monthly_v1',
+            },
+          },
+        },
         payments: {
           object: 'list',
           has_more: false,
@@ -548,6 +1175,7 @@ describe('Stripe test-mode transaction path', () => {
   let transport: StripeTransport;
 
   beforeEach(async () => {
+    clock.set(new Date('2026-08-15T12:00:00.000Z'));
     database = await createPGliteDatabase(':memory:');
     transport = {
       postForm: vi.fn(async ({ path, form }) =>
@@ -568,6 +1196,7 @@ describe('Stripe test-mode transaction path', () => {
                 household_id: form['metadata[household_id]'],
                 canonical_subscription_id: form['metadata[canonical_subscription_id]'],
                 plan_version_id: form['metadata[plan_version_id]'],
+                offer_id: form['metadata[offer_id]'],
               },
               expires_at: Number(form.expires_at),
             }
@@ -609,6 +1238,29 @@ describe('Stripe test-mode transaction path', () => {
             },
           };
         }
+        if (path === '/v1/prices/price_family_annual_fixture') {
+          return {
+            id: 'price_family_annual_fixture',
+            object: 'price',
+            livemode: false,
+            active: true,
+            product: 'prod_family_fixture',
+            currency: 'usd',
+            unit_amount: 14_990,
+            unit_amount_decimal: '14990',
+            type: 'recurring',
+            billing_scheme: 'per_unit',
+            custom_unit_amount: null,
+            tiers_mode: null,
+            transform_quantity: null,
+            recurring: {
+              interval: 'year',
+              interval_count: 1,
+              usage_type: 'licensed',
+              trial_period_days: null,
+            },
+          };
+        }
         if (path === '/v1/billing_portal/configurations/bpc_cancel_only_fixture') {
           return {
             id: 'bpc_cancel_only_fixture',
@@ -622,8 +1274,9 @@ describe('Stripe test-mode transaction path', () => {
                 proration_behavior: 'none',
               },
               subscription_update: { enabled: false, default_allowed_updates: [] },
-              payment_method_update: { enabled: false },
+              payment_method_update: { enabled: true },
               customer_update: { enabled: false, allowed_updates: [] },
+              invoice_history: { enabled: true },
             },
           };
         }
@@ -664,6 +1317,725 @@ describe('Stripe test-mode transaction path', () => {
     await database.close();
   });
 
+  it('retries an authentically expired annual trial with a new key and consumes only the retry', async () => {
+    let checkoutDispatches = 0;
+    vi.mocked(transport.postForm).mockImplementation(async ({ path, form }) => {
+      if (path !== '/v1/checkout/sessions') {
+        throw new Error(`Unexpected Stripe fixture path: ${path}`);
+      }
+      checkoutDispatches += 1;
+      return {
+        id: `cs_test_annual_retry_${checkoutDispatches}`,
+        object: 'checkout.session',
+        livemode: false,
+        url: `https://checkout.stripe.com/c/pay/annual-retry-${checkoutDispatches}`,
+        mode: 'subscription',
+        status: 'open',
+        payment_status: 'unpaid',
+        client_reference_id: form.client_reference_id,
+        success_url: form.success_url,
+        cancel_url: form.cancel_url,
+        customer: form.customer ?? null,
+        metadata: {
+          household_id: form['metadata[household_id]'],
+          canonical_subscription_id: form['metadata[canonical_subscription_id]'],
+          plan_version_id: form['metadata[plan_version_id]'],
+          offer_id: form['metadata[offer_id]'],
+        },
+        expires_at: Number(form.expires_at),
+      };
+    });
+    const cookie = await login(app, 'owner-alice');
+    const customerHeaders = {
+      cookie,
+      origin: customerOrigin,
+      'x-bb-household-id': 'household-sunrise',
+    } as const;
+    const firstHeaders = {
+      ...customerHeaders,
+      'idempotency-key': 'checkout-family-annual-abandoned-0001',
+    };
+    const first = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: firstHeaders,
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(first.statusCode, first.body).toBe(201);
+    const firstCheckout = first.json<{
+      checkout: { canonicalSubscriptionId: string; sessionId: string; expiresAt: string };
+    }>().checkout;
+    const sameKey = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: firstHeaders,
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(sameKey.statusCode, sameKey.body).toBe(200);
+    expect(sameKey.json()).toMatchObject({
+      checkout: {
+        canonicalSubscriptionId: firstCheckout.canonicalSubscriptionId,
+        sessionId: firstCheckout.sessionId,
+      },
+    });
+    const pendingReplacement = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...customerHeaders,
+        'idempotency-key': 'checkout-family-annual-pending-0002',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(pendingReplacement.statusCode).toBe(409);
+    expect(checkoutDispatches).toBe(1);
+
+    const sendStripeEvent = async (input: {
+      readonly id: string;
+      readonly type: 'checkout.session.expired' | 'checkout.session.completed';
+      readonly object: Record<string, unknown>;
+    }) => {
+      const created = Math.floor(clock.now().getTime() / 1_000);
+      const rawBody = JSON.stringify({
+        id: input.id,
+        type: input.type,
+        created,
+        livemode: false,
+        api_version: apiVersion,
+        data: { object: input.object },
+      });
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/stripe',
+        headers: {
+          'content-type': 'application/json',
+          'stripe-signature': signStripeFixture({
+            rawBody,
+            endpointSecret,
+            timestampSeconds: created,
+          }),
+        },
+        payload: rawBody,
+      });
+    };
+
+    clock.set(new Date(new Date(firstCheckout.expiresAt).getTime() + 1_000));
+    const expired = await sendStripeEvent({
+      id: 'evt_family_annual_abandoned_expired_0001',
+      type: 'checkout.session.expired',
+      object: {
+        id: firstCheckout.sessionId,
+        object: 'checkout.session',
+        livemode: false,
+        status: 'expired',
+        payment_status: 'unpaid',
+        mode: 'subscription',
+        amount_total: 0,
+        currency: 'usd',
+        expires_at: new Date(firstCheckout.expiresAt).getTime() / 1_000,
+        metadata: {
+          household_id: 'household-sunrise',
+          canonical_subscription_id: firstCheckout.canonicalSubscriptionId,
+          plan_version_id: 'family_v3',
+          offer_id: 'family_annual_v2',
+        },
+      },
+    });
+    expect(expired.statusCode, expired.body).toBe(200);
+    expect(expired.json()).toMatchObject({ application: 'applied' });
+
+    const refreshedCookie = await login(app, 'owner-alice');
+    const refreshedCustomerHeaders = { ...customerHeaders, cookie: refreshedCookie };
+    const expiredSameKey = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...refreshedCustomerHeaders,
+        'idempotency-key': 'checkout-family-annual-abandoned-0001',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(expiredSameKey.statusCode).toBe(409);
+    const retry = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...refreshedCustomerHeaders,
+        'idempotency-key': 'checkout-family-annual-retry-0002',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(retry.statusCode, retry.body).toBe(201);
+    expect(checkoutDispatches).toBe(2);
+    const retryCheckout = retry.json<{
+      checkout: { canonicalSubscriptionId: string; sessionId: string; expiresAt: string };
+    }>().checkout;
+    expect(retryCheckout.canonicalSubscriptionId).not.toBe(firstCheckout.canonicalSubscriptionId);
+    expect(retryCheckout.sessionId).toBe('cs_test_annual_retry_2');
+
+    const completed = await sendStripeEvent({
+      id: 'evt_family_annual_retry_completed_0002',
+      type: 'checkout.session.completed',
+      object: {
+        id: retryCheckout.sessionId,
+        object: 'checkout.session',
+        livemode: false,
+        mode: 'subscription',
+        customer: 'cus_family_annual_retry_0002',
+        subscription: 'sub_family_annual_retry_0002',
+        status: 'complete',
+        payment_status: 'no_payment_required',
+        payment_method_collection: 'always',
+        amount_total: 0,
+        currency: 'usd',
+        expires_at: new Date(retryCheckout.expiresAt).getTime() / 1_000,
+        metadata: {
+          household_id: 'household-sunrise',
+          canonical_subscription_id: retryCheckout.canonicalSubscriptionId,
+          plan_version_id: 'family_v3',
+          offer_id: 'family_annual_v2',
+        },
+      },
+    });
+    expect(completed.statusCode, completed.body).toBe(200);
+    expect(completed.json()).toMatchObject({ duplicate: false, application: 'applied' });
+    const completionReplay = await sendStripeEvent({
+      id: 'evt_family_annual_retry_completed_0002',
+      type: 'checkout.session.completed',
+      object: {
+        id: retryCheckout.sessionId,
+        object: 'checkout.session',
+        livemode: false,
+        mode: 'subscription',
+        customer: 'cus_family_annual_retry_0002',
+        subscription: 'sub_family_annual_retry_0002',
+        status: 'complete',
+        payment_status: 'no_payment_required',
+        payment_method_collection: 'always',
+        amount_total: 0,
+        currency: 'usd',
+        expires_at: new Date(retryCheckout.expiresAt).getTime() / 1_000,
+        metadata: {
+          household_id: 'household-sunrise',
+          canonical_subscription_id: retryCheckout.canonicalSubscriptionId,
+          plan_version_id: 'family_v3',
+          offer_id: 'family_annual_v2',
+        },
+      },
+    });
+    expect(completionReplay.statusCode, completionReplay.body).toBe(200);
+    expect(completionReplay.json()).toMatchObject({ duplicate: true, application: 'applied' });
+
+    const consumedRetry = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...refreshedCustomerHeaders,
+        'idempotency-key': 'checkout-family-annual-after-consumption-0003',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(consumedRetry.statusCode).toBe(409);
+    expect(checkoutDispatches).toBe(2);
+    const evidence = await database.query<
+      {
+        readonly reservations: number;
+        readonly attempts: number;
+        readonly consumptions: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::integer FROM commerce_stripe_trial_reservations
+          WHERE environment = 'test' AND household_id = 'household-sunrise'
+            AND offer_family = 'family') AS reservations,
+         (SELECT count(*)::integer FROM commerce_stripe_trial_checkout_attempts attempt
+          JOIN commerce_stripe_trial_reservations reservation
+            ON reservation.id = attempt.reservation_id
+          WHERE reservation.environment = 'test'
+            AND reservation.household_id = 'household-sunrise'
+            AND reservation.offer_family = 'family') AS attempts,
+         (SELECT count(*)::integer FROM commerce_stripe_trial_consumptions consumption
+          JOIN commerce_stripe_trial_reservations reservation
+            ON reservation.id = consumption.reservation_id
+          WHERE reservation.environment = 'test'
+            AND reservation.household_id = 'household-sunrise'
+            AND reservation.offer_family = 'family') AS consumptions`,
+    );
+    expect(evidence.rows).toEqual([{ reservations: 1, attempts: 2, consumptions: 1 }]);
+  });
+
+  it('proves the Family annual trial, reminder, first-charge failure, paid recovery, and replay denial', async () => {
+    const cookie = await login(app, 'owner-alice');
+    const customerHeaders = {
+      cookie,
+      origin: customerOrigin,
+      'x-bb-household-id': 'household-sunrise',
+    } as const;
+    const checkout = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...customerHeaders,
+        'idempotency-key': 'checkout_family_annual_trial_0001',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(checkout.statusCode, checkout.body).toBe(201);
+    const checkoutBody = checkout.json<{
+      checkout: { canonicalSubscriptionId: string; sessionId: string; expiresAt: string };
+    }>();
+    const checkoutCall = vi
+      .mocked(transport.postForm)
+      .mock.calls.find(([request]) => request.path === '/v1/checkout/sessions')?.[0];
+    expect(checkoutCall?.form).toMatchObject({
+      mode: 'subscription',
+      payment_method_collection: 'always',
+      allow_promotion_codes: 'false',
+      'automatic_tax[enabled]': 'false',
+      'adaptive_pricing[enabled]': 'false',
+      'line_items[0][price]': 'price_family_annual_fixture',
+      'line_items[0][quantity]': '1',
+      'metadata[offer_id]': 'family_annual_v2',
+      'subscription_data[metadata][offer_id]': 'family_annual_v2',
+      'subscription_data[trial_period_days]': '7',
+      'subscription_data[trial_settings][end_behavior][missing_payment_method]': 'cancel',
+    });
+
+    const sendStripeEvent = async (input: {
+      readonly id: string;
+      readonly type: string;
+      readonly object: Record<string, unknown>;
+    }) => {
+      const created = Math.floor(clock.now().getTime() / 1_000);
+      const rawBody = JSON.stringify({
+        id: input.id,
+        type: input.type,
+        created,
+        livemode: false,
+        api_version: apiVersion,
+        data: { object: input.object },
+      });
+      return app.inject({
+        method: 'POST',
+        url: '/v1/webhooks/stripe',
+        headers: {
+          'content-type': 'application/json',
+          'stripe-signature': signStripeFixture({
+            rawBody,
+            endpointSecret,
+            timestampSeconds: created,
+          }),
+        },
+        payload: rawBody,
+      });
+    };
+    const trialStart = Math.floor(clock.now().getTime() / 1_000);
+    const trialEnd = trialStart + 7 * 86_400;
+    const providerSubscriptionId = 'sub_family_annual_trial_0001';
+    const providerCustomerId = 'cus_family_annual_trial_0001';
+    const canonicalBinding = {
+      household_id: 'household-sunrise',
+      canonical_subscription_id: checkoutBody.checkout.canonicalSubscriptionId,
+      plan_version_id: 'family_v3',
+      offer_id: 'family_annual_v2',
+    };
+    const completion = await sendStripeEvent({
+      id: 'evt_family_annual_checkout_completed_0001',
+      type: 'checkout.session.completed',
+      object: {
+        id: checkoutBody.checkout.sessionId,
+        object: 'checkout.session',
+        livemode: false,
+        mode: 'subscription',
+        customer: providerCustomerId,
+        subscription: providerSubscriptionId,
+        status: 'complete',
+        payment_status: 'no_payment_required',
+        payment_method_collection: 'always',
+        amount_total: 0,
+        currency: 'usd',
+        expires_at: new Date(checkoutBody.checkout.expiresAt).getTime() / 1_000,
+        metadata: canonicalBinding,
+      },
+    });
+    expect(completion.statusCode, completion.body).toBe(200);
+    expect(completion.json()).toMatchObject({ application: 'applied' });
+
+    const annualPrice = {
+      id: 'price_family_annual_fixture',
+      active: true,
+      product: 'prod_family_fixture',
+      currency: 'usd',
+      unit_amount: 14_990,
+      unit_amount_decimal: '14990',
+      type: 'recurring',
+      billing_scheme: 'per_unit',
+      custom_unit_amount: null,
+      tiers_mode: null,
+      transform_quantity: null,
+      recurring: {
+        interval: 'year',
+        interval_count: 1,
+        usage_type: 'licensed',
+        trial_period_days: null,
+      },
+    };
+    const trialSubscription = {
+      id: providerSubscriptionId,
+      object: 'subscription',
+      livemode: false,
+      customer: providerCustomerId,
+      status: 'trialing',
+      cancel_at_period_end: false,
+      default_payment_method: 'pm_family_annual_trial_0001',
+      trial_start: trialStart,
+      trial_end: trialEnd,
+      current_period_start: trialStart,
+      current_period_end: trialEnd,
+      metadata: canonicalBinding,
+      items: {
+        has_more: false,
+        data: [
+          {
+            id: 'si_family_annual_trial_0001',
+            quantity: 1,
+            current_period_start: trialStart,
+            current_period_end: trialEnd,
+            price: annualPrice,
+          },
+        ],
+      },
+    };
+    const trialCreated = await sendStripeEvent({
+      id: 'evt_family_annual_subscription_created_0001',
+      type: 'customer.subscription.created',
+      object: trialSubscription,
+    });
+    expect(trialCreated.statusCode, trialCreated.body).toBe(200);
+    expect(trialCreated.json()).toMatchObject({ application: 'applied' });
+
+    const trialState = await database.query<
+      {
+        readonly lifecycle: string;
+        readonly active_grants: number;
+        readonly reservations: number;
+        readonly consumptions: number;
+        readonly trial_periods: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT subscription.lifecycle,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants,
+              (SELECT count(*)::int FROM commerce_stripe_trial_reservations reservation
+               WHERE reservation.subscription_id = subscription.id) AS reservations,
+              (SELECT count(*)::int FROM commerce_stripe_trial_consumptions consumption
+               JOIN commerce_stripe_trial_reservations reservation
+                 ON reservation.id = consumption.reservation_id
+               WHERE reservation.subscription_id = subscription.id) AS consumptions,
+              (SELECT count(*)::int FROM commerce_stripe_trial_period_evidence trial
+               WHERE trial.subscription_id = subscription.id) AS trial_periods
+       FROM commerce_subscriptions subscription WHERE subscription.id = $1`,
+      [checkoutBody.checkout.canonicalSubscriptionId],
+    );
+    expect(trialState.rows[0]).toEqual({
+      lifecycle: 'trialing',
+      active_grants: 1,
+      reservations: 1,
+      consumptions: 1,
+      trial_periods: 1,
+    });
+
+    const replayDenied = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        ...customerHeaders,
+        'idempotency-key': 'checkout_family_annual_trial_replay_0002',
+      },
+      payload: { offerId: 'family_annual_v2' },
+    });
+    expect(replayDenied.statusCode, replayDenied.body).toBe(409);
+    expect(
+      vi
+        .mocked(transport.postForm)
+        .mock.calls.filter(([request]) => request.path === '/v1/checkout/sessions'),
+    ).toHaveLength(1);
+
+    clock.advance(4 * 86_400_000);
+    const reminder = await sendStripeEvent({
+      id: 'evt_family_annual_trial_will_end_0001',
+      type: 'customer.subscription.trial_will_end',
+      object: trialSubscription,
+    });
+    expect(reminder.statusCode, reminder.body).toBe(200);
+    const reminderCookie = await login(app, 'owner-alice');
+    const reminderHeaders = { ...customerHeaders, cookie: reminderCookie };
+    const billing = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: reminderHeaders,
+    });
+    expect(billing.statusCode, billing.body).toBe(200);
+    const reminderIntent = billing.json<{
+      billing: {
+        trialEndingReminder?: { intentId: string; chargeAmountMinor: number; disclosure: string };
+      };
+    }>().billing.trialEndingReminder;
+    expect(reminderIntent).toMatchObject({
+      chargeAmountMinor: 14_990,
+      disclosure: '7 days free, then $149.90/year unless canceled.',
+    });
+    if (reminderIntent === undefined) throw new Error('Missing annual trial reminder');
+    const acknowledged = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/trial-reminders/acknowledge',
+      headers: reminderHeaders,
+      payload: {
+        intentId: reminderIntent.intentId,
+        idempotencyKey: 'family-annual-reminder-acknowledgement-0001',
+      },
+    });
+    expect(acknowledged.statusCode, acknowledged.body).toBe(200);
+    expect(acknowledged.json()).toMatchObject({ duplicate: false });
+
+    const annualPeriodStartsAt = new Date(trialEnd * 1_000);
+    const annualPeriodEndsAt = new Date((trialEnd + 365 * 86_400) * 1_000);
+    const commerce = new CommerceOperationsRepository(
+      database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
+    let evidenceSequence = 0;
+    const captureEvidence = async (
+      eventType: 'invoice.payment_failed' | 'invoice.paid' | 'subscription.reconciliation',
+      providerObjectId: string,
+      lifecycle: 'delinquent' | 'active',
+    ) => {
+      evidenceSequence += 1;
+      const externalEventId = `evt_family_annual_financial_${String(evidenceSequence)}`;
+      const captured = await commerce.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId,
+        eventType,
+        rawPayload: JSON.stringify({ eventType, evidenceSequence }),
+        providerApiVersion: apiVersion,
+        providerObjectId,
+        providerEventCreatedAt: clock.now(),
+        normalizedLifecycle: lifecycle,
+        evidenceTier: 'local_fixture',
+        transportKind: 'injected_fixture',
+        transportLivemode: false,
+        runtimeRunId: 'family-annual-lifecycle-test',
+        now: clock.now(),
+      });
+      return { ...captured, externalEventId };
+    };
+    const providerInvoiceId = 'in_family_annual_first_0001';
+    const failureSource = await captureEvidence(
+      'invoice.payment_failed',
+      providerInvoiceId,
+      'delinquent',
+    );
+    const failureSnapshot = await captureEvidence(
+      'subscription.reconciliation',
+      providerSubscriptionId,
+      'delinquent',
+    );
+    const failed = await commerce.applyProviderLifecycle({
+      inboxId: failureSnapshot.id,
+      provider: 'stripe',
+      environment: 'test',
+      externalEventId: failureSnapshot.externalEventId,
+      providerApiVersion: apiVersion,
+      providerObjectId: providerSubscriptionId,
+      providerEventCreatedAt: clock.now(),
+      householdId: 'household-sunrise',
+      subscriptionId: checkoutBody.checkout.canonicalSubscriptionId,
+      externalSubscriptionId: providerSubscriptionId,
+      providerCustomerId,
+      lifecycle: 'delinquent',
+      currentPeriodStartsAt: annualPeriodStartsAt,
+      currentPeriodEndsAt: annualPeriodEndsAt,
+      accessEvidence: {
+        kind: 'payment_failed',
+        sourceInboxId: failureSource.id,
+        evidence: {
+          offerId: 'family_annual_v2',
+          providerInvoiceId,
+          externalSubscriptionId: providerSubscriptionId,
+          providerSubscriptionItemId: 'si_family_annual_trial_0001',
+          providerInvoiceLineId: 'il_family_annual_first_0001',
+          providerInvoicePaymentId: 'inpay_family_annual_first_0001',
+          providerProductId: 'prod_family_fixture',
+          providerPaymentIntentId: 'pi_family_annual_first_0001',
+          providerPriceId: 'price_family_annual_fixture',
+          billingReason: 'subscription_create',
+          amountDue: 14_990,
+          currency: 'usd',
+          quantity: 1,
+          attemptCount: 1,
+          failureStatus: 'requires_payment_method',
+          lineProration: false,
+          currentPeriodStartsAt: annualPeriodStartsAt,
+          currentPeriodEndsAt: annualPeriodEndsAt,
+        },
+      },
+      authoritativeSnapshot: true,
+      now: clock.now(),
+    });
+    expect(failed).toMatchObject({ outcome: 'applied', lifecycle: 'delinquent' });
+    const afterFailure = await database.query<
+      { readonly lifecycle: string; readonly active_grants: number } & Record<string, unknown>
+    >(
+      `SELECT subscription.lifecycle,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants
+       FROM commerce_subscriptions subscription WHERE subscription.id = $1`,
+      [checkoutBody.checkout.canonicalSubscriptionId],
+    );
+    expect(afterFailure.rows[0]).toEqual({ lifecycle: 'delinquent', active_grants: 0 });
+
+    clock.advance(1_000);
+    const paidSource = await captureEvidence('invoice.paid', providerInvoiceId, 'active');
+    const paidSnapshot = await captureEvidence(
+      'subscription.reconciliation',
+      providerSubscriptionId,
+      'active',
+    );
+    const paid = await commerce.applyProviderLifecycle({
+      inboxId: paidSnapshot.id,
+      provider: 'stripe',
+      environment: 'test',
+      externalEventId: paidSnapshot.externalEventId,
+      providerApiVersion: apiVersion,
+      providerObjectId: providerSubscriptionId,
+      providerEventCreatedAt: clock.now(),
+      householdId: 'household-sunrise',
+      subscriptionId: checkoutBody.checkout.canonicalSubscriptionId,
+      externalSubscriptionId: providerSubscriptionId,
+      providerCustomerId,
+      lifecycle: 'active',
+      currentPeriodStartsAt: annualPeriodStartsAt,
+      currentPeriodEndsAt: annualPeriodEndsAt,
+      accessEvidence: {
+        kind: 'payment_confirmed',
+        sourceInboxId: paidSource.id,
+        evidence: {
+          offerId: 'family_annual_v2',
+          providerInvoiceId,
+          externalSubscriptionId: providerSubscriptionId,
+          providerSubscriptionItemId: 'si_family_annual_trial_0001',
+          providerInvoiceLineId: 'il_family_annual_first_0001',
+          providerInvoicePaymentId: 'inpay_family_annual_first_0001',
+          providerProductId: 'prod_family_fixture',
+          providerPaymentIntentId: 'pi_family_annual_first_0001',
+          providerPriceId: 'price_family_annual_fixture',
+          billingReason: 'subscription_create',
+          amountPaid: 14_990,
+          amountRemaining: 0,
+          currency: 'usd',
+          quantity: 1,
+          discountAmount: 0,
+          taxAmount: 0,
+          invoiceDiscountsEmpty: true,
+          invoiceTaxesEmpty: true,
+          invoiceCreditsEmpty: true,
+          providerPaidAt: clock.now(),
+          currentPeriodStartsAt: annualPeriodStartsAt,
+          currentPeriodEndsAt: annualPeriodEndsAt,
+        },
+      },
+      authoritativeSnapshot: true,
+      now: clock.now(),
+    });
+    expect(paid).toMatchObject({ outcome: 'applied', lifecycle: 'active' });
+    const afterPaid = await database.query<
+      { readonly lifecycle: string; readonly active_grants: number } & Record<string, unknown>
+    >(
+      `SELECT subscription.lifecycle,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants
+       FROM commerce_subscriptions subscription WHERE subscription.id = $1`,
+      [checkoutBody.checkout.canonicalSubscriptionId],
+    );
+    expect(afterPaid.rows[0]).toEqual({ lifecycle: 'active', active_grants: 1 });
+  });
+
+  it('queues signed asynchronous Checkout payment failure for provider reconciliation', async () => {
+    const created = Math.floor(clock.now().getTime() / 1_000);
+    const rawBody = JSON.stringify({
+      id: 'evt_async_payment_failed_fixture',
+      type: 'checkout.session.async_payment_failed',
+      created,
+      livemode: false,
+      api_version: apiVersion,
+      data: {
+        object: {
+          id: 'cs_test_async_payment_failed',
+          object: 'checkout.session',
+          livemode: false,
+          mode: 'subscription',
+          status: 'complete',
+          payment_status: 'unpaid',
+          amount_total: 1499,
+          currency: 'usd',
+          expires_at: created + 3600,
+          customer: 'cus_async_payment_failed',
+          subscription: 'sub_async_payment_failed',
+          metadata: {
+            household_id: 'household-sunrise',
+            canonical_subscription_id: 'subscription-async-payment-failed',
+            plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
+          },
+        },
+      },
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/webhooks/stripe',
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': signStripeFixture({
+          rawBody,
+          endpointSecret,
+          timestampSeconds: created,
+        }),
+      },
+      payload: rawBody,
+    });
+
+    expect(response.statusCode, response.body).toBe(202);
+    expect(response.json()).toMatchObject({
+      received: true,
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const queued = await database.query<
+      { readonly job_type: string; readonly payload: unknown } & Record<string, unknown>
+    >(
+      `SELECT job_type, payload
+         FROM durable_jobs
+        WHERE job_type = 'commerce.reconcile'
+        ORDER BY created_at DESC
+        LIMIT 1`,
+    );
+    expect(queued.rows[0]).toMatchObject({
+      job_type: 'commerce.reconcile',
+      payload: expect.objectContaining({
+        environment: 'test',
+        eventType: 'checkout.session.async_payment_failed',
+        externalSubscriptionId: 'sub_async_payment_failed',
+      }),
+    });
+  });
+
   it('binds checkout, signed webhook, canonical grant, portal, and duplicate delivery', async () => {
     const cookie = await login(app, 'owner-alice');
     const headers = {
@@ -696,6 +2068,43 @@ describe('Stripe test-mode transaction path', () => {
        WHERE household_id = 'household-sunrise'`,
     );
     expect(intents.rows[0]?.count).toBe(1);
+    const preflightBinding = await database.query<
+      {
+        readonly preflight_record_id: string;
+        readonly operation_environment: string;
+        readonly preflight_environment: string;
+        readonly offer_id: string;
+        readonly operation_price_id: string;
+        readonly preflight_price_id: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT operation.preflight_record_id,
+              operation.environment AS operation_environment,
+              preflight.environment AS preflight_environment,
+              preflight.offer_id,
+              operation.provider_price_id AS operation_price_id,
+              preflight.provider_price_id AS preflight_price_id
+       FROM commerce_stripe_session_operations operation
+       JOIN commerce_stripe_preflight_records preflight
+         ON preflight.id = operation.preflight_record_id
+        AND preflight.environment = operation.environment
+       WHERE operation.checkout_intent_id = (
+         SELECT intent.id FROM commerce_checkout_intents intent
+         WHERE intent.household_id = 'household-sunrise'
+           AND intent.subscription_id = $1
+       )`,
+      [checkoutBody.checkout.canonicalSubscriptionId],
+    );
+    expect(preflightBinding.rows).toEqual([
+      {
+        preflight_record_id: expect.any(String),
+        operation_environment: 'test',
+        preflight_environment: 'test',
+        offer_id: 'founding_family_monthly_v1',
+        operation_price_id: 'price_family_month_fixture',
+        preflight_price_id: 'price_family_month_fixture',
+      },
+    ]);
 
     const parallelCheckout = await app.inject({
       method: 'POST',
@@ -725,6 +2134,7 @@ describe('Stripe test-mode transaction path', () => {
           payment_intent: 'pi_checkout_fixture_1',
           status: 'complete',
           payment_status: 'paid',
+          payment_method_collection: 'always',
           amount_total: 1499,
           currency: 'usd',
           expires_at: checkoutExpiresAt,
@@ -732,6 +2142,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: checkoutBody.checkout.canonicalSubscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -807,8 +2218,9 @@ describe('Stripe test-mode transaction path', () => {
               proration_behavior: 'none',
             },
             subscription_update: { enabled: false, default_allowed_updates: [] },
-            payment_method_update: { enabled: false },
+            payment_method_update: { enabled: true },
             customer_update: { enabled: false, allowed_updates: [] },
+            invoice_history: { enabled: true },
           },
         };
       }
@@ -833,7 +2245,18 @@ describe('Stripe test-mode transaction path', () => {
           starting_balance: 0,
           ending_balance: 0,
           amount_overpaid: 0,
-          parent: { subscription_details: { subscription: 'sub_stripe_fixture_1' } },
+          parent: {
+            type: 'subscription_details',
+            subscription_details: {
+              subscription: 'sub_stripe_fixture_1',
+              metadata: {
+                household_id: 'household-sunrise',
+                canonical_subscription_id: checkoutBody.checkout.canonicalSubscriptionId,
+                plan_version_id: 'family_v1',
+                offer_id: 'founding_family_monthly_v1',
+              },
+            },
+          },
           payments: {
             object: 'list',
             has_more: false,
@@ -904,6 +2327,12 @@ describe('Stripe test-mode transaction path', () => {
           object: 'subscription',
           livemode: false,
           customer: 'cus_fixture_1',
+          metadata: {
+            household_id: 'household-sunrise',
+            canonical_subscription_id: checkoutBody.checkout.canonicalSubscriptionId,
+            plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
+          },
           status: 'active',
           cancel_at_period_end: false,
           created: initialStart,
@@ -1088,6 +2517,29 @@ describe('Stripe test-mode transaction path', () => {
           },
         };
       }
+      if (path === '/v1/prices/price_family_annual_fixture') {
+        return {
+          id: 'price_family_annual_fixture',
+          object: 'price',
+          livemode: false,
+          active: true,
+          product: 'prod_family_fixture',
+          currency: 'usd',
+          unit_amount: 14_990,
+          unit_amount_decimal: '14990',
+          type: 'recurring',
+          billing_scheme: 'per_unit',
+          custom_unit_amount: null,
+          tiers_mode: null,
+          transform_quantity: null,
+          recurring: {
+            interval: 'year',
+            interval_count: 1,
+            usage_type: 'licensed',
+            trial_period_days: null,
+          },
+        };
+      }
       return {
         id: 'bpc_cancel_only_fixture',
         object: 'billing_portal.configuration',
@@ -1100,8 +2552,9 @@ describe('Stripe test-mode transaction path', () => {
             proration_behavior: 'none',
           },
           subscription_update: { enabled: false, default_allowed_updates: [] },
-          payment_method_update: { enabled: false },
+          payment_method_update: { enabled: true },
           customer_update: { enabled: false, allowed_updates: [] },
+          invoice_history: { enabled: true },
         },
       };
     });
@@ -1121,28 +2574,41 @@ describe('Stripe test-mode transaction path', () => {
     const preflightReceipts = await database.query<
       {
         readonly authenticity_kind: string;
+        readonly account_business_type: string | null;
+        readonly account_charges_enabled: boolean;
+        readonly account_country: string | null;
+        readonly account_payouts_enabled: boolean;
         readonly evidence_digest: string;
         readonly evidence_level: string;
         readonly portal_mutation_controls_exact: boolean;
+        readonly portal_invoice_history_enabled: boolean;
         readonly retention_coupon_evidence: string;
         readonly runtime_run_id: string;
         readonly transport_kind: string;
       } & Record<string, unknown>
     >(
       `SELECT evidence_level, evidence_digest, transport_kind, runtime_run_id,
-              authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence
+              authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
+              portal_invoice_history_enabled,
+              account_charges_enabled, account_payouts_enabled, account_country,
+              account_business_type
        FROM commerce_stripe_preflight_records
        WHERE environment = 'test'
        ORDER BY id`,
     );
     expect(preflightReceipts.rows).toHaveLength(4);
-    expect(new Set(preflightReceipts.rows.map((row) => row.evidence_digest)).size).toBe(1);
+    expect(new Set(preflightReceipts.rows.map((row) => row.evidence_digest)).size).toBe(2);
     for (const receipt of preflightReceipts.rows) {
       expect(receipt).toMatchObject({
         evidence_level: 'local_fixture',
         transport_kind: 'injected_fixture',
         authenticity_kind: 'fixture_assertion',
+        account_charges_enabled: false,
+        account_payouts_enabled: false,
+        account_country: null,
+        account_business_type: null,
         portal_mutation_controls_exact: true,
+        portal_invoice_history_enabled: true,
         retention_coupon_evidence: 'manual_founder_browser_required',
       });
       expect(receipt.runtime_run_id).toMatch(/^api-/u);
@@ -1195,6 +2661,12 @@ describe('Stripe test-mode transaction path', () => {
       object: 'subscription',
       livemode: false,
       customer: 'cus_paid_period_proof',
+      metadata: {
+        household_id: 'household-sunrise',
+        canonical_subscription_id: subscriptionId,
+        plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
+      },
       status: 'active',
       cancel_at_period_end: false,
       created: initialStart,
@@ -1263,6 +2735,7 @@ describe('Stripe test-mode transaction path', () => {
           payment_intent: 'pi_checkout_paid_period_proof',
           status: 'complete',
           payment_status: 'paid',
+          payment_method_collection: 'always',
           amount_total: 1499,
           currency: 'usd',
           expires_at: new Date(checkoutBody.checkout.expiresAt).getTime() / 1_000,
@@ -1270,6 +2743,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: subscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -1300,7 +2774,18 @@ describe('Stripe test-mode transaction path', () => {
         starting_balance: 0,
         ending_balance: 0,
         amount_overpaid: 0,
-        parent: { subscription_details: { subscription: 'sub_paid_period_proof' } },
+        parent: {
+          type: 'subscription_details',
+          subscription_details: {
+            subscription: 'sub_paid_period_proof',
+            metadata: {
+              household_id: 'household-sunrise',
+              canonical_subscription_id: subscriptionId,
+              plan_version_id: 'family_v1',
+              offer_id: 'founding_family_monthly_v1',
+            },
+          },
+        },
         payments: {
           object: 'list',
           has_more: false,
@@ -1420,10 +2905,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterStatus.rows[0]?.current_period_ends_at))).toEqual(
       new Date(initialEnd * 1_000),
     );
-    const accessAfterStatus = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterStatus = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterStatus.portfolio.sources.find((source) => source.subscriptionId === subscriptionId)
         ?.accessState,
@@ -1454,10 +2940,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterOldInvoice.rows[0]?.current_period_ends_at))).toEqual(
       new Date(initialEnd * 1_000),
     );
-    const accessAfterOldInvoice = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterOldInvoice = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterOldInvoice.portfolio.sources.find(
         (source) => source.subscriptionId === subscriptionId,
@@ -1481,10 +2968,11 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(periodAfterCurrentInvoice.rows[0]?.current_period_ends_at))).toEqual(
       new Date(renewalEnd * 1_000),
     );
-    const accessAfterCurrentInvoice = await new EntitlementRepository(database).forHousehold(
-      'household-sunrise',
-      clock.now(),
-    );
+    const accessAfterCurrentInvoice = await new EntitlementRepository(
+      database,
+      undefined,
+      'local',
+    ).forHousehold('household-sunrise', clock.now());
     expect(
       accessAfterCurrentInvoice.portfolio.sources.find(
         (source) => source.subscriptionId === subscriptionId,
@@ -1566,6 +3054,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: subscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
           padding: 'x'.repeat(30_000),
         },
@@ -1709,6 +3198,7 @@ describe('Stripe test-mode transaction path', () => {
         household_id: form['metadata[household_id]'],
         canonical_subscription_id: form['metadata[canonical_subscription_id]'],
         plan_version_id: form['metadata[plan_version_id]'],
+        offer_id: form['metadata[offer_id]'],
       },
       expires_at: Number(form.expires_at),
     }));
@@ -2068,6 +3558,7 @@ describe('Stripe test-mode transaction path', () => {
       await adapter.createCheckout({
         actor,
         canonicalSubscriptionId: prepared.subscriptionId,
+        offerId: 'founding_family_monthly_v1',
         planVersionId: prepared.planVersionId,
         providerPriceId: 'price_family_month_fixture',
         successUrl,
@@ -2575,6 +4066,7 @@ describe('Stripe test-mode transaction path', () => {
           payment_intent: 'pi_unknown_completion_repair',
           status: 'complete',
           payment_status: 'paid',
+          payment_method_collection: 'always',
           amount_total: 1499,
           currency: 'usd',
           expires_at: Math.floor(providerRequestedExpiresAt.getTime() / 1_000),
@@ -2582,6 +4074,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: binding?.subscription_id,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -2760,6 +4253,7 @@ describe('Stripe test-mode transaction path', () => {
               household_id: 'household-sunrise',
               canonical_subscription_id: canonicalSubscriptionId,
               plan_version_id: 'family_v1',
+              offer_id: 'founding_family_monthly_v1',
             },
           },
         },
@@ -2894,6 +4388,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: original.checkout.canonicalSubscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -2928,6 +4423,7 @@ describe('Stripe test-mode transaction path', () => {
         household_id: form['metadata[household_id]'],
         canonical_subscription_id: form['metadata[canonical_subscription_id]'],
         plan_version_id: form['metadata[plan_version_id]'],
+        offer_id: form['metadata[offer_id]'],
       },
       expires_at: Number(form.expires_at),
     }));
@@ -2996,6 +4492,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: checkoutEvidence.checkout.canonicalSubscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -3098,6 +4595,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: subscriptionId,
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },
@@ -3131,7 +4629,7 @@ describe('Stripe test-mode transaction path', () => {
     expect(state.rows[0]).toMatchObject({ lifecycle: 'pending', provider_records: 0, grants: 0 });
   });
 
-  it('quarantines ambiguous invoices and does not truncate paid-through access on early failure', async () => {
+  it('records finalization attention and preserves paid-through access through payment recovery', async () => {
     const cookie = await login(app, 'owner-alice');
     const checkout = await app.inject({
       method: 'POST',
@@ -3152,6 +4650,12 @@ describe('Stripe test-mode transaction path', () => {
       object: 'subscription',
       livemode: false,
       customer: 'cus_invoice_policy_fixture',
+      metadata: {
+        household_id: 'household-sunrise',
+        canonical_subscription_id: subscriptionId,
+        plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
+      },
       status: 'active',
       created,
       current_period_start: created,
@@ -3196,15 +4700,21 @@ describe('Stripe test-mode transaction path', () => {
       fixtureKey: 'invoice_policy',
       periodStart: created,
       periodEnd: created + 30 * 86_400,
+      checkoutEventType: 'checkout.session.async_payment_succeeded',
     });
     vi.mocked(transport.get).mockClear();
 
     clock.advance(1_000);
-    const sendInvoiceEvent = async (id: string, type: string, object: Record<string, unknown>) => {
+    const sendInvoiceEvent = async (
+      id: string,
+      type: string,
+      object: Record<string, unknown>,
+      eventCreated = Math.floor(clock.now().getTime() / 1_000),
+    ) => {
       const rawBody = JSON.stringify({
         id,
         type,
-        created: Math.floor(clock.now().getTime() / 1_000),
+        created: eventCreated,
         livemode: false,
         api_version: apiVersion,
         data: { object },
@@ -3231,15 +4741,36 @@ describe('Stripe test-mode transaction path', () => {
         object: 'invoice',
         subscription: 'sub_invoice_policy_fixture',
       },
+      created - 1,
     );
     expect(ambiguous.statusCode).toBe(202);
-    expect(ambiguous.json()).toMatchObject({ application: 'quarantined' });
+    expect(ambiguous.json()).toMatchObject({
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
     await runReconciliation(database, transport, clock.now);
     expect(transport.get).not.toHaveBeenCalled();
     const held = await database.query<
-      { lifecycle: string; status: string; error_code: string } & Record<string, unknown>
+      {
+        lifecycle: string;
+        status: string;
+        application_state: string;
+        error_code: string;
+        active_grants: number;
+        recovery_events: number;
+        attention_items: number;
+      } & Record<string, unknown>
     >(
-      `SELECT subscription.lifecycle, inbox.status, inbox.error_code
+      `SELECT subscription.lifecycle, inbox.status, inbox.application_state, inbox.error_code,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants,
+              (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events recovery
+               WHERE recovery.source_inbox_id = inbox.id
+                 AND recovery.recovery_state = 'attention') AS recovery_events,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.source_id = inbox.id
+                 AND attention.attention_kind = 'billing_reconciliation') AS attention_items
        FROM commerce_subscriptions subscription
        JOIN commerce_event_inbox inbox ON inbox.external_event_id = 'evt_invoice_finalization_failed'
        WHERE subscription.id = $1`,
@@ -3247,23 +4778,247 @@ describe('Stripe test-mode transaction path', () => {
     );
     expect(held.rows[0]).toMatchObject({
       lifecycle: 'active',
-      status: 'quarantined',
-      error_code: 'stripe.event_not_allowlisted',
+      status: 'processed',
+      application_state: 'ignored',
+      error_code: 'provider.reconciled_from_snapshot',
+      active_grants: 1,
+      recovery_events: 1,
+      attention_items: 1,
+    });
+    const terminalAttentionRun = await database.query<
+      { readonly id: string; readonly trigger_event_id: string } & Record<string, unknown>
+    >(
+      `SELECT run.id, run.trigger_event_id
+       FROM commerce_reconciliation_runs run
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_failed'`,
+    );
+    await expect(
+      new CommerceOperationsRepository(
+        database,
+        Buffer.alloc(32, 11),
+        1,
+        undefined,
+        'local',
+      ).claimProviderReconciliationAutomaticAttempt({
+        id: terminalAttentionRun.rows[0]?.id ?? 'missing-run',
+        inboxId: terminalAttentionRun.rows[0]?.trigger_event_id ?? 'missing-inbox',
+        provider: 'stripe',
+        environment: 'test',
+        repairGeneration: 0,
+        now: clock.now(),
+      }),
+    ).resolves.toEqual({ kind: 'already_terminal', terminalState: 'attention' });
+    const finalizationStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(finalizationStatus.statusCode).toBe(200);
+    expect(finalizationStatus.json()).toMatchObject({
+      billing: {
+        canonicalAccessActive: true,
+        recoveryReason: 'invoice_finalization_failed',
+      },
+    });
+    const finalizationReplay = await sendInvoiceEvent(
+      'evt_invoice_finalization_failed',
+      'invoice.finalization_failed',
+      {
+        id: 'in_finalization_failed_fixture',
+        object: 'invoice',
+        subscription: 'sub_invoice_policy_fixture',
+      },
+      created - 1,
+    );
+    expect(finalizationReplay.statusCode).toBe(202);
+    expect(finalizationReplay.json()).toMatchObject({
+      duplicate: true,
+      application: 'reconciliation_queued',
+    });
+    await runReconciliation(database, transport, clock.now);
+    expect(transport.get).not.toHaveBeenCalled();
+    const finalizationReplayCounts = await database.query<
+      { recovery_events: number; attention_items: number } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events
+          WHERE provider_invoice_id = 'in_finalization_failed_fixture') AS recovery_events,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE dedupe_key = 'billing_invoice_finalization_' ||
+            (SELECT id FROM commerce_event_inbox
+             WHERE external_event_id = 'evt_invoice_finalization_failed')) AS attention_items`,
+    );
+    expect(finalizationReplayCounts.rows[0]).toEqual({ recovery_events: 1, attention_items: 1 });
+
+    clock.advance(1_000);
+    vi.mocked(transport.get).mockClear();
+    const paidThenFinalization = await sendInvoiceEvent(
+      'evt_invoice_finalization_after_paid',
+      'invoice.finalization_failed',
+      {
+        id: 'in_invoice_policy_initial',
+        object: 'invoice',
+        subscription: 'sub_invoice_policy_fixture',
+      },
+    );
+    expect(paidThenFinalization.statusCode).toBe(202);
+    const crashedJobs = new DurableJobRepository(database);
+    const crashedClaim = await crashedJobs.claim({
+      workerId: 'stripe-reconciliation-crashed-worker',
+      jobTypes: ['commerce.reconcile'],
+      limit: 1,
+      leaseDurationMs: 30_000,
+      now: clock.now(),
+    });
+    const crashedJob = crashedClaim[0];
+    expect(crashedJob?.type).toBe('commerce.reconcile');
+    if (crashedJob === undefined) throw new Error('Missing crash-window reconciliation job');
+    await expect(
+      crashedJobs.beginConsumerReceipt({
+        consumerKey: 'job-handler:commerce.reconcile:v1',
+        idempotencyKey: crashedJob.idempotencyKey,
+        jobId: crashedJob.id,
+        workerId: 'stripe-reconciliation-crashed-worker',
+        leaseDurationMs: 30_000,
+        now: clock.now(),
+      }),
+    ).resolves.toBe('acquired');
+    const crashedHandler = createStripeReconciliationHandler({
+      businessOs: new BusinessOsRepository(database),
+      commerce: new CommerceOperationsRepository(
+        database,
+        Buffer.alloc(32, 11),
+        1,
+        undefined,
+        'local',
+      ),
+      commerceRuntime: new CommerceRuntimeRepository(database),
+      jobs: crashedJobs,
+      provider: new StripeTestAdapter(
+        transport,
+        { authorize: async () => ({ allowed: false, reason: 'test_worker' }) },
+        new Set(),
+        apiVersion,
+      ),
+      clock: clock.now,
+    });
+    await expect(
+      crashedHandler({
+        job: crashedJob,
+        idempotencyKey: crashedJob.idempotencyKey,
+        signal: new AbortController().signal,
+        heartbeat: async () => true,
+      }),
+    ).resolves.toBeUndefined();
+    expect(transport.get).not.toHaveBeenCalled();
+
+    const crashedState = await database.query<
+      {
+        automatic_attempt_count: number;
+        job_state: string;
+        recovery_state: string;
+        run_state: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT run.state AS run_state, run.automatic_attempt_count,
+              job.state AS job_state, recovery.recovery_state
+       FROM commerce_reconciliation_runs run
+       JOIN durable_jobs job
+         ON job.idempotency_key = ('stripe-reconcile:test:' || run.trigger_event_id)
+       JOIN commerce_stripe_invoice_recovery_events recovery
+         ON recovery.source_inbox_id = run.trigger_event_id
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_after_paid'`,
+    );
+    expect(crashedState.rows[0]).toMatchObject({
+      run_state: 'completed',
+      automatic_attempt_count: 1,
+      job_state: 'running',
+      recovery_state: 'resolved',
+    });
+
+    clock.advance(30_001);
+    const restartedJobs = new DurableJobRepository(database);
+    const restartedWorker = new PortableWorker(
+      restartedJobs,
+      new OutboxDeliveryRepository(database),
+      {
+        'commerce.reconcile': createStripeReconciliationHandler({
+          businessOs: new BusinessOsRepository(database),
+          commerce: new CommerceOperationsRepository(
+            database,
+            Buffer.alloc(32, 11),
+            1,
+            undefined,
+            'local',
+          ),
+          commerceRuntime: new CommerceRuntimeRepository(database),
+          jobs: restartedJobs,
+          provider: new StripeTestAdapter(
+            transport,
+            { authorize: async () => ({ allowed: false, reason: 'test_worker' }) },
+            new Set(),
+            apiVersion,
+          ),
+          clock: clock.now,
+        }),
+      },
+      undefined,
+      {
+        workerId: 'stripe-reconciliation-restarted-worker',
+        pollIntervalMs: 100,
+        leaseDurationMs: 30_000,
+        heartbeatIntervalMs: 5_000,
+        shutdownTimeoutMs: 1_000,
+        batchSize: 10,
+        retryBaseMs: 100,
+        retryMaxMs: 1_000,
+      },
+      createLogger({ level: 'error', sink: () => undefined, clock: clock.now }),
+      clock.now,
+    );
+    await restartedWorker.runOnce();
+    await restartedWorker.stop();
+    expect(transport.get).not.toHaveBeenCalled();
+    const restartedState = await database.query<
+      {
+        automatic_attempt_count: number;
+        budget_attention: number;
+        finalization_attention: number;
+        job_state: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT run.automatic_attempt_count, job.state AS job_state,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.dedupe_key =
+                 ('billing_reconciliation_transport_' || run.trigger_event_id)
+                 AND attention.state IN ('open','snoozed')) AS budget_attention,
+              (SELECT count(*)::int FROM owner_attention_items attention
+               WHERE attention.dedupe_key =
+                 ('billing_invoice_finalization_' || run.trigger_event_id)
+                 AND attention.state IN ('open','snoozed')) AS finalization_attention
+       FROM commerce_reconciliation_runs run
+       JOIN durable_jobs job
+         ON job.idempotency_key = ('stripe-reconcile:test:' || run.trigger_event_id)
+       JOIN commerce_event_inbox inbox ON inbox.id = run.trigger_event_id
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_after_paid'`,
+    );
+    expect(restartedState.rows[0]).toEqual({
+      automatic_attempt_count: 1,
+      budget_attention: 0,
+      finalization_attention: 0,
+      job_state: 'succeeded',
     });
 
     clock.advance(1_000);
+    let failedAttemptCount = 1;
+    let failedPaymentIntentStatus: 'requires_action' | 'requires_payment_method' =
+      'requires_action';
     vi.mocked(transport.get).mockImplementation(async ({ path }) => {
-      if (
-        path === '/v1/invoices/in_payment_failed_fixture' ||
-        path === '/v1/invoices/in_payment_failed_repeat_fixture'
-      ) {
-        const repeated = path.endsWith('in_payment_failed_repeat_fixture');
-        const invoiceId = repeated
-          ? 'in_payment_failed_repeat_fixture'
-          : 'in_payment_failed_fixture';
-        const paymentIntentId = repeated
-          ? 'pi_payment_failed_repeat_fixture'
-          : 'pi_payment_failed_fixture';
+      if (path === '/v1/invoices/in_payment_action_required_fixture') {
+        const invoiceId = 'in_payment_action_required_fixture';
+        const paymentIntentId = 'pi_payment_action_required_fixture';
         return {
           id: invoiceId,
           object: 'invoice',
@@ -3280,8 +5035,19 @@ describe('Stripe test-mode transaction path', () => {
           discounts: [],
           pre_payment_credit_notes_amount: 0,
           post_payment_credit_notes_amount: 0,
-          attempt_count: 1,
-          parent: { subscription_details: { subscription: 'sub_invoice_policy_fixture' } },
+          attempt_count: failedAttemptCount,
+          parent: {
+            type: 'subscription_details',
+            subscription_details: {
+              subscription: 'sub_invoice_policy_fixture',
+              metadata: {
+                household_id: 'household-sunrise',
+                canonical_subscription_id: subscriptionId,
+                plan_version_id: 'family_v1',
+                offer_id: 'founding_family_monthly_v1',
+              },
+            },
+          },
           payments: {
             object: 'list',
             has_more: false,
@@ -3307,7 +5073,7 @@ describe('Stripe test-mode transaction path', () => {
             has_more: false,
             data: [
               {
-                id: repeated ? 'il_payment_failed_repeat_fixture' : 'il_payment_failed_fixture',
+                id: 'il_payment_action_required_fixture',
                 object: 'line_item',
                 amount: 1499,
                 currency: 'usd',
@@ -3336,17 +5102,12 @@ describe('Stripe test-mode transaction path', () => {
           },
         };
       }
-      if (
-        path === '/v1/payment_intents/pi_payment_failed_fixture' ||
-        path === '/v1/payment_intents/pi_payment_failed_repeat_fixture'
-      ) {
+      if (path === '/v1/payment_intents/pi_payment_action_required_fixture') {
         return {
-          id: path.endsWith('pi_payment_failed_repeat_fixture')
-            ? 'pi_payment_failed_repeat_fixture'
-            : 'pi_payment_failed_fixture',
+          id: 'pi_payment_action_required_fixture',
           object: 'payment_intent',
           livemode: false,
-          status: 'requires_payment_method',
+          status: failedPaymentIntentStatus,
         };
       }
       if (path === '/v1/subscriptions/sub_invoice_policy_fixture') {
@@ -3354,14 +5115,49 @@ describe('Stripe test-mode transaction path', () => {
       }
       return {};
     });
-    const paymentFailed = await sendInvoiceEvent(
-      'evt_invoice_payment_failed',
-      'invoice.payment_failed',
-      { id: 'in_payment_failed_fixture', object: 'invoice' },
+    const paymentActionRequired = await sendInvoiceEvent(
+      'evt_invoice_payment_action_required',
+      'invoice.payment_action_required',
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
     );
-    expect(paymentFailed.statusCode).toBe(202);
-    expect(paymentFailed.json()).toMatchObject({ application: 'reconciliation_queued' });
+    expect(paymentActionRequired.statusCode).toBe(202);
+    expect(paymentActionRequired.json()).toMatchObject({
+      duplicate: false,
+      application: 'reconciliation_queued',
+    });
+    const duplicateActionRequired = await sendInvoiceEvent(
+      'evt_invoice_payment_action_required',
+      'invoice.payment_action_required',
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
+    );
+    expect(duplicateActionRequired.statusCode).toBe(202);
+    expect(duplicateActionRequired.json()).toMatchObject({
+      duplicate: true,
+      application: 'reconciliation_queued',
+    });
     await runReconciliation(database, transport, clock.now);
+    const actionRequiredReconciliation = await database.query<
+      {
+        readonly application_state: string;
+        readonly error_code: string | null;
+        readonly failure_code: string | null;
+        readonly reconciliation_state: string;
+        readonly status: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT inbox.status, inbox.application_state, inbox.error_code,
+              run.state AS reconciliation_state, run.failure_code
+       FROM commerce_event_inbox inbox
+       JOIN commerce_reconciliation_runs run ON run.trigger_event_id = inbox.id
+       WHERE inbox.external_event_id = 'evt_invoice_payment_action_required'`,
+    );
+    expect(actionRequiredReconciliation.rows[0]).toMatchObject({
+      status: 'processed',
+      application_state: 'ignored',
+      error_code: 'provider.reconciled_from_snapshot',
+      reconciliation_state: 'completed',
+      failure_code: null,
+    });
     const grace = await database.query<
       { lifecycle: string; current_period_ends_at: unknown; active_grants: number } & Record<
         string,
@@ -3389,7 +5185,7 @@ describe('Stripe test-mode transaction path', () => {
     >(
       `SELECT event_kind, paid_through_at, grace_starts_at, grace_ends_at
        FROM commerce_stripe_dunning_events
-       WHERE provider_invoice_id = 'in_payment_failed_fixture'`,
+       WHERE provider_invoice_id = 'in_payment_action_required_fixture'`,
     );
     expect(dunning.rows[0]?.event_kind).toBe('opened');
     expect(new Date(String(dunning.rows[0]?.paid_through_at)).toISOString()).toBe(
@@ -3422,16 +5218,16 @@ describe('Stripe test-mode transaction path', () => {
               provider_invoice_line_id, provider_subscription_item_id,
               provider_product_id, line_proration, period_starts_at, period_ends_at
        FROM commerce_stripe_failed_invoice_evidence
-       WHERE provider_invoice_id = 'in_payment_failed_fixture'`,
+       WHERE provider_invoice_id = 'in_payment_action_required_fixture'`,
     );
     expect(failedProof.rows[0]).toMatchObject({
       amount_due: 1499,
       currency: 'usd',
       quantity: 1,
       attempt_count: 1,
-      failure_status: 'requires_payment_method',
-      provider_invoice_payment_id: 'inpay_in_payment_failed_fixture',
-      provider_invoice_line_id: 'il_payment_failed_fixture',
+      failure_status: 'requires_action',
+      provider_invoice_payment_id: 'inpay_in_payment_action_required_fixture',
+      provider_invoice_line_id: 'il_payment_action_required_fixture',
       provider_subscription_item_id: 'si_invoice_policy_fixture',
       provider_product_id: 'prod_family_fixture',
       line_proration: false,
@@ -3442,12 +5238,22 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(failedProof.rows[0]?.period_ends_at)).toISOString()).toBe(
       new Date((created + 30 * 86_400) * 1_000).toISOString(),
     );
+    const actionRequiredStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(actionRequiredStatus.json()).toMatchObject({
+      billing: { recoveryReason: 'payment_action_required' },
+    });
 
     clock.advance(1_000);
+    failedAttemptCount = 2;
+    failedPaymentIntentStatus = 'requires_payment_method';
     const repeatFailure = await sendInvoiceEvent(
       'evt_invoice_payment_failed_repeat',
       'invoice.payment_failed',
-      { id: 'in_payment_failed_repeat_fixture', object: 'invoice' },
+      { id: 'in_payment_action_required_fixture', object: 'invoice' },
     );
     expect(repeatFailure.statusCode).toBe(202);
     await runReconciliation(database, transport, clock.now);
@@ -3468,12 +5274,63 @@ describe('Stripe test-mode transaction path', () => {
     expect(new Date(String(repeatedDunning.rows[0]?.current_period_ends_at)).toISOString()).toBe(
       new Date((created + 33 * 86_400) * 1_000).toISOString(),
     );
+    const attemptEvidence = await database.query<
+      { attempt_count: number; failure_status: string; source_event: string } & Record<
+        string,
+        unknown
+      >
+    >(
+      `SELECT failed.attempt_count, failed.failure_status,
+              inbox.external_event_id AS source_event
+       FROM commerce_stripe_failed_invoice_evidence failed
+       JOIN commerce_event_inbox inbox ON inbox.id = failed.source_inbox_id
+       WHERE failed.provider_invoice_id = 'in_payment_action_required_fixture'
+       ORDER BY failed.attempt_count`,
+    );
+    expect(attemptEvidence.rows).toEqual([
+      {
+        attempt_count: 1,
+        failure_status: 'requires_action',
+        source_event: 'evt_invoice_payment_action_required',
+      },
+      {
+        attempt_count: 2,
+        failure_status: 'requires_payment_method',
+        source_event: 'evt_invoice_payment_failed_repeat',
+      },
+    ]);
+    const failedStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(failedStatus.json()).toMatchObject({
+      billing: { recoveryReason: 'payment_failed' },
+    });
+    const billingRuntime = new CommerceRuntimeRepository(database);
+    const billingActor = await billingRuntime.resolveActor({
+      householdId: 'household-sunrise',
+      personId: 'person-owner-alice',
+      now: clock.now(),
+    });
+    const afterGraceStatus = await billingRuntime.stripeBillingStatus({
+      actor: billingActor,
+      environment: 'test',
+      runtimeInitiationPermitted: true,
+      runtimePortalPermitted: true,
+      now: new Date((created + 33 * 86_400) * 1_000 + 1),
+    });
+    expect(afterGraceStatus).toMatchObject({
+      canonicalAccessActive: false,
+      portalAvailable: true,
+      recoveryReason: 'payment_failed',
+    });
 
     clock.advance(1_000);
     vi.mocked(transport.get).mockImplementation(async ({ path }) => {
-      if (path === '/v1/invoices/in_paid_fixture') {
+      if (path === '/v1/invoices/in_finalization_failed_fixture') {
         return {
-          id: 'in_paid_fixture',
+          id: 'in_finalization_failed_fixture',
           object: 'invoice',
           livemode: false,
           status: 'paid',
@@ -3492,7 +5349,18 @@ describe('Stripe test-mode transaction path', () => {
           starting_balance: 0,
           ending_balance: 0,
           amount_overpaid: 0,
-          parent: { subscription_details: { subscription: 'sub_invoice_policy_fixture' } },
+          parent: {
+            type: 'subscription_details',
+            subscription_details: {
+              subscription: 'sub_invoice_policy_fixture',
+              metadata: {
+                household_id: 'household-sunrise',
+                canonical_subscription_id: subscriptionId,
+                plan_version_id: 'family_v1',
+                offer_id: 'founding_family_monthly_v1',
+              },
+            },
+          },
           payments: {
             object: 'list',
             has_more: false,
@@ -3501,7 +5369,7 @@ describe('Stripe test-mode transaction path', () => {
                 id: 'inpay_paid_fixture',
                 object: 'invoice_payment',
                 livemode: false,
-                invoice: 'in_paid_fixture',
+                invoice: 'in_finalization_failed_fixture',
                 payment: { type: 'payment_intent', payment_intent: 'pi_paid_fixture' },
                 status: 'paid',
                 is_default: true,
@@ -3561,7 +5429,7 @@ describe('Stripe test-mode transaction path', () => {
       return {};
     });
     const paid = await sendInvoiceEvent('evt_invoice_paid', 'invoice.paid', {
-      id: 'in_paid_fixture',
+      id: 'in_finalization_failed_fixture',
       object: 'invoice',
     });
     expect(paid.statusCode).toBe(202);
@@ -3602,11 +5470,11 @@ describe('Stripe test-mode transaction path', () => {
     );
     expect(dunningAudit.rows.map((row) => row.event_kind).sort()).toEqual(['opened', 'recovered']);
     expect(new Set(dunningAudit.rows.map((row) => row.dunning_window_key))).toEqual(
-      new Set(['in_payment_failed_fixture']),
+      new Set(['in_payment_action_required_fixture']),
     );
     expect(
       dunningAudit.rows.find((row) => row.event_kind === 'recovered')?.provider_invoice_id,
-    ).toBe('in_paid_fixture');
+    ).toBe('in_finalization_failed_fixture');
     for (const audit of dunningAudit.rows) {
       expect(new Date(String(audit.paid_through_at)).toISOString()).toBe(
         new Date((created + 30 * 86_400) * 1_000).toISOString(),
@@ -3615,6 +5483,429 @@ describe('Stripe test-mode transaction path', () => {
         new Date((created + 33 * 86_400) * 1_000).toISOString(),
       );
     }
+    const resolvedFinalization = await database.query<
+      {
+        readonly attention_state: string;
+        readonly recovery_rows: number;
+        readonly recovery_state: string;
+        readonly resolved_at: unknown;
+        readonly source_inbox_id: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT recovery.source_inbox_id, recovery.recovery_state,
+              attention.state AS attention_state, attention.resolved_at,
+              (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events exact_recovery
+               WHERE exact_recovery.source_inbox_id = recovery.source_inbox_id) AS recovery_rows
+       FROM commerce_stripe_invoice_recovery_events recovery
+       JOIN commerce_event_inbox inbox ON inbox.id = recovery.source_inbox_id
+       JOIN owner_attention_items attention ON attention.source_id = recovery.source_inbox_id
+        AND attention.dedupe_key =
+          ('billing_invoice_finalization_' || recovery.source_inbox_id)
+       WHERE inbox.external_event_id = 'evt_invoice_finalization_failed'`,
+    );
+    expect(resolvedFinalization.rows[0]).toMatchObject({
+      attention_state: 'resolved',
+      recovery_rows: 1,
+      recovery_state: 'attention',
+    });
+    expect(resolvedFinalization.rows[0]?.resolved_at).not.toBeNull();
+    const recoveryInboxId = resolvedFinalization.rows[0]?.source_inbox_id;
+    if (recoveryInboxId === undefined) throw new Error('Missing finalization recovery inbox');
+    const recoveryClosureEvidence = {
+      offerId: 'founding_family_monthly_v1' as const,
+      providerInvoiceId: 'in_finalization_failed_fixture',
+      externalSubscriptionId: 'sub_invoice_policy_fixture',
+      providerSubscriptionItemId: 'si_invoice_policy_fixture',
+      providerInvoiceLineId: 'il_paid_fixture',
+      providerInvoicePaymentId: 'inpay_paid_fixture',
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: 'pi_paid_fixture',
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountPaid: 1499 as const,
+      amountRemaining: 0 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      discountAmount: 0 as const,
+      taxAmount: 0 as const,
+      invoiceDiscountsEmpty: true as const,
+      invoiceTaxesEmpty: true as const,
+      invoiceCreditsEmpty: true as const,
+      providerPaidAt: clock.now(),
+      currentPeriodStartsAt: new Date(created * 1_000),
+      currentPeriodEndsAt: new Date((created + 30 * 86_400) * 1_000),
+    };
+    const recoveryClosure = new CommerceOperationsRepository(
+      database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
+    for (const staleState of ['snoozed', 'open'] as const) {
+      await database.query(
+        `INSERT INTO owner_attention_items(
+           id, attention_kind, source_type, source_id, dedupe_key, why_founder_required,
+           recommended_action, consequence_of_inaction, deadline, state, created_at, updated_at
+         ) VALUES ($1,'billing_reconciliation','commerce_event',$2,$3,$4,$5,$6,NULL,$7,$8,$8)`,
+        [
+          `attention-stale-finalization-${staleState}`,
+          recoveryInboxId,
+          `billing_invoice_finalization_${recoveryInboxId}`,
+          'A concurrent finalization worker had already selected unpaid recovery evidence.',
+          'No action is required after exact paid evidence commits.',
+          'The post-commit closure must resolve this stale operational projection.',
+          staleState,
+          clock.now().toISOString(),
+        ],
+      );
+      await expect(
+        recoveryClosure.resolveStripeInvoiceFinalizationAttentionFromPaidEvidence({
+          environment: 'test',
+          householdId: 'household-sunrise',
+          subscriptionId,
+          evidence: recoveryClosureEvidence,
+          now: clock.now(),
+        }),
+      ).resolves.toBe(1);
+    }
+    const closedConcurrentAttention = await database.query<
+      {
+        readonly active_grants: number;
+        readonly open_attention: number;
+        readonly recovery_rows: number;
+        readonly resolved_attention: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM commerce_stripe_invoice_recovery_events
+          WHERE source_inbox_id = $1) AS recovery_rows,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE source_id = $1 AND dedupe_key = ('billing_invoice_finalization_' || $1)
+            AND state IN ('open','snoozed')) AS open_attention,
+         (SELECT count(*)::int FROM owner_attention_items
+          WHERE source_id = $1 AND dedupe_key = ('billing_invoice_finalization_' || $1)
+            AND state = 'resolved') AS resolved_attention,
+         (SELECT count(*)::int FROM entitlement_grants
+          WHERE subscription_id = $2 AND revoked_at IS NULL) AS active_grants`,
+      [recoveryInboxId, subscriptionId],
+    );
+    expect(closedConcurrentAttention.rows[0]).toEqual({
+      recovery_rows: 1,
+      open_attention: 0,
+      resolved_attention: 3,
+      active_grants: 1,
+    });
+    const recoveredBillingStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/stripe/billing',
+      headers: { cookie, origin: customerOrigin, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(recoveredBillingStatus.statusCode).toBe(200);
+    expect(recoveredBillingStatus.json().billing).not.toHaveProperty('recoveryReason');
+  });
+
+  it('keeps exact paid invoice evidence dominant across failure ordering and a stale-read late commit', async () => {
+    const cookie = await login(app, 'owner-alice');
+    const checkout = await app.inject({
+      method: 'POST',
+      url: '/v1/commerce/stripe/checkout',
+      headers: {
+        cookie,
+        origin: customerOrigin,
+        'x-bb-household-id': 'household-sunrise',
+        'idempotency-key': 'checkout_paid_dominates_failure_0001',
+      },
+      payload: { offerId: 'founding_family_monthly_v1' },
+    });
+    const subscriptionId = checkout.json<{ checkout: { canonicalSubscriptionId: string } }>()
+      .checkout.canonicalSubscriptionId;
+    const created = Math.floor(clock.now().getTime() / 1_000);
+    const periodStartsAt = new Date(created * 1_000);
+    const periodEndsAt = new Date((created + 30 * 86_400) * 1_000);
+    const externalSubscriptionId = 'sub_paid_dominates_failure';
+    const providerSubscriptionItemId = 'si_paid_dominates_failure';
+    await activateCompletedCheckoutWithPaidInvoice({
+      app,
+      database,
+      transport,
+      now: clock.now,
+      canonicalSubscriptionId: subscriptionId,
+      externalSubscriptionId,
+      providerCustomerId: 'cus_paid_dominates_failure',
+      fixtureKey: 'paid_dominates_failure',
+      periodStart: created,
+      periodEnd: created + 30 * 86_400,
+    });
+
+    const commerce = new CommerceOperationsRepository(
+      database,
+      Buffer.alloc(32, 11),
+      1,
+      undefined,
+      'local',
+    );
+    let eventSequence = 0;
+    const captureSource = async (
+      eventType: 'invoice.paid' | 'invoice.payment_failed',
+      providerInvoiceId: string,
+      observedAt: Date,
+    ) => {
+      eventSequence += 1;
+      return commerce.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `evt_exact_invoice_order_${String(eventSequence)}`,
+        eventType,
+        rawPayload: JSON.stringify({ eventType, providerInvoiceId, eventSequence }),
+        providerApiVersion: apiVersion,
+        providerObjectId: providerInvoiceId,
+        providerEventCreatedAt: observedAt,
+        evidenceTier: 'local_fixture',
+        transportKind: 'injected_fixture',
+        transportLivemode: false,
+        runtimeRunId: 'exact-invoice-order-test',
+        now: observedAt,
+      });
+    };
+    const captureSnapshot = async (observedAt: Date) => {
+      eventSequence += 1;
+      return commerce.captureVerifiedProviderEvent({
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        eventType: 'subscription.reconciliation',
+        rawPayload: JSON.stringify({ externalSubscriptionId, eventSequence }),
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        normalizedLifecycle: 'active',
+        evidenceTier: 'local_fixture',
+        transportKind: 'injected_fixture',
+        transportLivemode: false,
+        runtimeRunId: 'exact-invoice-order-test',
+        now: observedAt,
+      });
+    };
+    const paidEvidence = (providerInvoiceId: string, observedAt: Date) => ({
+      offerId: 'founding_family_monthly_v1' as const,
+      providerInvoiceId,
+      externalSubscriptionId,
+      providerSubscriptionItemId,
+      providerInvoiceLineId: `il_${providerInvoiceId}`,
+      providerInvoicePaymentId: `inpay_${providerInvoiceId}`,
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: `pi_${providerInvoiceId}`,
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountPaid: 1499 as const,
+      amountRemaining: 0 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      discountAmount: 0 as const,
+      taxAmount: 0 as const,
+      invoiceDiscountsEmpty: true as const,
+      invoiceTaxesEmpty: true as const,
+      invoiceCreditsEmpty: true as const,
+      providerPaidAt: observedAt,
+      currentPeriodStartsAt: periodStartsAt,
+      currentPeriodEndsAt: periodEndsAt,
+    });
+    const failedEvidence = (providerInvoiceId: string) => ({
+      offerId: 'founding_family_monthly_v1' as const,
+      providerInvoiceId,
+      externalSubscriptionId,
+      providerSubscriptionItemId,
+      providerInvoiceLineId: `il_${providerInvoiceId}`,
+      providerInvoicePaymentId: `inpay_${providerInvoiceId}`,
+      providerProductId: 'prod_family_fixture',
+      providerPaymentIntentId: `pi_${providerInvoiceId}`,
+      providerPriceId: 'price_family_month_fixture',
+      billingReason: 'subscription_cycle' as const,
+      amountDue: 1499 as const,
+      currency: 'usd' as const,
+      quantity: 1 as const,
+      attemptCount: 1,
+      failureStatus: 'requires_payment_method' as const,
+      lineProration: false as const,
+      currentPeriodStartsAt: periodStartsAt,
+      currentPeriodEndsAt: periodEndsAt,
+    });
+    const applyPaid = async (providerInvoiceId: string, observedAt: Date) => {
+      const [source, snapshot] = await Promise.all([
+        captureSource('invoice.paid', providerInvoiceId, observedAt),
+        captureSnapshot(observedAt),
+      ]);
+      const result = await commerce.applyProviderLifecycle({
+        inboxId: snapshot.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        householdId: 'household-sunrise',
+        subscriptionId,
+        externalSubscriptionId,
+        lifecycle: 'active',
+        currentPeriodStartsAt: periodStartsAt,
+        currentPeriodEndsAt: periodEndsAt,
+        accessEvidence: {
+          kind: 'payment_confirmed',
+          sourceInboxId: source.id,
+          evidence: paidEvidence(providerInvoiceId, observedAt),
+        },
+        authoritativeSnapshot: true,
+        now: observedAt,
+      });
+      await commerce.ignoreProviderEventAfterReconciliation({
+        inboxId: source.id,
+        now: observedAt,
+      });
+      return result;
+    };
+    const applyFailed = async (
+      sourceInboxId: string,
+      evidence: ReturnType<typeof failedEvidence>,
+      observedAt: Date,
+    ) => {
+      const snapshot = await captureSnapshot(observedAt);
+      const result = await commerce.applyProviderLifecycle({
+        inboxId: snapshot.id,
+        provider: 'stripe',
+        environment: 'test',
+        externalEventId: `reconciliation:exact-invoice-order:${String(eventSequence)}`,
+        providerApiVersion: apiVersion,
+        providerObjectId: externalSubscriptionId,
+        providerEventCreatedAt: observedAt,
+        householdId: 'household-sunrise',
+        subscriptionId,
+        externalSubscriptionId,
+        lifecycle: 'delinquent',
+        currentPeriodStartsAt: periodStartsAt,
+        currentPeriodEndsAt: periodEndsAt,
+        accessEvidence: { kind: 'payment_failed', sourceInboxId, evidence },
+        authoritativeSnapshot: true,
+        now: observedAt,
+      });
+      await commerce.ignoreProviderEventAfterReconciliation({
+        inboxId: sourceInboxId,
+        now: observedAt,
+      });
+      return result;
+    };
+
+    clock.advance(1_000);
+    const failureFirstAt = clock.now();
+    const failureFirstInvoice = 'in_failure_before_paid';
+    const failureFirstSource = await captureSource(
+      'invoice.payment_failed',
+      failureFirstInvoice,
+      failureFirstAt,
+    );
+    await expect(
+      applyFailed(failureFirstSource.id, failedEvidence(failureFirstInvoice), failureFirstAt),
+    ).resolves.toMatchObject({ outcome: 'applied', lifecycle: 'grace' });
+    clock.advance(1_000);
+    await expect(applyPaid(failureFirstInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+
+    clock.advance(1_000);
+    const paidFirstInvoice = 'in_paid_before_failure';
+    await expect(applyPaid(paidFirstInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+    clock.advance(1_000);
+    const paidFirstFailureAt = clock.now();
+    const paidFirstFailureSource = await captureSource(
+      'invoice.payment_failed',
+      paidFirstInvoice,
+      paidFirstFailureAt,
+    );
+    await expect(
+      applyFailed(paidFirstFailureSource.id, failedEvidence(paidFirstInvoice), paidFirstFailureAt),
+    ).resolves.toMatchObject({ outcome: 'superseded', lifecycle: 'active' });
+
+    clock.advance(1_000);
+    const stalledInvoice = 'in_stalled_failure_before_paid_commit';
+    const staleReadAt = clock.now();
+    const staleFailureSource = await captureSource(
+      'invoice.payment_failed',
+      stalledInvoice,
+      staleReadAt,
+    );
+    const staleFailureEvidence = failedEvidence(stalledInvoice);
+    let releaseLateCommit: (() => void) | undefined;
+    const lateCommitGate = new Promise<void>((resolve) => {
+      releaseLateCommit = resolve;
+    });
+    const lateFailureCommit = (async () => {
+      await lateCommitGate;
+      return applyFailed(staleFailureSource.id, staleFailureEvidence, staleReadAt);
+    })();
+    clock.advance(1_000);
+    await expect(applyPaid(stalledInvoice, clock.now())).resolves.toMatchObject({
+      outcome: 'applied',
+      lifecycle: 'active',
+    });
+    releaseLateCommit?.();
+    await expect(lateFailureCommit).resolves.toMatchObject({
+      outcome: 'superseded',
+      lifecycle: 'active',
+    });
+
+    const state = await database.query<
+      {
+        readonly active_grants: number;
+        readonly failed_evidence: number;
+        readonly lifecycle: string;
+        readonly opened_dunning: number;
+        readonly paid_evidence: number;
+        readonly recovered_dunning: number;
+        readonly superseded_failures: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT subscription.lifecycle,
+              (SELECT count(*)::int FROM entitlement_grants grant_record
+               WHERE grant_record.subscription_id = subscription.id
+                 AND grant_record.revoked_at IS NULL) AS active_grants,
+              (SELECT count(*)::int FROM commerce_stripe_paid_invoice_evidence paid
+               WHERE paid.subscription_id = subscription.id
+                 AND paid.provider_invoice_id IN (
+                   'in_failure_before_paid', 'in_paid_before_failure',
+                   'in_stalled_failure_before_paid_commit'
+                 )) AS paid_evidence,
+              (SELECT count(*)::int FROM commerce_stripe_failed_invoice_evidence failed
+               WHERE failed.subscription_id = subscription.id
+                 AND failed.provider_invoice_id IN (
+                   'in_failure_before_paid', 'in_paid_before_failure',
+                   'in_stalled_failure_before_paid_commit'
+                 )) AS failed_evidence,
+              (SELECT count(*)::int FROM commerce_stripe_dunning_events dunning
+               WHERE dunning.subscription_id = subscription.id
+                 AND dunning.event_kind = 'opened') AS opened_dunning,
+              (SELECT count(*)::int FROM commerce_stripe_dunning_events dunning
+               WHERE dunning.subscription_id = subscription.id
+                 AND dunning.event_kind = 'recovered') AS recovered_dunning,
+              (SELECT count(*)::int FROM commerce_event_inbox inbox
+               WHERE inbox.external_event_id LIKE 'reconciliation:exact-invoice-order:%'
+                 AND inbox.application_state = 'superseded') AS superseded_failures
+       FROM commerce_subscriptions subscription
+       WHERE subscription.household_id = 'household-sunrise' AND subscription.id = $1`,
+      [subscriptionId],
+    );
+    expect(state.rows[0]).toEqual({
+      lifecycle: 'active',
+      active_grants: 1,
+      paid_evidence: 3,
+      failed_evidence: 3,
+      opened_dunning: 1,
+      recovered_dunning: 1,
+      superseded_failures: 2,
+    });
   });
 
   it('reconciles a full refund and chargeback without treating partial evidence as cancellation', async () => {
@@ -3640,6 +5931,12 @@ describe('Stripe test-mode transaction path', () => {
       object: 'subscription',
       livemode: false,
       customer: 'cus_financial_fixture',
+      metadata: {
+        household_id: 'household-sunrise',
+        canonical_subscription_id: subscriptionId,
+        plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
+      },
       status: 'active',
       created,
       current_period_start: created,
@@ -4312,6 +6609,7 @@ describe('Stripe test-mode transaction path', () => {
             household_id: 'household-sunrise',
             canonical_subscription_id: 'subscription_foreign',
             plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
           },
         },
       },

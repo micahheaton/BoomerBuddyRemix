@@ -1,5 +1,14 @@
 # Founding Household closed-beta playbook
 
+Status: **historical local-simulation evidence; not an operational production runbook**
+
+Do not use this playbook to create a new production sponsorship, credential, invitation,
+enrollment, or external-customer cohort. The production runtime refuses the historical activation
+path. Begin current implementation at `docs/post-launch-beta/RUN-NEXT-EXECUTION.md`; the post-launch
+beta execution plan, receipt, and prompt pack are its controlling references. The local commands
+below are retained only for deterministic historical or maintenance investigation with synthetic
+data.
+
 ## Evidence statement
 
 This playbook describes an implemented local-simulation workflow. It is not evidence of a real household invitation, managed identity, deployed staging, provider success, payment, conversion, willingness to pay, retention, calibration, or production readiness.

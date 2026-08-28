@@ -11,7 +11,9 @@ const backupMagic = Buffer.from('BBR31PGDUMP1\0', 'ascii');
 const authenticationTagBytes = 16;
 const maximumHeaderBytes = 4_096;
 const maximumReceiptBytes = 64 * 1_024;
-const receiptVersion = 'run3-1-postgres-portability-v1' as const;
+const legacyReceiptVersion = 'run3-1-postgres-portability-v1' as const;
+const receiptVersion = 'run3-1-postgres-portability-v2' as const;
+type PortabilityReceiptVersion = typeof legacyReceiptVersion | typeof receiptVersion;
 const candidateShaPattern = /^[0-9a-f]{40}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const founderKeyPattern = /^[A-Za-z0-9+/]{43}=$/u;
@@ -119,6 +121,13 @@ export const criticalPortabilityTables = [
   'commerce_stripe_preflight_records',
   'commerce_stripe_session_operations',
   'commerce_stripe_checkout_completions',
+  'commerce_stripe_checkout_completions_v2',
+  'commerce_stripe_trial_reservations',
+  'commerce_stripe_trial_checkout_attempts',
+  'commerce_stripe_trial_consumptions',
+  'commerce_stripe_trial_period_evidence',
+  'commerce_stripe_trial_reminder_intents',
+  'commerce_stripe_trial_reminder_acknowledgements',
   'commerce_stripe_paid_invoice_evidence',
   'commerce_stripe_failed_invoice_evidence',
   'commerce_stripe_financial_restriction_resolutions',
@@ -153,7 +162,8 @@ export const criticalPortabilityTables = [
 ] as const;
 
 export type CriticalPortabilityTable = (typeof criticalPortabilityTables)[number];
-export type CriticalTableCounts = Readonly<Record<CriticalPortabilityTable, number>>;
+export type CriticalTableCounts = Readonly<Record<CriticalPortabilityTable, number | null>>;
+export type CriticalTablePresence = Readonly<Record<CriticalPortabilityTable, boolean>>;
 
 export interface ParsedPostgresUrl {
   readonly host: string;
@@ -180,12 +190,13 @@ export type ProcessRunner = (invocation: ProcessInvocation) => Promise<ProcessRe
 
 export interface DatabaseSnapshot {
   readonly criticalTableCounts: CriticalTableCounts;
+  readonly criticalTablePresence: CriticalTablePresence;
   readonly migrationCount: number;
   readonly migrationManifestSha256: string;
 }
 
 export interface PortabilityReceipt extends DatabaseSnapshot {
-  readonly version: typeof receiptVersion;
+  readonly version: PortabilityReceiptVersion;
   readonly evidenceTier: 'local_operator_generated';
   readonly candidateSha: string;
   readonly createdAt: string;
@@ -199,7 +210,7 @@ export interface PortabilityReceipt extends DatabaseSnapshot {
 }
 
 export interface EncryptedBackupHeader {
-  readonly version: typeof receiptVersion;
+  readonly version: PortabilityReceiptVersion;
   readonly algorithm: 'aes-256-gcm';
   readonly candidateSha: string;
   readonly authenticatedMetadataSha256: string;
@@ -214,6 +225,7 @@ export interface EncryptedBackupResult {
 
 interface SnapshotQueryPayload {
   readonly criticalCounts: unknown;
+  readonly criticalPresence: unknown;
   readonly migrations: unknown;
 }
 
@@ -392,21 +404,22 @@ export function authenticatedMetadataSha256(input: {
   readonly candidateSha: string;
   readonly createdAt: string;
   readonly snapshot: DatabaseSnapshot;
+  readonly version?: PortabilityReceiptVersion;
 }): string {
   const candidateSha = validateCandidateSha(input.candidateSha);
   const createdAt = validateIsoTimestamp(input.createdAt);
-  const canonical = {
-    version: receiptVersion,
-    candidateSha,
-    createdAt,
-    criticalTableCounts: criticalPortabilityTables.map((table) => [
-      table,
-      input.snapshot.criticalTableCounts[table],
-    ]),
-    migrationCount: input.snapshot.migrationCount,
-    migrationManifestSha256: input.snapshot.migrationManifestSha256,
-  };
-  parseCriticalCounts(input.snapshot.criticalTableCounts);
+  const version = input.version ?? receiptVersion;
+  const criticalTablePresence = parseCriticalPresence(input.snapshot.criticalTablePresence);
+  const criticalTableCounts = parseCriticalCounts(
+    input.snapshot.criticalTableCounts,
+    criticalTablePresence,
+  );
+  if (
+    version === legacyReceiptVersion &&
+    criticalPortabilityTables.some((table) => !criticalTablePresence[table])
+  ) {
+    throw new TypeError('Legacy database snapshot metadata cannot represent an absent table');
+  }
   if (
     !Number.isSafeInteger(input.snapshot.migrationCount) ||
     input.snapshot.migrationCount < 1 ||
@@ -414,6 +427,31 @@ export function authenticatedMetadataSha256(input: {
   ) {
     throw new TypeError('Database snapshot metadata is invalid');
   }
+  const sharedCanonical = {
+    version,
+    candidateSha,
+    createdAt,
+    criticalTableCounts: criticalPortabilityTables.map((table) => [
+      table,
+      criticalTableCounts[table],
+    ]),
+  };
+  const canonical =
+    version === legacyReceiptVersion
+      ? {
+          ...sharedCanonical,
+          migrationCount: input.snapshot.migrationCount,
+          migrationManifestSha256: input.snapshot.migrationManifestSha256,
+        }
+      : {
+          ...sharedCanonical,
+          criticalTablePresence: criticalPortabilityTables.map((table) => [
+            table,
+            criticalTablePresence[table],
+          ]),
+          migrationCount: input.snapshot.migrationCount,
+          migrationManifestSha256: input.snapshot.migrationManifestSha256,
+        };
   return createHash('sha256').update(JSON.stringify(canonical)).digest('hex');
 }
 
@@ -541,26 +579,49 @@ export function buildPgRestoreInvocation(input: {
   };
 }
 
-const snapshotSql = `SELECT json_build_object(
-  'criticalCounts', COALESCE(
-    (
-      SELECT json_object_agg(table_name, row_count ORDER BY table_name)
-      FROM (
-        ${criticalPortabilityTables
-          .map(
-            (table) =>
-              `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
-          )
-          .join('\n        UNION ALL\n        ')}
-      ) AS critical_counts
-    ),
-    '{}'::json
-  ),
-  'migrations', COALESCE(
-    (SELECT json_agg(version || ':' || checksum ORDER BY version) FROM "public"."schema_migrations"),
-    '[]'::json
+const snapshotSql = `BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY;
+DO $boomerbuddy_portability$
+DECLARE
+  target_table text;
+  target_relation regclass;
+  target_count bigint;
+  critical_counts jsonb := '{}'::jsonb;
+  critical_presence jsonb := '{}'::jsonb;
+  migration_entries jsonb;
+BEGIN
+  FOREACH target_table IN ARRAY ARRAY[
+    ${criticalPortabilityTables.map((table) => `'${table}'`).join(',\n    ')}
+  ]::text[]
+  LOOP
+    target_relation := to_regclass(format('%I.%I', 'public', target_table));
+    IF target_relation IS NULL THEN
+      critical_counts := critical_counts || jsonb_build_object(target_table, NULL::bigint);
+      critical_presence := critical_presence || jsonb_build_object(target_table, false);
+    ELSE
+      EXECUTE format('SELECT count(*)::bigint FROM %s', target_relation) INTO target_count;
+      critical_counts := critical_counts || jsonb_build_object(target_table, target_count);
+      critical_presence := critical_presence || jsonb_build_object(target_table, true);
+    END IF;
+  END LOOP;
+  SELECT COALESCE(
+    jsonb_agg(version || ':' || checksum ORDER BY version),
+    '[]'::jsonb
   )
-)::text;`;
+  INTO migration_entries
+  FROM "public"."schema_migrations";
+  PERFORM set_config(
+    'boomerbuddy.portability_snapshot',
+    jsonb_build_object(
+      'criticalCounts', critical_counts,
+      'criticalPresence', critical_presence,
+      'migrations', migration_entries
+    )::text,
+    true
+  );
+END
+$boomerbuddy_portability$;
+SELECT current_setting('boomerbuddy.portability_snapshot');
+ROLLBACK;`;
 
 export function buildSnapshotInvocation(input: {
   readonly database: ParsedPostgresUrl;
@@ -608,15 +669,48 @@ async function runChecked(runner: ProcessRunner, invocation: ProcessInvocation):
   return result.stdout;
 }
 
-function parseCriticalCounts(value: unknown): CriticalTableCounts {
+function criticalPresenceForAll(value: boolean): CriticalTablePresence {
+  return Object.fromEntries(criticalPortabilityTables.map((table) => [table, value])) as Record<
+    CriticalPortabilityTable,
+    boolean
+  >;
+}
+
+function parseCriticalPresence(value: unknown): CriticalTablePresence {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError('Database snapshot did not return critical table presence');
+  }
+  const input = value as Record<string, unknown>;
+  const presence = {} as Record<CriticalPortabilityTable, boolean>;
+  for (const table of criticalPortabilityTables) {
+    if (typeof input[table] !== 'boolean') {
+      throw new TypeError('Database snapshot returned invalid table presence');
+    }
+    presence[table] = input[table];
+  }
+  const expectedTables: ReadonlySet<string> = new Set(criticalPortabilityTables);
+  if (Object.keys(input).some((table) => !expectedTables.has(table))) {
+    throw new TypeError('Database snapshot returned unexpected table presence');
+  }
+  return presence;
+}
+
+function parseCriticalCounts(value: unknown, presence: CriticalTablePresence): CriticalTableCounts {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new TypeError('Database snapshot did not return critical table counts');
   }
   const input = value as Record<string, unknown>;
-  const counts = {} as Record<CriticalPortabilityTable, number>;
+  const counts = {} as Record<CriticalPortabilityTable, number | null>;
   for (const table of criticalPortabilityTables) {
     const raw = input[table];
     const parsed = typeof raw === 'string' ? Number(raw) : raw;
+    if (!presence[table]) {
+      if (parsed !== null) {
+        throw new TypeError('Database snapshot returned a count for an absent table');
+      }
+      counts[table] = null;
+      continue;
+    }
     if (typeof parsed !== 'number' || !Number.isSafeInteger(parsed) || parsed < 0) {
       throw new TypeError('Database snapshot returned an invalid table count');
     }
@@ -655,8 +749,10 @@ export function parseDatabaseSnapshotOutput(output: string): DatabaseSnapshot {
   ) {
     throw new TypeError('Database snapshot returned an invalid migration manifest');
   }
+  const criticalTablePresence = parseCriticalPresence(payload.criticalPresence);
   return {
-    criticalTableCounts: parseCriticalCounts(payload.criticalCounts),
+    criticalTablePresence,
+    criticalTableCounts: parseCriticalCounts(payload.criticalCounts, criticalTablePresence),
     migrationCount: migrationEntries.length,
     migrationManifestSha256: createHash('sha256')
       .update(JSON.stringify(migrationEntries))
@@ -811,7 +907,7 @@ function parseEncryptedHeader(value: unknown): EncryptedBackupHeader {
   }
   const header = value as Record<string, unknown>;
   if (
-    header.version !== receiptVersion ||
+    (header.version !== receiptVersion && header.version !== legacyReceiptVersion) ||
     header.algorithm !== 'aes-256-gcm' ||
     typeof header.candidateSha !== 'string' ||
     !candidateShaPattern.test(header.candidateSha) ||
@@ -926,7 +1022,7 @@ function parseReceipt(value: unknown): PortabilityReceipt {
   }
   const receipt = value as Record<string, unknown>;
   if (
-    receipt.version !== receiptVersion ||
+    (receipt.version !== receiptVersion && receipt.version !== legacyReceiptVersion) ||
     receipt.evidenceTier !== 'local_operator_generated' ||
     typeof receipt.candidateSha !== 'string' ||
     !candidateShaPattern.test(receipt.candidateSha) ||
@@ -952,8 +1048,13 @@ function parseReceipt(value: unknown): PortabilityReceipt {
   ) {
     throw new TypeError('Backup receipt is invalid');
   }
+  const version = receipt.version;
+  const criticalTablePresence =
+    version === legacyReceiptVersion
+      ? criticalPresenceForAll(true)
+      : parseCriticalPresence(receipt.criticalTablePresence);
   return {
-    version: receiptVersion,
+    version,
     evidenceTier: 'local_operator_generated',
     candidateSha: receipt.candidateSha,
     createdAt: receipt.createdAt,
@@ -964,7 +1065,8 @@ function parseReceipt(value: unknown): PortabilityReceipt {
       algorithm: 'aes-256-gcm',
       keyCustody: 'founder_held_out_of_band',
     },
-    criticalTableCounts: parseCriticalCounts(receipt.criticalTableCounts),
+    criticalTableCounts: parseCriticalCounts(receipt.criticalTableCounts, criticalTablePresence),
+    criticalTablePresence,
     migrationCount: receipt.migrationCount,
     migrationManifestSha256: receipt.migrationManifestSha256,
   };
@@ -1012,10 +1114,14 @@ export function compareSnapshotToReceipt(
     snapshot.migrationCount !== receipt.migrationCount ||
     snapshot.migrationManifestSha256 !== receipt.migrationManifestSha256 ||
     criticalPortabilityTables.some(
-      (table) => snapshot.criticalTableCounts[table] !== receipt.criticalTableCounts[table],
+      (table) =>
+        snapshot.criticalTablePresence[table] !== receipt.criticalTablePresence[table] ||
+        snapshot.criticalTableCounts[table] !== receipt.criticalTableCounts[table],
     )
   ) {
-    throw new Error('Post-restore critical counts or migration manifest do not match the receipt');
+    throw new Error(
+      'Post-restore critical table presence, counts, or migration manifest do not match the receipt',
+    );
   }
 }
 
@@ -1024,7 +1130,9 @@ function databaseSnapshotsMatch(left: DatabaseSnapshot, right: DatabaseSnapshot)
     left.migrationCount === right.migrationCount &&
     left.migrationManifestSha256 === right.migrationManifestSha256 &&
     criticalPortabilityTables.every(
-      (table) => left.criticalTableCounts[table] === right.criticalTableCounts[table],
+      (table) =>
+        left.criticalTablePresence[table] === right.criticalTablePresence[table] &&
+        left.criticalTableCounts[table] === right.criticalTableCounts[table],
     )
   );
 }
@@ -1207,8 +1315,10 @@ export async function restorePortableBackup(
       candidateSha: receipt.candidateSha,
       createdAt: receipt.createdAt,
       snapshot: receipt,
+      version: receipt.version,
     });
     if (
+      authenticatedBackup.header.version !== receipt.version ||
       receipt.authenticatedMetadataSha256 !== receiptMetadataSha256 ||
       authenticatedBackup.header.authenticatedMetadataSha256 !== receiptMetadataSha256
     ) {
@@ -1294,6 +1404,7 @@ async function main(): Promise<void> {
         restoredDatabase: result.restoredDatabase,
         migrationCount: result.postRestoreSnapshot.migrationCount,
         criticalTableCounts: result.postRestoreSnapshot.criticalTableCounts,
+        criticalTablePresence: result.postRestoreSnapshot.criticalTablePresence,
         evidenceTier: 'local_operator_generated',
       })}\n`,
     );

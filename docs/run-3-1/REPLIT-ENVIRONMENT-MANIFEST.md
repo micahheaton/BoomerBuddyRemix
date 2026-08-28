@@ -9,6 +9,22 @@ Service abbreviations: **W** customer web, **A** API, **K** worker, **H** HQ, **
 migration/bootstrap shell, **T** disposable provider-test PostgreSQL verification shell, **B**
 trusted founder backup/restore machine.
 
+The deployment set is exactly these four BoomerBuddy 2.0 consumers of
+`https://github.com/micahheaton/BoomerBuddyRemix.git`:
+
+| Replit service       | Production responsibility | Public origin or role       |
+| -------------------- | ------------------------- | --------------------------- |
+| `boomerbuddy-web`    | Customer web              | `https://app.boomerbuddy.net` |
+| `boomerbuddy-api`    | Customer and HQ API       | `https://api.boomerbuddy.net` |
+| `boomerbuddy-worker` | Background worker         | Private worker, no customer origin |
+| `boomerbuddy-hq`     | Operations HQ             | `https://hq.boomerbuddy.net` |
+
+GitHub is the only source of truth. Make changes in this repository, commit and push them to GitHub,
+then make each listed service pull the exact approved annotated tag. Replit must never push to
+GitHub. The separate legacy Replit project named `BoomerBuddy`, which serves `boomerbuddy.net`, is
+not one of these four services. Do not edit, synchronize, publish, or configure that legacy project
+as part of this cutover.
+
 ## Release and Replit process boundary
 
 | Variable                   | Purpose                                  | Secret? | Source / example                           | Services  | Requirement, default, and failure behavior                                                                                      |
@@ -166,7 +182,7 @@ near-match probes fail closed on both applications.
 | `BB_FINGERPRINT_KEY_BASE64`                 | Keyed fingerprints, evidence binding, and nonreversible identifiers | Yes                                  | separate canonical base64 of 32 random bytes          | A/K/M                         | Required; wrong length/noncanonical/equal to another secret refuses config.                                                                            |
 | `BB_SAFE_WORD_PEPPER`                       | Safe-word verifier hardening                                        | Yes                                  | separate high-entropy string, 16+ characters          | A/K/M                         | Required and distinct. Missing/short/equal secret refuses config.                                                                                      |
 | `BB_LOG_LEVEL`                              | Structured log threshold                                            | No                                   | `info`                                                | A/K/M                         | Optional default `info`; only `debug`, `info`, `warn`, `error`. Do not use debug with customer traffic.                                                |
-| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | default `disabled`; future reviewed rollout `live`    | A/K                           | Live is not currently production-capable. Disabled mode refuses every Stripe field, and a future candidate must close the catalog, entitlement, and complete surface-specific manifest gates below. |
+| `BB_STRIPE_MODE`                            | Payment network boundary                                            | No                                   | initial deployment: `disabled`; later gated rollout: `live` | A/K                           | The initial deployment requires `disabled`. It accepts no provider identifiers or credentials and permits no Checkout, Portal, webhook, or reconciliation network action. A later `live` deployment requires the complete Family monthly and annual mapping, separate surface custody, and the gates below. |
 | `BB_TWILIO_MODE`                            | Messaging network boundary                                          | No                                   | `disabled`                                            | A/K/M                         | Only `disabled` parses; all Twilio credential/URL fields are refused.                                                                                  |
 
 `BB_SESSION_SECRET` is intentionally **absent** in production. Supplying it refuses startup because
@@ -198,14 +214,41 @@ denial, and rollback. Roll back by setting intake false first, then customer acc
 false. Record only names, booleans, exact release identity, timestamps, and content-free receipt
 IDs. Never record PII or submitted content.
 
+### Default-off governed content controls
+
+These controls are also explicit in the initial deployment. They are separate from the reviewed
+static curriculum already shipped in the customer applications.
+
+| Variable | API project | Worker project | Activation and failure behavior |
+| --- | --- | --- | --- |
+| `BB_FIRST_PARTY_CONTENT_ENABLED` | exactly `false` | absent | Keeps the governed editorial creation, review, publication, retraction, and public article API closed. Enable only after the editorial roles, review evidence, public rendering, rollback, and retention boundary are proved. |
+| `BB_DAILY_CONTENT_DRAFTS_ENABLED` | exactly `false` | exactly `false` | Keeps manual and scheduled draft generation closed. A later activation must use the same exact release on API and worker and must retain human review before publication. |
+
 ### Surface-separated live Stripe configuration
 
-Live Stripe remains default-off. The API and worker use the same exact live account, Family product,
-USD $14.99/month price, and bounded Portal configuration identifiers, but they must not receive the
-same credential manifest. Each project receives only its own restricted key. The API alone receives
-the webhook signing secret and is the only surface on which initiation may later become true. The
-worker must keep initiation false. The deprecated shared `BB_STRIPE_LIVE_API_KEY` is always absent
-and is rejected by configuration.
+The authorized initial deployment is noncharging. Set `BB_STRIPE_MODE=disabled` on API and worker,
+set `BB_STRIPE_LIVE_INITIATION_ENABLED=false`, and leave every Stripe account, product, price,
+Portal, credential, and webhook value absent. Keep `BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED=false`.
+Account creation alone does not start a trial or charge. It creates no Checkout Session, Customer,
+Subscription, payment method, or billable entitlement in Stripe.
+
+The reviewed production offer contract is still complete while initiation is closed:
+
+- Family annual is the default Checkout offer: USD 149.90 per year with a seven-day trial.
+- Family monthly remains selectable at USD 14.99 per month with no trial.
+- Individual monthly at USD 8.99 and Individual annual at USD 89.90 with a seven-day trial remain
+  default-off and customer-unselectable. Their live mapping may be omitted; if prepared, the three
+  identifiers must be complete and the enable switch must remain false for this cutover.
+- Referrals remain disabled. There is no production referral activation variable, reward, coupon,
+  promotion code, or public referral promise in this deployment.
+
+After the noncharging deployment passes its smoke tests, a separate live-but-initiation-closed
+configuration may give API and worker the same exact live account, Family product, both Family
+prices, and bounded Portal configuration identifiers. The projects must not receive the same
+credential manifest. Each receives only its own restricted key. API alone receives the webhook
+signing secret and is the only surface on which initiation may later become true. Worker must keep
+initiation false. The deprecated shared `BB_STRIPE_LIVE_API_KEY` is always absent and is rejected by
+configuration.
 
 | Variable | Purpose | Secret? | API project | Worker project | Failure behavior |
 | --- | --- | --- | --- | --- | --- |
@@ -214,6 +257,11 @@ and is rejected by configuration.
 | `BB_STRIPE_LIVE_ACCOUNT_ID` | Exact live Stripe account | No, identifier | exact `acct_...` | same identifier | Missing or malformed refuses startup; preflight also requires charges and payouts enabled for a US company account. |
 | `BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID` | Family product | No, identifier | exact live `prod_...` | same identifier | Must resolve to the active Family product. |
 | `BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID` | Family monthly price | No, identifier | exact live `price_...` | same identifier | Must resolve to one active recurring USD 1,499-cent monthly price with quantity one. |
+| `BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID` | Default Family annual price | No, identifier | exact live `price_...` | same identifier | Must resolve to one active recurring USD 14,990-cent annual price with quantity one. Application Checkout adds the seven-day trial; the reusable Stripe Price itself has no embedded trial. |
+| `BB_STRIPE_LIVE_INDIVIDUAL_PRODUCT_ID` | Optional Individual product mapping | No, identifier | absent for this cutover, or exact live `prod_...` | same absence or identifier | Must be absent or supplied together with both Individual prices. A partial mapping refuses startup. |
+| `BB_STRIPE_LIVE_INDIVIDUAL_MONTHLY_PRICE_ID` | Optional Individual monthly mapping | No, identifier | absent for this cutover, or exact live `price_...` | same absence or identifier | If mapped, must resolve to an active recurring USD 899-cent monthly price with quantity one and no trial. It remains unselectable while the enable switch is false. |
+| `BB_STRIPE_LIVE_INDIVIDUAL_ANNUAL_PRICE_ID` | Optional Individual annual mapping | No, identifier | absent for this cutover, or exact live `price_...` | same absence or identifier | If mapped, must resolve to an active recurring USD 8,990-cent annual price with quantity one. It remains unselectable while the enable switch is false. |
+| `BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED` | Individual customer-selection gate | No | exactly `false` | exactly `false` | Defaults false. Do not enable it in this cutover; true without the complete mapping refuses startup. |
 | `BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID` | Bounded customer Portal | No, identifier | exact live `bpc_...` | same identifier | Payment-method update and cancel-at-period-end are enabled; plan changes, promotions, and proration are disabled. |
 | `BB_STRIPE_LIVE_API_RESTRICTED_KEY` | API Checkout, Portal, preflight, and webhook-side reconciliation reads | Yes | required `rk_live_...` in API Secrets only | absent | Any unrestricted key, worker key, or cross-surface copy refuses startup. |
 | `BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY` | Worker inventory and reconciliation reads | Yes | absent | required `rk_live_...` in worker Secrets only | Any API key, webhook secret, or cross-surface copy refuses startup. |
@@ -221,6 +269,32 @@ and is rejected by configuration.
 
 Production projects must omit every `BB_STRIPE_TEST_*` value. Test mode remains limited to isolated
 nonproduction evidence and cannot be mixed with any live field.
+
+The API must keep the following billing-readiness controls closed or absent during the initial
+deployment. They become a complete required set only when a later deployment sets
+`BB_STRIPE_MODE=live` and `BB_STRIPE_LIVE_INITIATION_ENABLED=true`. The loader refuses live
+initiation unless both readiness booleans are true and every other value in this table is present.
+Receipt identifiers must point to durable, content-free operator evidence and must never contain PII.
+
+| Variable | Initial API value | Requirement before live initiation |
+| --- | --- | --- |
+| `BB_BILLING_PUBLIC_SUPPORT_EMAIL` | absent | Public support email that is owned and staffed. |
+| `BB_BILLING_PUBLIC_SUPPORT_URL` | absent | Exact public support URL. |
+| `BB_BILLING_PUBLIC_PRIVACY_URL` | absent | Exact public privacy URL. |
+| `BB_BILLING_PUBLIC_TERMS_URL` | absent | Exact public terms URL. |
+| `BB_BILLING_PUBLIC_BILLING_TERMS_URL` | absent | Exact public billing terms URL that explains the annual trial and renewal. |
+| `BB_BILLING_POLICY_VERSION` | absent | Immutable bounded policy version identifier. |
+| `BB_BILLING_POLICY_EFFECTIVE_AT` | absent | Effective timestamp with an explicit UTC offset. |
+| `BB_BILLING_SUPPORT_OPERATIONS_READY` | exactly `false` | Exactly `true` only after the support owner, hours, backup, and response workflow are proved. |
+| `BB_BILLING_SUPPORT_RECEIPT_ID` | absent | Durable support-readiness receipt identifier. |
+| `BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE` | absent | Exactly `stripe_automatic_email` or `consented_durable_channel`, after delivery is proved. |
+| `BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID` | absent | Durable proof for the selected pre-renewal reminder channel. |
+| `BB_BILLING_TAX_TREATMENT_REVIEW_COMPLETE` | exactly `false` | Exactly `true` only after the launch geography and tax treatment are reviewed. |
+| `BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY` | absent | Bounded identifier for the reviewed launch geography. |
+| `BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID` | absent | Durable tax-treatment review receipt identifier. |
+
+Twilio remains closed in every phase covered by this manifest: keep `BB_TWILIO_MODE=disabled` and
+omit all Twilio credential and callback variables. Stripe activation does not authorize Twilio.
 
 The initial 0.25-CU database capacity profile is API pool 2 plus worker pool 1/batch 1. A pooled Neon
 URL controls connection churn but does not replace these application-side active-work caps. SQLSTATE

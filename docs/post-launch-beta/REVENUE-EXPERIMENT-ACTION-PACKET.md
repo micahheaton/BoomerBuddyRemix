@@ -37,15 +37,18 @@ preview. It does not connect either surface to production.
 ## Gauntlet decision
 
 The fastest safe route to recurring revenue remains one operator-assisted, consented household on
-the Family USD 14.99 monthly candidate. It is the sole approved production offer candidate and is
-not live. Its Checkout contract remains default-off. Family means coverage for one household group. No employer, association, bulk,
-or other group price has been selected, so this packet does not invent one.
+one Family plan. Family annual at USD 149.90 after a seven-day trial is the intended default
+production offer candidate, and Family monthly at USD 14.99 remains available without a trial;
+neither is live. Account creation alone does not start a trial or charge. Both Checkout contracts
+remain default-off. Family means coverage for one household group. Individual offers remain
+default-off, referrals remain disabled, and no employer, association, bulk, or other group price has
+been selected, so this packet does not invent one.
 
 The other entries answer later questions and do not outrank the first-household path:
 
 | Hypothesis | What it can test | Why it does not accelerate the first safe payment |
 | --- | --- | --- |
-| Family USD 149.90 yearly | Stated interval preference and sandbox renewal arithmetic | It increases commitment, refund, tax, and support questions before any retention evidence exists. Up-front cash is not proof of recurring retention. |
+| Family interval preference | Historical stated-preference and sandbox arithmetic evidence | The production catalog, not this research packet, now controls both Family intervals. A trial start is not payment, and up-front cash is not proof of recurring retention. |
 | Individual USD 8.99 monthly | Stated demand for one-person coverage | It adds a new entitlement, value, support, and copy boundary while lowering initial recurring revenue per payer. |
 | Individual USD 89.90 yearly | Stated audience and interval preference | It combines both unproved changes and therefore cannot identify which change caused a result. |
 | One-month service credits | Sandbox ledger, liability, and abuse-control behavior | A referral loop requires a settled payer, observed advocacy, recipient consent, and accounting treatment. It cannot produce Customer 1. |
@@ -98,7 +101,7 @@ unknown unless separately observed with valid consent and a restricted operator-
 | Email received | Manual mailbox observation only | Operator evidence outside the access-intent database |
 | Qualified lead | Not modeled | Unknown |
 | Invited household | Separate operator-assisted workflow | Not attributable to an access receipt without a consented correlation record |
-| Paid household | Canonical commerce evidence after a settled live invoice | Recurring-revenue evidence only for the sole Family monthly production offer |
+| Paid household | Canonical commerce evidence after a settled live invoice | Recurring-revenue evidence for the selected Family production offer; an annual trial is not paid before its first verified invoice payment |
 
 Do not divide access receipts by paid households and label the result lead-to-paid conversion. A
 future lead-to-paid metric requires a reviewed, consented transition contract with one durable
@@ -157,8 +160,10 @@ because that confounds coverage and interval.
 Use this exact status copy above every pair:
 
 > Research preview only. These choices do not start Checkout, reserve a price, or create an offer.
-> Family at USD 14.99 per month is the sole approved production offer candidate, and it is not live.
-> Every yearly and Individual choice shown here is unavailable and is being evaluated only as a hypothesis.
+> Family annual at USD 149.90 after a seven-day trial is the intended default production candidate,
+> and Family monthly at USD 14.99 remains available without a trial; neither is live. Account
+> creation alone does not start a trial or charge. Individual offers remain default-off and
+> referrals remain disabled.
 
 The Family pair is `USD 14.99 each month` and `USD 149.90 each year; exactly two monthly payments
 less`. The Individual pair is `USD 8.99 each month` and `USD 89.90 each year; exactly two monthly
@@ -275,8 +280,11 @@ and satisfies every objective receipt gate in this packet:
    idempotency operation receipts, expected-versus-actual invoice amounts, and lifecycle outcomes.
 7. Build the research page only as a private, noncollecting, noindex preview from the exact copy in
    this packet. Run keyboard, zoom, screen-reader, responsive, and automated accessibility checks.
-8. Verify the production home and pricing pages still show only Family USD 14.99 monthly and the
-   production Checkout contract still accepts only `founding_family_monthly_v1`.
+8. Verify the production home and pricing pages present Family annual at USD 149.90 after a
+   seven-day trial as the intended default and Family monthly at USD 14.99 without a trial as the
+   retained alternative. Verify that account creation alone starts neither trial nor charge, only
+   `family_annual_v2` and `family_monthly_v2` are customer-selectable, Individual remains
+   default-off, and referrals remain disabled.
 9. Freeze the sandbox. Make the four Prices and two Products inactive after evidence capture if no
    further authorized test is scheduled. Leave the isolated evidence intact; do not delete or alter
    the legacy webhook or any live object.

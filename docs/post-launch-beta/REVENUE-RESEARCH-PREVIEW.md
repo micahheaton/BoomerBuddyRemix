@@ -25,11 +25,13 @@ deterministic under test. No order or response is retained.
 
 ## Offer and referral truth
 
-[OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) remains controlling. Family at USD
-14.99 per month is the sole approved production offer candidate and is not live. Family yearly,
-Individual monthly, Individual yearly, and both non-cash referral service-credit ideas remain
-unavailable hypotheses. The preview does not activate, map, reserve, sell, or collect evidence for
-any hypothesis.
+[OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) remains controlling for default-off
+Individual, group-rate, and referral hypotheses and preserves historical Family annual research.
+The versioned production catalog now defines Family annual at USD 149.90 after a seven-day trial as
+the intended default and retains Family monthly at USD 14.99 without a trial; neither is live.
+Account creation alone does not start a trial or charge. Individual offers remain default-off and
+referrals remain disabled. This historical local preview does not activate, map, reserve, sell, or
+collect evidence for any offer or hypothesis.
 
 Automated security tests bind every displayed amount, saving, cap, and allowed response to registry
 version 2. They also prove the route is double-gated and local-only, contains no submission path,

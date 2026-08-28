@@ -28,6 +28,7 @@ import {
   validateCandidateSha,
   type CriticalPortabilityTable,
   type CriticalTableCounts,
+  type CriticalTablePresence,
   type PortabilityReceipt,
   type ProcessInvocation,
   type ProcessRunner,
@@ -63,6 +64,13 @@ const launchCriticalEvidenceTables = [
   'commerce_stripe_preflight_records',
   'commerce_stripe_session_operations',
   'commerce_stripe_checkout_completions',
+  'commerce_stripe_checkout_completions_v2',
+  'commerce_stripe_trial_reservations',
+  'commerce_stripe_trial_checkout_attempts',
+  'commerce_stripe_trial_consumptions',
+  'commerce_stripe_trial_period_evidence',
+  'commerce_stripe_trial_reminder_intents',
+  'commerce_stripe_trial_reminder_acknowledgements',
   'commerce_stripe_paid_invoice_evidence',
   'commerce_stripe_failed_invoice_evidence',
   'commerce_stripe_financial_restriction_resolutions',
@@ -107,20 +115,86 @@ const launchCriticalEvidenceTables = [
   'member_scam_guidance_briefs',
 ] as const;
 
-function criticalCounts(offset = 0): CriticalTableCounts {
+const post0027CriticalTables = [
+  'household_billing_authority_events',
+  'commerce_stripe_cohort_policy_events_v2',
+  'commerce_billing_reverification_mutex',
+  'commerce_billing_reverification_bindings',
+  'private_beta_access_intent_gate',
+  'private_beta_access_intent_receipts',
+  'private_beta_access_intent_rate_buckets',
+  'private_beta_access_intent_aggregates',
+  'commerce_stripe_invoice_recovery_events',
+  'support_receipt_gate',
+  'support_receipts',
+  'support_receipt_operations',
+  'support_receipt_events',
+  'support_receipt_rate_buckets',
+  'protected_self_enrollment_household_gates',
+  'protected_self_enrollment_operations',
+  'member_learning_progress',
+  'member_learning_preferences',
+  'member_in_app_feed_receipts',
+  'member_learning_operation_receipts',
+  'member_scam_guidance_briefs',
+  'trusted_circle_recipient_codes',
+  'trusted_circle_authenticated_rate_buckets',
+  'household_member_invitations',
+  'check_share_lifecycle_events',
+  'family_safe_word_rate_buckets',
+  'family_safe_word_lifecycle_events',
+  'commerce_stripe_checkout_completions_v2',
+  'commerce_stripe_trial_reservations',
+  'commerce_stripe_trial_checkout_attempts',
+  'commerce_stripe_trial_consumptions',
+  'commerce_stripe_trial_period_evidence',
+  'commerce_stripe_trial_reminder_intents',
+  'commerce_stripe_trial_reminder_acknowledgements',
+] as const satisfies readonly CriticalPortabilityTable[];
+
+const defaultMigrationManifest = [
+  `0024_run3_1_production_identity.sql:${'1'.repeat(64)}`,
+  `0026_run3_1_production_founding_households.sql:${'2'.repeat(64)}`,
+  `0027_run3_1_feedback_founding_quota.sql:${'3'.repeat(64)}`,
+];
+const migration0027Manifest = Array.from({ length: 27 }, (_, index) => {
+  const version = String(index + 1).padStart(4, '0');
+  const checksumDigit = String((index % 9) + 1);
+  return `${version}_fixture.sql:${checksumDigit.repeat(64)}`;
+});
+
+function criticalPresence(
+  absentTables: readonly CriticalPortabilityTable[] = [],
+): CriticalTablePresence {
+  const absent = new Set(absentTables);
   return Object.fromEntries(
-    criticalPortabilityTables.map((table, index) => [table, index + offset]),
-  ) as Record<CriticalPortabilityTable, number>;
+    criticalPortabilityTables.map((table) => [table, !absent.has(table)]),
+  ) as Record<CriticalPortabilityTable, boolean>;
 }
 
-function snapshotOutput(offset = 0): string {
+function criticalCounts(
+  offset = 0,
+  absentTables: readonly CriticalPortabilityTable[] = [],
+): CriticalTableCounts {
+  const absent = new Set(absentTables);
+  return Object.fromEntries(
+    criticalPortabilityTables.map((table, index) => [
+      table,
+      absent.has(table) ? null : index + offset,
+    ]),
+  ) as Record<CriticalPortabilityTable, number | null>;
+}
+
+function snapshotOutput(
+  offset = 0,
+  absentTables: readonly CriticalPortabilityTable[] = [],
+  countOverrides: Partial<Record<CriticalPortabilityTable, number | null>> = {},
+  migrations: readonly string[] = defaultMigrationManifest,
+): string {
   return JSON.stringify({
-    criticalCounts: criticalCounts(offset),
-    migrations: [
-      `0024_run3_1_production_identity.sql:${'1'.repeat(64)}`,
-      `0026_run3_1_production_founding_households.sql:${'2'.repeat(64)}`,
-      `0027_run3_1_feedback_founding_quota.sql:${'3'.repeat(64)}`,
-    ],
+    criticalCounts: { ...criticalCounts(offset, absentTables), ...countOverrides },
+    criticalPresence: criticalPresence(absentTables),
+    migrations,
   });
 }
 
@@ -218,7 +292,7 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
     );
   });
 
-  it('counts the explicit launch-critical authority, commerce, support, access, and enrollment inventory', () => {
+  it('guards every exact critical count with relation presence in one read-only snapshot', () => {
     expect(criticalPortabilityTables).toEqual(
       expect.arrayContaining([...launchCriticalEvidenceTables]),
     );
@@ -230,12 +304,20 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
     });
     const sql = snapshotInvocation.args.at(-1);
     expect(sql).toBeDefined();
-    expect(sql).toContain('json_object_agg(table_name, row_count ORDER BY table_name)');
-    expect(sql).not.toContain("'criticalCounts', json_build_object(");
+    expect(sql).toContain('BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    expect(sql).not.toMatch(/\bCREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\b/iu);
+    expect(sql).toContain(
+      "target_relation := to_regclass(format('%I.%I', 'public', target_table))",
+    );
+    expect(sql).toContain(
+      "EXECUTE format('SELECT count(*)::bigint FROM %s', target_relation) INTO target_count",
+    );
+    expect(sql).toContain("PERFORM set_config(\n    'boomerbuddy.portability_snapshot'");
+    expect(sql).toContain("SELECT current_setting('boomerbuddy.portability_snapshot')");
+    expect(sql).toContain('ROLLBACK;');
     for (const table of launchCriticalEvidenceTables) {
-      expect(sql).toContain(
-        `SELECT '${table}'::text AS table_name, count(*)::bigint AS row_count FROM "public"."${table}"`,
-      );
+      expect(sql).toContain(`'${table}'`);
+      expect(sql).not.toContain(`FROM "public"."${table}"`);
     }
   });
   it('parses one PostgreSQL URL into a scrubbed process environment without secret argv', () => {
@@ -374,6 +456,7 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
   it('rejects malformed or content-bearing snapshot output', () => {
     expect(parseDatabaseSnapshotOutput(snapshotOutput())).toMatchObject({
       criticalTableCounts: criticalCounts(),
+      criticalTablePresence: criticalPresence(),
       migrationCount: 3,
     });
     expect(() => parseDatabaseSnapshotOutput('{')).toThrow(TypeError);
@@ -386,10 +469,20 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
       parseDatabaseSnapshotOutput(
         JSON.stringify({
           criticalCounts: { ...criticalCounts(), customer_email: 'forbidden' },
+          criticalPresence: criticalPresence(),
           migrations: [`0024_identity.sql:${'1'.repeat(64)}`],
         }),
       ),
     ).toThrow(TypeError);
+    expect(() =>
+      parseDatabaseSnapshotOutput(
+        JSON.stringify({
+          criticalCounts: { ...criticalCounts(), support_receipts: 0 },
+          criticalPresence: { ...criticalPresence(), support_receipts: false },
+          migrations: [`0024_identity.sql:${'1'.repeat(64)}`],
+        }),
+      ),
+    ).toThrow(/count for an absent table/u);
   });
 
   it('authenticates AES-256-GCM before exposing a complete plaintext and preserves existing files', async () => {
@@ -478,11 +571,13 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
     expect(encryptedBytes.includes(customDumpFixture)).toBe(false);
     expect(receipt).toEqual(result.receipt);
     expect(receipt).toMatchObject({
+      version: 'run3-1-postgres-portability-v2',
       candidateSha,
       createdAt: '2026-08-17T20:00:00.000Z',
       backupBytes: encryptedBytes.byteLength,
       backupSha256: createHash('sha256').update(encryptedBytes).digest('hex'),
       criticalTableCounts: criticalCounts(),
+      criticalTablePresence: criticalPresence(),
       migrationCount: 3,
       authenticatedMetadataSha256: expect.stringMatching(/^[0-9a-f]{64}$/u),
       encryption: {
@@ -519,6 +614,80 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
       expect((await stat(result.backupPath)).mode & 0o777).toBe(0o600);
       expect((await stat(result.receiptPath)).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it('backs up a migration-0027 snapshot with later critical relations explicitly absent', async () => {
+    const root = await outsideRoot();
+    const outputPath = join(root, 'migration-0027.bbbackup');
+    const migration0027Snapshot = snapshotOutput(
+      0,
+      post0027CriticalTables,
+      {},
+      migration0027Manifest,
+    );
+    const fake = createFakeRunner([migration0027Snapshot, migration0027Snapshot]);
+
+    const result = await createPortableBackup({
+      databaseUrl: sourceDatabaseUrl,
+      keyBase64: founderKeyBase64,
+      candidateSha,
+      outputPath,
+      runner: fake.runner,
+    });
+
+    expect(result.receipt.migrationCount).toBe(27);
+    for (const table of post0027CriticalTables) {
+      expect(result.receipt.criticalTablePresence[table]).toBe(false);
+      expect(result.receipt.criticalTableCounts[table]).toBeNull();
+    }
+    expect(result.receipt.criticalTablePresence.schema_migrations).toBe(true);
+    expect(result.receipt.criticalTableCounts.schema_migrations).toBe(0);
+    expect(fake.invocations.map(({ command }) => command)).toEqual(['psql', 'pg_dump', 'psql']);
+  });
+
+  it('normalizes a complete v1 receipt for restore compatibility', async () => {
+    const root = await outsideRoot();
+    const receiptPath = join(root, 'legacy.bbbackup.receipt.json');
+    const snapshot = parseDatabaseSnapshotOutput(snapshotOutput());
+    const createdAt = '2026-08-17T20:00:00.000Z';
+    const authenticatedMetadata = authenticatedMetadataSha256({
+      candidateSha,
+      createdAt,
+      snapshot,
+      version: 'run3-1-postgres-portability-v1',
+    });
+    await writeFile(
+      receiptPath,
+      `${JSON.stringify({
+        version: 'run3-1-postgres-portability-v1',
+        evidenceTier: 'local_operator_generated',
+        candidateSha,
+        createdAt,
+        backupSha256: 'c'.repeat(64),
+        backupBytes: 123,
+        authenticatedMetadataSha256: authenticatedMetadata,
+        encryption: {
+          algorithm: 'aes-256-gcm',
+          keyCustody: 'founder_held_out_of_band',
+        },
+        criticalTableCounts: criticalCounts(),
+        migrationCount: snapshot.migrationCount,
+        migrationManifestSha256: snapshot.migrationManifestSha256,
+      })}\n`,
+      { flag: 'wx' },
+    );
+
+    const legacy = await readPortabilityReceipt(receiptPath);
+    expect(legacy.version).toBe('run3-1-postgres-portability-v1');
+    expect(legacy.criticalTablePresence).toEqual(criticalPresence());
+    expect(
+      authenticatedMetadataSha256({
+        candidateSha,
+        createdAt,
+        snapshot: legacy,
+        version: legacy.version,
+      }),
+    ).toBe(authenticatedMetadata);
   });
 
   it('preserves a receipt that appears after the no-overwrite preflight', async () => {
@@ -580,10 +749,11 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
     });
     const changedCounts: CriticalTableCounts = {
       ...backup.receipt.criticalTableCounts,
-      artifacts: backup.receipt.criticalTableCounts.artifacts + 1,
+      artifacts: backup.receipt.criticalTableCounts.artifacts! + 1,
     };
     const changedSnapshot = {
       criticalTableCounts: changedCounts,
+      criticalTablePresence: backup.receipt.criticalTablePresence,
       migrationCount: backup.receipt.migrationCount,
       migrationManifestSha256: backup.receipt.migrationManifestSha256,
     };
@@ -641,6 +811,7 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
 
     expect(result.restoredDatabase).toBe('restore_boomerbuddy');
     expect(result.postRestoreSnapshot.criticalTableCounts).toEqual(criticalCounts());
+    expect(result.postRestoreSnapshot.criticalTablePresence).toEqual(criticalPresence());
     expect(restoreFake.invocations.map(({ command }) => command)).toEqual([
       'pg_restore',
       'pg_restore',
@@ -718,6 +889,43 @@ describe('Run 3.1 PostgreSQL portability boundaries', () => {
         runner: restoreFake.runner,
       }),
     ).rejects.toThrow(/do not match the receipt/u);
+    expect(
+      restoreFake.invocations.filter(
+        ({ command, args }) => command === 'pg_restore' && args.includes('--clean'),
+      ),
+    ).toHaveLength(1);
+    for (const plaintextPath of restoreFake.plaintextPaths) await expectMissing(plaintextPath);
+  });
+
+  it('detects an absent source relation restored as a present empty relation', async () => {
+    const root = await outsideRoot();
+    const outputPath = join(root, 'presence-mismatch.bbbackup');
+    const sourceSnapshot = snapshotOutput(0, post0027CriticalTables);
+    const backupFake = createFakeRunner([sourceSnapshot, sourceSnapshot]);
+    await createPortableBackup({
+      databaseUrl: sourceDatabaseUrl,
+      keyBase64: founderKeyBase64,
+      candidateSha,
+      outputPath,
+      runner: backupFake.runner,
+    });
+
+    const restoredAbsentTables = post0027CriticalTables.filter(
+      (table) => table !== 'support_receipts',
+    );
+    const restoreFake = createFakeRunner([
+      snapshotOutput(0, restoredAbsentTables, { support_receipts: 0 }),
+    ]);
+    await expect(
+      restorePortableBackup({
+        databaseUrl: restoreDatabaseUrl,
+        keyBase64: founderKeyBase64,
+        candidateSha,
+        inputPath: outputPath,
+        confirmation: 'RESTORE-DISPOSABLE:restore_boomerbuddy',
+        runner: restoreFake.runner,
+      }),
+    ).rejects.toThrow(/presence, counts, or migration manifest do not match/u);
     expect(
       restoreFake.invocations.filter(
         ({ command, args }) => command === 'pg_restore' && args.includes('--clean'),

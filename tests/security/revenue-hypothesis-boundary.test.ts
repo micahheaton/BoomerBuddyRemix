@@ -127,6 +127,61 @@ describe('revenue hypothesis production boundary', () => {
     expect(currentPlan).not.toMatch(/Enable annual Family|test Plus|\$119 founding annual/iu);
   });
 
+  it('keeps every active launch document aligned to the annual-first Family catalog', async () => {
+    const activeLaunchDocuments = await Promise.all(
+      [
+        'docs/post-launch-beta/EXECUTION-PLAN.md',
+        'docs/post-launch-beta/RUN-NEXT-EXECUTION.md',
+        'docs/post-launch-beta/GAUNTLET-PROMPT-PACK.md',
+        'docs/post-launch-beta/GAUNTLET-PROMPT-PACK-G4-G15.md',
+      ].map(async (path) => ({ path, content: await source(path) })),
+    );
+
+    for (const document of activeLaunchDocuments) {
+      expect(document.content, document.path).toContain('USD 149.90');
+      expect(document.content, document.path).toContain('USD 14.99');
+      expect(document.content, document.path).toMatch(/seven-day trial/iu);
+      expect(document.content, document.path).toMatch(
+        /account creation alone (?:does not|must not) start a trial or charge/iu,
+      );
+      expect(document.content, document.path).toMatch(/Individual.+default-off/isu);
+      expect(document.content, document.path).toMatch(/referrals? (?:remain|are) disabled/iu);
+      expect(document.content, document.path).toMatch(/web-first/iu);
+      expect(document.content, document.path).toMatch(/mobile P0/iu);
+      expect(document.content, document.path).toMatch(
+        /Keep Twilio disabled|Twilio (?:remains|remain|stays) disabled/iu,
+      );
+      expect(document.content, document.path).not.toMatch(
+        /Family at USD 14\.99.+sole approved production offer|no annual Price|No annual, Individual|Family USD 14\.99 monthly Checkout/iu,
+      );
+    }
+  });
+
+  it('keeps every current pricing packet aligned and leaves monthly-only wording historical', async () => {
+    const currentPricingDocuments = await Promise.all(
+      [
+        'docs/post-launch-beta/EXECUTION-PLAN-SUPPLEMENT.md',
+        'docs/post-launch-beta/RUN-NEXT.md',
+        'docs/post-launch-beta/REVENUE-RESEARCH-PREVIEW.md',
+        'docs/post-launch-beta/REVENUE-EXPERIMENT-ACTION-PACKET.md',
+      ].map(async (path) => ({ path, content: await source(path) })),
+    );
+
+    for (const document of currentPricingDocuments) {
+      expect(document.content, document.path).toContain('USD 149.90');
+      expect(document.content, document.path).toContain('USD 14.99');
+      expect(document.content, document.path).toMatch(/seven-day trial/iu);
+      expect(document.content, document.path).toMatch(
+        /account creation alone (?:does not|must not) start a trial or charge/iu,
+      );
+      expect(document.content, document.path).toMatch(/Individual.+default-off/isu);
+      expect(document.content, document.path).toMatch(/referrals? (?:remain|are) disabled/iu);
+      expect(document.content, document.path).not.toMatch(
+        /Family at USD 14\.99.+sole approved production offer|no annual Price|annual remains deferred|Family USD 14\.99 monthly payment|show only Family USD 14\.99 monthly|accepts only `founding_family_monthly_v1`/iu,
+      );
+    }
+  });
+
   it('keeps every hypothesis key, scope, and registry outside the production package graph', async () => {
     const [domainBarrel, domainManifest, productionSources] = await Promise.all([
       source('packages/domain/src/index.ts'),

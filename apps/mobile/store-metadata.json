@@ -7,10 +7,10 @@
   "bundleIdentifier": "net.boomerbuddy.app",
   "androidPackage": "net.boomerbuddy.app",
   "marketingVersion": "0.1.0",
-  "subtitle": "Safer next steps for families",
-  "promotionalText": "Pause before you click, reply, pay, or share a code. Review warning signs and choose a safer next step.",
-  "shortDescription": "Review suspicious messages and links, then choose a safer next step.",
-  "fullDescription": "BoomerBuddy helps adults and families pause before acting on a suspicious message or link. Submit text or a URL for a structured review of warning signs, uncertainty, and safer next steps. Keep a private history of your own Checks, use explicit Family and Trusted Circle permissions, and complete a guided safety orientation. BoomerBuddy reviews only what you submit. It does not open websites, monitor messages, guarantee safety, or replace emergency services, a financial institution, law enforcement, or qualified professional advice. Access is invitation-only during early release.",
+  "subtitle": "Family scam safety practice",
+  "promotionalText": "Prepare before a scam reaches your family. Practice seven short lessons, review current guidance, Check suspicious messages, and follow through with people you trust.",
+  "shortDescription": "Practice safer responses, Check suspicious messages, and coordinate with family.",
+  "fullDescription": "BoomerBuddy helps adults and families prepare for and respond to suspicious messages, links, payment requests, and impersonation attempts. Practice seven short safety lessons, review dated source-linked guidance, and use a weekly rehearsal to make pausing and independently verifying feel familiar. When something suspicious arrives, submit text or a URL for a structured Check of warning signs, uncertainty, and safer next steps. Keep a private 30-day history, deliberately share a redacted result with an authorized Trusted Circle member, and use a private Family Safe Word as one social verification aid. BoomerBuddy reviews only what you submit. It does not open websites, monitor messages, guarantee safety, send alerts to family automatically, prove identity, or replace emergency services, a financial institution, law enforcement, or qualified professional advice. Access is invitation-only during early release.",
   "keywords": ["scam safety", "online safety", "family", "suspicious message", "phishing"],
   "categories": {
     "status": "draft_pending_current_console_review",
@@ -29,7 +29,7 @@
     }
   },
   "audience": {
-    "summary": "Adults and families who want help reviewing suspicious messages and links.",
+    "summary": "Adults and families who want to practice safer scam responses, review suspicious messages, and coordinate with people they trust.",
     "providerAgeRatingStatus": "pending_current_console_questionnaire_and_professional_review",
     "childDirected": false,
     "madeForChildren": false
@@ -286,6 +286,11 @@
         "preflightRequired": true
       },
       {
+        "id": "learning_guidance_and_weekly_practice",
+        "instruction": "Open Learn and updates, review one lesson and current source-linked guidance, verify weekly practice status, and confirm any device reminder is optional and generic.",
+        "preflightRequired": true
+      },
+      {
         "id": "support_legal_accessibility_and_deletion",
         "instruction": "Open Help and policies, Support, Privacy, Terms, Accessibility, and Account deletion from the app.",
         "preflightRequired": true
@@ -327,7 +332,8 @@
           "home_and_current_access",
           "check_input",
           "check_result_and_safer_next_steps",
-          "family_or_orientation"
+          "learn_lessons_and_guidance",
+          "trusted_circle_or_family_safe_word"
         ],
         "status": "pending_signed_device_capture"
       },
@@ -341,6 +347,7 @@
           "home_and_current_access",
           "check_input",
           "check_result_and_safer_next_steps",
+          "learn_lessons_and_guidance",
           "help_and_policies"
         ],
         "status": "pending_signed_device_capture"
@@ -355,7 +362,8 @@
           "home_and_current_access",
           "check_input",
           "check_result_and_safer_next_steps",
-          "family_or_orientation"
+          "learn_lessons_and_guidance",
+          "trusted_circle_or_family_safe_word"
         ],
         "status": "pending_signed_device_capture"
       },
@@ -383,7 +391,7 @@
       "policySource": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information"
     },
     "googlePlay": {
-      "text": "Initial invitation-only early access for hosted sign-in, manual Check review, private history, explicit Family permissions, guided orientation, support receipts, and in-app policy and deletion paths.",
+      "text": "Initial invitation-only early access with hosted sign-in, seven short safety lessons, reviewed guidance, optional weekly practice, manual Check review, private 30-day history, Trusted Circle follow-through, Family Safe Word, support receipts, and in-app policy and deletion paths.",
       "status": "draft_pending_signed_build_verification",
       "maximumCharacters": 500,
       "policySource": "https://support.google.com/googleplay/android-developer/answer/9859348?hl=en"

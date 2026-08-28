@@ -3,6 +3,12 @@
 Status: Template only. This file is not a completed receipt, release authorization, provider
 receipt, deployment receipt, or claim that any external action occurred.
 
+Historical terminology retained for audit and regression compatibility only: the former template
+used `draft_pre_authorization`, the row `External effects before authorization | Exactly zero`, and
+the phrase `CONFIRM NONCHARGING RELEASE SETUP`. It also stated, `The first authorized action is release identity`. Those literals are retired and are not active gates. The preserved invariant is
+that later records never alter or replace the authorized snapshot; in current terminology, that is
+the immutable scope-bound snapshot and digest.
+
 Use this template only after the paid Family entitlement repair is complete, the exact candidate is
 clean and pushed, and its full local and GitHub CI gates are green. The completed receipt must live
 outside the versioned candidate so it can bind the candidate without changing it. An active-task
@@ -20,10 +26,10 @@ this packet. Twilio remains disabled. The separate legacy `BoomerBuddy` Replit p
 
 Use exactly one state at a time:
 
-- `draft_pre_authorization`: exact candidate and proposed actions are recorded, but no tag or
-  external write has occurred.
-- `authorized_noncharging`: the founder cited this receipt ID and scope digest and typed the exact
-  confirmation phrase in the active task.
+- `draft_scope`: exact candidate and proposed actions are recorded, but no tag or external write has
+  occurred.
+- `ready_noncharging`: standing in-scope authorization is recorded and every objective prerequisite
+  for the listed actions has been independently verified.
 - `executing_noncharging`: the annotated tag is verified and only the listed noncharging actions are
   running.
 - `complete_noncharging`: every required receipt is present, every initiation gate is closed, and
@@ -36,15 +42,15 @@ Label every item with one evidence class: `repository`, `local_automated`, `gith
 Never promote a fixture, screenshot, source design, or operator statement to provider, deployment,
 device, customer, or payment evidence.
 
-## 2. Preauthorization identity block
+## 2. Scope identity block
 
-Complete this block before requesting external authorization. The tag is planned here but does not
-exist yet because tag creation is itself gated.
+Complete this block before external execution. The tag is planned here and becomes executable only
+after its exact candidate, tree, and green CI are proved.
 
 | Field | Required value |
 | --- | --- |
 | Receipt ID | `bb-noncharging-<UTC-date>-<first-12-SHA>-01` |
-| Receipt state | `draft_pre_authorization` |
+| Receipt state | `draft_scope` |
 | Created at | Exact UTC timestamp |
 | Repository root | `C:\Dev\BoomerBuddy` |
 | Canonical remote | `https://github.com/micahheaton/BoomerBuddyRemix.git` |
@@ -61,16 +67,16 @@ exist yet because tag creation is itself gated.
 | Entitlement repair | Exact commit anchors and passing paid-provider entitlement regressions |
 | Proposed action manifest | Ordered action IDs from Section 6 |
 | Canonical digest placeholder | Exact literal `scope_digest_sha256=EXCLUDED_FROM_CANONICAL_BYTES` |
-| Frozen preauthorization snapshot | Immutable safe locator for the exact snapshot used as digest input |
+| Frozen scope snapshot | Immutable safe locator for the exact snapshot used as digest input |
 | Scope digest | Separate append-only `scope_digest_sha256=<64 lowercase hex>` record created from the canonical bytes below |
-| External effects before authorization | Exactly zero |
+| External effects before execution | Exactly zero |
 
 Build the scope digest without asking the receipt to hash itself:
 
-1. Complete the external receipt in `draft_pre_authorization` state, including the proposed action
+1. Complete the external receipt in `draft_scope` state, including the proposed action
    manifest and target safe IDs. Make the exact final line of that snapshot
    `scope_digest_sha256=EXCLUDED_FROM_CANONICAL_BYTES`.
-2. Freeze that exact preauthorization snapshot in the approved append-only release log. Do not edit,
+2. Freeze that exact scope snapshot in the approved append-only release log. Do not edit,
    replace, reflow, or overwrite it after hashing.
 3. For the canonical digest bytes, take only the frozen snapshot, normalize CRLF and bare CR line
    endings to LF, encode as UTF-8 without a byte-order mark, and require exactly one trailing LF after
@@ -79,30 +85,29 @@ Build the scope digest without asking the receipt to hash itself:
 4. Compute SHA-256 over those canonical bytes. Immediately after the frozen snapshot, append
    `scope_digest_sha256=<64 lowercase hex>` and the immutable snapshot locator as separate log
    records. The appended digest record is not part of the frozen snapshot or its canonical bytes.
-5. Recompute from the frozen snapshot and require exact equality before requesting authorization.
+5. Recompute from the frozen snapshot and require exact equality before execution.
    Later state transitions and execution receipts append new records; they never alter or replace the
-   authorized snapshot or its digest record.
+    scope-bound snapshot or its digest record.
 
-The active-task authorization must cite the receipt ID and scope digest and then contain this exact
-phrase:
-
-`CONFIRM NONCHARGING RELEASE SETUP`
-
-If the candidate, tree, CI result, proposed actions, target accounts, or scope changes after the
-digest is recorded, create a new receipt and obtain a new confirmation. Do not amend an authorized
-scope silently.
+Record the user's standing in-scope authorization as a safe task reference. This reference does not
+waive any technical, security, consent, privacy, qualified legal or tax, provider-access,
+account-holder, customer-action, cost-cap, evidence, or rollback prerequisite. If the candidate,
+tree, CI result, proposed actions, target accounts, or scope changes after the digest is recorded,
+create a new receipt and review it. Do not amend a scope-bound snapshot silently.
 
 ## 3. Tag and merge sequence without self-binding
 
-The first authorized action is release identity, not a provider write:
+The first scope-bound action is release identity, not a provider write:
 
 1. Reverify the candidate SHA, tree, clean full porcelain status, upstream equality, and green CI.
-2. Create the annotated tag named in Section 2 on that exact commit. A lightweight tag is forbidden.
-3. Push only that tag, then record the tag object SHA, peeled commit, tagged tree, remote tag object,
+2. Reverify the standing-authority reference and every objective prerequisite for the action
+   manifest, append the evidence locators, and change the state to `ready_noncharging`.
+3. Create the annotated tag named in Section 2 on that exact commit. A lightweight tag is forbidden.
+4. Push only that tag, then record the tag object SHA, peeled commit, tagged tree, remote tag object,
    and remote peeled commit.
-4. Append the verified values to the external receipt and change its state to
+5. Append the verified values to the external receipt and change its state to
    `executing_noncharging` before any provider write, migration, Replit pull, or deployment.
-5. Advance `main` only if the operation preserves the exact candidate commit. Do not squash,
+6. Advance `main` only if the operation preserves the exact candidate commit. Do not squash,
    rebase, or create a merge commit after the receipt is bound. If repository protection would
    create a different commit, stop, run the full gates on the new commit, and start a new receipt.
 
@@ -111,7 +116,7 @@ new tag.
 
 ## 4. Human-only attestations
 
-Authorization is not an attestation. Record a safe reference, owner role, UTC timestamp, decision,
+Standing authorization is not an attestation. Record a safe reference, owner role, UTC timestamp, decision,
 and expiration or review date for each item. Do not record the person's private identity data.
 
 | Attestation | Required decision before the affected action |
@@ -170,7 +175,7 @@ result.
    entitlement effectiveness.
 2. Run the full local, browser, mobile, dependency, copy, secret, migration, and clean-diff gates.
 3. Require all GitHub CI jobs green for the exact candidate SHA.
-4. Complete Sections 1 through 5, obtain the exact confirmation phrase, and perform Section 3.
+4. Complete Sections 1 through 5, verify every objective prerequisite for the listed scope, and perform Section 3.
 
 ### B. Enforce GitHub pull-only credentials
 
@@ -206,7 +211,7 @@ For each of `boomerbuddy-web`, `boomerbuddy-api`, `boomerbuddy-worker`, and `boo
 3. Revoke the exposed secret. Record only safe credential IDs, timestamps, states, and a
    no-secret-captured attestation.
 4. Do not perform any Google production sign-in until replacement and revocation are both complete.
-5. After the exact web deployment and Clerk paths are ready, use a founder-controlled synthetic test
+5. After the exact web deployment and Clerk paths are ready, use an account-holder-controlled synthetic test
    identity to prove sign-in, callback, `/member` return, sign-out, and return sign-in without PII in
    evidence.
 6. If the replacement fails, keep the exposed secret revoked, disable Google sign-in, and create a
@@ -296,14 +301,14 @@ HQ production application:
   catch-all component;
 - use only `boomerbuddy-hq` audience and `https://hq.boomerbuddy.net` authorized party;
 - require MFA, enforce recent second-factor age through the application, keep HQ private, and bind
-  only the reviewed founder identity; and
+  only the reviewed operations identity; and
 - do not point any HQ field at Customer Clerk infrastructure or legacy `boomerbuddy.net`.
 
 Record Customer and HQ safe application IDs, before/after path values, issuer and key fingerprints,
 audiences, origin and allowed-subdomain sets, sign-in methods, MFA/recovery policy, session bounds,
 claim/template digests, legal URLs, and test outcomes separately. Prove Google and email sign-in,
 Device Trust routing, true MFA, recovery, sign-out, wrong realm, wrong origin, stale MFA, and callback
-paths with founder-controlled synthetic identities. Stop on a loop, 404, issuer/audience crossover,
+paths with account-holder-controlled synthetic identities. Stop on a loop, 404, issuer/audience crossover,
 unexpected `azp`, or customer access to HQ.
 
 ### G. Complete authentic Stripe sandbox proof
@@ -334,13 +339,13 @@ Use the live US company account only after Section G passes:
    and the relevant provider request-log baseline. Provider logs must show GETs only.
 
    Continue only when that same-session inventory proves the expected zero live commerce resources
-   and the recorded account-setting unknowns are closed, or when the preauthorization action manifest
+   and the recorded account-setting unknowns are closed, or when the scope-bound action manifest
    names an exact safe existing resource disposition. An existing desired Product, Price, Portal
    configuration, webhook, or key may be adopted only when every required field and custody boundary
    matches and the manifest explicitly says `adopt_existing`; never create a duplicate, delete or
    archive the existing object, or silently reuse it. Any new, changed, ambiguous, or unexpected
    resource or account value is scope drift: stop before the first write, freeze the observed state,
-   prepare a new receipt and digest, and obtain new confirmation.
+   prepare and review a new receipt and digest.
 2. Create one active Family Product and one active Price with `livemode=true`, `currency=usd`,
    `unit_amount=1499`, `type=recurring`, `recurring.interval=month`,
    `recurring.interval_count=1`, `recurring.usage_type=licensed`,
@@ -395,7 +400,7 @@ Use the live US company account only after Section G passes:
    Invoice, PaymentIntent, Charge, Refund, Dispute, or payout POST.
 11. Before leaving the same controlled session, repeat the complete inventory and retain exact
     before/after counts, safe-ID sets, request-log boundaries, and deltas. The only nonzero deltas may
-    be the exact create or `adopt_existing` actions named in the authorized manifest. Stop and contain
+    be the exact create or `adopt_existing` actions named in the scope-bound manifest. Stop and contain
     on any unexpected resource, write, field change, request, or unresolved outcome.
 
 Stripe-hosted Checkout plus Billing remains the payment architecture, but this packet creates no
@@ -426,8 +431,12 @@ canonical invoice-paid entitlement remain mandatory.
    Checkout/webhook/cancel/refund objects, ends in a safe teardown, and has its own candidate-bound
    receipt. No live customer account, live payment object, customer contact, or customer data is
    allowed. A pass from one run cannot close the other.
-6. Time a rollback to the immediately prior deployment, then redeploy the exact candidate while all
-   Stripe initiation controls remain closed. Do not down-migrate.
+6. Time a rollback only to an exact deployment proved compatible with the current schema. Before any
+   post-migration durable write, a rollback to a pre-migration deployment requires stopping all four
+   services and restoring the proved matching pre-migration database first. After any post-migration
+   durable write, use a new-schema-compatible corrective tag or keep the affected service
+   unavailable. Then redeploy the exact candidate while all Stripe initiation controls remain closed.
+   Do not down-migrate.
 7. Reconcile Stripe request logs, inventory, application controls, Replit deployment IDs, database
    state, Clerk audit logs, and GitHub refs. Prove no customer contact, customer data, live
    production Checkout or Portal Session, live payment object, live money movement, Twilio action,
@@ -503,7 +512,7 @@ Stop the affected lane immediately on:
 
 - missing entitlement repair, dirty Git state, candidate/upstream drift, non-green exact-SHA CI,
   tag mismatch, lightweight tag, different merge commit, or receipt scope drift;
-- absent or mismatched confirmation phrase, receipt ID, or scope digest;
+- absent or mismatched standing-authority reference, receipt ID, scope digest, exact target, or objective prerequisite;
 - a write-capable or shared Replit Git credential, credential in a URL/log, failed exact-tag fetch, or
   a denied-write proof that exits zero;
 - wrong GitHub repository, Replit project, Clerk app, Google OAuth client, Stripe account/mode,
@@ -569,9 +578,9 @@ annotated_tag=<exact tag>
 tag_object=<exact tag object>
 tag_peeled_commit=<same candidate SHA>
 github_ci=<exact green run URL>
-confirmation_phrase_timestamp=<UTC>
-confirmation_receipt_id=<receipt ID>
-confirmation_scope_digest=<SHA-256>
+standing_authority_reference=<safe task reference>
+scope_receipt_id=<receipt ID>
+scope_digest=<SHA-256>
 replit_exact_tag_deployments=4/4
 replit_read_only_credentials=4/4
 replit_denied_write_proofs=4/4

@@ -6,7 +6,16 @@ Evidence baseline: 2026-08-24
 
 Audited release: `9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf`
 
-These prompts complete the pack. Each is standalone. Work only in the saved project, use synthetic data, preserve customer/HQ separation, keep Check from fetching submitted URLs, and keep Family at USD 14.99 monthly as the sole approved production offer candidate, which is not live. `OFFER-HYPOTHESIS-REGISTRY.md` controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only; no prompt may move one into production configuration, customer copy, live provider resources, or external action. Keep payment web-first while mobile P0 continues in parallel, use `net.boomerbuddy.app` unless a verified collision stops for the founder, keep Twilio disabled, and keep customer PII and secrets out of evidence.
+These prompts complete the pack. Each is standalone. Work only in the saved project, use synthetic data, preserve customer/HQ separation, keep Check from fetching submitted URLs, and keep Family at USD 14.99 monthly as the sole approved production offer candidate, which is not live. `OFFER-HYPOTHESIS-REGISTRY.md` controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only; no prompt may move one into production configuration, customer copy, live provider resources, or external action. Keep payment web-first while mobile P0 continues in parallel, use `net.boomerbuddy.app` unless a verified collision requires a recorded replacement decision and matching provider and repository evidence, keep Twilio disabled, and keep customer PII and secrets out of evidence.
+
+Current authority note: the user has supplied standing authorization for in-scope repository,
+provider-configuration, deployment, testing, and controlled-launch work. No additional subjective
+founder phrase is required. For checklist compatibility, each phase retains its `Founder-only stop
+conditions` heading; read it as the set of nondelegable human and external stop conditions. Direct
+customer consent or payment action, provider-required account-holder identity or agreement steps,
+qualified legal or tax decisions, missing target access, security or privacy failures, unbounded
+spend, missing evidence, and failed rollback still stop the affected lane. Safe independent lanes
+continue.
 
 ## G4 - Mobile auth, device, and native safety readiness
 
@@ -45,11 +54,11 @@ Run targeted RN and API tests, realm-swap and tenant tests, deep-link hostile-in
 
 Commit, tag, and release policy
 
-Use small reviewed commits only when requested. No release tag or distribution until exact-SHA signed artifacts and device receipts exist. No production rollout is authorized.
+Use small reviewed commits with regressions. No release tag or distribution until exact-SHA signed artifacts and device receipts exist. Production rollout requires the scope receipt, objective gates, and rollback.
 
 Founder-only stop conditions
 
-Stop before choosing/reserving permanent IDs, changing production Clerk Native settings, linking Expo, uploading source, consuming build quota, managing certificates/keys/devices, or using provider accounts. Stop on identifier collision, uncertain native token claims, unresolved High dependency, dangerous permission, or customer/HQ crossover.
+Standing authorization covers scoped mobile provider and build work when exact account access, custody, cost cap, and rollback are proved. Stop on identifier collision, uncertain native token claims, unresolved High dependency, dangerous permission, wrong account, unbounded quota or spend, or customer/HQ crossover.
 
 Rollback
 
@@ -81,11 +90,11 @@ Read AGENTS.md; docs/post-launch-beta/EXECUTION-PLAN.md and supplement; docs/pos
 
 Allowed actions
 
-Prepare development, preview, production, and submit profiles; version policy; production icons/assets; accurate screenshots from real builds; reviewer instructions; privacy/data inventory; support/privacy/terms/deletion URLs; signing and recovery checklist; internal-tester matrix; and rollback runbook. Perform read-only collision checks for `net.boomerbuddy.app` when founder-held consoles are available. After the founder performs explicitly approved account steps, verify receipts and signed artifacts without exposing private identifiers.
+Prepare development, preview, production, and submit profiles; version policy; production icons/assets; accurate screenshots from real builds; reviewer instructions; privacy/data inventory; support/privacy/terms/deletion URLs; signing and recovery checklist; internal-tester matrix; and rollback runbook. Perform read-only collision checks for `net.boomerbuddy.app` when account-holder consoles are available. After the account holder completes any provider-required identity, agreement, or attestation step, verify receipts and signed artifacts without exposing private identifiers.
 
 Forbidden actions
 
-Do not invent an identifier suffix after collision. Do not accept agreements, create app/store/EAS records, register devices/testers, create or revoke credentials, upload builds/source, submit for review, invite testers, spend quota, or change declarations without founder authorization. Do not claim TestFlight, Play, or public approval timing. Do not add web-payment links inside native until storefront policy is approved. Twilio stays disabled.
+Do not invent an identifier suffix after collision. Do not accept agreements for the account holder. Do not create app, store, or EAS records; register devices or testers; create or revoke credentials; upload builds or source; submit for review; invite testers; spend quota; or change declarations without the exact target, scope receipt, required account-holder action, cost cap, evidence plan, and rollback. Do not claim TestFlight, Play, or public approval timing. Do not add web-payment links inside native until storefront policy is approved. Twilio stays disabled.
 
 Parallel workstreams
 
@@ -101,11 +110,11 @@ Repeat G4 signed-device, accessibility, permission, secret, SBOM, session, offli
 
 Commit, tag, and release policy
 
-Commit reproducible config/assets separately from account receipts only when requested. Tag only after founder approval and signed-artifact verification. Internal distribution is not public release authority. Every submission is a founder-only external action.
+Commit reproducible config and assets separately from account receipts. Tag only after exact-SHA signed-artifact verification and the scope receipt pass. Internal distribution is not public release authority. Every submission requires exact target, account-holder prerequisites, review evidence, cost cap, and rollback.
 
 Founder-only stop conditions
 
-Stop for identifier collision, account type/status, agreements, legal entity, banking/tax, certificate/key custody, privacy/store declarations, external tester identity, build quota, TestFlight/Play submission, or public rollout.
+Stop the affected distribution lane for identifier collision, incomplete provider-required agreement or account-holder attestation, unresolved legal entity or tax facts, unsafe certificate or key custody, inaccurate privacy or store declarations, unapproved tester participation, unbounded build quota, failed review evidence, or missing rollback. Standing authorization does not permit impersonating the account holder.
 
 Rollback
 
@@ -113,7 +122,7 @@ Expire/remove an approved TestFlight build from groups or halt/deactivate an app
 
 Verifiable completion
 
-Complete only when installable internal iOS and Android artifacts from an exact SHA pass device proof, all store/privacy/support/deletion fields have owners and evidence, rollback is rehearsed, and every external action is completed by the founder or remains an explicit gate.
+Complete only when installable internal iOS and Android artifacts from an exact SHA pass device proof, all store, privacy, support, and deletion fields have owners and evidence, rollback is rehearsed, and every provider-required account-holder action is completed or remains an explicit gate.
 
 Durable goal
 
@@ -157,15 +166,15 @@ Run commerce unit/integration/security/E2E, PostgreSQL concurrency, raw-body/sig
 
 Commit, tag, and release policy
 
-Use small reviewed commits and forward migrations only when requested. Do not tag/deploy until independent payment/security review passes. Later deployment must start with live initiation disabled. Provider resources and first charge require separate approvals.
+Use small reviewed commits and forward migrations. Do not tag or deploy until independent payment and security review passes. Later deployment must start with live initiation disabled. Provider resources and first charge require separate scope receipts and objective gates.
 
 Founder-only stop conditions
 
-Stop for tax/legal/accounting, live catalog/price/webhook/Portal, receipts, payouts, bank/descriptor/support details, secrets, deployment, cohort/charge cap, exact eligibility, live enablement, refund/dispute, or unknown provider outcome.
+Standing authorization covers the scoped billing work after objective gates pass. Stop on unresolved qualified tax, legal, or accounting decisions; wrong account or mode; catalog, Price, webhook, Portal, receipt, payout, bank, descriptor, support, credential, deployment, cohort, charge-cap, eligibility, refund, dispute, reconciliation, or rollback ambiguity; or any unknown provider outcome.
 
 Rollback
 
-Disable new initiation first, keep webhook/reconciliation and safe Portal access running until work drains, preserve evidence, reconcile provider truth, refund only by founder decision, and roll back only to a migration-compatible tag.
+Disable new initiation first, keep webhook reconciliation and safe Portal access running until work drains, preserve evidence, reconcile provider truth, refund only under the recorded policy and accountable authority, and roll back only to a migration-compatible tag.
 
 Verifiable completion
 
@@ -213,11 +222,11 @@ Run support routing/receipt/accessibility; privacy retention/deletion; auth sepa
 
 Commit, tag, and release policy
 
-Use reviewed commits with regressions only when requested. No tag/deploy/provider action until G8. Runbooks name exact SHA and rollback owners.
+Use reviewed commits with regressions. No tag, deployment, or provider action until the applicable G8 evidence gate. Runbooks name the exact SHA and rollback owners.
 
 Founder-only stop conditions
 
-Stop for support promise/hours, backup availability, legal/privacy decisions, production alert destinations, restore access, customer communications, refund/cancel, incident command, provider change, or Twilio enablement.
+Stop the affected lane when support hours or backup are not operational, legal or privacy content lacks an accountable decision, an alert destination or restore target is unproved, customer communication lacks a lawful basis, refund or cancellation authority is ambiguous, incident command is absent, a provider target is wrong, or Twilio would be enabled.
 
 Rollback
 
@@ -261,7 +270,7 @@ Run customer journey; auth/adversarial; payment/reconciliation; support/incident
 
 Evidence gates
 
-Two clean-account rehearsals pass signup through payment/use/support/cancel/refund/teardown with separate fresh customer and HQ sessions, state reset, and separate receipts. Failure matrix includes decline, action required, duplicate/delayed/out-of-order webhook, entitlement loss, unknown Checkout, restart, outage, consent withdrawal, cross-realm, restore, and timed rollback. No PII/secrets. Any unresolved P0 or launch-critical P1 is no-go; other P1 requires owner/date/bounded exposure/founder acceptance.
+Two clean-account rehearsals pass signup through payment/use/support/cancel/refund/teardown with separate fresh customer and HQ sessions, state reset, and separate receipts. Failure matrix includes decline, action required, duplicate/delayed/out-of-order webhook, entitlement loss, unknown Checkout, restart, outage, consent withdrawal, cross-realm, restore, and timed rollback. No PII/secrets. Any unresolved P0 or launch-critical P1 is no-go; other P1 requires an owner, date, and bounded exposure.
 
 Tests
 
@@ -269,11 +278,11 @@ Run complete automated suite, authentic sandbox matrix, deployed staging cross-b
 
 Commit, tag, and release policy
 
-Freeze one reviewed SHA. Create an annotated tag only after all gates pass and founder approves. Do not deploy live-capable code or perform live writes in G8.
+Freeze one reviewed SHA. Create an annotated tag only after all objective gates and the scope receipt pass. Do not deploy live-capable code or perform live writes in G8.
 
 Founder-only stop conditions
 
-Stop for candidate/customer selection, support schedule, legal/tax/offer acceptance, tag approval, deployment, provider writes, charge cap, initiation, contact, or waiver.
+Standing authorization covers synthetic rehearsal, exact tagging, scoped provider writes, and deployment after their objective gates pass. Stop on an unresolved customer-contact basis, support schedule, qualified legal or tax decision, offer mismatch, candidate or target drift, charge cap, initiation control, rollback, or requested waiver of a safety gate.
 
 Rollback
 
@@ -281,11 +290,11 @@ Reset only synthetic environments through approved procedures. Revert fixes only
 
 Verifiable completion
 
-Complete only when both clean rehearsals pass from reset state with separate fresh customer and HQ sessions and separate receipts, every forced failure reaches a safe state, rollback is timed, the packet binds exact SHA/tag, and founder-only actions are ordered.
+Complete only when both clean rehearsals pass from reset state with separate fresh customer and HQ sessions and separate receipts, every forced failure reaches a safe state, rollback is timed, the packet binds exact SHA and tag, and all nondelegable customer, account-holder, and qualified-professional actions are ordered.
 
 Durable goal
 
-Use one durable goal for the adversarial rehearsal, with no token budget unless supplied. Complete only after gates; use blocked only after three repeated blocker turns. Stop at founder go/no-go.
+Use one durable goal for the adversarial rehearsal, with no token budget unless supplied. Complete only after the gates; use blocked only after three repeated blocker turns. Stop at the objective GO, NO-GO, or REMEDIATE dossier.
 ```
 
 ## G9 - Live first-customer onboarding
@@ -293,7 +302,7 @@ Use one durable goal for the adversarial rehearsal, with no token budget unless 
 ```text
 Objective
 
-Safely onboard exactly one founder-approved paying household through the web-first path. The customer personally completes consent and payment while engineering, billing, support, and incident owners watch content-free evidence and stop on any safety, authority, privacy, or money mismatch.
+Safely onboard exactly one eligible, consented paying household through the web-first path. The customer personally completes consent and payment while engineering, billing, support, and incident owners watch content-free evidence and stop on any safety, authority, privacy, or money mismatch.
 
 Repository boundary
 
@@ -305,7 +314,7 @@ Read AGENTS.md; EXECUTION-PLAN.md and supplement; OFFER-HYPOTHESIS-REGISTRY.md a
 
 Allowed actions
 
-Verify SHA/tag and health; run approved read-only preflight; let the founder open only the authorized initiation window; observe content-free auth, consent version, household role, Check, Checkout, webhook, invoice-paid, entitlement, receipt, support, and return milestones; record opaque IDs/timestamps; and let founder close initiation after one approved payment. Founder handles contact/controls. Customer enters identity, consent, and payment personally.
+Verify SHA, tag, and health; run the scope-bound read-only preflight; let the launch operator open only the receipt-bound initiation window; observe content-free auth, consent version, household role, Check, Checkout, webhook, invoice-paid, entitlement, receipt, support, and return milestones; record opaque IDs and timestamps; and close initiation after one reconciled payment. The account holder or launch operator handles lawful contact and controls. The customer enters identity, consent, and payment personally.
 
 Forbidden actions
 
@@ -313,7 +322,7 @@ Do not contact the customer autonomously, view/enter PII/card data, accept conse
 
 Parallel workstreams
 
-Founder/customer facilitation; platform health; auth/consent; billing/reconciliation; member/accessibility; support; incident/rollback; evidence integrity, with founder as commander.
+Account-holder and customer facilitation; platform health; auth and consent; billing and reconciliation; member accessibility; support; incident and rollback; evidence integrity, with the launch operator as commander.
 
 Evidence gates
 
@@ -329,19 +338,19 @@ Use the frozen tag only. No commit, tag, deploy, config drift, or hotfix during 
 
 Founder-only stop conditions
 
-All contact, invitation, consent facilitation, live provider write, initiation control, charge cap, refund, communication, incident command, and expansion are founder-only. Stop on uncertainty.
+Provider configuration and controlled launch may proceed under standing authorization when scope receipts and objective gates pass. The customer must personally accept identity, consent, plan, and payment actions. Stop on uncertain contact authority, consent, initiation control, charge cap, provider outcome, refund policy, incident command, support coverage, expansion criteria, or rollback.
 
 Rollback
 
-Close initiation, keep webhook/reconciliation running, preserve evidence, support customer, revoke incorrect authority, restore safe access, and have founder cancel/refund if required. Roll back only after reconciliation.
+Close initiation, keep webhook and reconciliation running, preserve evidence, support the customer, revoke incorrect authority, restore safe access, and have the accountable billing owner cancel or refund under the recorded policy if required. Roll back only after reconciliation.
 
 Verifiable completion
 
-Complete only when one payment settles/reconciles, entitlement/receipt are correct, useful action/support complete, initiation is closed, no P0/launch-critical P1 remains, and founder records onboarded or rolled back.
+Complete only when one payment settles and reconciles, entitlement and receipt are correct, useful action and support complete, initiation is closed, no P0 or launch-critical P1 remains, and the launch integrator records onboarded or rolled back.
 
 Durable goal
 
-Use one durable goal only for content-free operational tracking, not for human interaction. Omit token budget unless supplied. Stop at every founder/customer action and complete only after all evidence gates; use blocked only after the same blocker repeats for three goal turns.
+Use one durable goal only for content-free operational tracking, not for human interaction. Omit token budget unless supplied. Stop at every nondelegable account-holder or customer action and complete only after all evidence gates; use blocked only after the same blocker repeats for three goal turns.
 ```
 
 ## G10 - Post-onboarding observation and iteration
@@ -349,7 +358,7 @@ Use one durable goal only for content-free operational tracking, not for human i
 ```text
 Objective
 
-Observe Customer 1 from 24 hours through Day 7, reconcile payment/access/support/privacy/fraud, close only bounded evidence-backed defects, and produce founder hold/continue/expand decision without exposing content or overstating one-household evidence.
+Observe Customer 1 from 24 hours through Day 7, reconcile payment, access, support, privacy, and fraud evidence, close only bounded evidence-backed defects, and produce an accountable hold, continue, or expand decision without exposing content or overstating one-household evidence.
 
 Repository boundary
 
@@ -373,7 +382,7 @@ Commerce; member/accessibility; support/feedback; fraud/safety; platform/privacy
 
 Evidence gates
 
-At 24 hours, Day 3, Day 7, provider, ledger, entitlement, support, privacy reconcile. Return/second action differ from login. Real statements stay founder-held under consent. Any fix has regression, full verify, staging, rollback, exact SHA. Expansion stops for any P0/launch-critical P1, overload, failed restore, money/access mismatch, auth/privacy incident, or harmful reassurance.
+At 24 hours, Day 3, and Day 7, provider, ledger, entitlement, support, and privacy evidence reconcile. Return or second action differs from login. Real statements stay in the approved consented research system. Any fix has a regression, full verification, staging, rollback, and exact SHA. Expansion stops for any P0 or launch-critical P1, overload, failed restore, money/access mismatch, auth or privacy incident, or harmful reassurance.
 
 Tests
 
@@ -381,11 +390,11 @@ Run targeted regression, full verify/E2E, security/fraud, browser/accessibility,
 
 Commit, tag, and release policy
 
-One fix per reviewed commit. At most one planned low-risk release/day through Day 7. Protected changes require code-owner/founder approval. Bind evidence to SHA. No automatic release.
+One fix per reviewed commit. At most one planned low-risk release per day through Day 7. Protected changes require code-owner review, exact-SHA evidence, scope receipt, and rollback. No automatic release.
 
 Founder-only stop conditions
 
-Stop for contact, raw feedback, refund/cancel/dispute, incident communication, expansion, waiver, policy/price change, or live effect.
+Stop the affected lane when contact lacks a lawful or consented basis, raw feedback would enter general evidence, refund or cancellation policy is ambiguous, a dispute or incident lacks an accountable owner, expansion criteria are unmet, a safety waiver is requested, a policy or price change lacks evidence, or a live effect is unreconciled.
 
 Rollback
 
@@ -393,7 +402,7 @@ Pause cohort/action, preserve support/reconciliation, revert compatible release 
 
 Verifiable completion
 
-Complete when Day 7 reconciles or safely rolls back, fixes verify, limitations distinguish household learning from market evidence, and founder records decision/gates.
+Complete when Day 7 reconciles or safely rolls back, fixes verify, limitations distinguish household learning from market evidence, and the accountable product owner records the decision and next gates.
 
 Durable goal
 
@@ -441,7 +450,7 @@ Separate loop infrastructure from fixes. No tag/release without independent revi
 
 Founder-only stop conditions
 
-Stop for raw feedback, follow-up, safety adjudication, legal/privacy interpretation, payment/auth/security, retention exception, release, or communication.
+Stop the affected lane for raw feedback outside its approved system, unconsented follow-up, unresolved safety adjudication, qualified legal or privacy interpretation, payment, authentication, security, retention, release, or communication ambiguity. Standing authorization does not convert those unknowns into evidence.
 
 Rollback
 
@@ -473,11 +482,11 @@ Read AGENTS.md; EXECUTION-PLAN.md and supplement; OFFER-HYPOTHESIS-REGISTRY.md a
 
 Allowed actions
 
-Create claims-source map, brief, founder-recording script, transcript workflow, accessible article/video/landing previews, captions, alt, metadata, performance budget, consented aggregate analytics plan, correction/expiry, review checklist. Use synthetic examples/plain language. Annual, Individual, and referral registry hypotheses remain absent from customer previews.
+Create a claims-source map, brief, owner-recording script, transcript workflow, accessible article, video, and landing previews, captions, alt text, metadata, performance budget, consented aggregate analytics plan, correction and expiry rules, and review checklist. Use synthetic examples and plain language. Annual, Individual, and referral registry hypotheses remain absent from customer previews.
 
 Forbidden actions
 
-Do not publish/upload/send/buy, use founder likeness/testimonials without approval, fabricate outcomes, mass-produce duplicates, guarantee safety, scrape restricted sources, collect leads without consent, or enable Twilio. Do not imply one household proves market rate.
+Do not publish, upload, send, or buy before the publication scope gates pass; use any person's likeness or testimonial without permission; fabricate outcomes; mass-produce duplicates; guarantee safety; scrape restricted sources; collect leads without consent; or enable Twilio. Do not imply one household proves market rate.
 
 Parallel workstreams
 
@@ -493,11 +502,11 @@ Run source/staleness, copy/dash, accessibility, keyboard, responsive, performanc
 
 Commit, tag, and release policy
 
-Commit previews/evidence only when requested. No publication, campaign, tag, deploy, upload without founder/editor approval and release gates.
+Commit previews and evidence in scoped reviewed commits. No publication, campaign, tag, deployment, or upload without editorial, exact-target, release, rights, data-boundary, and rollback gates.
 
 Founder-only stop conditions
 
-Stop for claims, likeness, testimonial, price/policy, publication, paid tool, analytics activation, external account, or legal/endorsement.
+Standing authorization covers truthful content work and scoped publication. Stop on an unsubstantiated claim, missing likeness or testimonial permission, price or policy mismatch, unbounded paid tool, unapproved analytics data boundary, wrong external account, rights issue, or unresolved legal or endorsement requirement.
 
 Rollback
 
@@ -517,7 +526,7 @@ Use one durable goal for one packet, no token budget unless supplied. Complete a
 ```text
 Objective
 
-Prepare and, only after founder approval, run one bounded acquisition experiment with predeclared hypothesis, consented lead handling, complete cost/funnel evidence, and hard stops. A warm first household is not channel proof.
+Prepare and run one bounded acquisition experiment only after its scope receipt proves the predeclared hypothesis, lawful and consented lead handling, complete cost and funnel evidence, hard stops, and rollback. A warm first household is not channel proof.
 
 Repository boundary
 
@@ -549,11 +558,11 @@ Run attribution/idempotency, budget reserve/recheck/overrun, unknown outcome, co
 
 Commit, tag, and release policy
 
-Normal reviewed code gates. Activation, publication, outreach, spend are separate founder approvals. Never auto-scale; reconcile one cell first.
+Use normal reviewed code gates. Activation, publication, outreach, and spend each require their own exact-target receipt, data boundary, cost cap, stop conditions, and rollback. Never auto-scale; reconcile one cell first.
 
 Founder-only stop conditions
 
-Stop for audience, creative/claim, spend, account, publication, outreach, cap, PII, terms, refund/dispute, continuation/scale.
+Standing authorization covers one bounded acquisition experiment after its receipt, data boundary, and rollback pass. Stop on an unsupported audience or claim, wrong account, unbounded spend, missing publication or outreach basis, cap failure, PII exposure, terms mismatch, refund or dispute ambiguity, unreconciled result, or unmet continuation and scale threshold.
 
 Rollback
 
@@ -561,7 +570,7 @@ Pause draft/campaign, preserve cost/consent, disable variant, honor suppression/
 
 Verifiable completion
 
-Complete when packet/dry run passes; if approved live, only after spend/funnel reconcile and founder records decision.
+Complete when the packet and dry run pass; if run live, complete only after spend and funnel evidence reconcile and the accountable growth owner records the decision.
 
 Durable goal
 
@@ -597,7 +606,7 @@ Theme/config; demo/reset; tenant/auth/security; reporting/privacy; accessibility
 
 Evidence gates
 
-Demo is synthetic, expiring, resettable, labeled, no-charge/no-send, isolated. Tenant crossover, raw export, small-cell leakage, unsupported branding, partner fork fail closed. Real branding impossible without founder-held permission.
+The demo is synthetic, expiring, resettable, labeled, no-charge, no-send, and isolated. Tenant crossover, raw export, small-cell leakage, unsupported branding, and partner forks fail closed. Real branding is impossible without permission held by the rights owner.
 
 Tests
 
@@ -605,11 +614,11 @@ Run tenant/auth/entitlement isolation, reset/expiry, no-outbound/billing, synthe
 
 Commit, tag, and release policy
 
-Commit reusable config/tests only when requested. No public deploy, outreach, proposal, branding, tag, commitment without founder approval.
+Commit reusable configuration and tests in reviewed commits. No public deployment, outreach, proposal, branding use, tag, or commitment without exact-target, rights, account-holder, release, and rollback evidence.
 
 Founder-only stop conditions
 
-Stop for real organization, trademark permission, contact, price/proposal/contract, deploy, sharing, external account, bespoke requirement.
+Research and prototype work may continue under standing authorization. Stop before naming or contacting a real organization without a lawful basis, using a trademark without permission, making a price or proposal commitment, accepting a contract or provider agreement for the account holder, deploying to a wrong target, sharing protected evidence, or accepting an unreviewed bespoke requirement.
 
 Rollback
 
@@ -661,11 +670,11 @@ Run deny-by-default, data/tool/cost/action caps, atomic reserve/recheck/commit/r
 
 Commit, tag, and release policy
 
-Isolated reviewed commit per action class when requested. Enable one class per approved release. Protected/external never auto-release. Tag/deploy only with exact-SHA evidence/founder approval.
+Use one isolated reviewed commit per action class. Enable one class per scope-bound release. Protected and external actions never auto-release. Tag and deploy only with exact-SHA evidence, exact targets, caps, reconciliation, and rollback.
 
 Founder-only stop conditions
 
-Stop for external effect, spend, credential/cap/policy, production, communication, release, refund/dispute, legal/tax/accounting, store, contract, incident, autonomy expansion.
+Standing authorization is necessary but not sufficient for autonomous external effects. Stop on missing scope receipts, caps, credentials, policy, production target, communication basis, release evidence, refund or dispute authority, qualified legal or tax decision, store or contract account-holder step, incident owner, reconciliation, rollback, or earned evidence for autonomy expansion.
 
 Rollback
 
@@ -673,7 +682,7 @@ Trip kill switch, stop new reservations/execution, reconcile accepted/unknown, d
 
 Verifiable completion
 
-Complete when autonomy matrix, cadence, dry runs, forced failures, kill switch, reconciliation, and fallback pass, with external actions founder-gated unless separately authorized.
+Complete when the autonomy matrix, cadence, dry runs, forced failures, kill switch, reconciliation, and fallback pass, with every external action bound by standing authorization, an exact scope receipt, objective prerequisites, caps, and rollback.
 
 Durable goal
 
@@ -717,11 +726,11 @@ Do not install or repair dependencies. If the pinned graph is already present an
 
 Commit, tag, and release policy
 
-No commit, branch, tag, merge, deployment, release, provider write, or production change is allowed. The phase output stays in the task response unless the founder separately requests a documentation artifact.
+No commit, branch, tag, merge, deployment, release, provider write, or production change is allowed in this read-only phase. Create a documentation artifact only when the active task explicitly includes it.
 
 Founder-only stop conditions
 
-Stop and ask the founder only when a missing choice changes launch geography, offer, tax treatment, refund/cancellation terms, support coverage, candidate eligibility, live-charge cap, permanent mobile identifier, provider-account ownership, or legal/business posture. Repository questions are not founder blockers until read-only evidence is exhausted.
+Standing authorization is already present. Stop only when a missing account-holder, qualified-professional, or customer decision changes launch geography, tax treatment, refund or cancellation terms, provider identity, consent, payment action, or legal or business posture. Record the unknown and continue unrelated read-only work.
 
 Rollback
 

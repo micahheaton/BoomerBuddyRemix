@@ -22,6 +22,21 @@
 | `https://api.boomerbuddy.net/health/ready` | HTTP 200 | API readiness reports `ready`. |
 | `https://hq.boomerbuddy.net/` | HTTP 307 | Public request redirects to Replit ReplShield. |
 
+### Latest anonymous recheck
+
+At 2026-08-28 04:42 UTC, fresh anonymous read-only requests reconfirmed:
+
+| Surface | Result | Current conclusion |
+| --- | --- | --- |
+| `https://app.boomerbuddy.net/` | HTTP 200 | Customer web responds. |
+| `https://app.boomerbuddy.net/pricing` | HTTP 200 and still contains `Development access` | The current public value-proposition candidate is not deployed. |
+| `https://app.boomerbuddy.net/sign-in/client-trust` | HTTP 404 | The live member recovery route remains absent. |
+| `https://api.boomerbuddy.net/health/live` | HTTP 200 with `{"status":"ok"}` | API liveness responds. |
+| `https://api.boomerbuddy.net/health/ready` | HTTP 200 with `{"status":"ready"}` | API readiness responds. |
+
+This recheck was anonymous and read-only. It did not sign in, retain cookies or identifiers, inspect
+customer data, or perform a provider, deployment, database, payment, or legacy-site write.
+
 ## Repository comparison
 
 The comparison baseline at the observation time was GitHub commit
@@ -96,7 +111,8 @@ each BoomerBuddy 2.0 service remains an external closure gate.
 
 ## Closure gate
 
-After the exact external setup authorization phrase is received:
+After the final exact candidate, green CI, exact target identities, provider access, migration,
+monitoring, and rollback gates are bound in the external scope receipt:
 
 1. Record the currently deployed commit or immutable artifact for customer web, API, worker, and HQ without exposing secrets or PII.
 2. From the external release receipt, verify the later final candidate's full commit SHA, planned

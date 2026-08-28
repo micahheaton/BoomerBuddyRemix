@@ -8,11 +8,20 @@ This ledger records the BoomerBuddy 2.0 product-value candidate built on 2026-08
 - Candidate branch: `codex/product-value-beta`.
 - Frozen payment baseline: `f4997946231b1548afc1a4b6d798ff05796a3c69`.
 - Payment evidence: exact-SHA GitHub Actions run `33098426835` passed all five jobs before this product-value work began.
+- Household safety implementation baseline: `11c0f70b2e293d71a09401b918b15a0a9ca2f711`.
+- Household safety evidence: exact-SHA GitHub Actions run `33123397854` passed all five jobs.
+- Public value-proposition implementation baseline: `08a285eaf39675b3daa1afef0568601525b8116f`.
+- Public value-proposition evidence: local full verification and the focused responsive
+  accessibility matrix passed; exact-SHA GitHub Actions run `33141679927` is the controlling CI
+  receipt for that baseline.
 - Payment boundary: this candidate does not change Stripe, commerce, billing, pricing, Twilio, Replit, or the legacy BoomerBuddy application.
 - Data boundary: tests and browser rehearsals use synthetic identities and content. No customer PII is included.
 - External boundary: no provider, production, deployment, customer, message, payment, or money write occurred in this candidate.
 
-The candidate commit and its exact-SHA CI run must be added after the tree is frozen, committed, pushed, and verified.
+These exact commits are immutable implementation baselines. A later documentation or integration
+commit creates a new candidate and must receive its own applicable validation and exact-SHA CI before
+release. None of these repository receipts proves deployment, provider configuration, signed native
+artifacts, physical-device behavior, real-customer value, or payment.
 
 ## Implemented beta value loop
 
@@ -79,7 +88,7 @@ These are repository and synthetic evidence. They are not production, provider, 
 
 | Gate | Why it remains open | Verifiable closure |
 | --- | --- | --- |
-| Exact candidate identity | This ledger was created before the final product-value commit. | Record the full commit SHA, clean tree, push, and exact-SHA green CI. |
+| Exact candidate identity | The pushed implementation baselines are identified above, but this living documentation can change afterward and cannot self-bind the final release commit. | Record the later full commit SHA and tree, clean status, upstream equality, annotated tag, and exact-SHA green CI in an external scope receipt. |
 | Live customer sign-in | The live deployment is older, `/sign-in/client-trust` returned 404, and Google sign-in looped. | Preserve Replit-local configuration evidence, deploy the exact approved GitHub SHA by pull only, rotate the exposed Google OAuth secret, close Clerk callback/fallback/legal/support configuration, and pass fresh Gmail plus email-code journeys without recording identity data. |
 | Real PostgreSQL runtime | The repository contains a real-PostgreSQL concurrency and migration verifier. | Run it in exact-SHA CI or an approved managed staging database and retain the sanitized job receipt. |
 | Physical mobile devices | Windows and web preview cannot prove native credential, notification, accessibility, signing, or store behavior. | Pass signed iOS and Android builds on supported devices, lock-screen privacy, VoiceOver/TalkBack, large text, slow/offline behavior, session revocation, and store review. |

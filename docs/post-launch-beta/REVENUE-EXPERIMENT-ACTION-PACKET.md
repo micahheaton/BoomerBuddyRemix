@@ -1,14 +1,20 @@
 # Revenue Experiment Action Packet
 
-Status: **non-executable local specification; no external action authorized or performed**
+Status: **scope-bound specification; no external action or experiment is proved by this file**
+
+Historical audit literals retained for regression compatibility only: `Status: **non-executable local specification; no external action authorized or performed**`,
+`c39a98415320adb40737d1ea354674b2aa8c4194`, and `CONFIRM NONCHARGING RELEASE SETUP`. The c39a984 baseline remains not live-capable as a historical statement about that commit. The earlier rule said
+the final exact SHA, annotated tag, and green CI are recorded in an external release receipt. The
+current rule still requires that evidence and that the paid-entitlement repair is complete and green,
+but the old phrase is retired and not an active gate.
 
 Controlling registry: [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md)
 
-Clean pushed implementation and local-validation baseline before this follow-up tranche:
-`c39a98415320adb40737d1ea354674b2aa8c4194`. GitHub Actions run `33023999677` for that SHA is
-green across all four jobs. The c39a984 baseline remains not live-capable because its Family
-catalogue is a hypothesis that provider-backed production entitlement verification cannot make
-effective.
+Current pushed implementation baselines include paid Family entitlement repair
+`f4997946231b1548afc1a4b6d798ff05796a3c69`, household safety beta
+`11c0f70b2e293d71a09401b918b15a0a9ca2f711`, and public Family value proposition
+`08a285eaf39675b3daa1afef0568601525b8116f`. These are repository and CI candidates, not live
+provider, deployment, customer, or payment evidence.
 
 This versioned packet cannot bind the final commit SHA that contains itself because changing the
 packet changes that SHA. After the paid-entitlement repair and all approved changes are committed,
@@ -16,28 +22,21 @@ execution must derive the exact SHA and annotated tag from Git, verify green loc
 evidence for that exact SHA, and record them in an external release receipt. A branch name, prior
 candidate, prior run, or documentation timestamp is not a substitute.
 
-This packet is non-executable until all of these conditions are true: the separately authorized
-paid-entitlement repair is complete and green; the final exact SHA, annotated tag, and green CI are
-recorded in an external release receipt; and the noncharging authorization below is present in the
-active task.
-
-External gate: **CLOSED** until the founder types this exact phrase in the active task after reviewing
-the external release receipt:
-
-`CONFIRM NONCHARGING RELEASE SETUP`
-
-The phrase authorizes only the exact noncharging sandbox and private-preview setup bound by the
-external release receipt. It cannot make this packet executable while any prerequisite above is
-open. It does not authorize a public experiment, participant contact, customer
-consent, plan choice, a live Checkout window, a real payment, a charge, a refund, a production
-offer change, a live provider resource, or a production deployment.
+The user has supplied standing authorization for in-scope work. This packet becomes executable only
+when the paid-entitlement regression is green and an external scope receipt binds the final exact
+SHA, tree, green CI, annotated tag, exact sandbox and preview targets, ordered actions, data boundary,
+cost cap, stop conditions, and rollback. Standing authorization cannot close an open technical,
+security, privacy, provider-access, customer-consent, qualified legal or tax, account-holder,
+evidence, or rollback prerequisite. It does not turn this research packet into authorization for a
+public experiment, participant contact, customer plan choice, live Checkout window, real payment,
+charge, refund, production offer change, or uncontrolled deployment.
 
 This packet prepares an isolated Stripe research sandbox and a private, noncollecting website
 preview. It does not connect either surface to production.
 
 ## Gauntlet decision
 
-The fastest safe route to recurring revenue remains one founder-assisted, consented household on
+The fastest safe route to recurring revenue remains one operator-assisted, consented household on
 the Family USD 14.99 monthly candidate. It is the sole approved production offer candidate and is
 not live. Its Checkout contract remains default-off. Family means coverage for one household group. No employer, association, bulk,
 or other group price has been selected, so this packet does not invent one.
@@ -98,7 +97,7 @@ unknown unless separately observed with valid consent and a restricted operator-
 | Email sent | Not observed | Unknown |
 | Email received | Manual mailbox observation only | Operator evidence outside the access-intent database |
 | Qualified lead | Not modeled | Unknown |
-| Invited household | Separate founder-assisted workflow | Not attributable to an access receipt without a consented correlation record |
+| Invited household | Separate operator-assisted workflow | Not attributable to an access receipt without a consented correlation record |
 | Paid household | Canonical commerce evidence after a settled live invoice | Recurring-revenue evidence only for the sole Family monthly production offer |
 
 Do not divide access receipts by paid households and label the result lead-to-paid conversion. A
@@ -187,17 +186,17 @@ free text are not experiment data.
 
 No real-participant collector or route exists in the current repository. The private preview must
 remain noncollecting until a separate reviewed contract, retention schedule, consent flow,
-independent edge limit, kill switch, accessibility pass, and owner are implemented. The
-confirmation phrase can authorize private preview setup only after the external release receipt
-closes every prerequisite in this packet. It cannot authorize participant contact or exposure.
+independent edge limit, kill switch, accessibility pass, and owner are implemented. Standing
+authorization permits private preview setup only after the external scope receipt closes every
+prerequisite in this packet. It cannot replace participant consent or permit unreviewed exposure.
 
 ## Isolated Stripe sandbox specification
 
 Do not use live mode. Do not use or modify the existing `Boomer Buddy sandbox`, whose enabled
 legacy webhook targets `https://boomerbuddy.net/api/webhooks/stripe`. Do not point a BoomerBuddy 2.0
 application, webhook, environment variable, provider key, or inventory job at the research
-sandbox. Only after every packet prerequisite, the external release receipt, and the external gate
-are complete may an authorized operator create a new isolated sandbox owned by the company solely
+sandbox. Only after every packet prerequisite and the external scope receipt are complete may an
+operator create a new isolated sandbox owned by the company solely
 for offer research. Stop if isolation cannot be proved.
 
 Create exactly two sandbox Products and four recurring Prices:
@@ -257,7 +256,8 @@ endpoint may participate.
 ## Externally bound action order
 
 After, and only after, the paid-entitlement repair is green, the external release receipt binds the
-final exact SHA, annotated tag, and green CI, and the exact phrase is present in the active task:
+final exact SHA, annotated tag, and green CI, and the active task cites the standing authorization
+and satisfies every objective receipt gate in this packet:
 
 1. Read the reviewed 40-character candidate SHA, annotated tag, and exact green local and CI
    receipts from the external release receipt. Verify them directly against Git and CI. Do not edit
@@ -304,7 +304,7 @@ edit the legacy webhook, do not change application configuration, and do not tou
 The external release receipt is complete only when it records:
 
 - exact candidate SHA, annotated tag, and clean-diff identity derived from Git;
-- confirmation phrase timestamp and scope;
+- standing-authority reference, scope receipt ID, and scope digest;
 - green local invariant, production-boundary, access-intent, accessibility, and CI receipts;
 - isolated sandbox identity and before/after inventory with `livemode=false`;
 - exact Product, Price, Coupon, idempotency, test-clock, and invoice-field comparisons;

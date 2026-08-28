@@ -12,7 +12,16 @@ Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
 
 Run one prompt at a time in order unless a prompt explicitly opens parallel work. Start every phase from current repository evidence, not from an earlier phase's summary. A phase may use subagents for the named parallel workstreams, but one agent must own integration and the final evidence packet.
 
-The launch path is web-first. Family at USD 14.99 per month for one household is the sole approved production offer candidate and is not live. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only. No phase may copy one into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A collision is a founder decision gate.
+Current authority note: the user has supplied standing authorization for in-scope repository,
+provider-configuration, deployment, testing, and controlled-launch work. No additional subjective
+founder phrase is required. For checklist compatibility, each phase retains its `Founder-only stop
+conditions` heading; read it as the set of nondelegable human and external stop conditions. It still
+stops an affected lane for direct customer consent or payment action, provider-required
+account-holder identity or agreement steps, qualified legal or tax decisions, missing target access,
+security or privacy failure, unbounded spend, missing evidence, or failed rollback. It does not stop
+safe independent lanes or create a new approval ritual.
+
+The launch path is web-first. Family at USD 14.99 per month for one household is the sole approved production offer candidate and is not live. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls every annual, Individual, and referral hypothesis, each of which is synthetic and Stripe sandbox only. No phase may copy one into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A verified collision requires a recorded replacement decision and matching provider and repository evidence.
 
 Twilio remains disabled until a later, separate consent and compliance gate covers sender registration, opt-out, suppression, quiet hours, delivery evidence, privacy, and incident handling. No phase in this pack authorizes Twilio credentials or traffic.
 
@@ -76,11 +85,11 @@ Do not install or repair dependencies. If the pinned graph is already present an
 
 Commit, tag, and release policy
 
-No commit, branch, tag, merge, deployment, release, provider write, or production change is allowed. The phase output stays in the task response unless the founder separately requests a documentation artifact.
+No commit, branch, tag, merge, deployment, release, provider write, or production change is allowed in this read-only phase. Create a documentation artifact only when the active task explicitly includes it.
 
 Founder-only stop conditions
 
-Stop and ask the founder only when a missing choice changes launch geography, offer, tax treatment, refund/cancellation terms, support coverage, candidate eligibility, live-charge cap, permanent mobile identifier, provider-account ownership, or legal/business posture. Repository questions are not founder blockers until read-only evidence is exhausted.
+Standing authorization is already present. Stop only when a missing account-holder, qualified-professional, or customer decision changes launch geography, tax treatment, refund or cancellation terms, provider identity, consent, payment action, or legal or business posture. Record the unknown and continue unrelated read-only work.
 
 Rollback
 
@@ -100,7 +109,7 @@ Use one durable goal for this phase: produce a source-anchored launch baseline a
 ```text
 Objective
 
-Turn unresolved business choices into a single founder-approved launch-control record without changing product, provider, production, or customer state. Freeze the smallest safe Customer 1 envelope and the authority boundaries for later phases.
+Turn unresolved business choices into a single evidence-backed launch-control record without changing product, provider, production, or customer state. Freeze the smallest safe Customer 1 envelope and the authority boundaries for later phases.
 
 Repository boundary
 
@@ -112,11 +121,11 @@ Read AGENTS.md; the completed G0 evidence packet; docs/post-launch-beta/EXECUTIO
 
 Allowed actions
 
-Draft a decision record with explicit approve, reject, defer, owner, date, evidence, and review fields. Recommend one launch geography; Family at USD 14.99 monthly; no trial, coupon, promotion, referral credit, adaptive price, annual purchase, Individual purchase, or mobile purchase; one household; web-first checkout; mobile P0 in parallel; Twilio disabled; a maximum one live initiation window; and `net.boomerbuddy.app` unless collision. Annual, Individual, and referral entries remain registry-controlled sandbox hypotheses and cannot be promoted by this record. Draft plain recurring-charge, cancellation, refund, tax, receipt, support, privacy, and emergency-boundary language for professional/founder review. Keep candidate details in a founder-held system, not Git.
+Draft a decision record with explicit approve, reject, defer, owner, date, evidence, and review fields. Recommend one launch geography; Family at USD 14.99 monthly; no trial, coupon, promotion, referral credit, adaptive price, annual purchase, Individual purchase, or mobile purchase; one household; web-first checkout; mobile P0 in parallel; Twilio disabled; a maximum one live initiation window; and `net.boomerbuddy.app` unless collision. Annual, Individual, and referral entries remain registry-controlled sandbox hypotheses and cannot be promoted by this record. Draft plain recurring-charge, cancellation, refund, tax, receipt, support, privacy, and emergency-boundary language for qualified-professional and account-holder review where required. Keep candidate details in an approved account-holder system, not Git.
 
 Forbidden actions
 
-Do not decide legal or tax conclusions for the founder. Do not publish terms, invite or contact a customer, create a Stripe product/price/webhook/Portal configuration, change payout settings, enable a provider, reserve a mobile identifier, accept store agreements, create EAS/Apple/Google records, add secrets, deploy, spend, or commit unless the founder explicitly requests the documentation commit. Do not infer consent or billing authority from kinship or payment.
+Do not invent legal or tax conclusions or impersonate the account holder. This phase is documentation-only: do not publish terms, invite or contact a customer, create a Stripe Product, Price, webhook, or Portal configuration, change payout settings, enable a provider, reserve a mobile identifier, accept store agreements, create EAS, Apple, or Google records, add secrets, deploy, or spend. A documentation commit is allowed only when the active task includes it. Do not infer consent or billing authority from kinship or payment.
 
 Parallel workstreams
 
@@ -132,11 +141,11 @@ Run a consistency review against pricing, billing, support, privacy, mobile, and
 
 Commit, tag, and release policy
 
-If the founder requests a commit, use one concise documentation-only commit on a codex/ branch and include only docs/post-launch-beta files. Do not tag, merge, deploy, release, or perform provider writes.
+If the active task includes a commit, use one concise documentation-only commit on a codex/ branch and include only docs/post-launch-beta files. Do not tag, merge, deploy, release, or perform provider writes in this phase.
 
 Founder-only stop conditions
 
-Stop for the founder to approve launch geography, paid offer, tax/accounting path, recurring-charge disclosure, cancellation/refund policy, support hours and backup, privacy/legal publication, candidate/contact authority, live-charge maximum, first-customer schedule, permanent mobile identifier, provider-account owner, and any external spend. A missing decision blocks only its dependent external action; safe local engineering may continue.
+Standing authorization covers in-scope execution. Stop only the affected action until launch geography, qualified tax and legal decisions, recurring-charge disclosure, refund policy, support ownership, privacy publication, customer contact basis, charge and spend caps, provider custody, and any required account-holder attestation have objective evidence. Continue independent engineering and verification.
 
 Rollback
 
@@ -144,11 +153,11 @@ Revert only the unapproved decision draft or later documentation commit. There s
 
 Verifiable completion
 
-Complete only when one internally consistent control record has no blank launch-critical field, authorizes at most one household and one USD 14.99 monthly live initiation, keeps annual, Individual, and referral hypotheses sandbox-only, explicitly defers mobile purchase and Twilio, names all founder stops, and confirms no external action occurred.
+Complete only when one internally consistent control record has no blank launch-critical field, bounds at most one household and one USD 14.99 monthly live initiation, keeps annual, Individual, and referral hypotheses sandbox-only, explicitly defers mobile purchase and Twilio, names every nondelegable customer, account-holder, qualified-professional, provider-access, evidence, and rollback stop, and confirms no external action occurred.
 
 Durable goal
 
-Do not use a durable goal. This is a short human decision gate. Resume the next engineering goal only after the founder returns explicit decisions.
+Do not use a durable goal. This is a short control-record phase. Resume the next engineering goal when every launch-critical decision has an accountable source and closure evidence; keep any unresolved dependent external lane stopped.
 ```
 
 ## G2 - Member golden-path hardening
@@ -192,7 +201,7 @@ Use small reviewed commits with one regression per fix. Do not tag or deploy fro
 
 Founder-only stop conditions
 
-Stop for approval of the billing-authority policy, customer-visible legal/support content, account deletion semantics, paid-feedback eligibility policy, any schema migration with production data implications, and any action requiring production Clerk/provider access. Stop immediately for an auth-realm ambiguity, cross-tenant path, customer-data exposure, or legal language that lacks an accountable owner.
+Do not wait for a new subjective approval. Stop the affected lane for missing production access, unapproved legal or support content, unresolved account-deletion or paid-feedback policy, unsafe migration evidence, auth-realm ambiguity, cross-tenant behavior, customer-data exposure, or a missing accountable qualified owner. Continue unrelated safe work.
 
 Rollback
 
@@ -248,7 +257,7 @@ Use small reviewable copy commits grouped by coherent surface, with automated re
 
 Founder-only stop conditions
 
-Stop for any disputed price, recurring-charge term, refund/cancellation promise, support promise, privacy/legal statement, safety claim, accessibility tradeoff, or public brand decision. Stop if accurate copy would expose an unimplemented feature or require a materially different product policy.
+Standing authorization covers truthful editorial work and publication after objective gates pass. Stop the affected claim for an unresolved price, recurring-charge term, refund policy, support promise, privacy or legal statement, safety substantiation, accessibility defect, rights issue, or unimplemented feature.
 
 Rollback
 

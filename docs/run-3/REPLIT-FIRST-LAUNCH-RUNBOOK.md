@@ -105,7 +105,11 @@ screenshots, or logs:
 6. Run `npm run verify`, `node scripts/verify-portability.mjs`, and the candidate-specific evidence checks. Record outputs and the Replit project/deployment IDs without secret values.
 7. Treat every Replit project as a pull-only deployment consumer. Do not make emergency source edits in Replit and never push code or editor checkpoints from Replit. Make and review every change in the canonical GitHub repository, then have each service pull the exact approved commit before redeployment.
 
-The existing [`.replit`](../../.replit) file is a local development convenience (`npm run dev`); it is not a production deployment definition.
+The existing [`.replit`](../../.replit) file is canonical shared service configuration. It defines
+the repository-owned entrypoint and deployment commands used by the exact-tag wrapper, while the
+wrapper selects the specific web, API, worker, or HQ service. Replit-local provider type, domain,
+cost, alert, secret, and published-environment settings do not belong in source or in local Replit
+checkpoint commits.
 
 ## Technically enforced GitHub pull-only credentials
 

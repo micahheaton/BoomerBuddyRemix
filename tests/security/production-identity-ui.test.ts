@@ -113,6 +113,7 @@ describe('production identity UI boundary', () => {
       customerClientTrust,
       support,
       verifier,
+      resourceVerifier,
     ] = await Promise.all([
       source('package.json'),
       source('apps/web/src/lib/resource-auth-policy.ts'),
@@ -121,6 +122,7 @@ describe('production identity UI boundary', () => {
       source('apps/web/src/app/sign-in/client-trust/page.tsx'),
       source('apps/web/src/app/support/page.tsx'),
       source('scripts/verify-founding-household-production-ui.mjs'),
+      source('scripts/verify-next-resource-auth.mjs'),
     ]);
 
     expect(JSON.parse(rootPackage).scripts['verify:production-auth-routes']).toContain(
@@ -138,6 +140,7 @@ describe('production identity UI boundary', () => {
     expect(customerSignIn).not.toContain('redirect(');
     expect(customerClientTrust).toContain("export { default } from '../[[...sign-in]]/page'");
     expect(customerClientTrust).not.toContain('redirect(');
+    expect(customerClientTrust).toContain("export const dynamic = 'force-dynamic'");
     expect(support).not.toContain('searchParams');
     expect(support).not.toContain('async function SupportPage');
 
@@ -164,6 +167,8 @@ describe('production identity UI boundary', () => {
       '${label} production sign-in path ${path} unexpectedly matches a rewrite',
     );
     expect(verifier).toContain('Customer and HQ production auth paths resolve');
+    expect(resourceVerifier).toContain('assertAuthenticationPath(application, path, response)');
+    expect(resourceVerifier).toContain('allowed public shared caching');
     expect(verifier).toContain("const unauthorizedRewriteTarget = '/sign-in/unauthorized-sign-in'");
     expect(verifier).toContain('The production unauthorized sign-in path has an ambiguous rewrite');
     expect(verifier).toContain(

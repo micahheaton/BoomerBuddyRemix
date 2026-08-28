@@ -19,23 +19,52 @@
 
 The two gauntlet files together are the complete G0 through G15 pack. Neither file is complete by itself.
 
+## Current evidence snapshot
+
+The current branch is `codex/product-value-beta`. Three pushed implementation baselines follow the
+older planning audit:
+
+- `f4997946231b1548afc1a4b6d798ff05796a3c69` repairs paid Family entitlement authority. Exact-SHA
+  GitHub Actions run `33098426835` passed all five jobs.
+- `11c0f70b2e293d71a09401b918b15a0a9ca2f711` builds the household safety beta, including neutral
+  household onboarding, protected-member consent, Trusted Circle collaboration, seven short
+  lessons, reviewed national and California guidance, weekly rehearsal, Family Safe Word, and web
+  and mobile member surfaces. Exact-SHA GitHub Actions run `33123397854` passed all five jobs.
+- `08a285eaf39675b3daa1afef0568601525b8116f` clarifies the Family USD 14.99 monthly value
+  proposition across the public homepage, pricing, How It Works, and Trust surfaces. Local full
+  verification and the focused responsive accessibility matrix passed. Exact-SHA GitHub Actions run
+  `33141679927` remains the controlling CI receipt for that implementation baseline. At the
+  2026-08-28 04:42 UTC read-only check, PostgreSQL, containers, Edge, and accessibility had completed
+  successfully while the comprehensive verify job was still running `npm test`; the commit was not
+  yet promotion-ready.
+
+These are repository and CI facts, not deployment proof. Anonymous live checks still show an older
+customer deployment with obsolete pricing language and a 404 at `/sign-in/client-trust`. Live
+Stripe remains unconfigured for BoomerBuddy 2.0. Signed native packages, physical-device proof,
+provider configuration, production migration, first-customer rehearsal, and first payment remain
+external closure gates. No document in this directory converts those unknowns into completed
+evidence.
+
 ## Which prompt to run
 
-- [RUN-NEXT-EXECUTION.md](./RUN-NEXT-EXECUTION.md) is the current implementation entry point. It closes the dirty local candidate, runs the independent gauntlet, and prepares the exact-SHA noncharging provider and four-service Replit action packet. Release and provider writes remain behind its exact confirmation phrase.
+- [RUN-NEXT-EXECUTION.md](./RUN-NEXT-EXECUTION.md) is the current closure and execution entry point.
+  It freezes a later exact-SHA candidate, runs the independent gauntlet, and executes only actions
+  whose objective prerequisites and rollback receipts are complete.
 - [RUN-NEXT.md](./RUN-NEXT.md) is a read-only re-audit prompt. Use it only after the repository, deployment, providers, or evidence baseline materially changes, or when a fresh independent baseline is specifically needed.
 
 Section 3.0 of the base plan is authoritative for current execution. Its later sections preserve historical audit evidence and must not be read as proof for uncommitted work. The supplement is retained as an audit receipt and no longer overrides the integrated base plan. For annual, Individual, group-rate, and referral hypothesis names, amounts, scopes, and promotion gates, the offer hypothesis registry controls over every other planning artifact or prompt. Older or broader wording cannot create a production offer, provider write, customer promise, or referral program.
 
 ## Execution authority
 
-Safe local edits, tests, commits, branch pushes, and CI may continue. Before merge/tag, any Replit
-pull/deploy, production migration, Clerk or Stripe write in any environment, EAS or other provider
-identity/account write, external message, spend, charge, or refund, complete a preauthorization
-receipt outside the candidate. It binds the exact candidate SHA and tree, green CI, planned annotated
-tag, ordered action manifest, and scope digest without claiming that the tag exists. The founder must
-cite that receipt ID and digest and type `CONFIRM NONCHARGING RELEASE SETUP` in the active task. The
-first authorized action creates, pushes, and verifies the planned annotated tag, then appends its tag
-object and peeled commit to the external receipt before any provider write. A different merge result,
-squash, rebase, tree, CI result, or action scope requires a new candidate and confirmation. The phrase
-authorizes only that noncharging setup packet. It does not authorize a customer charge, refund,
-consent, plan choice, provider agreement, or legal, tax, bank, or identity attestation.
+The user has supplied standing authorization for in-scope repository, provider-configuration,
+deployment, testing, and controlled-launch work. No additional subjective founder phrase is an active
+gate. Before an external write, complete a scope receipt outside the candidate that binds the exact
+candidate SHA and tree, green CI, annotated tag, ordered action manifest, exact target and
+environment, safe account identifiers, stop conditions, and rollback. A different merge result,
+squash, rebase, tree, CI result, target, or action scope requires a new receipt and review.
+
+Standing authorization is not evidence and cannot replace direct customer consent, customer plan
+choice or payment entry, provider-required account-holder identity or agreement steps, qualified
+legal or tax decisions, credential custody, production access, exact-SHA deployment proof, or a
+tested rollback. Continue safe independent lanes while a blocked lane waits for one of those
+objective prerequisites.

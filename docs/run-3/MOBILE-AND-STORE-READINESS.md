@@ -43,6 +43,11 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
   and sign-out recovery are coalesced.
 - The route observer recognizes only the empty `boomerbuddy://check` signal. Query strings and
   fragments are rejected instead of becoming artifact input.
+- The resolved iOS URL schemes include both `boomerbuddy` and `net.boomerbuddy.app`, which covers
+  the Clerk hosted-auth default return `net.boomerbuddy.app://callback`. The resolved Android main
+  activity includes Clerk's exact `clerk://net.boomerbuddy.app.hosted-callback` intent filter. This
+  proves repository configuration, not a live Clerk realm, signed build, browser-return, or device
+  sign-in.
 - No inbound share extension, contacts import, push transport, background monitoring, camera,
   microphone, photo-library workflow, or automatic artifact intake is configured.
 - Native share-sheet proof and local invitation creation/share controls remain guarded by `__DEV__`
@@ -119,12 +124,20 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 
 ## Permission policy
 
-Contacts, camera, microphone, photo library, notifications, and tracking permissions are denied by
-default because no reviewed feature currently needs them. Adding any permission requires a versioned
-purpose, least-privilege platform configuration, denial behavior, retention/deletion path, and a
-device regression. Android storage, overlay, and vibration permissions are explicitly blocked, and
-iOS App Transport Security explicitly denies arbitrary loads. Customer address books may never be
-uploaded to create a marketing database.
+Contacts, camera, microphone, photo library, and tracking permissions are denied by default because
+no reviewed feature currently needs them. Notifications are the one narrow exception: after a member
+explicitly opts into a generic weekly practice reminder, iOS may request notification permission and
+the Android notifications library contributes `POST_NOTIFICATIONS` and `RECEIVE_BOOT_COMPLETED` at
+native manifest merge. The repository-owned Android manifest directly requests only Internet access;
+the distribution packet separately declares the two SDK-contributed permissions. Remote push-token
+registration, background remote notifications, sounds, badges, exact alarms, message content,
+household identifiers, and automatic family delivery remain disabled. Signed IPA/AAB inspection and
+permission grant, denial, restart, reboot, lock-screen, and revocation behavior remain device gates.
+
+Adding any other permission requires a versioned purpose, least-privilege platform configuration,
+denial behavior, retention/deletion path, and a device regression. Android storage, overlay, and
+vibration permissions are explicitly blocked, and iOS App Transport Security explicitly denies
+arbitrary loads. Customer address books may never be uploaded to create a marketing database.
 
 ## Required device proof
 

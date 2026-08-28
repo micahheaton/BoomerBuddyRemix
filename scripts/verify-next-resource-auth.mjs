@@ -20,6 +20,13 @@ const applications = [
     host: 'customer.resource-auth.invalid',
     port: 3_200,
     publicPaths: ['/check', '/robots.txt', '/sitemap.xml'],
+    authenticationPaths: [
+      '/sign-in',
+      '/sign-in/client-trust',
+      '/sign-in/session-recovery',
+      '/sign-in/sso-callback',
+      '/sign-in/oauth-callback',
+    ],
     protectedPaths: [
       '/member',
       '/member/history',
@@ -164,6 +171,19 @@ function assertPublic(application, path, response) {
   }
 }
 
+function assertAuthenticationPath(application, path, response) {
+  assertPublic(application, path, response);
+  const cacheControl = response.cacheControl ?? '';
+  if (
+    !/(?:^|,)\s*(?:private|no-store)(?:\s|,|$)/iu.test(cacheControl) ||
+    /s-maxage/iu.test(cacheControl)
+  ) {
+    throw new Error(
+      `${application.name} authentication path ${path} allowed public shared caching: ${cacheControl || 'missing cache-control'}`,
+    );
+  }
+}
+
 function assertSignedOutRedirect(application, path, response) {
   if (response.status !== 307 || response.location === undefined) {
     throw new Error(
@@ -264,6 +284,9 @@ async function verifyApplication(application) {
   await withProductionServer(application, environment, async () => {
     for (const path of application.publicPaths) {
       assertPublic(application, path, await request(application, path));
+    }
+    for (const path of application.authenticationPaths ?? []) {
+      assertAuthenticationPath(application, path, await request(application, path));
     }
     for (const path of application.protectedPaths) {
       assertSignedOutRedirect(application, path, await request(application, path));

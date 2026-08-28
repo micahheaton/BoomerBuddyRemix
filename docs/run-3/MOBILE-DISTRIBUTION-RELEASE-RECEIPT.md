@@ -76,7 +76,9 @@ npx vitest run --project security mobile
 
 `mobile:verify-distribution` performs no network or provider mutation. It verifies:
 
-- source and resolved Expo identity, transport, permission, and backup settings;
+- source and resolved Expo identity, transport, app-owned permission, and backup settings, plus the
+  expected Android notification permissions contributed by the pinned notifications SDK; the exact
+  merged signed manifest remains a signed-artifact gate;
 - exact preview and production API configuration;
 - remote build-version truth without presenting ignored local defaults as signed-build numbers;
 - absence of guessed Expo, Apple, or Google submission identifiers;

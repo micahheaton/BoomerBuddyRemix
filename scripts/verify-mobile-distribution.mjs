@@ -110,6 +110,11 @@ const app = await readJson(join(mobileRoot, 'app.json'));
 const eas = await readJson(join(mobileRoot, 'eas.json'));
 const mobilePackage = await readJson(join(mobileRoot, 'package.json'));
 const metadata = await readJson(join(mobileRoot, 'store-metadata.json'));
+const notificationsAndroidManifestPath = join(
+  repositoryRoot,
+  'node_modules/expo-notifications/android/src/main/AndroidManifest.xml',
+);
+const notificationsAndroidManifestSource = await readFile(notificationsAndroidManifestPath, 'utf8');
 const appConfig = app.expo;
 const notificationPluginEntries = (appConfig.plugins ?? []).filter(
   (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-notifications',
@@ -201,6 +206,20 @@ for (const truthfulBoundary of [
   assertRelease(
     metadata.fullDescription.includes(truthfulBoundary),
     `store description must retain truthful boundary: ${truthfulBoundary}`,
+  );
+}
+for (const implementedValue of [
+  'seven short safety lessons',
+  'dated source-linked guidance',
+  'weekly rehearsal',
+  'private 30-day history',
+  'redacted result',
+  'Trusted Circle',
+  'Family Safe Word',
+]) {
+  assertRelease(
+    metadata.fullDescription.includes(implementedValue),
+    `store description must explain implemented value: ${implementedValue}`,
   );
 }
 const listingCopyForClaimScan = approvedListingCopy.replaceAll(
@@ -434,7 +453,7 @@ assertRelease(
   Array.isArray(reviewerFlow.prerequisites) &&
     reviewerFlow.prerequisites.length === 4 &&
     Array.isArray(reviewerFlow.steps) &&
-    reviewerFlow.steps.length === 8 &&
+    reviewerFlow.steps.length === 9 &&
     Array.isArray(reviewerFlow.knownUnavailableFeatures) &&
     reviewerFlow.knownUnavailableFeatures.length === 3,
   'reviewer flow must retain complete bounded instructions and unavailable-feature disclosure',
@@ -507,6 +526,7 @@ assertExactStringSet(
     'manual_check_and_result',
     'private_household_history',
     'family_and_orientation',
+    'learning_guidance_and_weekly_practice',
     'support_legal_accessibility_and_deletion',
     'session_restart_and_sign_out',
     'no_native_commerce_or_payment_steering',
@@ -871,14 +891,72 @@ const introspected = JSON.parse(
 const iosMod = introspected._internal?.modResults?.ios;
 const androidManifest = introspected._internal?.modResults?.android?.manifest?.manifest;
 const androidApplication = androidManifest?.application?.[0];
+const iosUrlSchemes = (iosMod?.infoPlist?.CFBundleURLTypes ?? []).flatMap(
+  (urlType) => urlType?.CFBundleURLSchemes ?? [],
+);
 const activePermissions = (androidManifest?.['uses-permission'] ?? [])
   .filter((permission) => permission.$?.['tools:node'] !== 'remove')
   .map((permission) => permission.$?.['android:name']);
+const notificationSdkPermissions = [
+  ...notificationsAndroidManifestSource.matchAll(
+    /<uses-permission\b[^>]*android:name="([^"]+)"[^>]*\/>/gu,
+  ),
+].map((match) => match[1]);
 const androidAppLinkData = (androidApplication?.activity ?? [])
   .flatMap((activity) => activity['intent-filter'] ?? [])
   .flatMap((filter) => filter.data ?? [])
   .map((data) => data.$)
   .filter((data) => data?.['android:scheme'] === 'https');
+const androidMainActivities = (androidApplication?.activity ?? []).filter(
+  (activity) => activity.$?.['android:name'] === '.MainActivity',
+);
+assertRelease(
+  androidMainActivities.length === 1,
+  'resolved Android manifest must contain exactly one .MainActivity',
+);
+const hostedCallbackHost = `${exactApplicationId}.hosted-callback`;
+const clerkCallbackFilters = (androidMainActivities[0]?.['intent-filter'] ?? []).filter((filter) =>
+  (filter.data ?? []).some(
+    (data) =>
+      data.$?.['android:scheme'] === 'clerk' || data.$?.['android:host'] === hostedCallbackHost,
+  ),
+);
+assertRelease(
+  clerkCallbackFilters.length === 1,
+  'resolved Android manifest must contain exactly one bounded Clerk hosted-callback filter',
+);
+const clerkCallbackFilter = clerkCallbackFilters[0];
+const clerkCallbackActions = (clerkCallbackFilter?.action ?? []).map(
+  (action) => action.$?.['android:name'],
+);
+const clerkCallbackCategories = (clerkCallbackFilter?.category ?? []).map(
+  (category) => category.$?.['android:name'],
+);
+const clerkCallbackData = clerkCallbackFilter?.data ?? [];
+assertExactStringSet(
+  iosUrlSchemes,
+  [appConfig.scheme, exactApplicationId],
+  'resolved iOS native-auth callback schemes',
+);
+assertExactStringSet(
+  clerkCallbackActions,
+  ['android.intent.action.VIEW'],
+  'resolved Android Clerk callback actions',
+);
+assertExactStringSet(
+  clerkCallbackCategories,
+  ['android.intent.category.DEFAULT', 'android.intent.category.BROWSABLE'],
+  'resolved Android Clerk callback categories',
+);
+assertRelease(
+  clerkCallbackData.length === 1 &&
+    JSON.stringify(Object.keys(clerkCallbackData[0]?.$ ?? {}).sort()) ===
+      JSON.stringify(['android:host', 'android:scheme']) &&
+    clerkCallbackData[0]?.$?.['android:scheme'] === 'clerk' &&
+    clerkCallbackData[0]?.$?.['android:host'] === hostedCallbackHost,
+  'resolved Android Clerk callback data must contain only the exact hosted-callback URI',
+);
+const androidHostedCallbackUri = `clerk://${hostedCallbackHost}`;
 assertRelease(
   iosMod?.infoPlist?.NSAppTransportSecurity?.NSAllowsArbitraryLoads === false,
   'resolved iOS manifest must deny arbitrary loads',
@@ -897,7 +975,17 @@ assertRelease(
 );
 assertRelease(
   activePermissions.length === 1 && activePermissions[0] === 'android.permission.INTERNET',
-  'resolved Android manifest must request only Internet access',
+  'repository-owned Android manifest must directly request only Internet access',
+);
+assertExactStringSet(
+  notificationSdkPermissions,
+  ['android.permission.POST_NOTIFICATIONS', 'android.permission.RECEIVE_BOOT_COMPLETED'],
+  'pinned notification SDK Android manifest permissions',
+);
+assertExactStringSet(
+  [...activePermissions, ...notificationSdkPermissions],
+  metadata.permissions.expectedActiveAndroidPermissions,
+  'declared Android permissions across the app and pinned notification SDK manifests',
 );
 assertRelease(
   androidAppLinkData.length === 0,
@@ -913,6 +1001,7 @@ const inputSha256 = await buildInputFingerprint([
   join(repositoryRoot, 'package-lock.json'),
   join(repositoryRoot, 'scripts/generate-mobile-assets.mjs'),
   join(repositoryRoot, 'scripts/verify-mobile-distribution.mjs'),
+  notificationsAndroidManifestPath,
 ]);
 
 process.stdout.write(
@@ -923,6 +1012,10 @@ process.stdout.write(
       marketingVersion: appConfig.version,
       developerBuildVersionSource: 'remote_eas_receipt_required',
       universalAndAppLinks: 'blocked_pending_two_way_provider_association',
+      nativeAuthCallbacks: {
+        iosSchemes: [...iosUrlSchemes].sort(),
+        androidHostedCallbackUri,
+      },
       inputSha256,
       assetSha256: assetHashes,
     },

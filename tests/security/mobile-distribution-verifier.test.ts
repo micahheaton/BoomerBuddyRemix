@@ -22,7 +22,7 @@ describe('provider-free mobile distribution verifier', () => {
       bundleIdentifier: 'net.boomerbuddy.app',
       androidPackage: 'net.boomerbuddy.app',
       marketingVersion: '0.1.0',
-      subtitle: 'Safer next steps for families',
+      subtitle: 'Family scam safety practice',
       categories: {
         status: 'draft_pending_current_console_review',
         policyReviewedAt: '2026-08-26',
@@ -97,6 +97,18 @@ describe('provider-free mobile distribution verifier', () => {
     expect((metadata.categories as { policyCaveat: string }).policyCaveat).toContain(
       'Recheck the current provider documentation and console',
     );
+    const fullDescription = metadata.fullDescription as string;
+    for (const implementedValue of [
+      'seven short safety lessons',
+      'dated source-linked guidance',
+      'weekly rehearsal',
+      'private 30-day history',
+      'redacted result',
+      'Trusted Circle',
+      'Family Safe Word',
+    ]) {
+      expect(fullDescription).toContain(implementedValue);
+    }
     const appleReleaseNotes = (metadata.releaseNotes as { appleAppStore: Record<string, unknown> })
       .appleAppStore;
     expect(appleReleaseNotes).not.toHaveProperty('text');
@@ -182,7 +194,7 @@ describe('provider-free mobile distribution verifier', () => {
       ]),
     );
     expect(reviewerFlow.prerequisites).toHaveLength(4);
-    expect(reviewerFlow.steps).toHaveLength(8);
+    expect(reviewerFlow.steps).toHaveLength(9);
     expect(reviewerFlow.dataPolicy).toContain('synthetic');
     expect(reviewerFlow.dataPolicy).toContain('Do not use customer PII.');
     expect(reviewerFlow.accountRequirements).toMatchObject({
@@ -234,6 +246,7 @@ describe('provider-free mobile distribution verifier', () => {
       'manual_check_and_result',
       'private_household_history',
       'family_and_orientation',
+      'learning_guidance_and_weekly_practice',
       'support_legal_accessibility_and_deletion',
       'session_restart_and_sign_out',
       'no_native_commerce_or_payment_steering',
@@ -355,6 +368,10 @@ describe('provider-free mobile distribution verifier', () => {
     expect(verifier).toContain('weekly rehearsal notification must remain generic');
     expect(verifier).toContain('weekly rehearsal notification must cancel on sign-out');
     expect(verifier).toContain('device proof explicitly pending');
+    expect(verifier).toContain('pinned notification SDK Android manifest permissions');
+    expect(verifier).toContain(
+      'declared Android permissions across the app and pinned notification SDK manifests',
+    );
   });
 
   it('allows only explicit blank or validated receipt-code support email drafts', () => {
@@ -406,6 +423,10 @@ describe('provider-free mobile distribution verifier', () => {
       marketingVersion: '0.1.0',
       developerBuildVersionSource: 'remote_eas_receipt_required',
       universalAndAppLinks: 'blocked_pending_two_way_provider_association',
+      nativeAuthCallbacks: {
+        iosSchemes: ['boomerbuddy', 'net.boomerbuddy.app'],
+        androidHostedCallbackUri: 'clerk://net.boomerbuddy.app.hosted-callback',
+      },
       assetSha256: {
         'icon.png': expect.stringMatching(/^[a-f0-9]{64}$/u),
         'adaptive-icon.png': expect.stringMatching(/^[a-f0-9]{64}$/u),

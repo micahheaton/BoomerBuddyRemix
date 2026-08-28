@@ -162,4 +162,67 @@ describe('versioned Stripe offer catalogue migration', () => {
       { trigger_name: 'commerce_stripe_trial_checkout_attempts_append_only' },
     ]);
   }, 120_000);
+
+  it('requires an active administrator for an exact household-member self-grant', async () => {
+    database = await createPGliteDatabase(':memory:');
+    await runMigrations(database);
+    const now = '2026-08-28T12:00:00.000Z';
+    await database.query(
+      `INSERT INTO persons(id, display_name, created_at)
+       VALUES ('person-authority-fixture','Authority fixture',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO households(id, name, created_at)
+       VALUES ('household-authority-fixture','Authority fixture',$1)`,
+      [now],
+    );
+    await database.query(
+      `INSERT INTO household_memberships(
+         household_id, id, person_id, membership_kind, status, created_at
+       ) VALUES (
+         'household-authority-fixture','membership-authority-fixture',
+         'person-authority-fixture','member','active',$1
+       )`,
+      [now],
+    );
+    const insertAuthority = () =>
+      database!.query(
+        `INSERT INTO household_billing_authorities(
+           household_id, person_id, status, granted_by_person_id, granted_at, grant_source
+         ) VALUES (
+           'household-authority-fixture','person-authority-fixture','active',
+           'person-authority-fixture',$1,'household_member'
+         )`,
+        [now],
+      );
+    await expect(insertAuthority()).rejects.toThrow(
+      'Household billing authority requires exact administrator self-grant',
+    );
+    await database.query(
+      `INSERT INTO household_administrator_assignments(
+         household_id, person_id, status, granted_by_person_id, granted_at
+       ) VALUES (
+         'household-authority-fixture','person-authority-fixture','active',
+         'person-authority-fixture',$1
+       )`,
+      [now],
+    );
+    await expect(insertAuthority()).resolves.toMatchObject({ rowCount: 1 });
+    const authority = await database.query<{
+      readonly grant_source: string;
+      readonly granted_by_person_id: string;
+    }>(
+      `SELECT grant_source, granted_by_person_id
+       FROM household_billing_authorities
+       WHERE household_id = 'household-authority-fixture'
+         AND person_id = 'person-authority-fixture'`,
+    );
+    expect(authority.rows).toEqual([
+      {
+        grant_source: 'household_member',
+        granted_by_person_id: 'person-authority-fixture',
+      },
+    ]);
+  }, 120_000);
 });

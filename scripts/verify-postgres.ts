@@ -110,9 +110,15 @@ try {
     [stripeHouseholdId, `membership-postgres-stripe-${suffix}`, actorPersonId, base.toISOString()],
   );
   await database.query(
-    `INSERT INTO household_billing_authorities(
+    `INSERT INTO household_administrator_assignments(
        household_id, person_id, status, granted_by_person_id, granted_at
      ) VALUES ($1,$2,'active',$2,$3)`,
+    [stripeHouseholdId, actorPersonId, base.toISOString()],
+  );
+  await database.query(
+    `INSERT INTO household_billing_authorities(
+       household_id, person_id, status, granted_by_person_id, granted_at, grant_source
+     ) VALUES ($1,$2,'active',$2,$3,'household_member')`,
     [stripeHouseholdId, actorPersonId, base.toISOString()],
   );
   await database.query(

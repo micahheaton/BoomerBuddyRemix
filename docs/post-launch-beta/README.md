@@ -11,8 +11,8 @@
 - [NONCHARGING-RELEASE-RECEIPT.md](./NONCHARGING-RELEASE-RECEIPT.md): retired historical template for
   the earlier monthly-only noncharging plan. It is format and regression evidence only and must not
   govern the current annual-plus-monthly catalog. The current release requires a new external scope
-  receipt bound to the exact candidate, catalog, actions, targets, prerequisites, stop conditions,
-  and rollback.
+  receipt. The completed receipt lives outside the versioned candidate and binds the exact
+  candidate, catalog, actions, targets, prerequisites, stop conditions, and rollback.
 - [GAUNTLET-PROMPT-PACK.md](./GAUNTLET-PROMPT-PACK.md): standalone phases G0 through G3.
 - [GAUNTLET-PROMPT-PACK-G4-G15.md](./GAUNTLET-PROMPT-PACK-G4-G15.md): standalone phases G4 through G15 and the exact G0 first prompt preserved at the end.
 

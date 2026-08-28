@@ -17,9 +17,9 @@ detail, session identifier, safe word, submitted artifact, private recovery valu
 export in any receipt.
 
 This packet predates the versioned production catalog and is retired for the current release. Its
-historical boundary allowed only Family at USD 14.99 per month for one household and excluded every
+historical boundary allowed only Family at USD 14.99 per month for one household and excluded Family
 annual, Individual, group, referral, coupon, credit, trial, adaptive-pricing, Payment Link, and native
-purchase variant. Do not use that historical boundary to override the current catalog. Checkout and
+purchase variants. Do not use that historical boundary to override the current catalog. Checkout and
 Portal initiation remain disabled throughout this historical packet. Twilio remains disabled. The
 separate legacy `BoomerBuddy` Replit project,
 `boomerbuddy.net`, its Twilio evidence, and its Stripe webhook remain untouched.

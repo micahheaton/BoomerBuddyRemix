@@ -375,6 +375,11 @@ describe('Run 3.1 Replit deployment controls', () => {
     const hqPackage = JSON.parse(await readFile(join(root, 'apps/hq/package.json'), 'utf8')) as {
       scripts: Record<string, string>;
     };
+    const persistencePackage = JSON.parse(
+      await readFile(join(root, 'packages/persistence/package.json'), 'utf8'),
+    ) as {
+      dependencies: Record<string, string>;
+    };
 
     expect(replit).toContain('build = "npm run replit:build"');
     expect(replit).toContain('run = "npm run replit:start"');
@@ -386,6 +391,7 @@ describe('Run 3.1 Replit deployment controls', () => {
     expect(packageJson.scripts['replit:start']).toBe('node scripts/replit-service.mjs start');
     expect(webPackage.scripts.start).toBe('next start');
     expect(hqPackage.scripts.start).toBe('next start');
+    expect(persistencePackage.dependencies['@boomerbuddy/contracts']).toBe('*');
     expect(source).toContain("['@expo/metro', 'expo', 'image-size', 'metro', 'react-native']");
     expect(source).toContain("'--include-workspace-root=false'");
     expect(source).toContain("process.env.REPLIT_DEPLOYMENT !== '1'");

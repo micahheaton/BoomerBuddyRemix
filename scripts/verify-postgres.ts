@@ -1807,7 +1807,7 @@ try {
   invariant(
     recipientCodeRegressionRejected &&
       inactiveLearningMutationRejected &&
-      productValuePostgresEvidence.rows[0]?.guidance_briefs === 2 &&
+      productValuePostgresEvidence.rows[0]?.guidance_briefs === 6 &&
       productValuePostgresEvidence.rows[0]?.learning_attempt_count === 0 &&
       productValuePostgresEvidence.rows[0]?.recipient_code_state === 'consumed',
     `Run 3.1 PostgreSQL product-value lifecycle controls failed: ${JSON.stringify({

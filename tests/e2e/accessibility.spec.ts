@@ -24,11 +24,11 @@ async function gotoReady(page: Page, url: string, heading: string | RegExp): Pro
 
 test('public landmark pages have zero serious or critical axe violations', async ({ page }) => {
   const pages = [
-    ['/', /From suspicious to a safer next step/u],
+    ['/', 'A calmer family response to suspicious messages.'],
     ['/check', 'Pause before you act.'],
-    ['/how-it-works', 'A calmer way to handle something suspicious'],
-    ['/pricing', 'One plan for invited early access'],
-    ['/trust', 'Designed to show its limits'],
+    ['/how-it-works', 'A simple family plan for uncertain moments'],
+    ['/pricing', 'An ongoing household plan for calmer scam response'],
+    ['/trust', 'Help without surveillance'],
     ['/support', 'Get help with BoomerBuddy'],
     ['/privacy', 'BoomerBuddy privacy notice'],
     ['/terms', 'BoomerBuddy early-access terms'],
@@ -40,6 +40,64 @@ test('public landmark pages have zero serious or critical axe violations', async
   for (const [path, heading] of pages) {
     await gotoReady(page, `${customerUrl}${path}`, heading);
     await expectNoSeriousOrCriticalAxeViolations(page, `Customer ${path}`);
+  }
+});
+
+test('Family value and both honest next steps remain readable across public breakpoints', async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 1440, height: 900 },
+    { width: 768, height: 1024 },
+    { width: 390, height: 844 },
+    { width: 320, height: 568 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto(customerUrl, { waitUntil: 'domcontentloaded' });
+    await expect(
+      page.getByRole('heading', {
+        level: 1,
+        name: 'A calmer family response to suspicious messages.',
+      }),
+    ).toBeVisible();
+    await expect(page.getByLabel('Family plan offer')).toContainText('USD 14.99/month');
+    await expect(
+      page.getByRole('link', { name: 'See the Family plan', exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Try Public Check free', exact: true }).first(),
+    ).toBeVisible();
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
+
+    for (const [path, heading] of [
+      ['/how-it-works', 'A simple family plan for uncertain moments'],
+      ['/pricing', 'An ongoing household plan for calmer scam response'],
+    ] as const) {
+      await page.goto(`${customerUrl}${path}`, { waitUntil: 'domcontentloaded' });
+      await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+      const routeOverflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      );
+      expect(routeOverflow).toBeLessThanOrEqual(1);
+    }
+
+    if (viewport.width <= 768) {
+      for (const path of ['/', '/how-it-works', '/pricing', '/trust']) {
+        await page.goto(`${customerUrl}${path}`, { waitUntil: 'domcontentloaded' });
+        await page.evaluate(() => {
+          document.documentElement.style.fontSize = '200%';
+        });
+        const scaledOverflow = await page.evaluate(
+          () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        );
+        expect(scaledOverflow, `${path} at ${viewport.width}px and 200% text`).toBeLessThanOrEqual(
+          1,
+        );
+      }
+    }
   }
 });
 

@@ -5,20 +5,18 @@ export function PublicHeader() {
   return (
     <>
       <p className="dev-banner">
-        Early access - Public Check needs no account - Results can be wrong - Never enter passwords,
-        access codes, or payment information
+        Family early access - Invitation required - Public Check needs no account
       </p>
       <header className="site-header">
         <div className="header-inner">
           <Brand />
           <nav className="public-nav" aria-label="Main navigation">
-            <Link href="/check">Check something</Link>
             <Link href="/how-it-works">How it works</Link>
-            <Link href="/pricing">Pricing</Link>
+            <Link href="/pricing">Family</Link>
             <Link href="/trust">Trust</Link>
-            <Link href="/support">Support</Link>
-            <Link className="button button-primary" href="/sign-in">
-              Member sign in
+            <Link href="/sign-in">Sign in</Link>
+            <Link className="button button-primary" href="/check">
+              Free Check
             </Link>
           </nav>
         </div>

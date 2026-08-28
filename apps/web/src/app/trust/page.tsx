@@ -7,50 +7,60 @@ export default function TrustPage() {
   return (
     <>
       <PublicHeader />
-      <main id="main-content" className="page-shell narrow">
+      <main id="main-content" className="page-shell trust-page">
         <span className="eyebrow">Trust and safety</span>
-        <h1 className="page-title">Designed to show its limits</h1>
+        <h1 className="page-title">Help without surveillance</h1>
         <p className="lede">
-          A reassuring answer can still be wrong. BoomerBuddy explains what a check noticed, what it
-          could not determine, and safer next actions. Signed-in results also show when they were
-          created and when they are scheduled for deletion.
+          BoomerBuddy examines only the text or website address someone deliberately submits. Every
+          adult chooses whether to participate and what to share. Paying for Family does not reveal
+          another adult&apos;s Checks.
         </p>
-        <div className="card-grid two" style={{ marginTop: '2rem' }}>
+        <div className="card-grid two trust-grid">
+          <article className="card">
+            <h2>No continuous monitoring</h2>
+            <p>
+              BoomerBuddy does not watch messages, calls, contacts, accounts, or location. It does
+              not open the website address someone enters or look it up with an outside service.
+            </p>
+          </article>
+          <article className="card">
+            <h2>Private by default</h2>
+            <p>
+              Submitted text and website addresses are not visible to other household members.
+              Household, administrator, and payer status do not create access to a Check. Its owner
+              can deliberately share a redacted result with one exact Trusted Circle person.
+            </p>
+          </article>
+          <article className="card">
+            <h2>Consent you can change</h2>
+            <p>
+              Trusted Circle invitations and permissions are explicit and revocable. Invitations are
+              handed directly to the intended person and are not sent automatically.
+            </p>
+          </article>
           <article className="card">
             <h2>Minimal records</h2>
             <p>
               Check responses do not repeat submitted content. Public Check keeps a protected
-              temporary copy for up to 15 minutes only when needed to let you save after signing in.
-              Signed-in records show their deletion time and can be deleted sooner by the owner.
+              temporary copy for up to 15 minutes only when needed to let someone save after signing
+              in. Signed-in records show their deletion time and can be deleted sooner by the owner.
             </p>
           </article>
           <article className="card">
-            <h2>Household boundaries</h2>
+            <h2>Limited operations metadata</h2>
             <p>
-              Each member sees only the household information their role and permissions allow.
-              Operations staff can see limited service records needed to support an account, but not
-              the message text or website address submitted to Check.
-            </p>
-          </article>
-          <article className="card">
-            <h2>Consent you can see</h2>
-            <p>
-              Trusted Circle permissions are explicit. Invitations are handed directly to the
-              intended person and are not sent automatically.
-            </p>
-          </article>
-          <article className="card">
-            <h2>No hidden lookups</h2>
-            <p>
-              The check follows a fixed set of rules. It never opens a website address or checks it
-              with an outside service, and its result can be wrong.
+              Authorized operations staff can see limited service metadata needed to operate and
+              support the service, including household, Check type, risk label, processing status,
+              and timing. They cannot see the submitted message text or website address.
             </p>
           </article>
         </div>
         <section className="section">
-          <h2 className="section-heading">When the stakes are high</h2>
+          <h2 className="section-heading">Clear limits when the stakes are high</h2>
           <p>
-            Stop contact. Do not transfer money or disclose credentials. Find the organization’s
+            A reassuring answer can still be wrong. BoomerBuddy explains warning signs, unknowns,
+            and safer next actions, but it does not prove that a message is safe or fraudulent. Stop
+            contact when money, accounts, or safety may be at risk. Find the organization&apos;s
             official phone number independently, or ask a trusted person for help. Call emergency
             services if anyone is in immediate danger.
           </p>

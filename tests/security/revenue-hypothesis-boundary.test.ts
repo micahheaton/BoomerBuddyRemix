@@ -178,7 +178,7 @@ describe('revenue hypothesis production boundary', () => {
     expect(publicConfig).toContain("key: 'family'");
     expect(publicConfig).toContain('monthlyUsd: 14.99');
     expect(publicConfig).toContain('annualUsd: null');
-    expect(home).toContain('Family is USD 14.99 per month');
+    expect(home).toContain('USD 14.99/month');
     expect(pricing).toContain('USD 14.99 monthly');
     const publicOfferCopy = `${home}\n${pricing}`;
     expect(publicOfferCopy).not.toMatch(/USD (?:8\.99|89|149)\b/u);

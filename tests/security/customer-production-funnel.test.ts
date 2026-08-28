@@ -69,34 +69,59 @@ describe('rendered production customer funnel', () => {
     const home = renderedProductionRoutes().home;
 
     expect(home).toContain('href="/pricing"');
-    expect(home).toContain('Family is USD 14.99 per month.');
-    expect(home).toContain('Access is invite-only');
+    expect(home).toContain('A calmer family response to suspicious messages.');
+    expect(home).toContain('USD 14.99/month');
+    expect(home).toContain('One invited household');
+    expect(home).toContain('See the Family plan');
+    expect(home).toContain('Try Public Check free');
   });
 
-  it('does not advertise self-service household capacity that invited access cannot provide', () => {
+  it('advertises only implemented Family value without unsupported capacity claims', () => {
     const pricing = renderedProductionRoutes().pricing;
 
     expect(pricing).toContain('For one invited household.');
-    expect(pricing).toContain('You cannot create a new Trusted Circle invitation right now.');
+    expect(pricing).toContain(
+      'Consent-based Trusted Circle invitations, sharing, and acknowledgement',
+    );
+    expect(pricing).toContain('An optional Family Safe Word');
+    expect(pricing).toContain('Seven short safety lessons');
+    expect(pricing).toContain('An optional weekly practice prompt in the in-app learning feed');
     expect(pricing).toContain('Checkout is not public.');
-    expect(pricing).toContain('Household invitation, consent, permissions, billing authority');
     expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
+    expect(pricing).not.toContain('You cannot create a new Trusted Circle invitation right now.');
   });
 
   it('renders honest paused copy instead of an active access-intent control by default', () => {
     const pricing = renderedProductionRoutes().pricing;
 
-    expect(pricing).toContain('Early-access requests are paused');
-    expect(pricing).toContain('no request or email has been sent');
-    expect(pricing).not.toContain('Create receipt and open email');
+    expect(pricing).toContain('Family access requests are paused');
+    expect(pricing).toContain('No request or email has been sent');
+    expect(pricing).not.toContain('Open an email request');
   });
 
   it('renders the active CTA only after both production enablement gates are true', () => {
     const pricing = renderedProductionRoutes(true).pricing;
 
-    expect(pricing).toContain('Ask about early access');
-    expect(pricing).toContain('Create receipt and open email');
-    expect(pricing).not.toContain('Early-access requests are paused');
+    expect(pricing).toContain('Ask about Family early access');
+    expect(pricing).toContain('Open an email request');
+    expect(pricing).toContain('No email is sent until');
+    expect(pricing).not.toContain('Family access requests are paused');
+  });
+
+  it('keeps the buyer story free of unsupported protection and delivery claims', () => {
+    const routes = renderedProductionRoutes();
+    const marketing = [routes.home, routes.pricing, routes.howItWorks, routes.trust].join('\n');
+
+    expect(marketing).not.toMatch(
+      /prevents scams|scam-proof|real-time alerts|automatic notification|verified safe|24\/7 protection|regional scams near you|AI scam detector/iu,
+    );
+    expect(marketing).toContain('Results can be wrong');
+    expect(marketing).toContain('does not monitor your phone');
+    expect(marketing).toContain('redacted result');
+    expect(marketing).toContain('private History for up to 30 days');
+    expect(marketing).toContain('Each adult chooses their own participation.');
+    expect(marketing).toContain('Limited operations metadata');
+    expect(marketing).not.toMatch(/device reminder/iu);
   });
 
   it('discloses bounded campaign attribution and aggregate conversion measurement', () => {

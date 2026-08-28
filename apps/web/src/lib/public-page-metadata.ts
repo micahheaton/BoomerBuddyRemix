@@ -8,9 +8,9 @@ export type IndexedCustomerPageMetadata = {
 
 export const indexedCustomerPageMetadata = {
   '/': {
-    title: 'BoomerBuddy: a calmer next step',
+    title: 'BoomerBuddy Family: scam-response support for households',
     description:
-      'Pause, review suspicious messages, and choose a safer next step with calm educational guidance.',
+      'Prepare, check warning signs, and ask one person you choose for help with private, consent-based household scam-response support.',
     alternates: { canonical: '/' },
   },
   '/check': {
@@ -22,19 +22,19 @@ export const indexedCustomerPageMetadata = {
   '/how-it-works': {
     title: 'How BoomerBuddy works',
     description:
-      'Learn the pause, check, and connect approach for reviewing something suspicious without false certainty.',
+      'Learn how Family combines short lessons, Check, deliberate redacted sharing, in-app acknowledgement, and weekly practice.',
     alternates: { canonical: '/how-it-works' },
   },
   '/pricing': {
     title: 'Family pricing | BoomerBuddy',
     description:
-      'Review the invite-only Family monthly plan at USD 14.99, including billing authority, renewal, and cancellation boundaries.',
+      'See what the invitation-only Family plan includes for USD 14.99 monthly, with consent boundaries, renewal, and cancellation details.',
     alternates: { canonical: '/pricing' },
   },
   '/trust': {
     title: 'Trust and safety | BoomerBuddy',
     description:
-      'Read how BoomerBuddy limits data use, preserves household and consent boundaries, and avoids hidden website lookups.',
+      'Learn how BoomerBuddy supports families without monitoring, preserves adult consent, and keeps Checks private by default.',
     alternates: { canonical: '/trust' },
   },
   '/support': {

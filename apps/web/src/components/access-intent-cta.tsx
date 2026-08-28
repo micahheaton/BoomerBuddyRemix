@@ -24,7 +24,7 @@ export function AccessIntentCta() {
   function continueWithoutAttribution() {
     pendingOperationKey.current = undefined;
     setAttribution({ source: 'direct', campaign: 'none' });
-    setStatus('Unrecognized attribution was removed. You can create a direct access receipt.');
+    setStatus('The unrecognized campaign label was removed. You can continue directly.');
   }
 
   async function createReceiptAndOpenEmail() {
@@ -43,7 +43,7 @@ export function AccessIntentCta() {
       });
       const emailDestination = accessIntentMailto(response.intent.receiptCode);
       setStatus(
-        `Receipt ${response.intent.receiptCode} was created. No email has been sent; choose Send in your email app to contact support.`,
+        `Request reference ${response.intent.receiptCode} is ready. No email has been sent; choose Send in your email app to contact support.`,
       );
       setMailto(emailDestination);
       pendingOperationKey.current = undefined;
@@ -57,22 +57,22 @@ export function AccessIntentCta() {
 
   return (
     <section className="card" aria-labelledby="early-access-heading">
-      <h2 id="early-access-heading">Ask about early access</h2>
+      <h3 id="early-access-heading">Ask about Family early access</h3>
       <p>
-        First, BoomerBuddy creates a temporary, content-free receipt using only a fixed source and
-        campaign label. Then your device opens its own email composer addressed to support. The
-        receipt means access intent was created; it does not mean an email was sent or a lead was
-        received.
+        Choose below to create a temporary request reference and open an email draft addressed to
+        BoomerBuddy support. No email is sent until you review the draft and press Send in your
+        email app.
       </p>
       <p className="help">
-        BoomerBuddy does not attach an account, name, email address, phone number, or message to the
-        receipt. Your contact details reach support only if you choose Send in your email app.
+        The reference uses only a fixed source and campaign label. It does not attach an account,
+        name, email address, phone number, or message. A reference does not mean an email was sent
+        or a request was received. Your contact details reach support only if you press Send.
       </p>
       {attribution === null ? (
         <div className="error" role="alert">
-          <p>This access link has an unrecognized source or campaign. No receipt was created.</p>
+          <p>This link has an unrecognized campaign label. Nothing was created or sent.</p>
           <button className="button-secondary" type="button" onClick={continueWithoutAttribution}>
-            Continue without attribution
+            Continue directly
           </button>
         </div>
       ) : null}
@@ -83,10 +83,10 @@ export function AccessIntentCta() {
         onClick={() => void createReceiptAndOpenEmail()}
       >
         {busy
-          ? 'Creating receipt...'
+          ? 'Preparing email draft...'
           : mailto === ''
-            ? 'Create receipt and open email'
-            : 'Receipt created'}
+            ? 'Open an email request'
+            : 'Email draft ready'}
       </button>
       {status ? (
         <p className="help" role="status" aria-live="polite">

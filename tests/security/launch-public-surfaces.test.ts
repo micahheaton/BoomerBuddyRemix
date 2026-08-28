@@ -17,11 +17,50 @@ describe('launch public surfaces', () => {
     expect(pricing).not.toContain('$149 annually');
     expect(pricing).not.toContain('$8.99 monthly');
     expect(pricing).not.toMatch(/individual|group rate|referral bonus/iu);
-    expect(pricing).toContain('What Family is designed to support');
-    expect(pricing).toContain('Can anyone start a subscription?');
+    expect(pricing).toContain('What is included');
+    expect(pricing).toContain('A plan before, during, and after uncertainty');
     expect(pricing).toContain('Checkout is not public.');
-    expect(pricing).toContain('Does signing in activate access?');
-    expect(pricing).toContain('No. Signing in identifies an invited member.');
+    expect(pricing).toContain('Does paying activate access or visibility?');
+    expect(pricing).toContain('No. Sign-in, household invitation, adult consent');
+  });
+
+  it('explains the implemented recurring Family value and its boundaries', async () => {
+    const marketing = (
+      await Promise.all([
+        source('apps/web/src/app/page.tsx'),
+        source('apps/web/src/app/pricing/page.tsx'),
+        source('apps/web/src/app/how-it-works/page.tsx'),
+      ])
+    ).join('\n');
+
+    expect(marketing).toContain('Seven short lessons');
+    expect(marketing).toContain('Family Safe Word');
+    expect(marketing).toContain('redacted result');
+    expect(marketing).toMatch(/weekly (?:in-app )?practice/iu);
+    expect(marketing).toContain('in-app acknowledgement');
+    expect(marketing).toContain('social aid, not proof of identity');
+    expect(marketing).toContain('does not monitor your phone');
+    expect(marketing).not.toMatch(/device reminder/iu);
+    expect(marketing).not.toContain('You cannot create a new Trusted Circle invitation right now.');
+  });
+
+  it('ties public Family claims to current member implementation anchors', async () => {
+    const [learning, family, check, history, guidance] = await Promise.all([
+      source('apps/web/src/app/member/orientation/member-learning-client.tsx'),
+      source('apps/web/src/app/member/family/page-client.tsx'),
+      source('apps/web/src/app/member/check/page-client.tsx'),
+      source('apps/web/src/app/member/history/page-client.tsx'),
+      source('packages/persistence/migrations/0038_run3_1_member_learning_feed.sql'),
+    ]);
+
+    expect(learning).toContain('Seven short safety lessons');
+    expect(learning).toContain('Show a weekly two-minute rehearsal in this in-app feed');
+    expect(learning).toContain('It never sends an email, text message, or push');
+    expect(family).toContain('<h2>Family verification aid</h2>');
+    expect(family).toContain('redacted result');
+    expect(check).toContain('No notification was sent');
+    expect(history).toContain('I saw this redacted result');
+    expect(guidance).toContain('California DOJ: Court notice scam warning');
   });
 
   it('links every required support and policy route from the public footer', async () => {

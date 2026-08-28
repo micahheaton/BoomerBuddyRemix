@@ -224,6 +224,6 @@ describe('local-only revenue research preview', () => {
     expect(nonResearchSources).not.toContain('BB_LOCAL_REVENUE_RESEARCH_PREVIEW_ENABLED');
     expect(publicSources).not.toMatch(/USD (?:8\.99|89(?:\.00)?|149(?:\.00)?)\b/u);
     expect(publicSources).not.toMatch(/Individual - one person|referral service-credit/iu);
-    expect(publicSources).toContain('Family is USD 14.99 per month');
+    expect(publicSources).toContain('USD 14.99/month');
   });
 });

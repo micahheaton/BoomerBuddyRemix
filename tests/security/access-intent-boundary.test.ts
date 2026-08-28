@@ -75,7 +75,7 @@ describe('private-beta access-intent boundary', () => {
 
     expect(api).toContain("path === '/v1/public/access-intents'");
     expect(api).toContain("credentials: anonymousPublicRequest ? 'omit' : 'include'");
-    expect(cta).toContain('it does not mean an email was sent or a lead was');
+    expect(cta).toMatch(/does not mean an email was sent\s+or a request was received/u);
     expect(cta).toContain('without creating another receipt');
     expect(cta).toContain("setAttribution({ source: 'direct', campaign: 'none' })");
     expect(cta).not.toContain('<Link href="/pricing"');
@@ -83,7 +83,7 @@ describe('private-beta access-intent boundary', () => {
     expect(pricing).toContain("export const dynamic = 'force-dynamic'");
     expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED');
     expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED');
-    expect(pricing).toContain('Early-access requests are paused');
+    expect(pricing).toContain('Family access requests are paused');
     expect(privacy).toMatch(
       /It does not contain your name,\s+email\s+address, phone number, message/iu,
     );

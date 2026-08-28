@@ -111,6 +111,13 @@
         "usedForTracking": false
       },
       {
+        "category": "feedback_text_category_consent_and_receipt",
+        "examples": "Text deliberately submitted as feedback, its category, optional follow-up and short research-retention choices, and a content-free receipt.",
+        "purposes": ["app_functionality", "customer_support", "analytics"],
+        "linkedToAccount": true,
+        "usedForTracking": false
+      },
+      {
         "category": "orientation_privacy_and_deletion_state",
         "examples": "Orientation completion, consent choices, privacy request state, and account deletion request state. The private family phrase is not stored in the mobile app.",
         "purposes": ["app_functionality", "account_management"],
@@ -293,6 +300,11 @@
       {
         "id": "support_legal_accessibility_and_deletion",
         "instruction": "Open Help and policies, Support, Privacy, Terms, Accessibility, and Account deletion from the app.",
+        "preflightRequired": true
+      },
+      {
+        "id": "text_feedback_and_consent_withdrawal",
+        "instruction": "Submit approved synthetic text feedback, confirm the content-free receipt and deletion deadline, and withdraw each optional consent that was granted.",
         "preflightRequired": true
       },
       {

@@ -4,9 +4,16 @@ import { buildSync } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
 type RenderedRoutes = Record<string, string> & {
+  readonly home: string;
   readonly pricing: string;
+  readonly howItWorks: string;
+  readonly trust: string;
   readonly billingTerms: string;
+  readonly support: string;
   readonly privacy: string;
+  readonly terms: string;
+  readonly accessibility: string;
+  readonly accountDeletion: string;
 };
 
 const renderedRoutesByAccessIntentState = new Map<boolean, RenderedRoutes>();
@@ -46,7 +53,7 @@ describe('rendered production customer funnel', () => {
     const rendered = Object.values(renderedProductionRoutes()).join('\n');
 
     expect(rendered).toContain('Family');
-    expect(rendered).toContain('USD 14.99 monthly');
+    expect(rendered).toContain('$14.99 USD per month');
     expect(rendered).toContain('Results can be wrong');
     expect(rendered).not.toMatch(
       /private.?beta|Founding Household|sponsored access|No annual plan|free tier|coupon|referral credit|evidence sufficiency|canonical server|provider state|ruleset|not calibrated|conversion payload|continuity proof|local development|development build/iu,
@@ -69,24 +76,23 @@ describe('rendered production customer funnel', () => {
     const home = renderedProductionRoutes().home;
 
     expect(home).toContain('href="/pricing"');
-    expect(home).toContain('A calmer family response to suspicious messages.');
+    expect(home).toContain('Handle suspicious messages with a calmer family plan.');
+    expect(home).toContain('Scam-safety support for older adults and families');
+    expect(home).toContain('seven short safety lessons');
     expect(home).toContain('USD 14.99/month');
     expect(home).toContain('One invited household');
-    expect(home).toContain('See the Family plan');
-    expect(home).toContain('Try Public Check free');
+    expect(home).toContain('See what Family includes');
+    expect(home).toContain('Try a free Check');
   });
 
   it('advertises only implemented Family value without unsupported capacity claims', () => {
     const pricing = renderedProductionRoutes().pricing;
 
-    expect(pricing).toContain('For one invited household.');
-    expect(pricing).toContain(
-      'Consent-based Trusted Circle invitations, sharing, and acknowledgement',
-    );
-    expect(pricing).toContain('An optional Family Safe Word');
+    expect(pricing).toContain('Billed monthly for one invited household.');
+    expect(pricing).toContain('Invite a Trusted Circle person and share a summary');
+    expect(pricing).toContain('An optional Family Safe Word and weekly in-app practice');
     expect(pricing).toContain('Seven short safety lessons');
-    expect(pricing).toContain('An optional weekly practice prompt in the in-app learning feed');
-    expect(pricing).toContain('Checkout is not public.');
+    expect(pricing).toContain('Family is currently available by invitation.');
     expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
     expect(pricing).not.toContain('You cannot create a new Trusted Circle invitation right now.');
   });
@@ -95,7 +101,7 @@ describe('rendered production customer funnel', () => {
     const pricing = renderedProductionRoutes().pricing;
 
     expect(pricing).toContain('Family access requests are paused');
-    expect(pricing).toContain('No request or email has been sent');
+    expect(pricing).toContain('This page has not sent a request or email');
     expect(pricing).not.toContain('Open an email request');
   });
 
@@ -118,10 +124,33 @@ describe('rendered production customer funnel', () => {
     expect(marketing).toContain('Results can be wrong');
     expect(marketing).toContain('does not monitor your phone');
     expect(marketing).toContain('redacted result');
-    expect(marketing).toContain('private History for up to 30 days');
-    expect(marketing).toContain('Each adult chooses their own participation.');
+    expect(marketing).toMatch(/private (?:Check )?History for up to 30 days/iu);
+    expect(marketing).toContain('Every adult chooses whether to join');
     expect(marketing).toContain('Limited operations metadata');
     expect(marketing).not.toMatch(/device reminder/iu);
+  });
+
+  it('answers the four first-screen buyer questions without internal gate language', () => {
+    const routes = renderedProductionRoutes();
+    const homeHero = routes.home.slice(0, routes.home.indexOf('</section>'));
+    const pricingHero = routes.pricing.slice(0, routes.pricing.indexOf('</section>'));
+
+    expect(homeHero).toContain('older adults and families');
+    expect(homeHero).toContain('seven short safety lessons');
+    expect(homeHero).toContain('USD 14.99/month');
+    expect(homeHero).toContain('See what Family includes');
+    expect(homeHero).toContain('Try a free Check');
+    expect(homeHero).toContain('does not monitor your phone');
+
+    expect(pricingHero).toContain('$14.99 USD per month');
+    expect(pricingHero).toContain('Billed monthly for one invited household');
+    expect(pricingHero).toContain('I have an invitation');
+    expect(pricingHero).toContain('Try a free Check');
+    expect(pricingHero).toContain('Paying does not give anyone access');
+
+    expect(homeHero + pricingHero).not.toMatch(
+      /billing authority|service shows that billing is ready|evidence sufficiency|provider state|ruleset|exact person/iu,
+    );
   });
 
   it('discloses bounded campaign attribution and aggregate conversion measurement', () => {

@@ -12,16 +12,16 @@ describe('launch public surfaces', () => {
   it('publishes the single monthly customer offer without hypothetical-plan denials', async () => {
     const pricing = await source('apps/web/src/app/pricing/page.tsx');
 
-    expect(pricing).toContain('USD 14.99 monthly');
+    expect(pricing).toContain('$14.99 USD per month');
     expect(pricing).not.toMatch(/No annual plan|free tier|coupon|referral credit/iu);
     expect(pricing).not.toContain('$149 annually');
     expect(pricing).not.toContain('$8.99 monthly');
     expect(pricing).not.toMatch(/individual|group rate|referral bonus/iu);
     expect(pricing).toContain('What is included');
     expect(pricing).toContain('A plan before, during, and after uncertainty');
-    expect(pricing).toContain('Checkout is not public.');
-    expect(pricing).toContain('Does paying activate access or visibility?');
-    expect(pricing).toContain('No. Sign-in, household invitation, adult consent');
+    expect(pricing).toContain('Family is currently available by invitation.');
+    expect(pricing).toContain('Can the person paying see another adult&apos;s Checks?');
+    expect(pricing).toContain('No. Each adult joins separately');
   });
 
   it('explains the implemented recurring Family value and its boundaries', async () => {
@@ -37,7 +37,7 @@ describe('launch public surfaces', () => {
     expect(marketing).toContain('Family Safe Word');
     expect(marketing).toContain('redacted result');
     expect(marketing).toMatch(/weekly (?:in-app )?practice/iu);
-    expect(marketing).toContain('in-app acknowledgement');
+    expect(marketing).toContain('acknowledge it in the app');
     expect(marketing).toContain('social aid, not proof of identity');
     expect(marketing).toContain('does not monitor your phone');
     expect(marketing).not.toMatch(/device reminder/iu);

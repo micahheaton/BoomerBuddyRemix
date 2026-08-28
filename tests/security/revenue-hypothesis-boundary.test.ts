@@ -179,7 +179,7 @@ describe('revenue hypothesis production boundary', () => {
     expect(publicConfig).toContain('monthlyUsd: 14.99');
     expect(publicConfig).toContain('annualUsd: null');
     expect(home).toContain('USD 14.99/month');
-    expect(pricing).toContain('USD 14.99 monthly');
+    expect(pricing).toContain('$14.99 USD per month');
     const publicOfferCopy = `${home}\n${pricing}`;
     expect(publicOfferCopy).not.toMatch(/USD (?:8\.99|89|149)\b/u);
     expect(publicOfferCopy).not.toMatch(/\$(?:8\.99|89|149)\b/u);

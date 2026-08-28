@@ -45,21 +45,21 @@ The other entries answer later questions and do not outrank the first-household 
 
 | Hypothesis | What it can test | Why it does not accelerate the first safe payment |
 | --- | --- | --- |
-| Family USD 149 yearly | Stated interval preference and sandbox renewal arithmetic | It increases commitment, refund, tax, and support questions before any retention evidence exists. Up-front cash is not proof of recurring retention. |
+| Family USD 149.90 yearly | Stated interval preference and sandbox renewal arithmetic | It increases commitment, refund, tax, and support questions before any retention evidence exists. Up-front cash is not proof of recurring retention. |
 | Individual USD 8.99 monthly | Stated demand for one-person coverage | It adds a new entitlement, value, support, and copy boundary while lowering initial recurring revenue per payer. |
-| Individual USD 89 yearly | Stated audience and interval preference | It combines both unproved changes and therefore cannot identify which change caused a result. |
+| Individual USD 89.90 yearly | Stated audience and interval preference | It combines both unproved changes and therefore cannot identify which change caused a result. |
 | One-month service credits | Sandbox ledger, liability, and abuse-control behavior | A referral loop requires a settled payer, observed advocacy, recipient consent, and accounting treatment. It cannot produce Customer 1. |
 | Private-beta access receipt | Whether the pricing CTA created a content-free handoff receipt | It does not prove that the visitor sent email, that support received or qualified a lead, or that anyone paid. |
 
 ## Frozen arithmetic and liability
 
-All values below must be read from `packages/domain/src/revenue-hypotheses.ts` at registry version 1.
+All values below must be read from `packages/domain/src/revenue-hypotheses.ts` at registry version 2.
 Do not retype them into production configuration.
 
 | Audience | Monthly | Twelve monthly payments | Yearly candidate | Savings | Rounded discount |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Family household group | USD 14.99 | USD 179.88 | USD 149.00 | USD 30.88 | 17.17% |
-| Individual | USD 8.99 | USD 107.88 | USD 89.00 | USD 18.88 | 17.50% |
+| Family household group | USD 14.99 | USD 179.88 | USD 149.90 | USD 29.98 | 16.67% |
+| Individual | USD 8.99 | USD 107.88 | USD 89.90 | USD 17.98 | 16.67% |
 
 | Credit hypothesis | Credit | Maximum qualifying referrals per referrer | Referrer and household cap | Program cap | Maximum whole credits |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -160,17 +160,17 @@ Use this exact status copy above every pair:
 > Family at USD 14.99 per month is the sole approved production offer candidate, and it is not live.
 > Every yearly and Individual choice shown here is unavailable and is being evaluated only as a hypothesis.
 
-The Family pair is `USD 14.99 each month` and `USD 149 each year; USD 30.88 less than twelve monthly
-payments`. The Individual pair is `USD 8.99 each month` and `USD 89 each year; USD 18.88 less than
-twelve monthly payments`. The only response values are `monthly`, `yearly`, `neither`, and `unsure`.
-Provide a no-response exit.
+The Family pair is `USD 14.99 each month` and `USD 149.90 each year; exactly two monthly payments
+less`. The Individual pair is `USD 8.99 each month` and `USD 89.90 each year; exactly two monthly
+payments less`. The only response values are `monthly`, `yearly`, `neither`, and `unsure`. Provide a
+no-response exit.
 
 The minimized event contract for a future reviewed collector is:
 
 ```json
 {
-  "experimentKey": "offer-pair-v1",
-  "registryVersion": 1,
+  "experimentKey": "offer-pair-v2",
+  "registryVersion": 2,
   "evidenceTier": "synthetic",
   "audience": "family",
   "presentationOrder": "monthly_first",
@@ -204,9 +204,9 @@ Create exactly two sandbox Products and four recurring Prices:
 | Product metadata audience | Price hypothesis key | Unit amount | Recurrence |
 | --- | --- | ---: | --- |
 | `family` | `offer-hypothesis-family-monthly-v1` | 1499 USD cents | month, interval count 1 |
-| `family` | `offer-hypothesis-family-annual-v1` | 14900 USD cents | year, interval count 1 |
+| `family` | `offer-hypothesis-family-annual-v2` | 14990 USD cents | year, interval count 1 |
 | `individual` | `offer-hypothesis-individual-monthly-v1` | 899 USD cents | month, interval count 1 |
-| `individual` | `offer-hypothesis-individual-annual-v1` | 8900 USD cents | year, interval count 1 |
+| `individual` | `offer-hypothesis-individual-annual-v2` | 8990 USD cents | year, interval count 1 |
 
 Each object must report `livemode=false`. Each Price must also report `type=recurring`,
 `billing_scheme=per_unit`, `usage_type=licensed`, `custom_unit_amount=null`, `tiers_mode=null`,
@@ -217,7 +217,7 @@ Use this exact metadata on every research object where the object supports it:
 
 ```text
 bb_scope=stripe_sandbox
-bb_registry_version=1
+bb_registry_version=2
 bb_public_route_enabled=false
 bb_production_activation_enabled=false
 bb_live_provider_write_enabled=false

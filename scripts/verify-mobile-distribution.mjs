@@ -314,6 +314,7 @@ const requiredPrivacyCategories = [
   'user_submitted_check_content',
   'check_results_and_private_history',
   'support_receipt_state',
+  'feedback_text_category_consent_and_receipt',
   'orientation_privacy_and_deletion_state',
   'learning_progress_coarse_region_and_in_app_feed',
   'subscription_access_status',
@@ -328,6 +329,7 @@ const approvedPrivacyPurposes = new Set([
   'account_management',
   'security_and_fraud_prevention',
   'customer_support',
+  'analytics',
 ]);
 for (const item of privacy.dataItems) {
   assertRelease(
@@ -453,7 +455,7 @@ assertRelease(
   Array.isArray(reviewerFlow.prerequisites) &&
     reviewerFlow.prerequisites.length === 4 &&
     Array.isArray(reviewerFlow.steps) &&
-    reviewerFlow.steps.length === 9 &&
+    reviewerFlow.steps.length === 10 &&
     Array.isArray(reviewerFlow.knownUnavailableFeatures) &&
     reviewerFlow.knownUnavailableFeatures.length === 3,
   'reviewer flow must retain complete bounded instructions and unavailable-feature disclosure',
@@ -528,6 +530,7 @@ assertExactStringSet(
     'family_and_orientation',
     'learning_guidance_and_weekly_practice',
     'support_legal_accessibility_and_deletion',
+    'text_feedback_and_consent_withdrawal',
     'session_restart_and_sign_out',
     'no_native_commerce_or_payment_steering',
   ],

@@ -37,8 +37,9 @@ drafts, not provider approvals. Recheck [Apple App Store categories](https://dev
 and [Google Play release preparation](https://support.google.com/googleplay/android-developer/answer/9859348?hl=en)
 before every approval or submission.
 
-The privacy map distinguishes repository-observed account-linked data from data classes not observed
-in product code. It also classifies every runtime dependency currently declared in
+The privacy map distinguishes repository-observed account-linked data, including deliberately
+submitted household feedback and its optional consent state, from data classes not observed in
+product code. It also classifies every runtime dependency currently declared in
 `apps/mobile/package.json`. Verification fails closed if that exact dependency allowlist changes or
 any dependency lacks its approved privacy classification. The allowlist remains repository evidence
 only; a fresh Clerk/Expo SDK disclosure review, generated privacy-manifest review, signed-artifact
@@ -126,8 +127,9 @@ An authorized operator must complete these steps from an approved clean commit:
 8. Preflight the same non-expiring synthetic customer review account for both providers against the
    exact signed candidate. Prove the protected-adult and billing-manager roles, one active household,
    all required capabilities, effective canonical access, both required allowance counters, and all
-   listed reviewer flows. Deliver access separately through App Store Connect and Google Play
-   Console secure review fields. Record no credential, token, customer PII, or Check content.
+   listed reviewer flows, including text-only feedback receipt and consent withdrawal. Deliver access
+   separately through App Store Connect and Google Play Console secure review fields. Record no
+   credential, token, customer PII, feedback text, or Check content.
 
 Every rebuilt artifact needs a new receipt. A successful Expo export or simulator run cannot replace
 the signed-build receipt.

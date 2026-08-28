@@ -42,6 +42,7 @@ export type RootStackParamList = {
   ProtectedAccess: undefined;
   Orientation: undefined;
   LearnUpdates: undefined;
+  Feedback: undefined;
   HelpPolicies: undefined;
   Support: undefined;
   Privacy: undefined;

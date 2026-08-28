@@ -57,7 +57,7 @@ describe('customer production route provenance', () => {
     ]) {
       expect(relativeArtifacts).toContain(requiredLayout);
     }
-    expect(relativeArtifacts).not.toContain('research/offer-pair-v1/page.tsx');
+    expect(relativeArtifacts).not.toContain('research/offer-pair-v2/page.tsx');
 
     for (const artifact of artifacts) {
       const route = relative(customerAppRoot, artifact).split(sep).join('/');

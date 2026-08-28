@@ -96,7 +96,7 @@ describe('customer search indexing boundary', () => {
       '/feedback',
       '/member',
       '/member/history',
-      '/research/offer-pair-v1',
+      '/research/offer-pair-v2',
       '/sign-in',
       '/unauthorized-sign-in',
     ]) {

@@ -11,11 +11,11 @@ export default function HomePage() {
       <main id="main-content">
         <section className="page-shell marketing-hero">
           <div>
-            <span className="eyebrow">Scam-response support for families</span>
-            <h1>A calmer family response to suspicious messages.</h1>
+            <span className="eyebrow">Scam-safety support for older adults and families</span>
+            <h1>Handle suspicious messages with a calmer family plan.</h1>
             <p className="lede">
-              BoomerBuddy helps one invited household prepare before pressure hits, check warning
-              signs, and ask one person they choose for help. You decide what is saved and shared.
+              Family combines seven short safety lessons, a private place to check suspicious text
+              or links, and optional help from a person each adult chooses and trusts.
             </p>
             <p className="offer-line" aria-label="Family plan offer">
               <strong>Family</strong>
@@ -24,23 +24,24 @@ export default function HomePage() {
             </p>
             <div className="button-row">
               <Link className="button button-primary" href="/pricing">
-                See the Family plan
+                See what Family includes
               </Link>
               <Link className="button button-secondary" href="/check">
-                Try Public Check free
+                Try a free Check
               </Link>
             </div>
             <p className="help">
-              Invitation required. Results can be wrong. BoomerBuddy does not monitor your phone or
-              automatically text, email, or push alerts to family members.
+              Private by design: BoomerBuddy does not monitor your phone, read your messages, or
+              contact family automatically. A Check explains warning signs and safer actions; it
+              cannot guarantee that something is safe.
             </p>
           </div>
           <aside className="hero-card workflow-card" aria-label="The Family response plan">
             <span className="data-pill">A plan before the pressure</span>
-            <h2>When something feels wrong</h2>
+            <h2>A simple habit when something feels wrong</h2>
             <ol className="workflow-list">
               <li>
-                <strong>Prepare</strong>
+                <strong>Learn</strong>
                 <span>Practice common scam situations before one feels urgent.</span>
               </li>
               <li>
@@ -48,12 +49,12 @@ export default function HomePage() {
                 <span>Review warning signs and safer next actions.</span>
               </li>
               <li>
-                <strong>Connect by choice</strong>
-                <span>Share only a redacted result with the person you chose.</span>
+                <strong>Ask by choice</strong>
+                <span>Share a summary with the original message or link removed.</span>
               </li>
               <li>
                 <strong>Follow through</strong>
-                <span>See an in-app acknowledgement and record when the concern is handled.</span>
+                <span>See when they acknowledge it and record when the concern is handled.</span>
               </li>
             </ol>
           </aside>
@@ -101,8 +102,8 @@ export default function HomePage() {
               <article className="card">
                 <h3>Trusted Circle help</h3>
                 <p>
-                  Share a redacted result with one exact person you chose. They can review and
-                  acknowledge it in the app.
+                  Share a summary with the original message or link removed. Only the person you
+                  chose can review and acknowledge it in the app.
                 </p>
               </article>
               <article className="card">
@@ -130,14 +131,14 @@ export default function HomePage() {
               <h3>When you receive something suspicious</h3>
               <p>
                 Get a calm second look without being judged, rushed, monitored, or asked to give up
-                control.
+                control of your account.
               </p>
             </article>
             <article className="card">
               <h3>When someone asks you for help</h3>
               <p>
-                See only the redacted result they deliberately shared and help them choose a safer
-                next step.
+                See only the summary they chose to share, with the original message or link removed,
+                and help them choose a safer next step.
               </p>
             </article>
           </div>
@@ -169,7 +170,7 @@ export default function HomePage() {
                   <li>No household collaboration</li>
                 </ul>
                 <Link className="button button-secondary" href="/check">
-                  Try Public Check free
+                  Try a free Check
                 </Link>
               </article>
               <article className="card plan-card plan-card-featured">
@@ -178,12 +179,12 @@ export default function HomePage() {
                 <p className="plan-price">USD 14.99/month</p>
                 <ul className="plain-list">
                   <li>One invited household</li>
-                  <li>Private History for up to 30 days and deliberate redacted sharing</li>
-                  <li>In-app acknowledgement and follow-through</li>
+                  <li>Private History for up to 30 days and sharing only by choice</li>
+                  <li>See when your chosen person acknowledges a shared summary</li>
                   <li>Safe Word, seven lessons, guidance, and weekly practice</li>
                 </ul>
                 <Link className="button button-primary" href="/pricing">
-                  See Family details
+                  See what Family includes
                 </Link>
               </article>
             </div>

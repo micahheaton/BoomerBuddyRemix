@@ -16,6 +16,7 @@ import {
 } from './src/authentication';
 import { MobileHouseholdProvider } from './src/household';
 import { FamilySafeWordScreen } from './src/family-safe-word-screen';
+import { FeedbackScreen } from './src/feedback-screen';
 import { MemberLearningScreen } from './src/member-learning-screen';
 import { clearMobileMemberLearningPendingOperations } from './src/member-learning-idempotency';
 import {
@@ -659,6 +660,11 @@ function MobileApplication(): React.ReactElement {
                 name="LearnUpdates"
                 component={MemberLearningScreen}
                 options={{ title: 'Learn and updates' }}
+              />
+              <Stack.Screen
+                name="Feedback"
+                component={FeedbackScreen}
+                options={{ title: 'Share feedback' }}
               />
               <Stack.Screen
                 name="HelpPolicies"

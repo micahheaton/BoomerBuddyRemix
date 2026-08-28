@@ -24,10 +24,10 @@ async function gotoReady(page: Page, url: string, heading: string | RegExp): Pro
 
 test('public landmark pages have zero serious or critical axe violations', async ({ page }) => {
   const pages = [
-    ['/', 'A calmer family response to suspicious messages.'],
+    ['/', 'Handle suspicious messages with a calmer family plan.'],
     ['/check', 'Pause before you act.'],
     ['/how-it-works', 'A simple family plan for uncertain moments'],
-    ['/pricing', 'An ongoing household plan for calmer scam response'],
+    ['/pricing', 'Family scam-safety support for $14.99 a month'],
     ['/trust', 'Help without surveillance'],
     ['/support', 'Get help with BoomerBuddy'],
     ['/privacy', 'BoomerBuddy privacy notice'],
@@ -57,15 +57,15 @@ test('Family value and both honest next steps remain readable across public brea
     await expect(
       page.getByRole('heading', {
         level: 1,
-        name: 'A calmer family response to suspicious messages.',
+        name: 'Handle suspicious messages with a calmer family plan.',
       }),
     ).toBeVisible();
     await expect(page.getByLabel('Family plan offer')).toContainText('USD 14.99/month');
     await expect(
-      page.getByRole('link', { name: 'See the Family plan', exact: true }),
+      page.getByRole('link', { name: 'See what Family includes', exact: true }).first(),
     ).toBeVisible();
     await expect(
-      page.getByRole('link', { name: 'Try Public Check free', exact: true }).first(),
+      page.getByRole('link', { name: 'Try a free Check', exact: true }).first(),
     ).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -74,7 +74,7 @@ test('Family value and both honest next steps remain readable across public brea
 
     for (const [path, heading] of [
       ['/how-it-works', 'A simple family plan for uncertain moments'],
-      ['/pricing', 'An ongoing household plan for calmer scam response'],
+      ['/pricing', 'Family scam-safety support for $14.99 a month'],
     ] as const) {
       await page.goto(`${customerUrl}${path}`, { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();

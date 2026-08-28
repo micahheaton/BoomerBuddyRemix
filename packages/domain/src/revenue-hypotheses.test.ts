@@ -9,7 +9,7 @@ import {
 
 describe('isolated revenue hypotheses', () => {
   it('records the exact versioned subscription values without a live scope', () => {
-    expect(revenueOfferHypothesisRegistryVersion).toBe(1);
+    expect(revenueOfferHypothesisRegistryVersion).toBe(2);
     expect(revenueHypothesisScopes).toEqual(['synthetic', 'stripe_sandbox']);
     expect(
       revenueOfferHypothesisRegistry.map((hypothesis) => ({
@@ -36,13 +36,13 @@ describe('isolated revenue hypotheses', () => {
         scopes: ['synthetic', 'stripe_sandbox'],
       },
       {
-        hypothesisKey: 'offer-hypothesis-family-annual-v1',
-        version: 1,
-        displayName: 'Family annual USD 149',
+        hypothesisKey: 'offer-hypothesis-family-annual-v2',
+        version: 2,
+        displayName: 'Family annual USD 149.90',
         audience: 'family',
         billingInterval: 'year',
         currency: 'USD',
-        amountMinor: 14_900,
+        amountMinor: 14_990,
         comparisonRole: 'synthetic_candidate',
         scopes: ['synthetic', 'stripe_sandbox'],
       },
@@ -58,13 +58,13 @@ describe('isolated revenue hypotheses', () => {
         scopes: ['synthetic', 'stripe_sandbox'],
       },
       {
-        hypothesisKey: 'offer-hypothesis-individual-annual-v1',
-        version: 1,
-        displayName: 'Individual annual USD 89',
+        hypothesisKey: 'offer-hypothesis-individual-annual-v2',
+        version: 2,
+        displayName: 'Individual annual USD 89.90',
         audience: 'individual',
         billingInterval: 'year',
         currency: 'USD',
-        amountMinor: 8_900,
+        amountMinor: 8_990,
         comparisonRole: 'synthetic_candidate',
         scopes: ['synthetic', 'stripe_sandbox'],
       },
@@ -92,21 +92,21 @@ describe('isolated revenue hypotheses', () => {
     expect(seededFamilyAmounts).toEqual([1_499, 14_900]);
   });
 
-  it('keeps each annual candidate discounted from twelve monthly payments', () => {
+  it('prices each annual candidate at exactly ten monthly payments', () => {
     for (const comparison of [
       {
         audience: 'family',
-        expectedAnnualMinor: 14_900,
+        expectedAnnualMinor: 14_990,
         expectedMonthlyMinor: 1_499,
-        expectedSavingsMinor: 3_088,
-        expectedDiscountBasisPoints: 1_717,
+        expectedSavingsMinor: 2_998,
+        expectedDiscountBasisPoints: 1_667,
       },
       {
         audience: 'individual',
-        expectedAnnualMinor: 8_900,
+        expectedAnnualMinor: 8_990,
         expectedMonthlyMinor: 899,
-        expectedSavingsMinor: 1_888,
-        expectedDiscountBasisPoints: 1_750,
+        expectedSavingsMinor: 1_798,
+        expectedDiscountBasisPoints: 1_667,
       },
     ] as const) {
       const monthly = revenueOfferHypothesisRegistry.find(
@@ -120,6 +120,7 @@ describe('isolated revenue hypotheses', () => {
 
       expect(monthly?.amountMinor).toBe(comparison.expectedMonthlyMinor);
       expect(annual?.amountMinor).toBe(comparison.expectedAnnualMinor);
+      expect(annual?.amountMinor).toBe((monthly?.amountMinor ?? 0) * 10);
       const twelveMonthlyPayments = (monthly?.amountMinor ?? 0) * 12;
       const savingsMinor = twelveMonthlyPayments - (annual?.amountMinor ?? 0);
       expect(savingsMinor).toBe(comparison.expectedSavingsMinor);

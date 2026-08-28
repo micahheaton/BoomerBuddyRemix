@@ -97,7 +97,14 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 - Current provider questionnaires, SDK disclosures, signed manifests, live operations, screenshots,
   reviewer-account preflight, and professional review must still be reconciled before any store
   answer or listing is approved.
-- The isolated Feedback component remains source-only and unwired; production navigation and artifacts omit it.
+- Signed-in members can submit text-only household feedback from production navigation. The mobile
+  client validates the exact request and response contracts, binds each request and receipt to the
+  selected household, retains the same idempotency key only for an unchanged uncertain retry, and
+  aborts and clears private state on a household switch. It accepts no attachment, contact detail,
+  destination, or external processing action. Optional in-app follow-up and short research-retention
+  consent can be withdrawn independently from the receipt; a server-confirmed active-store erasure
+  updates text-retention state without changing another still-granted consent. Signed-device
+  behavior and staffed review remain external gates.
 - Web export, TypeScript, and bundle inspection are build evidence, not device evidence.
 - The production verifier is a static artifact/payload and Expo-bundle check; it is not hydrated production-browser or native-device evidence.
 

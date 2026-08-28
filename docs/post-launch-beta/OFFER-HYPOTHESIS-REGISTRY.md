@@ -25,20 +25,21 @@ values. They are not current offer hypotheses, production Checkout contracts, pr
 promotion inputs. Do not update historical rows in place or infer authority from them. A future
 approved offer requires a new versioned production contract that passes the promotion gate below.
 
-## Version 1 subscription hypotheses
+## Version 2 subscription hypothesis registry
 
 | Key | Name | Amount | Interval | Role | Allowed scopes |
 | --- | --- | ---: | --- | --- | --- |
 | `offer-hypothesis-family-monthly-v1` | Family monthly USD 14.99 | 1,499 cents | month | synthetic control | synthetic, stripe_sandbox |
-| `offer-hypothesis-family-annual-v1` | Family annual USD 149 | 14,900 cents | year | synthetic candidate | synthetic, stripe_sandbox |
+| `offer-hypothesis-family-annual-v2` | Family annual USD 149.90 | 14,990 cents | year | synthetic candidate | synthetic, stripe_sandbox |
 | `offer-hypothesis-individual-monthly-v1` | Individual monthly USD 8.99 | 899 cents | month | synthetic candidate | synthetic, stripe_sandbox |
-| `offer-hypothesis-individual-annual-v1` | Individual annual USD 89 | 8,900 cents | year | synthetic candidate | synthetic, stripe_sandbox |
+| `offer-hypothesis-individual-annual-v2` | Individual annual USD 89.90 | 8,990 cents | year | synthetic candidate | synthetic, stripe_sandbox |
 
-The Family annual candidate saves USD 30.88, or about 17.17 percent, compared with twelve Family
-monthly payments. The Individual annual candidate saves USD 18.88, or about 17.50 percent, compared
-with twelve Individual monthly payments. Automated tests bind these exact comparisons. Family is
-the household coverage hypothesis; no separate employer, association, or bulk group price has been
-specified, so the registry does not invent one.
+Each annual version 2 candidate costs exactly ten monthly payments. Family annual saves USD 29.98
+and Individual annual saves USD 17.98 compared with twelve monthly payments, so each discount is
+exactly two monthly payments. Automated tests bind this arithmetic. Family is the household
+coverage hypothesis; no separate employer, association, or bulk group price has been specified, so
+the registry does not invent one. The prior annual version 1 hypotheses remain historical evidence
+and are not active registry entries.
 
 The former USD 119 Family annual founding experiment is retired. The legacy
 `founding_experiment` kind can remain readable for historical catalog, migration, and replay

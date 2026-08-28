@@ -18,6 +18,7 @@ import { describe, expect, it } from 'vitest';
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const isolatedPreviewPaths = new Set([
   'apps/web/src/app/research/offer-pair-v1/page.tsx',
+  'apps/web/src/app/research/offer-pair-v2/page.tsx',
   'apps/web/src/components/revenue-research-preview.tsx',
   'apps/web/src/lib/revenue-research-preview.ts',
 ]);
@@ -84,9 +85,9 @@ describe('local-only revenue research preview', () => {
     ).toBe(false);
   });
 
-  it('binds exact preview arithmetic and copy to registry version 1', () => {
-    expect(revenueOfferHypothesisRegistryVersion).toBe(1);
-    expect(revenueOfferHypothesisRegistry.every((offer) => offer.version === 1)).toBe(true);
+  it('binds exact preview arithmetic and copy to registry version 2', () => {
+    expect(revenueOfferHypothesisRegistryVersion).toBe(2);
+    expect(revenueOfferHypothesisRegistry.map((offer) => offer.version)).toEqual([1, 2, 1, 2]);
     expect(referralRevenueHypothesisRegistry.every((hypothesis) => hypothesis.version === 1)).toBe(
       true,
     );
@@ -115,6 +116,8 @@ describe('local-only revenue research preview', () => {
       expect(definition.savingsMinor).toBe(
         definition.twelveMonthlyPaymentsMinor - definition.yearlyAmountMinor,
       );
+      expect(definition.yearlyAmountMinor).toBe(definition.monthlyAmountMinor * 10);
+      expect(definition.savingsMinor).toBe(definition.monthlyAmountMinor * 2);
       expect(definition.referral.creditMinor).toBe(referral?.creditMinor);
       expect(definition.referral.maximumQualifyingReferrals).toBe(
         referral?.maximumQualifyingReferralsPerReferrer,
@@ -133,14 +136,14 @@ describe('local-only revenue research preview', () => {
     expect(revenueResearchAudienceDefinitions.family).toMatchObject({
       label: 'Family - one household group',
       monthlyCopy: 'USD 14.99 each month',
-      yearlyCopy: 'USD 149 each year; USD 30.88 less than twelve monthly payments',
-      savingsMinor: 3_088,
+      yearlyCopy: 'USD 149.90 each year; exactly two monthly payments less',
+      savingsMinor: 2_998,
     });
     expect(revenueResearchAudienceDefinitions.individual).toMatchObject({
       label: 'Individual - one person',
       monthlyCopy: 'USD 8.99 each month',
-      yearlyCopy: 'USD 89 each year; USD 18.88 less than twelve monthly payments',
-      savingsMinor: 1_888,
+      yearlyCopy: 'USD 89.90 each year; exactly two monthly payments less',
+      savingsMinor: 1_798,
     });
     expect(revenueResearchResponseChoices.map((choice) => choice.value)).toEqual([
       'monthly',
@@ -172,10 +175,10 @@ describe('local-only revenue research preview', () => {
 
   it('contains no collector, durable tracking, provider call, or purchase path', async () => {
     const [page, component, model, routeFiles] = await Promise.all([
-      source('apps/web/src/app/research/offer-pair-v1/page.tsx'),
+      source('apps/web/src/app/research/offer-pair-v2/page.tsx'),
       source('apps/web/src/components/revenue-research-preview.tsx'),
       source('apps/web/src/lib/revenue-research-preview.ts'),
-      readdir(resolve(repositoryRoot, 'apps/web/src/app/research/offer-pair-v1')),
+      readdir(resolve(repositoryRoot, 'apps/web/src/app/research/offer-pair-v2')),
     ]);
     const preview = `${page}\n${component}\n${model}`;
 
@@ -219,7 +222,7 @@ describe('local-only revenue research preview', () => {
       )
     ).join('\n');
 
-    expect(nonResearchSources).not.toContain('/research/offer-pair-v1');
+    expect(nonResearchSources).not.toContain('/research/offer-pair-v2');
     expect(nonResearchSources).not.toContain('RevenueResearchPreview');
     expect(nonResearchSources).not.toContain('BB_LOCAL_REVENUE_RESEARCH_PREVIEW_ENABLED');
     expect(publicSources).not.toMatch(/USD (?:8\.99|89(?:\.00)?|149(?:\.00)?)\b/u);

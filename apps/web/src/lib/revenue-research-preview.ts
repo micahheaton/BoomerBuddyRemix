@@ -34,11 +34,11 @@ export const revenueResearchPreviewStatusCopy =
 const familyDefinition = Object.freeze({
   label: 'Family - one household group',
   monthlyAmountMinor: 1_499,
-  yearlyAmountMinor: 14_900,
+  yearlyAmountMinor: 14_990,
   twelveMonthlyPaymentsMinor: 17_988,
-  savingsMinor: 3_088,
+  savingsMinor: 2_998,
   monthlyCopy: 'USD 14.99 each month',
-  yearlyCopy: 'USD 149 each year; USD 30.88 less than twelve monthly payments',
+  yearlyCopy: 'USD 149.90 each year; exactly two monthly payments less',
   referral: Object.freeze({
     creditMinor: 1_499,
     maximumQualifyingReferrals: 3,
@@ -54,11 +54,11 @@ const familyDefinition = Object.freeze({
 const individualDefinition = Object.freeze({
   label: 'Individual - one person',
   monthlyAmountMinor: 899,
-  yearlyAmountMinor: 8_900,
+  yearlyAmountMinor: 8_990,
   twelveMonthlyPaymentsMinor: 10_788,
-  savingsMinor: 1_888,
+  savingsMinor: 1_798,
   monthlyCopy: 'USD 8.99 each month',
-  yearlyCopy: 'USD 89 each year; USD 18.88 less than twelve monthly payments',
+  yearlyCopy: 'USD 89.90 each year; exactly two monthly payments less',
   referral: Object.freeze({
     creditMinor: 899,
     maximumQualifyingReferrals: 3,

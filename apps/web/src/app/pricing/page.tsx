@@ -21,36 +21,43 @@ export default function PricingPage() {
       <main id="main-content">
         <section className="page-shell pricing-hero">
           <span className="eyebrow">Family pricing</span>
-          <h1 className="page-title">An ongoing household plan for calmer scam response</h1>
+          <h1 className="page-title">Family scam-safety support for $14.99 a month</h1>
           <p className="lede">
-            Family combines preparation, private Check history for up to 30 days, and consent-based
-            help from a person each adult chooses. Paying never grants access to another
-            adult&apos;s Checks.
+            One invited household gets short lessons, private Checks and History, and optional help
+            from a person each adult chooses. No phone monitoring. No automatic family messages.
           </p>
           <article className="card pricing-offer" aria-labelledby="family-plan-heading">
             <div>
-              <span className="data-pill">Invitation required</span>
+              <span className="data-pill">Available by invitation</span>
               <h2 id="family-plan-heading">Family</h2>
-              <p className="plan-price">USD 14.99 monthly</p>
-              <p>For one invited household. It renews monthly until canceled.</p>
+              <p className="plan-price" aria-label="14 dollars and 99 cents US per month">
+                $14.99 USD per month
+              </p>
+              <p>Billed monthly for one invited household. Renews until canceled.</p>
+              <div className="button-row pricing-quick-actions">
+                <Link className="button button-primary" href="/sign-in">
+                  I have an invitation
+                </Link>
+                <Link className="button button-secondary" href="/check">
+                  Try a free Check
+                </Link>
+              </div>
             </div>
             <div>
               <h3>What is included</h3>
               <ul className="plain-list">
-                <li>Public and member Check, plus private History for up to 30 days</li>
-                <li>Consent-based Trusted Circle invitations, sharing, and acknowledgement</li>
-                <li>An optional Family Safe Word</li>
                 <li>Seven short safety lessons</li>
-                <li>Dated, source-linked US guidance, including a reviewed California brief</li>
-                <li>An optional weekly practice prompt in the in-app learning feed</li>
+                <li>Reviewed, source-linked US scam guidance</li>
+                <li>Check suspicious message text or a website address for warning signs</li>
+                <li>Private Check History for up to 30 days</li>
+                <li>Invite a Trusted Circle person and share a summary only when you choose</li>
+                <li>An optional Family Safe Word and weekly in-app practice</li>
               </ul>
             </div>
           </article>
           <div className="notice role-note">
-            <strong>Each adult chooses their own participation.</strong> An adult must separately
-            enroll for Family protection features before using private Check, History, learning,
-            Safe Word, or Trusted Circle sharing. Paying for or organizing a household does not
-            activate those features for another adult.
+            <strong>Paying does not give anyone access to another adult&apos;s Checks.</strong>{' '}
+            Every adult chooses whether to join, use Family features, or share a Check.
           </div>
         </section>
 
@@ -73,8 +80,8 @@ export default function PricingPage() {
               <article className="card">
                 <h3>Choose private help</h3>
                 <p>
-                  Invite one exact Trusted Circle person, then deliberately share a redacted result
-                  when you want their help.
+                  Invite a Trusted Circle person, then share a summary with the original message or
+                  link removed when you want their help.
                 </p>
               </article>
               <article className="card">
@@ -90,18 +97,19 @@ export default function PricingPage() {
 
         <section className="page-shell pricing-access" aria-labelledby="family-access-heading">
           <h2 id="family-access-heading" className="section-heading">
-            Family access
+            How to get Family
           </h2>
           <p>
-            Checkout is not public. It becomes available only after an invited household has
-            verified billing authority and the service shows that billing is ready.
+            Family is currently available by invitation. If you have an invitation, sign in to see
+            whether your account is ready for payment. If not, Public Check remains free while
+            access opens to more households.
           </p>
           <div className="button-row">
             <Link className="button button-primary" href="/sign-in">
-              Invited member sign in
+              I have an invitation
             </Link>
             <Link className="button button-secondary" href="/check">
-              Try Public Check free
+              Try a free Check
             </Link>
           </div>
           {accessIntentsEnabled ? (
@@ -113,8 +121,8 @@ export default function PricingPage() {
             >
               <h3 id="early-access-unavailable-heading">Family access requests are paused</h3>
               <p>
-                No request or email has been sent from this page. Invited members can sign in above.
-                For current contact options, visit the <Link href="/support">support page</Link>.
+                This page has not sent a request or email. Invited members can sign in above. For
+                current contact options, visit the <Link href="/support">support page</Link>.
               </p>
             </section>
           )}
@@ -139,10 +147,10 @@ export default function PricingPage() {
                 </p>
               </article>
               <article className="card">
-                <h3>Does paying activate access or visibility?</h3>
+                <h3>Can the person paying see another adult&apos;s Checks?</h3>
                 <p>
-                  No. Sign-in, household invitation, adult consent, exact sharing permission,
-                  billing authority, and paid access are checked separately.
+                  No. Each adult joins separately, and each Check stays private unless its owner
+                  chooses to share a summary with their Trusted Circle person.
                 </p>
               </article>
               <article className="card">

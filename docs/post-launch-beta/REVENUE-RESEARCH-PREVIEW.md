@@ -5,7 +5,7 @@ or participant exposure.
 
 ## Boundary
 
-The isolated route is `/research/offer-pair-v1`. It is not linked by the public site. It always
+The isolated route is `/research/offer-pair-v2`. It is not linked by the public site. It always
 returns not found unless all three runtime conditions are exact:
 
 ```text
@@ -26,12 +26,13 @@ deterministic under test. No order or response is retained.
 ## Offer and referral truth
 
 [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) remains controlling. Family at USD
-14.99 per month is the sole approved production offer candidate and is not live. Family yearly, Individual monthly,
-Individual yearly, and both non-cash referral service-credit ideas remain unavailable hypotheses.
-The preview does not activate, map, reserve, sell, or collect evidence for any hypothesis.
+14.99 per month is the sole approved production offer candidate and is not live. Family yearly,
+Individual monthly, Individual yearly, and both non-cash referral service-credit ideas remain
+unavailable hypotheses. The preview does not activate, map, reserve, sell, or collect evidence for
+any hypothesis.
 
 Automated security tests bind every displayed amount, saving, cap, and allowed response to registry
-version 1. They also prove the route is double-gated and local-only, contains no submission path,
+version 2. They also prove the route is double-gated and local-only, contains no submission path,
 and is not imported or linked by any other web source.
 
 ## Stop rule

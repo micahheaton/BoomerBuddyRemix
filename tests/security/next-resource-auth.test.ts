@@ -133,6 +133,7 @@ describe('Next resource-local authentication inventory', () => {
         'apps/web/src/app/member/layout.tsx',
         'apps/web/src/app/research/layout.tsx',
         'apps/web/src/app/research/offer-pair-v1/page.tsx',
+        'apps/web/src/app/research/offer-pair-v2/page.tsx',
         'apps/web/src/app/robots.ts',
         'apps/web/src/app/sign-in/layout.tsx',
         'apps/web/src/app/sitemap.ts',
@@ -174,7 +175,7 @@ describe('Next resource-local authentication inventory', () => {
     expect(isPublicCustomerResourcePath('/apiary')).toBe(false);
     expect(classifyCustomerResourcePath('/member/history')).toBe('guarded');
     expect(classifyCustomerResourcePath('/membership')).toBe('unclassified');
-    expect(classifyCustomerResourcePath('/research/offer-pair-v1')).toBe('unclassified');
+    expect(classifyCustomerResourcePath('/research/offer-pair-v2')).toBe('unclassified');
     expect(classifyCustomerResourcePath('/robots.txt')).toBe('public');
     expect(classifyCustomerResourcePath('/sitemap.xml')).toBe('public');
   });

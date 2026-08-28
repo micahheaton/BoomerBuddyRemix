@@ -541,7 +541,6 @@ for (const value of [
   'Create local invitation',
   'Open device share sheet',
   'Review native proof status',
-  'Share feedback',
   'Submit local feedback',
 ]) {
   if (mobileText.includes(value)) {

@@ -395,6 +395,43 @@ describe('member learning repository', () => {
     ).rejects.toThrow('effective protected access');
   }, 60_000);
 
+  it('resolves each reviewed regional brief before the national brief', async () => {
+    const regionalNow = new Date('2026-08-28T12:00:00.000Z');
+    database = await createSeededTestDatabase(regionalNow);
+    const repository = new MemberLearningRepository(database);
+    const expected = [
+      ['US-AZ', 'az-crypto-atm-payment-demand'],
+      ['US-IL', 'il-fake-traffic-toll-text'],
+      ['US-NY', 'ny-gold-bar-account-emergency'],
+      ['US-PA', 'pa-cash-courier-emergency'],
+    ] as const;
+
+    for (const [index, [coarseRegion, briefKey]] of expected.entries()) {
+      const snapshot = await repository.updatePreferences({
+        householdId: 'household-sunrise',
+        personId: 'person-owner-alice',
+        audience: 'customer',
+        correlationId: `correlation-learning-regional-${index + 1}`,
+        now: regionalNow,
+        coarseRegion,
+        weeklyRehearsalEnabled: false,
+        idempotencyKey: operationKey('preferences-update', 30 + index),
+      });
+
+      expect(snapshot.guidance).toMatchObject({
+        requestedRegion: coarseRegion,
+        resolvedRegion: coarseRegion,
+        state: 'current',
+      });
+      expect(snapshot.guidance.briefs.map((brief) => [brief.region, brief.key])).toEqual([
+        [coarseRegion, briefKey],
+        ['US', 'us-imposter-scam-trends'],
+      ]);
+      expect(snapshot.guidance.briefs[0]?.safeActions).toHaveLength(4);
+      expect(snapshot.guidance.briefs[0]?.source.url).toMatch(/^https:\/\//u);
+    }
+  }, 60_000);
+
   it('denies neutral, cross-household, capability-lost, and entitlement-lost direct callers without side effects', async () => {
     database = await createSeededTestDatabase(now);
     const repository = new MemberLearningRepository(database);

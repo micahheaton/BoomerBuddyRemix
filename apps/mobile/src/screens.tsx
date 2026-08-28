@@ -544,6 +544,13 @@ export function HomeScreen({
             Only an enrolled protected adult can complete orientation for this household.
           </Text>
         ) : null}
+        {!isUnassigned ? (
+          <ActionButton
+            kind="secondary"
+            title="Share feedback"
+            onPress={() => navigation.navigate('Feedback')}
+          />
+        ) : null}
         <ActionButton
           kind="secondary"
           title="Help and policies"

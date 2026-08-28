@@ -1,13 +1,13 @@
 export const revenueHypothesisScopes = ['synthetic', 'stripe_sandbox'] as const;
 export type RevenueHypothesisScope = (typeof revenueHypothesisScopes)[number];
 
-export const revenueOfferHypothesisRegistryVersion = 1 as const;
+export const revenueOfferHypothesisRegistryVersion = 2 as const;
 
 export const revenueOfferHypothesisKeys = [
   'offer-hypothesis-family-monthly-v1',
-  'offer-hypothesis-family-annual-v1',
+  'offer-hypothesis-family-annual-v2',
   'offer-hypothesis-individual-monthly-v1',
-  'offer-hypothesis-individual-annual-v1',
+  'offer-hypothesis-individual-annual-v2',
 ] as const;
 export type RevenueOfferHypothesisKey = (typeof revenueOfferHypothesisKeys)[number];
 
@@ -16,9 +16,9 @@ export interface RevenueOfferHypothesis {
   readonly version: number;
   readonly displayName:
     | 'Family monthly USD 14.99'
-    | 'Family annual USD 149'
+    | 'Family annual USD 149.90'
     | 'Individual monthly USD 8.99'
-    | 'Individual annual USD 89';
+    | 'Individual annual USD 89.90';
   readonly audience: 'family' | 'individual';
   readonly billingInterval: 'month' | 'year';
   readonly currency: 'USD';
@@ -51,13 +51,13 @@ export const revenueOfferHypothesisRegistry = Object.freeze([
     ...productionIsolation,
   }),
   Object.freeze({
-    hypothesisKey: 'offer-hypothesis-family-annual-v1',
-    version: 1,
-    displayName: 'Family annual USD 149',
+    hypothesisKey: 'offer-hypothesis-family-annual-v2',
+    version: 2,
+    displayName: 'Family annual USD 149.90',
     audience: 'family',
     billingInterval: 'year',
     currency: 'USD',
-    amountMinor: 14_900,
+    amountMinor: 14_990,
     comparisonRole: 'synthetic_candidate',
     scopes: isolatedScopes,
     ...productionIsolation,
@@ -75,13 +75,13 @@ export const revenueOfferHypothesisRegistry = Object.freeze([
     ...productionIsolation,
   }),
   Object.freeze({
-    hypothesisKey: 'offer-hypothesis-individual-annual-v1',
-    version: 1,
-    displayName: 'Individual annual USD 89',
+    hypothesisKey: 'offer-hypothesis-individual-annual-v2',
+    version: 2,
+    displayName: 'Individual annual USD 89.90',
     audience: 'individual',
     billingInterval: 'year',
     currency: 'USD',
-    amountMinor: 8_900,
+    amountMinor: 8_990,
     comparisonRole: 'synthetic_candidate',
     scopes: isolatedScopes,
     ...productionIsolation,

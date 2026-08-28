@@ -8,9 +8,9 @@ export type IndexedCustomerPageMetadata = {
 
 export const indexedCustomerPageMetadata = {
   '/': {
-    title: 'BoomerBuddy Family: scam-response support for households',
+    title: 'BoomerBuddy Family: scam-safety support for older adults',
     description:
-      'Prepare, check warning signs, and ask one person you choose for help with private, consent-based household scam-response support.',
+      'Use short lessons, private Checks, and optional help from someone you trust to handle suspicious messages with a calmer family plan.',
     alternates: { canonical: '/' },
   },
   '/check': {
@@ -28,7 +28,7 @@ export const indexedCustomerPageMetadata = {
   '/pricing': {
     title: 'Family pricing | BoomerBuddy',
     description:
-      'See what the invitation-only Family plan includes for USD 14.99 monthly, with consent boundaries, renewal, and cancellation details.',
+      'See the invitation-only BoomerBuddy Family plan, including lessons, private Checks, Trusted Circle help, and monthly billing for $14.99 USD.',
     alternates: { canonical: '/pricing' },
   },
   '/trust': {

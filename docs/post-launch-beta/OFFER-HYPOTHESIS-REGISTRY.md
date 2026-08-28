@@ -2,14 +2,17 @@
 
 ## Boundary
 
-Family at USD 14.99 per month is the sole approved production offer candidate. It is not a live
-offer. Its default-off Checkout contract, Stripe mapping, and customer copy remain separate from
-this registry.
+The versioned production catalog now defines Family annual at USD 149.90 after a seven-day trial as
+the intended default repository candidate and retains Family monthly at USD 14.99 without a trial.
+Neither offer is live. Account creation alone does not start a trial or charge; a customer must
+explicitly select Checkout, consent, and provide a payment method. The production catalog, Stripe
+mapping, and customer copy remain separate from this hypothesis registry.
 
-For every annual, Individual, and referral hypothesis, this document is the controlling planning
-index and `packages/domain/src/revenue-hypotheses.ts` is the controlling typed registry. If another
-post-launch plan, prompt, report, or backlog conflicts with this boundary, this boundary wins. Such
-text is historical or exploratory and grants no execution authority.
+For default-off Individual, group-rate, and referral hypotheses, this document is the controlling
+planning index and `packages/domain/src/revenue-hypotheses.ts` is the controlling typed registry.
+Family annual rows here remain historical research evidence; the versioned production catalog
+controls the current Family repository candidates. Conflicting historical or exploratory text
+grants no execution authority.
 
 The registry is evidence for controlled future experiments only. Every entry has exactly two
 allowed scopes: `synthetic` and `stripe_sandbox`. Every entry disables public routes, production

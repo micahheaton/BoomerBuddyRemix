@@ -9,17 +9,19 @@ the phrase `CONFIRM NONCHARGING RELEASE SETUP`. It also stated, `The first autho
 that later records never alter or replace the authorized snapshot; in current terminology, that is
 the immutable scope-bound snapshot and digest.
 
-Use this template only after the paid Family entitlement repair is complete, the exact candidate is
-clean and pushed, and its full local and GitHub CI gates are green. The completed receipt must live
-outside the versioned candidate so it can bind the candidate without changing it. An active-task
-receipt or another approved append-only release log is acceptable. Never put a secret, customer PII,
-payment detail, session identifier, safe word, submitted artifact, private recovery value, or raw
-provider export in the receipt.
+Do not use this retired template for the current release. It is retained only as historical format
+and regression evidence for the earlier monthly-only noncharging plan. A current release must create
+a new external scope receipt that binds the exact current catalog, candidate, action manifest,
+targets, prerequisites, stop conditions, and rollback. Never put a secret, customer PII, payment
+detail, session identifier, safe word, submitted artifact, private recovery value, or raw provider
+export in any receipt.
 
-The sole production offer in this packet is Family at USD 14.99 per month for one household. Family
-annual, Individual, group, referral, coupon, credit, trial, adaptive pricing, Payment Link, and native
-purchase variants remain unavailable. Checkout and Portal initiation remain disabled throughout
-this packet. Twilio remains disabled. The separate legacy `BoomerBuddy` Replit project,
+This packet predates the versioned production catalog and is retired for the current release. Its
+historical boundary allowed only Family at USD 14.99 per month for one household and excluded every
+annual, Individual, group, referral, coupon, credit, trial, adaptive-pricing, Payment Link, and native
+purchase variant. Do not use that historical boundary to override the current catalog. Checkout and
+Portal initiation remain disabled throughout this historical packet. Twilio remains disabled. The
+separate legacy `BoomerBuddy` Replit project,
 `boomerbuddy.net`, its Twilio evidence, and its Stripe webhook remain untouched.
 
 ## 1. Receipt state and evidence classes

@@ -1,25 +1,30 @@
 # Product value beta evidence ledger
 
-## Current integration overlay: uncommitted work in progress
+## Current integration overlay: committed and merged candidate
 
-This section is the controlling status for the current worktree. The detailed receipt below remains
-an immutable record of the earlier product-value candidate and must not be used as proof for this
-overlay.
+This section is the controlling status for the committed integrated implementation baseline. The
+detailed receipt below remains an immutable record of the earlier product-value candidate and must
+not be used as proof for this overlay.
 
-- Working branch: `codex/annual-trial-content-beta`.
+- Implementation branch: `codex/annual-trial-content-beta`.
 - Frozen base commit: `a8d0080701d80f3bb0219905a53c6c86a6a26d47`.
 - Frozen base tag: `run3-1-replit-founding-household-a8d0080701d8`.
 - Frozen base CI: GitHub Actions run `33154571879` passed all five jobs for the exact base commit.
-- Current tree state: uncommitted integration candidate after lane convergence.
+- Implementation commits: `db2ff5efbc139623b72584f55e896213128c2552` and
+  `45714b713619e3d02785ca84669da6ec364d1b70`.
+- Merged `main` commit: `20fc6783046df682b92bb01495fabbff347d2727`.
+- Exact-SHA pull-request CI: run `33176283345` passed all five jobs.
+- Current state: committed and merged repository candidate; release tag, provider, deployment,
+  physical-device, and customer proof remain open.
 - Evidence boundary: the integrated tree passed the full local verification chain, browser journeys,
   supported-browser accessibility matrix, migration rehearsal, dependency threshold, mobile asset,
-  and provider-free distribution checks. These results bind the uncommitted tree only and do not
-  replace a clean-tree dependency receipt, exact-SHA CI, provider proof, deployment proof, physical
-  device proof, or customer rehearsal.
+  and provider-free distribution checks. These results bind the committed implementation. The
+  clean-tree dependency receipt and exact-SHA pull-request CI passed, but they do not replace
+  annotated-tag CI, provider proof, deployment proof, physical-device proof, or customer rehearsal.
 - Data and external boundary: no customer PII belongs in this work. This overlay records no
   production database, provider, deployment, customer, message, payment, or money write.
 
-### Repository candidates in the current worktree
+### Repository candidates in the committed implementation baseline
 
 | Lane | Current repository candidate | Evidence and remaining boundary |
 | --- | --- | --- |
@@ -49,22 +54,23 @@ overlay.
 - `npm audit --audit-level=high` passed its threshold with 1 low and 23 moderate advisories and no
   high or critical finding. Mobile asset integrity, Expo export, and provider-free distribution
   inputs passed for `net.boomerbuddy.app`.
-- The release dependency verifier correctly remains open until the candidate is committed and the
-  checkout is clean. No local result is an exact-SHA CI, provider, deployment, physical-device,
-  real-customer, payment, or outcome receipt.
+- The clean-tree release dependency verifier and exact-SHA pull-request CI passed. No repository
+  result is an annotated-tag CI, provider, deployment, physical-device, real-customer, payment, or
+  outcome receipt.
 
 ### Sell-today decision and closure gates
 
 Paid launch today is **no**. Anonymous live evidence still shows the older customer application,
 including a missing `/sign-in/client-trust` route and broken sign-in behavior. The new catalog,
 trial, authority, content, and mobile work passed full combined local verification and isolated
-migration rehearsal. It has not received a clean-tree dependency receipt, a new exact-SHA CI receipt,
-provider configuration proof, production migration, deployment, or first-customer rehearsal.
+migration rehearsal. It has received a clean-tree dependency receipt, exact-SHA pull-request CI,
+and a merge to `main`. It has not received annotated-tag CI, provider configuration proof,
+production migration, deployment, or first-customer rehearsal.
 
-Before this overlay can become a release candidate, all of the following must close:
+Before this candidate can become a controlled beta release, all of the following must close:
 
-1. Commit the tested tree, pass the clean-tree dependency and integrity checks, push, receive green
-   exact-SHA CI, and create a new annotated candidate tag.
+1. Require green CI for the exact merged `main` commit, create an annotated candidate tag on that
+   exact commit, and require green tag CI.
 2. Preserve the completed isolated migration rehearsal and recheck the final committed migration
    hashes before any production action.
 3. Bind every later provider and deployment receipt to that exact candidate SHA and tag.
@@ -86,7 +92,7 @@ Before this overlay can become a release candidate, all of the following must cl
 This prior receipt records the BoomerBuddy 2.0 product-value candidate built on 2026-08-27. It
 separates repository implementation and synthetic proof from deployment, provider, native-device,
 real-human, and production evidence. References below to "this candidate" mean that frozen prior
-candidate, not the uncommitted integration overlay above.
+candidate, not the current committed integration overlay above.
 
 - Repository: `https://github.com/micahheaton/BoomerBuddyRemix.git` is the only source of truth.
 - Candidate branch: `codex/product-value-beta`.

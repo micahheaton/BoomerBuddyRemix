@@ -116,6 +116,16 @@ export interface AppliedProviderCommerceEvent {
 export type ProviderAccessEvidence =
   | { readonly kind: 'non_payment'; readonly sourceInboxId?: string }
   | {
+      readonly kind: 'trial_confirmed';
+      readonly sourceInboxId: string;
+      readonly evidence: {
+        readonly offerId: 'family_annual_v2' | 'individual_annual_v1';
+        readonly trialStartsAt: Date;
+        readonly trialEndsAt: Date;
+        readonly paymentMethodPresent: true;
+      };
+    }
+  | {
       readonly kind: 'payment_confirmed';
       readonly sourceInboxId: string;
       readonly evidence: ProviderPaidPeriodEvidence;
@@ -389,6 +399,12 @@ export class CommerceOperationsRepository {
           evidenceEvent.event_type !== 'invoice.paid') ||
         (input.accessEvidence.kind === 'payment_failed' &&
           !isStripeFailedPaymentEventType(evidenceEvent.event_type)) ||
+        (input.accessEvidence.kind === 'trial_confirmed' &&
+          ![
+            'customer.subscription.created',
+            'customer.subscription.updated',
+            'customer.subscription.trial_will_end',
+          ].includes(evidenceEvent.event_type)) ||
         (input.accessEvidence.kind !== 'payment_confirmed' &&
           evidenceEvent.event_type === 'invoice.paid') ||
         (input.accessEvidence.kind !== 'payment_failed' &&
@@ -417,7 +433,7 @@ export class CommerceOperationsRepository {
           { readonly provider_customer_id: string } & Record<string, unknown>
         >(
           `SELECT provider_customer_id
-           FROM commerce_stripe_checkout_completions
+           FROM commerce_stripe_checkout_completion_bindings
            WHERE environment = $1 AND household_id = $2 AND subscription_id = $3
              AND provider_subscription_id = $4`,
           [
@@ -553,6 +569,130 @@ export class CommerceOperationsRepository {
       const activeDunningWindow = activeDunning.rows[0];
       const paymentConfirmed = input.accessEvidence.kind === 'payment_confirmed';
       const paymentFailed = input.accessEvidence.kind === 'payment_failed';
+      const trialConfirmed = input.accessEvidence.kind === 'trial_confirmed';
+      if (trialConfirmed) {
+        const proof = input.accessEvidence.evidence;
+        const trialDuration = proof.trialEndsAt.getTime() - proof.trialStartsAt.getTime();
+        if (
+          input.provider !== 'stripe' ||
+          !['trialing', 'cancel_at_period_end'].includes(input.lifecycle) ||
+          proof.paymentMethodPresent !== true ||
+          !Number.isFinite(proof.trialStartsAt.getTime()) ||
+          !Number.isFinite(proof.trialEndsAt.getTime()) ||
+          trialDuration !== 7 * 24 * 60 * 60_000 ||
+          proof.trialStartsAt.getTime() !== input.currentPeriodStartsAt.getTime() ||
+          proof.trialEndsAt.getTime() !== input.currentPeriodEndsAt.getTime() ||
+          proof.trialEndsAt <= input.now ||
+          evidenceEvent.provider_object_id !== input.externalSubscriptionId
+        ) {
+          throw new DomainError('conflict', 'Stripe trial period evidence is invalid');
+        }
+        const checkout = await transaction.query<
+          {
+            readonly checkout_intent_id: string;
+            readonly offer_id: string;
+            readonly payment_status: string;
+            readonly amount_total: number;
+            readonly payment_method_collection: string;
+            readonly trial_period_days: number;
+          } & Record<string, unknown>
+        >(
+          `SELECT completion.checkout_intent_id, completion.offer_id,
+                  completion.payment_status, completion.amount_total,
+                  completion.payment_method_collection, offer.trial_period_days
+           FROM commerce_stripe_checkout_completion_bindings completion
+           JOIN commerce_stripe_offer_contracts offer
+             ON offer.offer_id = completion.offer_id
+           JOIN commerce_stripe_trial_reservations reservation
+             ON reservation.environment = completion.environment
+            AND reservation.household_id = completion.household_id
+            AND reservation.checkout_intent_id = completion.checkout_intent_id
+            AND reservation.subscription_id = completion.subscription_id
+            AND reservation.offer_id = completion.offer_id
+           JOIN commerce_stripe_trial_consumptions consumption
+             ON consumption.reservation_id = reservation.id
+            AND consumption.provider_session_id = completion.provider_session_id
+            AND consumption.provider_subscription_id = completion.provider_subscription_id
+           WHERE completion.environment = $1 AND completion.household_id = $2
+             AND completion.subscription_id = $3
+             AND completion.provider_subscription_id = $4`,
+          [
+            input.environment,
+            input.householdId,
+            input.subscriptionId,
+            input.externalSubscriptionId,
+          ],
+        );
+        const completed = checkout.rows[0];
+        if (
+          checkout.rows.length !== 1 ||
+          completed?.offer_id !== proof.offerId ||
+          completed.payment_status !== 'no_payment_required' ||
+          completed.amount_total !== 0 ||
+          completed.payment_method_collection !== 'always' ||
+          completed.trial_period_days !== 7
+        ) {
+          throw new DomainError('conflict', 'Stripe trial is not bound to an eligible Checkout');
+        }
+        await transaction.query(
+          `INSERT INTO commerce_stripe_trial_period_evidence(
+             id, environment, household_id, subscription_id, provider_subscription_id,
+             offer_id, trial_starts_at, trial_ends_at, payment_method_present,
+             source_inbox_id, evidence_digest, recorded_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true,$9,$10,$11)
+           ON CONFLICT (environment, provider_subscription_id) DO NOTHING`,
+          [
+            this.idFactory.next('stripe-trial-period'),
+            input.environment,
+            input.householdId,
+            input.subscriptionId,
+            input.externalSubscriptionId,
+            proof.offerId,
+            proof.trialStartsAt.toISOString(),
+            proof.trialEndsAt.toISOString(),
+            input.accessEvidence.sourceInboxId,
+            evidenceEvent.payload_hmac,
+            input.now.toISOString(),
+          ],
+        );
+        const recordedTrial = await transaction.query<
+          {
+            readonly household_id: string;
+            readonly subscription_id: string;
+            readonly offer_id: string;
+            readonly trial_starts_at: unknown;
+            readonly trial_ends_at: unknown;
+            readonly payment_method_present: boolean;
+          } & Record<string, unknown>
+        >(
+          `SELECT household_id, subscription_id, offer_id, trial_starts_at,
+                  trial_ends_at, payment_method_present
+           FROM commerce_stripe_trial_period_evidence
+           WHERE environment = $1 AND provider_subscription_id = $2`,
+          [input.environment, input.externalSubscriptionId],
+        );
+        const recorded = recordedTrial.rows[0];
+        if (
+          recordedTrial.rows.length !== 1 ||
+          recorded?.household_id !== input.householdId ||
+          recorded.subscription_id !== input.subscriptionId ||
+          recorded.offer_id !== proof.offerId ||
+          new Date(String(recorded.trial_starts_at)).getTime() !== proof.trialStartsAt.getTime() ||
+          new Date(String(recorded.trial_ends_at)).getTime() !== proof.trialEndsAt.getTime() ||
+          recorded.payment_method_present !== true
+        ) {
+          throw new DomainError('conflict', 'Stripe trial evidence conflicts with prior proof');
+        }
+      }
+      const previouslyPaid =
+        (
+          await transaction.query(
+            `SELECT 1 FROM commerce_stripe_paid_invoice_evidence
+             WHERE environment = $1 AND household_id = $2 AND subscription_id = $3
+             LIMIT 1`,
+            [input.environment, input.householdId, input.subscriptionId],
+          )
+        ).rowCount === 1;
       const dunningPaidThroughAt =
         activeDunningWindow === undefined
           ? null
@@ -590,7 +730,7 @@ export class CommerceOperationsRepository {
           { readonly checkout_intent_id: string } & Record<string, unknown>
         >(
           `SELECT checkout_intent_id
-           FROM commerce_stripe_checkout_completions
+           FROM commerce_stripe_checkout_completion_bindings
            WHERE environment = $1 AND household_id = $2 AND subscription_id = $3
              AND provider_subscription_id = $4`,
           [
@@ -931,11 +1071,7 @@ export class CommerceOperationsRepository {
             lifecycle: canonicalBefore.lifecycle,
           };
         }
-        if (
-          canonicalBefore.source_verified &&
-          canonicalEnd !== null &&
-          activeDunningWindow === undefined
-        ) {
+        if (previouslyPaid && canonicalEnd !== null && activeDunningWindow === undefined) {
           const graceEndsAt = new Date(canonicalEnd.getTime() + 3 * 24 * 60 * 60_000);
           await transaction.query(
             `INSERT INTO commerce_stripe_dunning_events(
@@ -966,9 +1102,10 @@ export class CommerceOperationsRepository {
         (paidComparisonEnd === null ||
           (input.currentPeriodEndsAt >= paidComparisonEnd &&
             input.currentPeriodStartsAt <= paidComparisonEnd));
-      const mayActivateAccess = paymentCoversCanonicalPeriod;
+      const trialCoversCanonicalPeriod = trialConfirmed && input.currentPeriodEndsAt > input.now;
+      const mayActivateAccess = paymentCoversCanonicalPeriod || trialCoversCanonicalPeriod;
       const dunningGraceEndsAt =
-        paymentFailed && canonicalBefore.source_verified && canonicalEnd !== null
+        paymentFailed && previouslyPaid && canonicalEnd !== null
           ? (dunningGraceEndsAtFromLedger ??
             new Date(canonicalEnd.getTime() + 3 * 24 * 60 * 60_000))
           : null;
@@ -977,6 +1114,7 @@ export class CommerceOperationsRepository {
           ? 'grace'
           : !canonicalBefore.source_verified &&
               !paymentConfirmed &&
+              !trialConfirmed &&
               ['trialing', 'active', 'cancel_at_period_end', 'restored'].includes(
                 effectiveLifecycle,
               )
@@ -984,9 +1122,9 @@ export class CommerceOperationsRepository {
             : effectiveLifecycle;
       let canonicalPeriodStartsAt = input.currentPeriodStartsAt;
       let canonicalPeriodEndsAt: Date | null = input.currentPeriodEndsAt;
-      if (!paymentConfirmed) {
+      if (!paymentConfirmed && !trialConfirmed) {
         canonicalPeriodStartsAt = canonicalStart;
-        if (paymentFailed && canonicalBefore.source_verified && canonicalEnd !== null) {
+        if (paymentFailed && previouslyPaid && canonicalEnd !== null) {
           canonicalPeriodEndsAt = dunningGraceEndsAt;
         } else if (canonicalEnd === null) {
           canonicalPeriodEndsAt = null;
@@ -1133,7 +1271,9 @@ export class CommerceOperationsRepository {
       const canonical = await transaction.query(
         `UPDATE commerce_subscriptions
          SET lifecycle = $3, source_verified = (source_verified OR $8), reconciliation_state = 'reconciled',
-             current_period_starts_at = $4, current_period_ends_at = $5, updated_at = $6
+             current_period_starts_at = $4, current_period_ends_at = $5,
+             trial_ends_at = CASE WHEN $9 THEN $5 ELSE trial_ends_at END,
+             updated_at = $6
          WHERE household_id = $1 AND id = $2 AND source = $7`,
         [
           input.householdId,
@@ -1143,7 +1283,8 @@ export class CommerceOperationsRepository {
           canonicalPeriodEndsAt?.toISOString() ?? null,
           input.now.toISOString(),
           source,
-          paymentConfirmed,
+          paymentConfirmed || trialConfirmed,
+          trialConfirmed,
         ],
       );
       if (canonical.rowCount !== 1) {
@@ -1201,7 +1342,7 @@ export class CommerceOperationsRepository {
             grantMayRemainActive ? null : input.now.toISOString(),
             canonicalPlan.plan_version_id,
             input.subscriptionId,
-            paymentConfirmed || canonicalBefore.source_verified,
+            paymentConfirmed || trialConfirmed || canonicalBefore.source_verified,
           ],
         );
       } else {
@@ -1216,7 +1357,7 @@ export class CommerceOperationsRepository {
             JSON.stringify(canonicalPlan.capabilities),
             canonicalPlan.plan_version_id,
             grantMayRemainActive ? null : input.now.toISOString(),
-            paymentConfirmed || canonicalBefore.source_verified,
+            paymentConfirmed || trialConfirmed || canonicalBefore.source_verified,
           ],
         );
       }

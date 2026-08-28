@@ -9,17 +9,20 @@ async function source(path: string): Promise<string> {
 }
 
 describe('launch public surfaces', () => {
-  it('publishes the single monthly customer offer without hypothetical-plan denials', async () => {
+  it('publishes exact annual and monthly Family offers without unsupported offers', async () => {
     const pricing = await source('apps/web/src/app/pricing/page.tsx');
 
     expect(pricing).toContain('$14.99 USD per month');
+    expect(pricing).toContain('7 days free, then $149.90 USD per year');
+    expect(pricing).toContain('You save $29.98');
     expect(pricing).not.toMatch(/No annual plan|free tier|coupon|referral credit/iu);
     expect(pricing).not.toContain('$149 annually');
     expect(pricing).not.toContain('$8.99 monthly');
     expect(pricing).not.toMatch(/individual|group rate|referral bonus/iu);
-    expect(pricing).toContain('What is included');
     expect(pricing).toContain('A plan before, during, and after uncertainty');
-    expect(pricing).toContain('Family is currently available by invitation.');
+    expect(pricing).toContain('Creating an account does not start a trial or charge you.');
+    expect(pricing).toContain('up to three protected adults');
+    expect(pricing).toMatch(/six Trusted\s+Circle participants/u);
     expect(pricing).toContain('Can the person paying see another adult&apos;s Checks?');
     expect(pricing).toContain('No. Each adult joins separately');
   });

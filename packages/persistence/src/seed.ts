@@ -256,7 +256,7 @@ async function seedHouseholdData(transaction: SqlExecutor, now: Date): Promise<v
     ],
     plus: [
       { interval: 'month', amountMinor: 899, currency: 'USD', kind: 'list' },
-      { interval: 'year', amountMinor: 8_900, currency: 'USD', kind: 'list' },
+      { interval: 'year', amountMinor: 8_990, currency: 'USD', kind: 'list' },
     ],
     family: [{ interval: 'month', amountMinor: 1_499, currency: 'USD', kind: 'list' }],
   } as const;
@@ -610,10 +610,11 @@ export async function seedDemoData(
          OR EXISTS (
            SELECT 1 FROM commerce_plan_versions
            WHERE id NOT IN (
-             'founding_plus_beta_v2','founding_family_beta_v2','family_v1'
+             'founding_plus_beta_v2','founding_family_beta_v2','family_v1',
+             'family_v3','individual_v3'
            )
          )
-         OR (SELECT count(*) FROM commerce_plan_versions) <> 3
+         OR (SELECT count(*) FROM commerce_plan_versions) <> 5
          OR EXISTS (SELECT 1 FROM analyses)
          OR EXISTS (SELECT 1 FROM provider_health)
          OR EXISTS (SELECT 1 FROM saved_searches)

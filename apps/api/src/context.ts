@@ -17,6 +17,7 @@ import {
   FeedbackRepository,
   FounderProvisioningRepository,
   FoundingHouseholdRepository,
+  GovernedContentRepository,
   HqRepository,
   KnowledgeRepository,
   MemberLearningRepository,
@@ -47,6 +48,7 @@ export interface ApiRepositories {
   readonly feedback: FeedbackRepository;
   readonly founderProvisioning: FounderProvisioningRepository;
   readonly foundingHouseholds: FoundingHouseholdRepository;
+  readonly governedContent: GovernedContentRepository;
   readonly hq: HqRepository;
   readonly knowledge: KnowledgeRepository;
   readonly memberLearning: MemberLearningRepository;
@@ -148,6 +150,10 @@ export function createRepositories(
       config.identity.founderPersonId,
       config.environment === 'production' ? 'production' : 'local',
     ),
+    governedContent: new GovernedContentRepository(database, {
+      encryptionKey: config.secrets.artifactEncryptionKey,
+      encryptionKeyVersion: 1,
+    }),
     hq: new HqRepository(database, undefined, entitlementRuntimeEnvironment),
     knowledge: new KnowledgeRepository(database),
     memberLearning: new MemberLearningRepository(

@@ -57,12 +57,15 @@ const customerPublicPages = [
   'apps/web/src/app/feedback/page.tsx',
   'apps/web/src/app/global-error.tsx',
   'apps/web/src/app/how-it-works/page.tsx',
+  'apps/web/src/app/learn/[slug]/page.tsx',
+  'apps/web/src/app/learn/page.tsx',
   'apps/web/src/app/not-found.tsx',
   'apps/web/src/app/page.tsx',
   'apps/web/src/app/pricing/page.tsx',
   'apps/web/src/app/privacy/page.tsx',
   'apps/web/src/app/sign-in/[[...sign-in]]/page.tsx',
   'apps/web/src/app/sign-in/client-trust/page.tsx',
+  'apps/web/src/app/sign-up/[[...sign-up]]/page.tsx',
   'apps/web/src/app/support/page.tsx',
   'apps/web/src/app/terms/page.tsx',
   'apps/web/src/app/trust/page.tsx',
@@ -136,6 +139,7 @@ describe('Next resource-local authentication inventory', () => {
         'apps/web/src/app/research/offer-pair-v2/page.tsx',
         'apps/web/src/app/robots.ts',
         'apps/web/src/app/sign-in/layout.tsx',
+        'apps/web/src/app/sign-up/layout.tsx',
         'apps/web/src/app/sitemap.ts',
       ].sort(),
     );
@@ -168,9 +172,15 @@ describe('Next resource-local authentication inventory', () => {
     expect(isPublicCustomerResourcePath('/check')).toBe(true);
     expect(isPublicCustomerResourcePath('/checkmate')).toBe(false);
     expect(isPublicCustomerResourcePath('/check/extra')).toBe(false);
+    expect(isPublicCustomerResourcePath('/learn')).toBe(true);
+    expect(isPublicCustomerResourcePath('/learn/imposter-scams')).toBe(true);
+    expect(isPublicCustomerResourcePath('/learning')).toBe(false);
     expect(isPublicCustomerResourcePath('/sign-in')).toBe(true);
     expect(isPublicCustomerResourcePath('/sign-in/client-trust')).toBe(true);
     expect(isPublicCustomerResourcePath('/sign-in-danger')).toBe(false);
+    expect(isPublicCustomerResourcePath('/sign-up')).toBe(true);
+    expect(isPublicCustomerResourcePath('/sign-up/verify')).toBe(true);
+    expect(isPublicCustomerResourcePath('/sign-up-danger')).toBe(false);
     expect(isPublicCustomerResourcePath('/api/v1/me')).toBe(true);
     expect(isPublicCustomerResourcePath('/apiary')).toBe(false);
     expect(classifyCustomerResourcePath('/member/history')).toBe('guarded');

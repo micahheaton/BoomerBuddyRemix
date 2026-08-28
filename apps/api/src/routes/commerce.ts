@@ -22,6 +22,8 @@ import {
   stripeSessionRetryRepairQuerySchema,
   stripeSessionRetryRepairRequestSchema,
   stripeSessionRetryRepairResponseSchema,
+  stripeTrialReminderAcknowledgeRequestSchema,
+  stripeTrialReminderAcknowledgeResponseSchema,
   stripeWebhookResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError } from '@boomerbuddy/domain';
@@ -49,6 +51,7 @@ import {
   type AuthContext,
 } from '../auth';
 import type { ApiContext } from '../context';
+import { publicCommerceCatalog } from '../public-commerce-catalog';
 
 type StripeEnvironment = 'test' | 'production';
 
@@ -60,6 +63,7 @@ const stripeEventAllowlist = new Set([
   'customer.subscription.created',
   'customer.subscription.updated',
   'customer.subscription.deleted',
+  'customer.subscription.trial_will_end',
   'invoice.paid',
   'invoice.payment_failed',
   'invoice.payment_action_required',
@@ -214,7 +218,8 @@ export function registerCommerceRoutes(
             accountId: runtimeStripe.accountId,
             apiVersion: runtimeStripe.apiVersion,
             portalConfigurationId: runtimeStripe.cancelOnlyPortalConfigurationId,
-            offer: runtimeStripe.offer,
+            defaultOfferId: runtimeStripe.defaultOfferId,
+            offers: runtimeStripe.offers,
           },
         )
       : undefined;
@@ -562,11 +567,35 @@ export function registerCommerceRoutes(
       runtimePortalPermitted: runtimeStripe !== undefined && adapter !== undefined,
       now,
     });
+    const trialEndingReminder =
+      await context.repositories.commerceRuntime.stripeTrialReminderProjection({
+        actor,
+        environment,
+        now,
+      });
+    const catalog = publicCommerceCatalog({
+      individualOffersEnabled:
+        runtimeStripe?.offers.some(
+          (offer) => offer.plan === 'individual' && offer.customerSelectable,
+        ) === true,
+    });
     return stripeBillingStatusResponseSchema.parse({
       billing: {
         householdId: household.householdId,
-        offerId: 'founding_family_monthly_v1',
+        offerId: catalog.defaultOfferId,
+        ...catalog,
         ...billing,
+        ...(trialEndingReminder === undefined
+          ? {}
+          : {
+              trialEndingReminder: {
+                ...trialEndingReminder,
+                trialEndsAt: trialEndingReminder.trialEndsAt.toISOString(),
+                ...(trialEndingReminder.acknowledgedAt === undefined
+                  ? {}
+                  : { acknowledgedAt: trialEndingReminder.acknowledgedAt.toISOString() }),
+              },
+            }),
         ...(billing.pendingOperation === undefined
           ? {}
           : {
@@ -584,7 +613,38 @@ export function registerCommerceRoutes(
             }),
       },
       evidenceNotice:
-        'Your membership becomes active only after BoomerBuddy confirms a successful payment.',
+        'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.',
+    });
+  });
+
+  app.post('/v1/commerce/stripe/trial-reminders/acknowledge', async (request) => {
+    const now = context.now();
+    const auth = await authenticate(
+      request,
+      context.repositories.sessions,
+      context.config,
+      ['customer'],
+      now,
+    );
+    assertMutationOrigin(request, context.config, auth);
+    const household = selectedHousehold(auth, request);
+    const body = stripeTrialReminderAcknowledgeRequestSchema.parse(request.body);
+    const actor = await context.repositories.commerceRuntime.resolveActor({
+      householdId: household.householdId,
+      personId: auth.principal.personId,
+      now,
+    });
+    const environment = stripe.mode === 'disabled' ? 'test' : stripe.environment;
+    const acknowledged = await context.repositories.commerceRuntime.acknowledgeStripeTrialReminder({
+      actor,
+      environment,
+      intentId: body.intentId,
+      idempotencyKey: body.idempotencyKey,
+      now,
+    });
+    return stripeTrialReminderAcknowledgeResponseSchema.parse({
+      ...acknowledged,
+      acknowledgedAt: acknowledged.acknowledgedAt.toISOString(),
     });
   });
 
@@ -602,13 +662,25 @@ export function registerCommerceRoutes(
     );
     assertMutationOrigin(request, context.config, auth);
     const household = selectedHousehold(auth, request);
-    stripeCheckoutRequestSchema.parse(request.body);
+    const checkoutRequest = stripeCheckoutRequestSchema.parse(request.body);
     const serverOperationId = operationId(request.headers['idempotency-key']);
     const actor = await context.repositories.commerceRuntime.resolveActor({
       householdId: household.householdId,
       personId: auth.principal.personId,
       now,
     });
+    const selectedOffer = runtimeStripe.offers.find(
+      (offer) => offer.offerId === checkoutRequest.offerId && offer.customerSelectable,
+    );
+    if (selectedOffer === undefined) {
+      throw new DomainError('not_found', 'The selected billing offer is unavailable');
+    }
+    if (
+      runtimeStripe.environment === 'production' &&
+      runtimeStripe.billingOperationalReadiness.state !== 'ready'
+    ) {
+      return reply.code(503).send(unavailable(request.id));
+    }
     await context.repositories.commerceRuntime.assertStripeInitiationAllowed({
       householdId: household.householdId,
       environment: runtimeStripe.environment,
@@ -625,8 +697,8 @@ export function registerCommerceRoutes(
         action: 'checkout',
         environment: runtimeStripe.environment,
         serverOperationId,
-        offerId: 'founding_family_monthly_v1',
-        amountMinor: 1499,
+        offerId: selectedOffer.offerId,
+        amountMinor: selectedOffer.unitAmountMinor,
         currency: 'usd',
         factorLevel: reverification.factorLevel,
       } as const;
@@ -644,7 +716,7 @@ export function registerCommerceRoutes(
         return reply.code(403).send(customerBillingReverificationHint());
       }
     }
-    const preflight = await adapter.verifyConfiguredResources();
+    const preflight = await adapter.verifyConfiguredResources(selectedOffer.offerId);
     const preflightReceipt = await context.repositories.commerceRuntime.recordStripePreflight({
       evidence: preflight,
       evidenceLevel,
@@ -666,10 +738,10 @@ export function registerCommerceRoutes(
     });
     const prepared = await context.repositories.commerceRuntime.prepareStripeCheckout({
       actor,
-      offerId: runtimeStripe.offer.offerId,
-      planVersionId: runtimeStripe.offer.planVersionId,
-      billingInterval: runtimeStripe.offer.billingInterval,
-      providerPriceId: runtimeStripe.offer.providerPriceId,
+      offerId: selectedOffer.offerId,
+      planVersionId: selectedOffer.planVersionId,
+      billingInterval: selectedOffer.billingInterval,
+      providerPriceId: selectedOffer.providerPriceId,
       idempotencyKey: serverOperationId,
       serverOperationId,
       providerIdempotencyKey,
@@ -690,7 +762,7 @@ export function registerCommerceRoutes(
       actorPersonId: actor.personId,
       requestedExpiresAt: prepared.providerExpiresAt,
       canonicalSubscriptionId: prepared.subscriptionId,
-      providerPriceId: runtimeStripe.offer.providerPriceId,
+      providerPriceId: selectedOffer.providerPriceId,
       ...(customerReference === null ? {} : { providerCustomerId: customerReference }),
       successUrl,
       cancelUrl,
@@ -714,7 +786,7 @@ export function registerCommerceRoutes(
               expiresAt: dispatch.returnedExpiresAt.toISOString(),
             },
             limitation:
-              'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+              'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
           }),
         );
       }
@@ -727,8 +799,9 @@ export function registerCommerceRoutes(
       const session = await adapter.createCheckout({
         actor,
         canonicalSubscriptionId: prepared.subscriptionId,
+        offerId: selectedOffer.offerId,
         planVersionId: prepared.planVersionId,
-        providerPriceId: runtimeStripe.offer.providerPriceId,
+        providerPriceId: selectedOffer.providerPriceId,
         ...(customerReference === null ? {} : { customerReference }),
         successUrl,
         cancelUrl,
@@ -761,7 +834,7 @@ export function registerCommerceRoutes(
             expiresAt: session.expiresAt.toISOString(),
           },
           limitation:
-            'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+            'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
         }),
       );
     } catch (error) {
@@ -991,7 +1064,7 @@ export function registerCommerceRoutes(
           supportedApiVersions: new Set([runtimeStripe.apiVersion]),
         });
         signatureVerifiedAt = verified.signedAt;
-        normalized = normalizeStripeEvent(verified);
+        normalized = normalizeStripeEvent(verified, runtimeStripe.offers);
       } catch (error) {
         if (error instanceof StripeWebhookError) {
           throw new DomainError('invalid_input', 'Stripe webhook verification failed');
@@ -1070,23 +1143,46 @@ export function registerCommerceRoutes(
             }),
           );
         }
-        await context.repositories.commerceRuntime.recordStripeCheckoutCompletion({
-          inboxId: captured.id,
-          externalEventId: normalized.externalEventId,
-          environment: runtimeStripe.environment,
-          providerSessionId: normalized.providerObjectId,
-          providerSubscriptionId: normalized.externalSubscriptionId,
-          providerCustomerId: normalized.providerCustomerId,
-          ...(normalized.providerPaymentIntentId === undefined
-            ? {}
-            : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
-          canonicalBinding: normalized.canonicalBinding,
-          amountTotal: normalized.checkoutCompletion.amountTotal,
-          currency: normalized.checkoutCompletion.currency,
-          providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
-          providerEventCreatedAt: normalized.eventCreatedAt,
-          now: context.now(),
-        });
+        if (normalized.checkoutCompletion.offerId === 'founding_family_monthly_v1') {
+          await context.repositories.commerceRuntime.recordStripeCheckoutCompletion({
+            inboxId: captured.id,
+            externalEventId: normalized.externalEventId,
+            environment: runtimeStripe.environment,
+            providerSessionId: normalized.providerObjectId,
+            providerSubscriptionId: normalized.externalSubscriptionId,
+            providerCustomerId: normalized.providerCustomerId,
+            ...(normalized.providerPaymentIntentId === undefined
+              ? {}
+              : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
+            canonicalBinding: normalized.canonicalBinding,
+            amountTotal: 1499,
+            currency: normalized.checkoutCompletion.currency,
+            providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
+            providerEventCreatedAt: normalized.eventCreatedAt,
+            now: context.now(),
+          });
+        } else {
+          await context.repositories.commerceRuntime.recordStripeCheckoutCompletionV2({
+            inboxId: captured.id,
+            externalEventId: normalized.externalEventId,
+            environment: runtimeStripe.environment,
+            providerSessionId: normalized.providerObjectId,
+            providerSubscriptionId: normalized.externalSubscriptionId,
+            providerCustomerId: normalized.providerCustomerId,
+            ...(normalized.providerPaymentIntentId === undefined
+              ? {}
+              : { providerPaymentIntentId: normalized.providerPaymentIntentId }),
+            canonicalBinding: normalized.canonicalBinding,
+            offerId: normalized.checkoutCompletion.offerId,
+            paymentStatus: normalized.checkoutCompletion.paymentStatus,
+            paymentMethodCollection: normalized.checkoutCompletion.paymentMethodCollection,
+            amountTotal: normalized.checkoutCompletion.amountTotal,
+            currency: normalized.checkoutCompletion.currency,
+            providerExpiresAt: normalized.checkoutCompletion.providerExpiresAt,
+            providerEventCreatedAt: normalized.eventCreatedAt,
+            now: context.now(),
+          });
+        }
         await context.repositories.commerce.completeProviderOperationalEvent({
           inboxId: captured.id,
           now: context.now(),
@@ -1211,10 +1307,12 @@ export function registerCommerceRoutes(
       ) {
         throw new DomainError('conflict', 'Persisted Stripe event provenance is incomplete');
       }
+      const eventOffer = runtimeStripe.offers.find((offer) => offer.offerId === normalized.offerId);
       const evidenceMatches =
         normalized.lifecycle !== undefined &&
+        eventOffer !== undefined &&
         normalized.providerPriceId === binding.providerPriceId &&
-        normalized.providerProductId === runtimeStripe.offer.providerProductId &&
+        normalized.providerProductId === eventOffer.providerProductId &&
         normalized.subscriptionOfferExact === true &&
         normalized.billingInterval === binding.billingInterval &&
         normalized.currentPeriodStartsAt !== undefined &&
@@ -1258,7 +1356,25 @@ export function registerCommerceRoutes(
         lifecycle: normalized.lifecycle as NonNullable<typeof normalized.lifecycle>,
         currentPeriodStartsAt: normalized.currentPeriodStartsAt as Date,
         currentPeriodEndsAt: normalized.currentPeriodEndsAt as Date,
-        accessEvidence: { kind: 'non_payment' },
+        accessEvidence:
+          (normalized.offerId === 'family_annual_v2' ||
+            normalized.offerId === 'individual_annual_v1') &&
+          (normalized.lifecycle === 'trialing' ||
+            normalized.lifecycle === 'cancel_at_period_end') &&
+          normalized.trialStartsAt !== undefined &&
+          normalized.trialEndsAt !== undefined &&
+          normalized.paymentMethodPresent === true
+            ? {
+                kind: 'trial_confirmed',
+                sourceInboxId: captured.id,
+                evidence: {
+                  offerId: normalized.offerId,
+                  trialStartsAt: normalized.trialStartsAt,
+                  trialEndsAt: normalized.trialEndsAt,
+                  paymentMethodPresent: true,
+                },
+              }
+            : { kind: 'non_payment' },
         now: context.now(),
       });
       if (applied.outcome === 'quarantined') {
@@ -1278,6 +1394,23 @@ export function registerCommerceRoutes(
           received: true,
           duplicate: captured.duplicate,
           application: 'reconciliation_queued',
+        });
+      }
+      if (
+        normalized.eventType === 'customer.subscription.trial_will_end' &&
+        (normalized.offerId === 'family_annual_v2' ||
+          normalized.offerId === 'individual_annual_v1') &&
+        normalized.trialEndsAt !== undefined
+      ) {
+        await context.repositories.commerceRuntime.recordStripeTrialReminderIntent({
+          environment: runtimeStripe.environment,
+          householdId: binding.householdId,
+          subscriptionId: binding.subscriptionId,
+          providerSubscriptionId: normalized.externalSubscriptionId,
+          sourceInboxId: captured.id,
+          offerId: normalized.offerId,
+          trialEndsAt: normalized.trialEndsAt,
+          now: context.now(),
         });
       }
       return stripeWebhookResponseSchema.parse({

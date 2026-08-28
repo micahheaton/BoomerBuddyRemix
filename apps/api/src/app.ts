@@ -17,12 +17,14 @@ import {
 import Fastify, { type FastifyInstance } from 'fastify';
 import { ZodError } from 'zod';
 import { createRepositories, type ApiContext } from './context';
+import { publicCommerceCatalog } from './public-commerce-catalog';
 import { registerAccessIntentRoutes } from './routes/access-intents';
 import { registerCheckRoutes } from './routes/checks';
 import { registerBillingAuthorityRoutes } from './routes/billing-authority';
 import { registerBusinessOsRoutes } from './routes/business-os';
 import { registerCommerceRoutes } from './routes/commerce';
 import { registerEditorialIntelligenceRoutes } from './routes/editorial-intelligence';
+import { registerGovernedContentRoutes } from './routes/governed-content';
 import { registerFamilyRoutes } from './routes/family';
 import { registerFamilySafeWordRoutes } from './routes/family-safe-word';
 import { registerFeedbackRoutes } from './routes/feedback';
@@ -169,8 +171,14 @@ function registerBaseRoutes(app: FastifyInstance, context: ApiContext): void {
       return reply.code(503).send({ status: 'not_ready' });
     }
   });
-  app.get('/v1/public/config', () =>
-    publicConfigResponseSchema.parse({
+  app.get('/v1/public/config', () => {
+    const stripe = context.config.commerce.stripe;
+    const commerceCatalog = publicCommerceCatalog({
+      individualOffersEnabled:
+        stripe.mode !== 'disabled' &&
+        stripe.offers.some((offer) => offer.plan === 'individual' && offer.customerSelectable),
+    });
+    return publicConfigResponseSchema.parse({
       productName: 'BoomerBuddy',
       environment: context.config.environment,
       checkKinds: ['text', 'url'],
@@ -183,12 +191,13 @@ function registerBaseRoutes(app: FastifyInstance, context: ApiContext): void {
           key: 'family',
           name: 'Family',
           monthlyUsd: 14.99,
-          annualUsd: null,
+          annualUsd: 149.9,
           hypothesis: false,
         },
       ],
-    }),
-  );
+      commerceCatalog,
+    });
+  });
 }
 
 export async function buildApp(options: BuildAppOptions): Promise<FastifyInstance> {
@@ -417,6 +426,7 @@ export async function buildApp(options: BuildAppOptions): Promise<FastifyInstanc
     editorial: context.repositories.editorial,
     now: context.now,
   });
+  registerGovernedContentRoutes(app, context);
   registerFeedbackRoutes(app, {
     config: context.config,
     sessions: context.repositories.sessions,

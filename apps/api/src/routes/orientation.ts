@@ -19,6 +19,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   assertMutationOrigin,
+  assertRecentCustomerAuthentication,
   authenticate,
   correlationId,
   selectedHousehold,
@@ -250,6 +251,7 @@ export function registerOrientationRoutes(app: FastifyInstance, context: ApiCont
       action: 'orientation:update',
       resource: { kind: 'orientation', householdId: household.householdId, subjectPersonId },
     });
+    assertRecentCustomerAuthentication(auth);
     const body = safeWordRequestSchema.parse(request.body);
     const now = context.now();
     await context.repositories.orientation.get(household.householdId, subjectPersonId, now);

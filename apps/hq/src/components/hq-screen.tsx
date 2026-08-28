@@ -260,7 +260,6 @@ function Shell({
   const canReview = me.principal.roles.includes('hq_reviewer');
   const canSupport = me.principal.roles.includes('hq_support');
   const feedbackNavigationEnabled = process.env.NODE_ENV !== 'production' || isOwner;
-  const editorialNavigationEnabled = process.env.NODE_ENV !== 'production';
   return (
     <>
       <header className="hq-topbar">
@@ -320,9 +319,7 @@ function Shell({
               Feedback learning
             </Link>
           )}
-          {editorialNavigationEnabled && (isOwner || canReview) && (
-            <Link href="/editorial">Editorial intelligence</Link>
-          )}
+          {(isOwner || canReview) && <Link href="/editorial">Editorial studio</Link>}
           {process.env.NODE_ENV !== 'production' && (isOwner || canReview) && (
             <Link href="/referrals">Referral credit evidence</Link>
           )}

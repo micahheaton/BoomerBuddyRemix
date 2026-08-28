@@ -8,9 +8,9 @@ export type IndexedCustomerPageMetadata = {
 
 export const indexedCustomerPageMetadata = {
   '/': {
-    title: 'BoomerBuddy Family: scam-safety support for older adults',
+    title: 'BoomerBuddy Family: practice, Check, and respond together',
     description:
-      'Use short lessons, private Checks, and optional help from someone you trust to handle suspicious messages with a calmer family plan.',
+      'Use seven short lessons, private Checks, and optional redacted help from someone you trust to respond to suspicious messages together.',
     alternates: { canonical: '/' },
   },
   '/check': {
@@ -25,10 +25,16 @@ export const indexedCustomerPageMetadata = {
       'Learn how Family combines short lessons, Check, deliberate redacted sharing, in-app acknowledgement, and weekly practice.',
     alternates: { canonical: '/how-it-works' },
   },
+  '/learn': {
+    title: 'Reviewed scam guidance | BoomerBuddy Learn',
+    description:
+      'Read practical, human-reviewed scam-safety guidance based on dated public sources from government and law-enforcement organizations.',
+    alternates: { canonical: '/learn' },
+  },
   '/pricing': {
     title: 'Family pricing | BoomerBuddy',
     description:
-      'See the invitation-only BoomerBuddy Family plan, including lessons, private Checks, Trusted Circle help, and monthly billing for $14.99 USD.',
+      'Compare Family annual with a seven-day free trial and Family monthly, including lessons, private Checks, Trusted Circle help, and Safe Word.',
     alternates: { canonical: '/pricing' },
   },
   '/trust': {
@@ -58,7 +64,7 @@ export const indexedCustomerPageMetadata = {
   '/billing-terms': {
     title: 'Family billing terms | BoomerBuddy',
     description:
-      'Review the USD 14.99 monthly Family subscription price, renewal, billing authority, cancellation, refund, and support terms.',
+      'Review Family annual trial and monthly pricing, first-charge timing, renewal, billing authority, cancellation, refund, and support terms.',
     alternates: { canonical: '/billing-terms' },
   },
   '/accessibility': {

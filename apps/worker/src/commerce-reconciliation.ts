@@ -323,6 +323,24 @@ export function createStripeReconciliationHandler(input: {
       const proposedLifecycle = eventResolution?.lifecycleOverride ?? snapshot.lifecycle;
       const paidPeriod = eventResolution?.paidPeriodEvidence;
       const failedPayment = eventResolution?.failedPaymentEvidence;
+      const trialPeriod =
+        [
+          'customer.subscription.created',
+          'customer.subscription.updated',
+          'customer.subscription.trial_will_end',
+        ].includes(eventType) &&
+        (snapshot.offerId === 'family_annual_v2' || snapshot.offerId === 'individual_annual_v1') &&
+        (proposedLifecycle === 'trialing' || proposedLifecycle === 'cancel_at_period_end') &&
+        snapshot.trialStartsAt !== undefined &&
+        snapshot.trialEndsAt !== undefined &&
+        snapshot.paymentMethodPresent === true
+          ? {
+              offerId: snapshot.offerId,
+              trialStartsAt: snapshot.trialStartsAt,
+              trialEndsAt: snapshot.trialEndsAt,
+              paymentMethodPresent: true as const,
+            }
+          : undefined;
       const appliedPeriodStartsAt =
         eventType === 'invoice.paid'
           ? paidPeriod?.currentPeriodStartsAt
@@ -429,7 +447,14 @@ export function createStripeReconciliationHandler(input: {
         billingInterval: snapshot.billingInterval,
         currentPeriodStartsAt: appliedPeriodStartsAt?.toISOString(),
         currentPeriodEndsAt: appliedPeriodEndsAt?.toISOString(),
-        accessEvidence: eventType === 'invoice.paid' ? 'payment_confirmed' : 'non_payment',
+        accessEvidence:
+          eventType === 'invoice.paid'
+            ? 'payment_confirmed'
+            : isStripeFailedPaymentEventType(eventType)
+              ? 'payment_failed'
+              : trialPeriod === undefined
+                ? 'non_payment'
+                : 'trial_confirmed',
         lifecycle: effectiveLifecycle,
         observedAt: observedAt.toISOString(),
       });
@@ -479,7 +504,13 @@ export function createStripeReconciliationHandler(input: {
                   sourceInboxId: inboxId,
                   evidence: failedPayment as NonNullable<typeof failedPayment>,
                 }
-              : { kind: 'non_payment', sourceInboxId: inboxId },
+              : trialPeriod === undefined
+                ? { kind: 'non_payment', sourceInboxId: inboxId }
+                : {
+                    kind: 'trial_confirmed',
+                    sourceInboxId: inboxId,
+                    evidence: trialPeriod,
+                  },
         authoritativeSnapshot: true,
         now: observedAt,
       });
@@ -513,6 +544,18 @@ export function createStripeReconciliationHandler(input: {
           householdId: binding.householdId,
           subscriptionId: binding.subscriptionId,
           evidence: paidPeriod as NonNullable<typeof paidPeriod>,
+          now: observedAt,
+        });
+      }
+      if (eventType === 'customer.subscription.trial_will_end' && trialPeriod !== undefined) {
+        await input.commerceRuntime.recordStripeTrialReminderIntent({
+          environment,
+          householdId: binding.householdId,
+          subscriptionId: binding.subscriptionId,
+          providerSubscriptionId: externalSubscriptionId,
+          sourceInboxId: inboxId,
+          offerId: trialPeriod.offerId,
+          trialEndsAt: trialPeriod.trialEndsAt,
           now: observedAt,
         });
       }

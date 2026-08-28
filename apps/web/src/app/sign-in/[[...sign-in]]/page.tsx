@@ -139,11 +139,11 @@ function ProductionSignIn() {
     <>
       <PublicHeader />
       <main id="main-content" className="page-shell narrow">
-        <span className="eyebrow">Invited member access</span>
+        <span className="eyebrow">Member access</span>
         <h1 className="page-title">Sign in to BoomerBuddy</h1>
         <p className="lede">
-          Use your invited member account. Signing in does not grant household access; an exact,
-          unexpired invitation and your consent are still required.
+          Use your existing account. Signing in opens only your own authorized households and does
+          not reveal another adult&apos;s Checks, grant billing authority, or accept an invitation.
         </p>
         <div className="card" style={{ marginTop: '2rem', display: 'grid', placeItems: 'center' }}>
           <SignIn
@@ -152,8 +152,14 @@ function ProductionSignIn() {
             withSignUp={false}
             forceRedirectUrl="/member"
             fallbackRedirectUrl="/member"
+            signUpUrl="/sign-up"
+            signUpForceRedirectUrl="/member/billing"
           />
         </div>
+        <p className="help">
+          New to BoomerBuddy? <Link href="/sign-up">Create a free account</Link>. Account creation
+          does not start a trial or charge you.
+        </p>
       </main>
       <PublicFooter />
     </>
@@ -175,8 +181,8 @@ function UnauthorizedSignInRecovery() {
             Opening this page by itself does not prove that a session was revoked.
           </p>
           <p>
-            If you were trying to use BoomerBuddy, sign in again with your invited member account.
-            If this was unexpected, contact support before continuing.
+            If you were trying to use BoomerBuddy, sign in again with your existing account. If this
+            was unexpected, contact support before continuing.
           </p>
           <div className="button-row">
             <Link className="button button-primary" href="/sign-in">

@@ -10,7 +10,7 @@
   "subtitle": "Family scam safety practice",
   "promotionalText": "Prepare before a scam reaches your family. Practice seven short lessons, review current guidance, Check suspicious messages, and follow through with people you trust.",
   "shortDescription": "Practice safer responses, Check suspicious messages, and coordinate with family.",
-  "fullDescription": "BoomerBuddy helps adults and families prepare for and respond to suspicious messages, links, payment requests, and impersonation attempts. Practice seven short safety lessons, review dated source-linked guidance, and use a weekly rehearsal to make pausing and independently verifying feel familiar. When something suspicious arrives, submit text or a URL for a structured Check of warning signs, uncertainty, and safer next steps. Keep a private 30-day history, deliberately share a redacted result with an authorized Trusted Circle member, and use a private Family Safe Word as one social verification aid. BoomerBuddy reviews only what you submit. It does not open websites, monitor messages, guarantee safety, send alerts to family automatically, prove identity, or replace emergency services, a financial institution, law enforcement, or qualified professional advice. Access is invitation-only during early release.",
+  "fullDescription": "BoomerBuddy helps adults and families prepare for and respond to suspicious messages, links, payment requests, and impersonation attempts. Practice seven short safety lessons, review dated source-linked guidance, and use a weekly rehearsal to make pausing and independently verifying feel familiar. When something suspicious arrives, submit text or a URL for a structured Check of warning signs, uncertainty, and safer next steps. Keep a private 30-day history, deliberately share a redacted result with an authorized Trusted Circle member, and use a private Family Safe Word as one social verification aid. BoomerBuddy reviews only what you submit. It does not open websites, monitor messages, guarantee safety, send alerts to family automatically, prove identity, or replace emergency services, a financial institution, law enforcement, or qualified professional advice. Web access is in controlled beta; native apps remain in signed-device and store testing.",
   "keywords": ["scam safety", "online safety", "family", "suspicious message", "phishing"],
   "categories": {
     "status": "draft_pending_current_console_review",
@@ -40,6 +40,13 @@
   "termsOfUseUrl": "https://app.boomerbuddy.net/terms",
   "accountDeletionUrl": "https://app.boomerbuddy.net/account-deletion",
   "customSchemeCheckUrl": "boomerbuddy://check",
+  "nativeHostedAuth": {
+    "status": "canonical_callbacks_configured_provider_and_signed_device_proof_pending",
+    "iosCallback": "net.boomerbuddy.app://callback",
+    "androidCallback": "clerk://net.boomerbuddy.app.hosted-callback",
+    "deviceTrustHandling": "Complete any Clerk device confirmation inside the hosted sign-in window before the native callback returns to BoomerBuddy.",
+    "callbackDataPolicy": "The app delegates callback state and nonce validation to Clerk hosted auth and never treats callback query material as Check intake."
+  },
   "universalAndAppLinksStatus": "blocked_pending_provider_signing_and_two_way_association",
   "nativeCommerceStatus": "web_first_no_native_purchase_or_payment_steering",
   "contentDeclarations": {
@@ -269,7 +276,7 @@
     "steps": [
       {
         "id": "hosted_customer_sign_in_and_native_return",
-        "instruction": "Open BoomerBuddy, choose Member sign in, complete hosted customer authentication, and confirm the browser returns to the app.",
+        "instruction": "Open BoomerBuddy, choose Member sign in, complete hosted customer authentication plus any Clerk device confirmation in the same window, and confirm the exact platform callback returns to the app.",
         "preflightRequired": true
       },
       {
@@ -319,7 +326,7 @@
       }
     ],
     "knownUnavailableFeatures": [
-      "Public sign-up is not offered during invitation-only early release.",
+      "Account creation is free and does not start a trial or charge; mobile access depends on current beta distribution.",
       "Inbound share targets, automatic message monitoring, native purchases, and external payment links are not available.",
       "Universal Links and Android App Links remain blocked until signed two-way association is proved."
     ]
@@ -403,7 +410,7 @@
       "policySource": "https://developer.apple.com/help/app-store-connect/reference/app-information/platform-version-information"
     },
     "googlePlay": {
-      "text": "Initial invitation-only early access with hosted sign-in, seven short safety lessons, reviewed guidance, optional weekly practice, manual Check review, private 30-day history, Trusted Circle follow-through, Family Safe Word, support receipts, and in-app policy and deletion paths.",
+      "text": "Initial controlled beta with hosted sign-in, seven short safety lessons, reviewed guidance, optional weekly practice, manual Check review, private 30-day history, Trusted Circle follow-through, Family Safe Word, support receipts, and in-app policy and deletion paths.",
       "status": "draft_pending_signed_build_verification",
       "maximumCharacters": 500,
       "policySource": "https://support.google.com/googleplay/android-developer/answer/9859348?hl=en"

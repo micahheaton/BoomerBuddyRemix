@@ -166,28 +166,33 @@ describe('revenue hypothesis production boundary', () => {
     expect(commerce).toContain("priceHypothesisKinds = ['list', 'founding_experiment']");
   });
 
-  it('retains one exact public and Checkout offer', async () => {
-    const [publicConfig, home, pricing, checkoutContract, stripeConfig] = await Promise.all([
-      source('apps/api/src/app.ts'),
+  it('publishes the exact Family annual default and monthly alternative while keeping Individual default-off', async () => {
+    const [publicCatalog, home, pricing, checkoutContract, stripeConfig] = await Promise.all([
+      source('apps/api/src/public-commerce-catalog.ts'),
       source('apps/web/src/app/page.tsx'),
       source('apps/web/src/app/pricing/page.tsx'),
       source('packages/contracts/src/commerce.ts'),
       source('packages/config/src/index.ts'),
     ]);
 
-    expect(publicConfig).toContain("key: 'family'");
-    expect(publicConfig).toContain('monthlyUsd: 14.99');
-    expect(publicConfig).toContain('annualUsd: null');
+    expect(publicCatalog).toContain("defaultPublicAcquisitionOfferId = 'family_annual_v2'");
+    expect(publicCatalog).toContain("offerId: 'family_monthly_v2'");
+    expect(publicCatalog).toContain("offerId: 'family_annual_v2'");
+    expect(publicCatalog).toContain('unitAmountMinor: 14_990');
+    expect(publicCatalog).toContain('individualOffersEnabled === true');
     expect(home).toContain('USD 14.99/month');
+    expect(home).toContain('USD 149.90/year');
     expect(pricing).toContain('$14.99 USD per month');
+    expect(pricing).toContain('$149.90 USD per year');
     const publicOfferCopy = `${home}\n${pricing}`;
-    expect(publicOfferCopy).not.toMatch(/USD (?:8\.99|89|149)\b/u);
-    expect(publicOfferCopy).not.toMatch(/\$(?:8\.99|89|149)\b/u);
+    expect(publicOfferCopy).not.toMatch(/USD (?:8\.99|89(?:\.90)?)\b/u);
+    expect(publicOfferCopy).not.toMatch(/\$(?:8\.99|89(?:\.90)?)\b/u);
     expect(publicOfferCopy).not.toMatch(/Individual (?:monthly|yearly|annual)/iu);
     expect(publicOfferCopy).not.toMatch(/referral (?:credit|offer|reward)/iu);
-    expect(checkoutContract).toContain("offerId: z.literal('founding_family_monthly_v1')");
+    expect(checkoutContract).toContain('offerId: stripeOfferIdSchema');
     expect(stripeConfig).toContain('unitAmountMinor: 1499');
-    expect(stripeConfig).toContain("billingInterval: 'month'");
+    expect(stripeConfig).toContain('unitAmountMinor: 14_990');
+    expect(stripeConfig).toContain("defaultOfferId: 'family_annual_v2'");
   });
 
   it('keeps the noncharging experiment packet isolated and honest about funnel evidence', async () => {

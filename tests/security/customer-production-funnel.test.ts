@@ -67,50 +67,54 @@ describe('rendered production customer funnel', () => {
     expect(rendered).toContain('href="/support"');
     expect(rendered).toContain('href="/billing-terms"');
     expect(rendered).toContain('href="/privacy"');
-    expect(rendered).toContain('Monthly charges are generally not refundable');
+    expect(rendered).toContain('Subscription charges are generally not refundable');
     expect(rendered).toContain('Canceling stops future renewals');
-    expect(rendered).toContain('current paid period');
+    expect(rendered).toContain('current billing period');
   });
 
   it('links the homepage directly to truthful Family pricing', () => {
     const home = renderedProductionRoutes().home;
 
     expect(home).toContain('href="/pricing"');
-    expect(home).toContain('Handle suspicious messages with a calmer family plan.');
-    expect(home).toContain('Scam-safety support for older adults and families');
+    expect(home).toContain('Practice, check, and respond safely to suspicious messages together.');
+    expect(home).toContain('Scam-safety practice and support for older adults and families');
     expect(home).toContain('seven short safety lessons');
-    expect(home).toContain('USD 14.99/month');
-    expect(home).toContain('One invited household');
-    expect(home).toContain('See what Family includes');
+    expect(home).toContain('7 days free, then USD 149.90/year');
+    expect(home).toContain('USD 14.99/month without a trial');
+    expect(home).toContain('href="/sign-up"');
     expect(home).toContain('Try a free Check');
+    expect(home).toContain('Already a member? Sign in');
   });
 
-  it('advertises only implemented Family value without unsupported capacity claims', () => {
+  it('advertises implemented Family value with exact catalog-backed capacity', () => {
     const pricing = renderedProductionRoutes().pricing;
 
-    expect(pricing).toContain('Billed monthly for one invited household.');
-    expect(pricing).toContain('Invite a Trusted Circle person and share a summary');
-    expect(pricing).toContain('An optional Family Safe Word and weekly in-app practice');
-    expect(pricing).toContain('Seven short safety lessons');
-    expect(pricing).toContain('Family is currently available by invitation.');
-    expect(pricing).not.toMatch(/up to three protected adults|six Trusted Circle people/iu);
+    expect(pricing).toContain('7 days free, then $149.90 USD per year');
+    expect(pricing).toContain('$14.99 USD per month');
+    expect(pricing).toContain('You save $29.98');
+    expect(pricing).toContain('Trusted Circle');
+    expect(pricing).toContain('Family Safe Word');
+    expect(pricing).toContain('seven short lessons');
+    expect(pricing).toContain('Creating an account does not start a trial or charge you.');
+    expect(pricing).toContain('up to three protected adults');
+    expect(pricing).toContain('six Trusted Circle participants');
     expect(pricing).not.toContain('You cannot create a new Trusted Circle invitation right now.');
   });
 
-  it('renders honest paused copy instead of an active access-intent control by default', () => {
+  it('uses account creation instead of a paused access-intent dead end', () => {
     const pricing = renderedProductionRoutes().pricing;
 
-    expect(pricing).toContain('Family access requests are paused');
-    expect(pricing).toContain('This page has not sent a request or email');
+    expect(pricing).toContain('href="/sign-up"');
+    expect(pricing).toContain('How web access starts');
+    expect(pricing).not.toContain('Family access requests are paused');
     expect(pricing).not.toContain('Open an email request');
   });
 
-  it('renders the active CTA only after both production enablement gates are true', () => {
+  it('does not let legacy access-intent flags change the primary pricing path', () => {
     const pricing = renderedProductionRoutes(true).pricing;
 
-    expect(pricing).toContain('Ask about Family early access');
-    expect(pricing).toContain('Open an email request');
-    expect(pricing).toContain('No email is sent until');
+    expect(pricing).toContain('href="/sign-up"');
+    expect(pricing).not.toContain('Open an email request');
     expect(pricing).not.toContain('Family access requests are paused');
   });
 
@@ -137,16 +141,17 @@ describe('rendered production customer funnel', () => {
 
     expect(homeHero).toContain('older adults and families');
     expect(homeHero).toContain('seven short safety lessons');
-    expect(homeHero).toContain('USD 14.99/month');
-    expect(homeHero).toContain('See what Family includes');
+    expect(homeHero).toContain('7 days free, then USD 149.90/year');
+    expect(homeHero).toContain('Or USD 14.99/month without a trial');
+    expect(homeHero).toContain('Create an account');
     expect(homeHero).toContain('Try a free Check');
     expect(homeHero).toContain('does not monitor your phone');
 
     expect(pricingHero).toContain('$14.99 USD per month');
-    expect(pricingHero).toContain('Billed monthly for one invited household');
-    expect(pricingHero).toContain('I have an invitation');
+    expect(pricingHero).toContain('7 days free, then $149.90 USD per year');
+    expect(pricingHero).toContain('Create an account');
     expect(pricingHero).toContain('Try a free Check');
-    expect(pricingHero).toContain('Paying does not give anyone access');
+    expect(pricingHero).toContain('Paying does not reveal another adult');
 
     expect(homeHero + pricingHero).not.toMatch(
       /billing authority|service shows that billing is ready|evidence sufficiency|provider state|ruleset|exact person/iu,

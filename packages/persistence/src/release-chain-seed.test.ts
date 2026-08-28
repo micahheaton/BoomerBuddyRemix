@@ -56,6 +56,8 @@ const releaseMigrations = [
   '0040_run3_1_member_learning_idempotency.sql',
   '0041_run3_1_family_safe_word_lifecycle.sql',
   '0042_run3_1_regional_scam_guidance.sql',
+  '0043_governed_first_party_content.sql',
+  '0044_versioned_stripe_offer_catalog.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');
@@ -127,7 +129,7 @@ describe('frozen release migration and demo seed chain', () => {
     }
   });
 
-  it('applies exactly 0001 through 0042 and seeds stable local Stage 7 and support fixtures once', async () => {
+  it('applies exactly 0001 through 0044 and seeds stable local Stage 7 and support fixtures once', async () => {
     database = await createPGliteDatabase();
 
     await expect(runMigrations(database)).resolves.toEqual(releaseMigrations);
@@ -225,7 +227,7 @@ describe('frozen release migration and demo seed chain', () => {
     ]);
   }, 60_000);
 
-  it('keeps an old marked run1 database untouched while applying 0019 through 0027', async () => {
+  it('keeps an old marked run1 database untouched while applying 0019 through 0044', async () => {
     const sourceDirectory = await migrationDirectory();
     temporaryDirectory = await mkdtemp(join(tmpdir(), 'boomerbuddy-release-old-seed-'));
     await copyMigrationsThrough(

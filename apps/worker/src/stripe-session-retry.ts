@@ -213,6 +213,7 @@ export function createStripeSessionRetryHandler(input: {
       if (context.action === 'checkout') {
         const session = await input.provider.createCheckout({
           actor: context.actor,
+          offerId: context.offerId,
           canonicalSubscriptionId: context.canonicalSubscriptionId,
           planVersionId: context.planVersionId,
           providerPriceId: context.providerPriceId,

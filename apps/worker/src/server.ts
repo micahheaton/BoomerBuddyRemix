@@ -18,6 +18,7 @@ import {
   createPostgresDatabase,
   DurableJobRepository,
   FeedbackRepository,
+  GovernedContentRepository,
   GrowthRuntimeRepository,
   growthProjectionEventTypes,
   MessagingRepository,
@@ -55,6 +56,11 @@ import { createWorkerStripeAdapter } from './stripe-adapter';
 import { createGrowthRuntimeHandlers, enqueueGrowthRuntimeJobs } from './growth-runtime';
 import { runReplitWorkerLifecycle } from './health-server';
 import { createOperationalHandlers, seedOperationalSchedules } from './operational-handlers';
+import {
+  createGovernedContentDailyHandler,
+  enqueueGovernedContentDailyJob,
+  governedContentDailyJobType,
+} from './governed-content';
 
 if (existsSync('.env')) loadEnvironmentFile();
 await runReplitWorkerLifecycle(
@@ -124,6 +130,10 @@ await runReplitWorkerLifecycle(
       encryptionKeyVersion: 1,
       fingerprintKey: appConfig.secrets.fingerprintKey,
       fingerprintKeyVersion: 1,
+    });
+    const governedContent = new GovernedContentRepository(database, {
+      encryptionKey: appConfig.secrets.artifactEncryptionKey,
+      encryptionKeyVersion: 1,
     });
     const messaging = new MessagingRepository(
       database,
@@ -215,6 +225,9 @@ await runReplitWorkerLifecycle(
     await enqueueAutomationBudgetMaintenance({ jobs, now, batch: 25 });
     await enqueueGrowthRuntimeJobs({ jobs, now, batch: 100 });
     await seedOperationalSchedules({ environment: appConfig.environment, jobs, now });
+    if (appConfig.content?.dailyDraftGenerationEnabled === true) {
+      await enqueueGovernedContentDailyJob({ jobs, now });
+    }
 
     const handlers: Record<string, JobHandler> = {
       'retention.sweep': retentionHandler,
@@ -231,6 +244,14 @@ await runReplitWorkerLifecycle(
         operations,
         fingerprintKey: appConfig.secrets.fingerprintKey,
       }),
+      ...(appConfig.content?.dailyDraftGenerationEnabled === true
+        ? {
+            [governedContentDailyJobType]: createGovernedContentDailyHandler({
+              content: governedContent,
+              jobs,
+            }),
+          }
+        : {}),
     };
     if (
       appConfig.commerce.stripe.mode === 'test' ||
@@ -249,7 +270,8 @@ await runReplitWorkerLifecycle(
           accountId: stripe.accountId,
           apiVersion: stripe.apiVersion,
           portalConfigurationId: stripe.cancelOnlyPortalConfigurationId,
-          offer: stripe.offer,
+          defaultOfferId: stripe.defaultOfferId,
+          offers: stripe.offers,
         },
       });
       handlers['commerce.reconcile'] = createStripeReconciliationHandler({

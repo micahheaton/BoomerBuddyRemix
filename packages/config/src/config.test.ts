@@ -79,6 +79,10 @@ describe('typed configuration', () => {
       intakeEnabled: false,
       hqQueueEnabled: false,
     });
+    expect(config.content).toEqual({
+      firstPartyPublishingEnabled: false,
+      dailyDraftGenerationEnabled: false,
+    });
     expect(config.secrets.artifactEncryptionKey.equals(config.secrets.fingerprintKey)).toBe(false);
     expect(config.commerce).toEqual({ stripe: { mode: 'disabled' } });
     expect(config.messaging).toEqual({
@@ -154,6 +158,21 @@ describe('typed configuration', () => {
         BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED: 'true',
       }).supportReceipts,
     ).toEqual({ customerAccessEnabled: true, intakeEnabled: true, hqQueueEnabled: true });
+  });
+
+  it('keeps governed publication and daily draft generation separately default-off', () => {
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_FIRST_PARTY_CONTENT_ENABLED: 'true',
+      }).content,
+    ).toEqual({ firstPartyPublishingEnabled: true, dailyDraftGenerationEnabled: false });
+    expect(
+      loadConfig({
+        ...developmentEnvironment(),
+        BB_DAILY_CONTENT_DRAFTS_ENABLED: 'true',
+      }).content,
+    ).toEqual({ firstPartyPublishingEnabled: false, dailyDraftGenerationEnabled: true });
   });
 
   it('requires an explicit bounded trusted-proxy hop count', () => {
@@ -434,6 +453,7 @@ describe('typed configuration', () => {
       BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
       BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
       BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+      BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID: 'price_family_annual_fixture',
     });
     expect(config.commerce.stripe).toMatchObject({
       mode: 'test',
@@ -457,6 +477,7 @@ describe('typed configuration', () => {
         BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_cancel_only_fixture',
         BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: 'prod_family_fixture',
         BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: 'price_family_month_fixture',
+        BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID: 'price_family_annual_fixture',
       }),
     ).toThrow('complete environment-specific credentials');
     expect(() =>
@@ -507,6 +528,7 @@ describe('typed configuration', () => {
       BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: 'bpc_live_cancel_fixture',
       BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: 'prod_live_family_fixture',
       BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: 'price_live_family_fixture',
+      BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID: 'price_live_family_annual_fixture',
     };
     expect(() =>
       loadConfig({
@@ -555,9 +577,58 @@ describe('typed configuration', () => {
       runtimeNetworkPermitted: true,
     });
     expect(() => assertStripeOnlineRuntimePermitted(workerConfig, 'worker')).not.toThrow();
+    const liveInitiationReadiness = {
+      BB_BILLING_PUBLIC_SUPPORT_EMAIL: 'support@example.invalid',
+      BB_BILLING_PUBLIC_SUPPORT_URL: 'https://app.example.invalid/support',
+      BB_BILLING_PUBLIC_PRIVACY_URL: 'https://app.example.invalid/privacy',
+      BB_BILLING_PUBLIC_TERMS_URL: 'https://app.example.invalid/terms',
+      BB_BILLING_PUBLIC_BILLING_TERMS_URL: 'https://app.example.invalid/billing-terms',
+      BB_BILLING_POLICY_VERSION: 'billing-v1',
+      BB_BILLING_POLICY_EFFECTIVE_AT: '2026-08-28T00:00:00.000Z',
+      BB_BILLING_SUPPORT_OPERATIONS_READY: 'true',
+      BB_BILLING_SUPPORT_RECEIPT_ID: 'support-readiness-fixture',
+      BB_BILLING_TAX_TREATMENT_REVIEW_COMPLETE: 'true',
+      BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY: 'us-only-fixture',
+      BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID: 'tax-review-fixture',
+    } as const;
     expect(() =>
       loadConfig({
         ...commonLive,
+        ...liveInitiationReadiness,
+        BB_STRIPE_RUNTIME_SURFACE: 'api',
+        BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+        BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+        BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+      }),
+    ).toThrow('trial-reminder delivery receipt');
+    const readyLiveApi = loadConfig({
+      ...commonLive,
+      ...liveInitiationReadiness,
+      BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE: 'stripe_automatic_email',
+      BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID: 'trial-email-setting-fixture',
+      BB_STRIPE_RUNTIME_SURFACE: 'api',
+      BB_STRIPE_LIVE_API_RESTRICTED_KEY: 'rk_live_api_fixture_12345678',
+      BB_STRIPE_LIVE_WEBHOOK_SECRET: 'whsec_live_fixture_12345678',
+      BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',
+    });
+    expect(readyLiveApi.commerce.stripe).toMatchObject({
+      mode: 'live',
+      runtimeInitiationPermitted: true,
+      billingOperationalReadiness: {
+        state: 'ready',
+        trialReminderDeliveryMode: 'stripe_automatic_email',
+        trialReminderDeliveryReceiptId: 'trial-email-setting-fixture',
+        taxTreatmentReviewComplete: true,
+        taxReviewedLaunchGeography: 'us-only-fixture',
+        taxTreatmentReviewReceiptId: 'tax-review-fixture',
+      },
+    });
+    expect(() =>
+      loadConfig({
+        ...commonLive,
+        ...liveInitiationReadiness,
+        BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE: 'stripe_automatic_email',
+        BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID: 'trial-email-setting-fixture',
         BB_STRIPE_RUNTIME_SURFACE: 'worker',
         BB_STRIPE_LIVE_WORKER_RESTRICTED_KEY: 'rk_live_worker_fixture_12345678',
         BB_STRIPE_LIVE_INITIATION_ENABLED: 'true',

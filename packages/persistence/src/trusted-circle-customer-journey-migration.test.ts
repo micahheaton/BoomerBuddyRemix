@@ -1,12 +1,10 @@
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { testArtifactProtection } from '@boomerbuddy/testkit';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createPGliteDatabase, type Database } from './database';
 import { migrationDirectory, runMigrations } from './migrations';
-import { seedDemoData } from './seed';
 
 const migration = '0039_trusted_circle_customer_journey.sql';
 
@@ -35,41 +33,82 @@ describe('Trusted Circle customer journey migration', () => {
     database = await createPGliteDatabase();
     await expect(runMigrations(database, temporaryDirectory)).resolves.toHaveLength(38);
     const now = new Date('2026-08-27T12:00:00.000Z');
-    await database.query(
-      `CREATE TABLE check_share_lifecycle_events (
-         id text PRIMARY KEY,
-         household_id text NOT NULL,
-         analysis_id text NOT NULL,
-         shared_with_person_id text NOT NULL,
-         actor_person_id text NOT NULL,
-         event_kind text NOT NULL,
-         state_after text NOT NULL,
-         closure_reason text,
-         created_at timestamptz NOT NULL
-       )`,
-    );
-    await database.query(
-      `ALTER TABLE check_shares
-         ADD COLUMN lifecycle_state text NOT NULL DEFAULT 'shared',
-         ADD COLUMN acknowledged_by_person_id text,
-         ADD COLUMN acknowledged_at timestamptz,
-         ADD COLUMN closed_by_person_id text,
-         ADD COLUMN closed_at timestamptz,
-         ADD COLUMN closure_reason text`,
-    );
-    await expect(seedDemoData(database, testArtifactProtection(), 'test', now)).resolves.toBe(
-      'seeded',
-    );
-    await database.query('DROP TABLE check_share_lifecycle_events');
-    await database.query(
-      `ALTER TABLE check_shares
-         DROP COLUMN lifecycle_state,
-         DROP COLUMN acknowledged_by_person_id,
-         DROP COLUMN acknowledged_at,
-         DROP COLUMN closed_by_person_id,
-         DROP COLUMN closed_at,
-         DROP COLUMN closure_reason`,
-    );
+    await database.exec(`
+      INSERT INTO persons(id, display_name, created_at) VALUES
+        ('person-migration-protected','Migration protected fixture','${now.toISOString()}'),
+        ('person-migration-trusted','Migration trusted fixture','${now.toISOString()}');
+      INSERT INTO households(id, name, created_at)
+      VALUES ('household-migration-share','Migration share fixture','${now.toISOString()}');
+      INSERT INTO household_memberships(
+        household_id, id, person_id, membership_kind, status, created_at
+      ) VALUES
+        ('household-migration-share','membership-migration-protected',
+          'person-migration-protected','member','active','${now.toISOString()}'),
+        ('household-migration-share','membership-migration-trusted',
+          'person-migration-trusted','member','active','${now.toISOString()}');
+      INSERT INTO consents(
+        household_id, id, protected_person_id, granted_by_person_id, purpose,
+        consent_version, state, granted_at
+      ) VALUES (
+        'household-migration-share','consent-migration-share','person-migration-protected',
+        'person-migration-protected','trusted_circle_relationship','migration-v1','active',
+        '${now.toISOString()}'
+      );
+      INSERT INTO consent_evidence(
+        household_id, id, consent_id, actor_person_id, subject_person_id,
+        recipient_person_id, purpose, scope, action, disclosure_version,
+        disclosure_digest, policy_version, policy_digest, source_interaction,
+        assurance, effective_at, recorded_at
+      ) VALUES (
+        'household-migration-share','evidence-migration-share','consent-migration-share',
+        'person-migration-protected','person-migration-protected','person-migration-trusted',
+        'trusted_circle_relationship','{"permissions":["check:read"]}'::jsonb,'accept',
+        'migration-disclosure-v1',repeat('1',64),'migration-policy-v1',repeat('2',64),
+        'migration_test','legacy_unverified','${now.toISOString()}','${now.toISOString()}'
+      );
+      INSERT INTO consent_current_projections(
+        household_id, consent_id, latest_evidence_id, actor_person_id,
+        subject_person_id, recipient_person_id, purpose, scope, state,
+        effective_at, updated_at
+      ) VALUES (
+        'household-migration-share','consent-migration-share','evidence-migration-share',
+        'person-migration-protected','person-migration-protected','person-migration-trusted',
+        'trusted_circle_relationship','{"permissions":["check:read"]}'::jsonb,'active',
+        '${now.toISOString()}','${now.toISOString()}'
+      );
+      INSERT INTO trusted_circle_relationships(
+        household_id, id, protected_person_id, trusted_person_id, permissions,
+        consent_id, consent_version, state, created_at, latest_consent_evidence_id
+      ) VALUES (
+        'household-migration-share','relationship-migration-share','person-migration-protected',
+        'person-migration-trusted','["check:read"]'::jsonb,'consent-migration-share',
+        'migration-v1','active','${now.toISOString()}','evidence-migration-share'
+      );
+      INSERT INTO artifacts(
+        household_id, id, owner_person_id, kind, encryption_key_version,
+        fingerprint_key_version, state, delete_after, created_at
+      ) VALUES (
+        'household-migration-share','artifact-migration-share','person-migration-protected',
+        'text',1,1,'active','2026-09-27T12:00:00.000Z','${now.toISOString()}'
+      );
+      INSERT INTO analyses(
+        household_id, id, artifact_id, requested_by, risk, evidence_sufficiency,
+        calibration, summary, evidence, actions, provider_name, provider_state,
+        provider_version, ruleset_version, state, created_at
+      ) VALUES (
+        'household-migration-share','analysis-migration-share','artifact-migration-share',
+        'person-migration-protected','caution','limited','not_calibrated',
+        'Synthetic migration fixture','[]'::jsonb,'[]'::jsonb,'fixture','mock','v1','v1',
+        'completed','${now.toISOString()}'
+      );
+      INSERT INTO check_shares(
+        household_id, analysis_id, relationship_id, shared_with_person_id,
+        shared_by_person_id, created_at
+      ) VALUES (
+        'household-migration-share','analysis-migration-share','relationship-migration-share',
+        'person-migration-trusted','person-migration-protected','${now.toISOString()}'
+      );
+    `);
     const sharesBefore = await database.query<{
       household_id: string;
       analysis_id: string;

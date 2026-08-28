@@ -9,7 +9,7 @@ export default function PrivacyPage() {
     <PolicyPage
       eyebrow="Privacy"
       title="BoomerBuddy privacy notice"
-      summary="This notice explains the information used to provide invited early access and the choices available to members."
+      summary="This notice explains the information used to provide BoomerBuddy on the web and the choices available to members."
     >
       <PolicySection title="Information we use">
         <p>
@@ -40,13 +40,13 @@ export default function PrivacyPage() {
           website addresses, and unrecognized address values are not used for campaign attribution.
         </p>
       </PolicySection>
-      <PolicySection title="Early-access intent receipts">
+      <PolicySection title="Access-intent receipts">
         <p>
-          When you choose to ask about early access from the pricing page, BoomerBuddy first creates
-          a temporary receipt containing only a server-issued code, the fixed purpose, and a
-          recognized source and campaign label. Protected one-way values prevent duplicate requests
-          and enforce abuse limits without storing the request key or network address in the
-          receipt. The receipt expires after seven days. It does not contain your name, email
+          If BoomerBuddy displays an access-request control and you choose to use it, BoomerBuddy
+          first creates a temporary receipt containing only a server-issued code, the fixed purpose,
+          and a recognized source and campaign label. Protected one-way values prevent duplicate
+          requests and enforce abuse limits without storing the request key or network address in
+          the receipt. The receipt expires after seven days. It does not contain your name, email
           address, phone number, message, account, or member identifier.
         </p>
         <p>

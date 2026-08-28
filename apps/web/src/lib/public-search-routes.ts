@@ -4,6 +4,7 @@ export const indexedCustomerRoutes = [
   { path: '/', changeFrequency: 'weekly', priority: 1 },
   { path: '/check', changeFrequency: 'weekly', priority: 0.9 },
   { path: '/how-it-works', changeFrequency: 'monthly', priority: 0.8 },
+  { path: '/learn', changeFrequency: 'daily', priority: 0.8 },
   { path: '/pricing', changeFrequency: 'monthly', priority: 0.8 },
   { path: '/trust', changeFrequency: 'monthly', priority: 0.7 },
   { path: '/support', changeFrequency: 'monthly', priority: 0.6 },
@@ -30,6 +31,7 @@ export const noindexCustomerRoutePrefixes = [
   '/member',
   '/research',
   '/sign-in',
+  '/sign-up',
   '/unauthorized-sign-in',
 ] as const;
 

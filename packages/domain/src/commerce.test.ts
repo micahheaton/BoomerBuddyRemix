@@ -91,10 +91,10 @@ describe('immutable commerce catalog', () => {
       { interval: 'year', amountMinor: 0, currency: 'USD', kind: 'list' },
     ]);
     expect(seededCommercePlanVersions.plus.prices.map((price) => price.amountMinor)).toEqual([
-      899, 8_900,
+      899, 8_990,
     ]);
     expect(seededCommercePlanVersions.family.prices.map((price) => price.amountMinor)).toEqual([
-      1_499, 14_900,
+      1_499, 14_990,
     ]);
     expect(seededCommercePlanVersions.plus.allowances).toEqual([
       { kind: 'protected_members', limit: 1 },

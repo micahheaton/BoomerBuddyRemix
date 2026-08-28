@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema, providerStateSchema } from './common';
 import { riskSchema } from './checks';
+import { stripePublicCatalogSchema } from './commerce';
 
 const hqDataStateSchema = z.enum(['local_development', 'live_database']);
 
@@ -259,11 +260,12 @@ export const publicConfigResponseSchema = z.object({
         key: z.literal('family'),
         name: z.literal('Family'),
         monthlyUsd: z.literal(14.99),
-        annualUsd: z.null(),
+        annualUsd: z.literal(149.9),
         hypothesis: z.literal(false),
       }),
     )
     .length(1),
+  commerceCatalog: stripePublicCatalogSchema,
 });
 
 export type HqOverviewResponse = z.infer<typeof hqOverviewResponseSchema>;

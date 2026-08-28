@@ -11,29 +11,46 @@ export default function HomePage() {
       <main id="main-content">
         <section className="page-shell marketing-hero">
           <div>
-            <span className="eyebrow">Scam-safety support for older adults and families</span>
-            <h1>Handle suspicious messages with a calmer family plan.</h1>
+            <span className="eyebrow">
+              Scam-safety practice and support for older adults and families
+            </span>
+            <h1>Practice, check, and respond safely to suspicious messages together.</h1>
             <p className="lede">
-              Family combines seven short safety lessons, a private place to check suspicious text
-              or links, and optional help from a person each adult chooses and trusts.
+              BoomerBuddy gives each adult seven short safety lessons, a private way to check
+              suspicious text or links, and an optional redacted handoff to one person they choose.
+              During web access, you contact that person directly; BoomerBuddy does not message them
+              automatically.
             </p>
             <p className="offer-line" aria-label="Family plan offer">
               <strong>Family</strong>
-              <span>USD 14.99/month</span>
-              <span>One invited household</span>
+              <span>7 days free, then USD 149.90/year</span>
+              <span>Or USD 14.99/month without a trial</span>
             </p>
             <div className="button-row">
-              <Link className="button button-primary" href="/pricing">
-                See what Family includes
+              <Link className="button button-primary" href="/sign-up">
+                Create an account
               </Link>
               <Link className="button button-secondary" href="/check">
                 Try a free Check
               </Link>
+              <Link className="button button-secondary" href="/sign-in">
+                Already a member? Sign in
+              </Link>
             </div>
+            <p className="help">
+              Creating an account does not start a trial or charge you. If annual billing is
+              available, a trial starts only after you review the exact first-charge date and
+              confirm secure checkout. Seven days are free, then Family renews at USD 149.90 per
+              year unless canceled before the trial ends.
+            </p>
             <p className="help">
               Private by design: BoomerBuddy does not monitor your phone, read your messages, or
               contact family automatically. A Check explains warning signs and safer actions; it
               cannot guarantee that something is safe.
+            </p>
+            <p className="help">
+              Web access is the current path. iPhone and Android apps are still in signed-device and
+              store testing.
             </p>
           </div>
           <aside className="hero-card workflow-card" aria-label="The Family response plan">
@@ -50,7 +67,10 @@ export default function HomePage() {
               </li>
               <li>
                 <strong>Ask by choice</strong>
-                <span>Share a summary with the original message or link removed.</span>
+                <span>
+                  Contact your chosen person, then share a summary with the original message or link
+                  removed.
+                </span>
               </li>
               <li>
                 <strong>Follow through</strong>
@@ -81,8 +101,9 @@ export default function HomePage() {
               <article className="card">
                 <h3>Reviewed scam guidance</h3>
                 <p>
-                  Read dated, source-linked US guidance, including a reviewed California brief.
-                  Broader regional coverage is still being added.
+                  Read dated, source-linked US guidance. Reviewed state-specific briefs currently
+                  cover Arizona, California, Illinois, New York, and Pennsylvania; other states use
+                  an honest national fallback.
                 </p>
               </article>
               <article className="card">
@@ -174,17 +195,20 @@ export default function HomePage() {
                 </Link>
               </article>
               <article className="card plan-card plan-card-featured">
-                <p className="plan-kicker">Invitation required</p>
+                <p className="plan-kicker">Available on the web</p>
                 <h3>Family</h3>
-                <p className="plan-price">USD 14.99/month</p>
+                <p className="plan-price">7 days free, then USD 149.90/year</p>
                 <ul className="plain-list">
-                  <li>One invited household</li>
+                  <li>Save USD 29.98 compared with twelve monthly payments</li>
+                  <li>USD 14.99 monthly is available without a trial</li>
+                  <li>Up to three protected adults, with every adult joining by choice</li>
+                  <li>Up to six Trusted Circle participants across the household</li>
                   <li>Private History for up to 30 days and sharing only by choice</li>
                   <li>See when your chosen person acknowledges a shared summary</li>
                   <li>Safe Word, seven lessons, guidance, and weekly practice</li>
                 </ul>
                 <Link className="button button-primary" href="/pricing">
-                  See what Family includes
+                  Review Family pricing
                 </Link>
               </article>
             </div>
@@ -196,17 +220,17 @@ export default function HomePage() {
             <span className="eyebrow">A clearer next step</span>
             <h2 className="section-heading">Build the habit before the next urgent message.</h2>
             <p>
-              Family access is currently limited to invited households. Web access is the controlled
-              early-access path; native iPhone and Android packages are still completing
-              signed-device and store testing.
+              Create an account to review availability and the exact billing terms. Signing up alone
+              does not start a trial or charge you. Native iPhone and Android packages are still
+              completing signed-device and store testing.
             </p>
           </div>
           <div className="button-row">
-            <Link className="button button-primary" href="/pricing">
-              Review Family access
+            <Link className="button button-primary" href="/sign-up">
+              Create an account
             </Link>
             <Link className="button button-secondary" href="/sign-in">
-              Already invited? Sign in
+              Already a member? Sign in
             </Link>
           </div>
         </section>

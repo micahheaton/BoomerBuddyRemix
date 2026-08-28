@@ -47,6 +47,7 @@ const metadataSourceByRoute: Readonly<Record<IndexedCustomerRoutePath, string>> 
   '/': 'apps/web/src/app/page.tsx',
   '/check': 'apps/web/src/app/check/layout.tsx',
   '/how-it-works': 'apps/web/src/app/how-it-works/page.tsx',
+  '/learn': 'apps/web/src/app/learn/page.tsx',
   '/pricing': 'apps/web/src/app/pricing/page.tsx',
   '/trust': 'apps/web/src/app/trust/page.tsx',
   '/support': 'apps/web/src/app/support/page.tsx',
@@ -80,8 +81,10 @@ describe('customer search indexing boundary', () => {
     const routes = pageFiles(customerAppRoot).map(routeForPage).sort();
     const unclassified = routes.filter(
       (route) =>
-        !indexedPaths.some((indexedPath) => indexedPath === route) &&
-        !noindexCustomerRoutePrefixes.some((prefix) => routeBelongsToFamily(route, prefix)),
+        !indexedPaths.some(
+          (indexedPath) =>
+            indexedPath === route || (indexedPath === '/learn' && route === '/learn/[slug]'),
+        ) && !noindexCustomerRoutePrefixes.some((prefix) => routeBelongsToFamily(route, prefix)),
     );
 
     expect(unclassified).toEqual([]);
@@ -98,6 +101,7 @@ describe('customer search indexing boundary', () => {
       '/member/history',
       '/research/offer-pair-v2',
       '/sign-in',
+      '/sign-up',
       '/unauthorized-sign-in',
     ]) {
       expect(crawlerBlocks(path, customerRules.disallow), path).toBe(false);
@@ -112,6 +116,7 @@ describe('customer search indexing boundary', () => {
     for (const path of [
       'apps/web/src/app/member/layout.tsx',
       'apps/web/src/app/sign-in/layout.tsx',
+      'apps/web/src/app/sign-up/layout.tsx',
       'apps/web/src/app/research/layout.tsx',
       'apps/web/src/app/feedback/page.tsx',
       'apps/hq/src/app/layout.tsx',
@@ -133,11 +138,11 @@ describe('customer search indexing boundary', () => {
     expect(customerRobotsSource).not.toContain("'/api/'");
 
     const customerSitemapSource = source('apps/web/src/app/sitemap.ts');
-    expect(customerSitemapSource).toContain(
-      "import { indexedCustomerSitemapEntries } from '../lib/public-search-routes';",
-    );
+    expect(customerSitemapSource).toContain('indexedCustomerSitemapEntries');
+    expect(customerSitemapSource).toContain("from '../lib/public-search-routes';");
     expect(customerSitemapSource).toContain('indexedCustomerSitemapEntries.map');
-    expect(customerSitemapSource).not.toContain('customerPublicOrigin');
+    expect(customerSitemapSource).toContain('publicLearnArticles');
+    expect(customerSitemapSource).toContain('/learn/${article.slug}');
 
     const hqRobotsSource = source('apps/hq/src/app/robots.ts');
     expect(hqRobotsSource).toContain("import { hqCrawlerPolicy } from '../lib/search-policy';");

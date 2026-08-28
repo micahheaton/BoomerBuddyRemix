@@ -297,16 +297,116 @@ describe('input, persistence, and no-network security', () => {
       safeWordDisposition: 'configured',
     });
     const verificationEvents = await harness.database.query<{
-      audits: number;
-      outbox: number;
+      orientation_audits: number;
+      orientation_outbox: number;
+      lifecycle_audits: number;
+      lifecycle_outbox: number;
+      lifecycle_revision: number;
     }>(
       `SELECT
          (SELECT count(*)::int FROM audit_events
-          WHERE action = 'orientation.verification_aid_updated') AS audits,
+          WHERE action = 'orientation.verification_aid_updated') AS orientation_audits,
          (SELECT count(*)::int FROM outbox_events
-          WHERE event_type = 'orientation.verification_aid_updated.v1') AS outbox`,
+          WHERE event_type = 'orientation.verification_aid_updated.v1') AS orientation_outbox,
+         (SELECT count(*)::int FROM audit_events
+          WHERE action = 'family.verification_aid_configured') AS lifecycle_audits,
+         (SELECT count(*)::int FROM outbox_events
+          WHERE event_type = 'family.verification_aid_configured.v1') AS lifecycle_outbox,
+         (SELECT lifecycle_revision FROM safe_word_verifiers
+          WHERE household_id = 'household-sunrise'
+            AND protected_person_id = 'person-protected-pat') AS lifecycle_revision`,
     );
-    expect(verificationEvents.rows[0]).toEqual({ audits: 1, outbox: 1 });
+    expect(verificationEvents.rows[0]).toEqual({
+      orientation_audits: 1,
+      orientation_outbox: 1,
+      lifecycle_audits: 1,
+      lifecycle_outbox: 1,
+      lifecycle_revision: 1,
+    });
+
+    await harness.database.query(
+      `UPDATE orientation_states
+       SET completed_steps = $1::jsonb, safe_word_disposition = 'unanswered', version = version + 1
+       WHERE household_id = 'household-sunrise' AND person_id = 'person-protected-pat'`,
+      [JSON.stringify(['protection_subject', 'trusted_circle'])],
+    );
+    const replaced = await harness.app.inject({
+      method: 'PUT',
+      url: '/v1/orientation/safe-word',
+      headers,
+      payload: { action: 'configure', phrase: 'Replacement local household phrase' },
+    });
+    expect(replaced.statusCode).toBe(200);
+    expect(replaced.body).not.toMatch(/phrase|verifier|scrypt|salt/iu);
+
+    await harness.database.query(
+      `UPDATE orientation_states
+       SET completed_steps = $1::jsonb, safe_word_disposition = 'unanswered', version = version + 1
+       WHERE household_id = 'household-sunrise' AND person_id = 'person-protected-pat'`,
+      [JSON.stringify(['protection_subject', 'trusted_circle'])],
+    );
+    const disabled = await harness.app.inject({
+      method: 'PUT',
+      url: '/v1/orientation/safe-word',
+      headers,
+      payload: { action: 'defer' },
+    });
+    expect(disabled.statusCode).toBe(200);
+    const lifecycle = await harness.database.query<{
+      event_kind: string;
+      lifecycle_revision: number;
+    }>(
+      `SELECT event_kind, lifecycle_revision
+       FROM family_safe_word_lifecycle_events
+       WHERE household_id = 'household-sunrise'
+         AND protected_person_id = 'person-protected-pat'
+         AND event_kind IN ('configured', 'replaced', 'disabled')
+       ORDER BY lifecycle_revision`,
+    );
+    expect(lifecycle.rows).toEqual([
+      { event_kind: 'configured', lifecycle_revision: 1 },
+      { event_kind: 'replaced', lifecycle_revision: 2 },
+      { event_kind: 'disabled', lifecycle_revision: 3 },
+    ]);
+    const lifecycleOperationalEvidence = await harness.database.query<{
+      configured_audit: number;
+      replaced_audit: number;
+      disabled_audit: number;
+      configured_outbox: number;
+      replaced_outbox: number;
+      disabled_outbox: number;
+    }>(
+      `SELECT
+         (SELECT count(*)::int FROM audit_events
+          WHERE action = 'family.verification_aid_configured') AS configured_audit,
+         (SELECT count(*)::int FROM audit_events
+          WHERE action = 'family.verification_aid_replaced') AS replaced_audit,
+         (SELECT count(*)::int FROM audit_events
+          WHERE action = 'family.verification_aid_disabled') AS disabled_audit,
+         (SELECT count(*)::int FROM outbox_events
+          WHERE event_type = 'family.verification_aid_configured.v1') AS configured_outbox,
+         (SELECT count(*)::int FROM outbox_events
+          WHERE event_type = 'family.verification_aid_replaced.v1') AS replaced_outbox,
+         (SELECT count(*)::int FROM outbox_events
+          WHERE event_type = 'family.verification_aid_disabled.v1') AS disabled_outbox`,
+    );
+    expect(lifecycleOperationalEvidence.rows[0]).toEqual({
+      configured_audit: 1,
+      replaced_audit: 1,
+      disabled_audit: 1,
+      configured_outbox: 1,
+      replaced_outbox: 1,
+      disabled_outbox: 1,
+    });
+    expect(
+      (
+        await harness.database.query<{ count: number }>(
+          `SELECT count(*)::int AS count FROM safe_word_verifiers
+           WHERE household_id = 'household-sunrise'
+             AND protected_person_id = 'person-protected-pat'`,
+        )
+      ).rows[0]?.count,
+    ).toBe(0);
     const noVerifierGet = await harness.app.inject({
       method: 'GET',
       url: '/v1/orientation/safe-word',
@@ -363,6 +463,9 @@ describe('input, persistence, and no-network security', () => {
       version: number;
       verifiers: number;
       audits: number;
+      lifecycle_events: number;
+      lifecycle_audits: number;
+      lifecycle_outbox: number;
     }>(
       `SELECT o.completed_steps, o.safe_word_disposition, o.version,
          (SELECT count(*)::int FROM safe_word_verifiers v
@@ -370,7 +473,16 @@ describe('input, persistence, and no-network security', () => {
            AS verifiers,
          (SELECT count(*)::int FROM audit_events a
           WHERE a.household_id = o.household_id
-            AND a.action = 'orientation.verification_aid_updated') AS audits
+            AND a.action = 'orientation.verification_aid_updated') AS audits,
+         (SELECT count(*)::int FROM family_safe_word_lifecycle_events lifecycle
+          WHERE lifecycle.household_id = o.household_id
+            AND lifecycle.protected_person_id = o.person_id) AS lifecycle_events,
+         (SELECT count(*)::int FROM audit_events lifecycle_audit
+          WHERE lifecycle_audit.household_id = o.household_id
+            AND lifecycle_audit.action LIKE 'family.verification_aid_%') AS lifecycle_audits,
+         (SELECT count(*)::int FROM outbox_events lifecycle_outbox
+          WHERE lifecycle_outbox.household_id = o.household_id
+            AND lifecycle_outbox.event_type LIKE 'family.verification_aid_%') AS lifecycle_outbox
        FROM orientation_states o
        WHERE o.household_id = 'household-sunrise'
          AND o.person_id = 'person-protected-pat'`,
@@ -381,6 +493,9 @@ describe('input, persistence, and no-network security', () => {
       version: 4,
       verifiers: 0,
       audits: 0,
+      lifecycle_events: 0,
+      lifecycle_audits: 0,
+      lifecycle_outbox: 0,
     });
   });
 });

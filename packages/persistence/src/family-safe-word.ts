@@ -54,7 +54,7 @@ export interface FamilySafeWordRateBucketPurgeResult {
   readonly saturated: boolean;
 }
 
-interface OperationalInput {
+export interface FamilySafeWordOperationalInput {
   readonly householdId: string;
   readonly protectedPersonId: string;
   readonly actorPersonId: string;
@@ -207,7 +207,10 @@ export class FamilySafeWordRepository {
 
   private async assertAuthority(
     executor: SqlExecutor,
-    input: Pick<OperationalInput, 'householdId' | 'protectedPersonId' | 'actorPersonId' | 'now'>,
+    input: Pick<
+      FamilySafeWordOperationalInput,
+      'householdId' | 'protectedPersonId' | 'actorPersonId' | 'now'
+    >,
   ): Promise<SafeWordActorKind> {
     if (input.actorPersonId === input.protectedPersonId) {
       const protectedAccess = await hasEffectiveProtectedEnrollment(
@@ -268,7 +271,7 @@ export class FamilySafeWordRepository {
     return 'trusted_person';
   }
 
-  async getStatus(input: OperationalInput): Promise<FamilySafeWordStatus> {
+  async getStatus(input: FamilySafeWordOperationalInput): Promise<FamilySafeWordStatus> {
     return this.database.transaction(async (transaction) => {
       await this.assertAuthority(transaction, input);
       const stored = await selectVerifier(
@@ -296,7 +299,7 @@ export class FamilySafeWordRepository {
   }
 
   async verify(
-    input: OperationalInput & { readonly phrase: string },
+    input: FamilySafeWordOperationalInput & { readonly phrase: string },
   ): Promise<FamilySafeWordVerificationResult> {
     return this.database.transaction(async (transaction) => {
       const actorKind = await this.assertAuthority(transaction, input);
@@ -378,89 +381,90 @@ export class FamilySafeWordRepository {
   }
 
   async replace(
-    input: OperationalInput & { readonly phrase: string },
+    input: FamilySafeWordOperationalInput & { readonly phrase: string },
+  ): Promise<FamilySafeWordLifecycleResult> {
+    return this.database.transaction((transaction) => this.replaceWithin(transaction, input));
+  }
+
+  async replaceWithin(
+    transaction: SqlExecutor,
+    input: FamilySafeWordOperationalInput & { readonly phrase: string },
   ): Promise<FamilySafeWordLifecycleResult> {
     if (input.actorPersonId !== input.protectedPersonId) {
       throw new DomainError('not_found', 'Family verification aid is unavailable');
     }
-    return this.database.transaction(async (transaction) => {
-      const actorKind = await this.assertAuthority(transaction, input);
-      const verifier = await createSafeWordVerifier(input.phrase, this.pepper, input.now);
-      const stored = await selectVerifier(
-        transaction,
+    const actorKind = await this.assertAuthority(transaction, input);
+    const verifier = await createSafeWordVerifier(input.phrase, this.pepper, input.now);
+    const stored = await selectVerifier(
+      transaction,
+      input.householdId,
+      input.protectedPersonId,
+      true,
+    );
+    const summary = await lifecycleSummary(transaction, input.householdId, input.protectedPersonId);
+    const revision = Math.max(stored?.lifecycle_revision ?? 0, summary.maximumRevision) + 1;
+    const eventKind = stored === null && summary.maximumRevision === 0 ? 'configured' : 'replaced';
+    await transaction.query(
+      `INSERT INTO safe_word_verifiers(
+         household_id, protected_person_id, verifier, version,
+         updated_at, lifecycle_revision
+       ) VALUES ($1,$2,$3,$4,$5,$6)
+       ON CONFLICT (household_id, protected_person_id) DO UPDATE
+         SET verifier = EXCLUDED.verifier,
+             version = EXCLUDED.version,
+             updated_at = EXCLUDED.updated_at,
+             lifecycle_revision = EXCLUDED.lifecycle_revision`,
+      [
         input.householdId,
         input.protectedPersonId,
-        true,
-      );
-      const summary = await lifecycleSummary(
-        transaction,
-        input.householdId,
-        input.protectedPersonId,
-      );
-      const revision = Math.max(stored?.lifecycle_revision ?? 0, summary.maximumRevision) + 1;
-      const eventKind =
-        stored === null && summary.maximumRevision === 0 ? 'configured' : 'replaced';
-      await transaction.query(
-        `INSERT INTO safe_word_verifiers(
-           household_id, protected_person_id, verifier, version,
-           updated_at, lifecycle_revision
-         ) VALUES ($1,$2,$3,$4,$5,$6)
-         ON CONFLICT (household_id, protected_person_id) DO UPDATE
-           SET verifier = EXCLUDED.verifier,
-               version = EXCLUDED.version,
-               updated_at = EXCLUDED.updated_at,
-               lifecycle_revision = EXCLUDED.lifecycle_revision`,
-        [
-          input.householdId,
-          input.protectedPersonId,
-          JSON.stringify(verifier),
-          verifier.version,
-          input.now.toISOString(),
-          revision,
-        ],
-      );
-      await this.recordChange(transaction, input, actorKind, eventKind, revision, 'configured');
-      return { state: 'configured', changed: true, updatedAt: input.now };
-    });
+        JSON.stringify(verifier),
+        verifier.version,
+        input.now.toISOString(),
+        revision,
+      ],
+    );
+    await this.recordChange(transaction, input, actorKind, eventKind, revision, 'configured');
+    return { state: 'configured', changed: true, updatedAt: input.now };
   }
 
-  async disable(input: OperationalInput): Promise<FamilySafeWordLifecycleResult> {
+  async disable(input: FamilySafeWordOperationalInput): Promise<FamilySafeWordLifecycleResult> {
+    return this.database.transaction((transaction) => this.disableWithin(transaction, input));
+  }
+
+  async disableWithin(
+    transaction: SqlExecutor,
+    input: FamilySafeWordOperationalInput,
+  ): Promise<FamilySafeWordLifecycleResult> {
     if (input.actorPersonId !== input.protectedPersonId) {
       throw new DomainError('not_found', 'Family verification aid is unavailable');
     }
-    return this.database.transaction(async (transaction) => {
-      const actorKind = await this.assertAuthority(transaction, input);
-      const stored = await selectVerifier(
-        transaction,
-        input.householdId,
-        input.protectedPersonId,
-        true,
-      );
-      const summary = await lifecycleSummary(
-        transaction,
-        input.householdId,
-        input.protectedPersonId,
-      );
-      if (stored === null) {
-        return {
-          state: 'disabled',
-          changed: false,
-          ...(summary.latestAt === undefined ? {} : { updatedAt: summary.latestAt }),
-        };
-      }
-      const revision = Math.max(stored.lifecycle_revision, summary.maximumRevision) + 1;
-      await transaction.query(
-        'DELETE FROM safe_word_verifiers WHERE household_id = $1 AND protected_person_id = $2',
-        [input.householdId, input.protectedPersonId],
-      );
-      await this.recordChange(transaction, input, actorKind, 'disabled', revision, 'disabled');
-      return { state: 'disabled', changed: true, updatedAt: input.now };
-    });
+    const actorKind = await this.assertAuthority(transaction, input);
+    const stored = await selectVerifier(
+      transaction,
+      input.householdId,
+      input.protectedPersonId,
+      true,
+    );
+    const summary = await lifecycleSummary(transaction, input.householdId, input.protectedPersonId);
+    if (stored === null) {
+      return {
+        state: 'disabled',
+        changed: false,
+        ...(summary.latestAt === undefined ? {} : { updatedAt: summary.latestAt }),
+      };
+    }
+    const revision = Math.max(stored.lifecycle_revision, summary.maximumRevision) + 1;
+    await transaction.query(
+      'DELETE FROM safe_word_verifiers WHERE household_id = $1 AND protected_person_id = $2',
+      [input.householdId, input.protectedPersonId],
+    );
+    await this.recordChange(transaction, input, actorKind, 'disabled', revision, 'disabled');
+    return { state: 'disabled', changed: true, updatedAt: input.now };
   }
 
   private async recordChange(
     transaction: SqlExecutor,
-    input: OperationalInput,
+    input: FamilySafeWordOperationalInput,
     actorKind: SafeWordActorKind,
     eventKind: 'configured' | 'replaced' | 'disabled',
     revision: number,

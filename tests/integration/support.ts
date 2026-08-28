@@ -77,6 +77,8 @@ export async function createApiHarness(
     readonly supportReceiptsCustomerAccessEnabled?: boolean;
     readonly supportReceiptsIntakeEnabled?: boolean;
     readonly supportReceiptsHqQueueEnabled?: boolean;
+    readonly firstPartyContentEnabled?: boolean;
+    readonly dailyContentDraftsEnabled?: boolean;
   } = {},
 ): Promise<ApiHarness> {
   const {
@@ -85,6 +87,8 @@ export async function createApiHarness(
     supportReceiptsCustomerAccessEnabled = true,
     supportReceiptsIntakeEnabled = supportReceiptsCustomerAccessEnabled,
     supportReceiptsHqQueueEnabled = supportReceiptsIntakeEnabled,
+    firstPartyContentEnabled = false,
+    dailyContentDraftsEnabled = false,
     ...buildOptions
   } = options;
   const baseConfig = testConfig();
@@ -98,6 +102,10 @@ export async function createApiHarness(
       customerAccessEnabled: supportReceiptsCustomerAccessEnabled,
       intakeEnabled: supportReceiptsIntakeEnabled,
       hqQueueEnabled: supportReceiptsHqQueueEnabled,
+    },
+    content: {
+      firstPartyPublishingEnabled: firstPartyContentEnabled,
+      dailyDraftGenerationEnabled: dailyContentDraftsEnabled,
     },
   };
   const database = await createPGliteDatabase(':memory:');

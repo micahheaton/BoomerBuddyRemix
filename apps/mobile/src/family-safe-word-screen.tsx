@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type {
   FamilyResponse,
@@ -101,6 +101,10 @@ export function FamilySafeWordScreen({
   const [recentAuthenticationRequired, setRecentAuthenticationRequired] = useState(false);
   const [busy, setBusy] = useState<'replace' | 'disable' | 'verify'>();
   const [loading, setLoading] = useState(true);
+  const [selfStatusLoadFailedForHouseholdId, setSelfStatusLoadFailedForHouseholdId] =
+    useState<string>();
+  const [familyLoadAttempt, setFamilyLoadAttempt] = useState(0);
+  const [selfStatusLoadAttempt, setSelfStatusLoadAttempt] = useState(0);
   const [error, setError] = useState('');
   const [announcement, setAnnouncement] = useState('');
   const selectedHouseholdIdRef = useRef(selectedHouseholdId);
@@ -124,6 +128,7 @@ export function FamilySafeWordScreen({
       setError('');
       setAnnouncement('');
       setLoading(Boolean(selectedHouseholdId));
+      setSelfStatusLoadFailedForHouseholdId(undefined);
     }, 0);
     return () => clearTimeout(reset);
   }, [selectedHouseholdId]);
@@ -155,7 +160,7 @@ export function FamilySafeWordScreen({
         }
       });
     return () => controller.abort();
-  }, [selectedHouseholdId]);
+  }, [familyLoadAttempt, selectedHouseholdId]);
 
   useEffect(
     () => () => {
@@ -199,15 +204,17 @@ export function FamilySafeWordScreen({
       .then((response) => {
         if (!controller.signal.aborted && selectedHouseholdIdRef.current === householdId) {
           setSelfStatusState({ householdId, value: response });
+          setSelfStatusLoadFailedForHouseholdId(undefined);
         }
       })
       .catch((caught) => {
         if (!controller.signal.aborted && selectedHouseholdIdRef.current === householdId) {
+          setSelfStatusLoadFailedForHouseholdId(householdId);
           setError(readableError(caught));
         }
       });
     return () => controller.abort();
-  }, [protectedSelf?.personId, selectedHouseholdId]);
+  }, [protectedSelf?.personId, selectedHouseholdId, selfStatusLoadAttempt]);
 
   function beginMutation(): AbortController {
     mutationControllerRef.current?.abort();
@@ -351,6 +358,8 @@ export function FamilySafeWordScreen({
   }
 
   const hasAccess = Boolean(protectedSelf || trustedTargets.length);
+  const selfStatusLoadFailed =
+    selfStatusLoadFailedForHouseholdId === selectedHouseholdId && !selfStatus;
 
   return (
     <ScrollView style={s.safe} contentContainerStyle={s.screen} keyboardShouldPersistTaps="handled">
@@ -392,10 +401,24 @@ export function FamilySafeWordScreen({
           />
         </View>
       ) : null}
-      {loading ? <Text style={s.body}>Loading family verification access…</Text> : null}
+      {loading ? (
+        <View style={s.card} accessibilityLiveRegion="polite">
+          <ActivityIndicator accessibilityLabel="Loading family verification access" />
+          <Text style={s.body}>Loading family verification access…</Text>
+        </View>
+      ) : null}
       {!loading && !family ? (
         <View style={s.banner}>
           <Text style={s.body}>Family verification access could not be loaded.</Text>
+          <ActionButton
+            kind="secondary"
+            title="Try loading family verification again"
+            onPress={() => {
+              setError('');
+              setLoading(true);
+              setFamilyLoadAttempt((attempt) => attempt + 1);
+            }}
+          />
         </View>
       ) : null}
       {!loading && family && !hasAccess ? (
@@ -416,8 +439,22 @@ export function FamilySafeWordScreen({
               ? selfStatus.state === 'configured'
                 ? 'Configured'
                 : 'Disabled'
-              : 'Checking…'}
+              : selfStatusLoadFailed
+                ? 'Unavailable'
+                : 'Checking…'}
           </Text>
+          {selfStatusLoadFailed ? (
+            <ActionButton
+              kind="secondary"
+              title="Try loading safe word status again"
+              disabled={Boolean(busy)}
+              onPress={() => {
+                setError('');
+                setSelfStatusLoadFailedForHouseholdId(undefined);
+                setSelfStatusLoadAttempt((attempt) => attempt + 1);
+              }}
+            />
+          ) : null}
           {selfStatus?.updatedAt ? (
             <Text style={s.muted}>
               Last changed {new Date(selfStatus.updatedAt).toLocaleString()}

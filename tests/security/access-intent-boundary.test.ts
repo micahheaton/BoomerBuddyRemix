@@ -13,7 +13,7 @@ async function source(path: string): Promise<string> {
   return readFile(resolve(repositoryRoot, path), 'utf8');
 }
 
-describe('private-beta access-intent boundary', () => {
+describe('access-intent boundary', () => {
   it('accepts only complete exact attribution pairs and never retains arbitrary parameters', () => {
     expect(accessIntentAttributionFromSearch('')).toEqual({ source: 'direct', campaign: 'none' });
     expect(accessIntentAttributionFromSearch('?source=organic&campaign=none')).toEqual({
@@ -60,11 +60,12 @@ describe('private-beta access-intent boundary', () => {
   });
 
   it('omits browser credentials and exposes honest privacy and retention copy', async () => {
-    const [api, cta, pricing, privacy, support, worker, route, persistence, guide] =
+    const [api, cta, pricing, signUp, privacy, support, worker, route, persistence, guide] =
       await Promise.all([
         source('apps/web/src/lib/api.ts'),
         source('apps/web/src/components/access-intent-cta.tsx'),
         source('apps/web/src/app/pricing/page.tsx'),
+        source('apps/web/src/app/sign-up/[[...sign-up]]/page.tsx'),
         source('apps/web/src/app/privacy/page.tsx'),
         source('apps/web/src/app/support/page.tsx'),
         source('apps/worker/src/server.ts'),
@@ -80,10 +81,15 @@ describe('private-beta access-intent boundary', () => {
     expect(cta).toContain("setAttribution({ source: 'direct', campaign: 'none' })");
     expect(cta).not.toContain('<Link href="/pricing"');
     expect(cta).not.toMatch(/<input|<textarea|type="email"|type="tel"/iu);
-    expect(pricing).toContain("export const dynamic = 'force-dynamic'");
-    expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED');
-    expect(pricing).toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED');
-    expect(pricing).toContain('Family access requests are paused');
+    expect(pricing).toContain('href="/sign-up"');
+    expect(pricing).toContain('7 days free, then $149.90 USD per year');
+    expect(pricing).toContain('$14.99 USD per month');
+    expect(pricing).not.toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED');
+    expect(pricing).not.toContain('BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED');
+    expect(pricing).not.toContain('AccessIntentCta');
+    expect(signUp).toContain('<SignUp');
+    expect(signUp).toContain('Creating and verifying an account is free');
+    expect(signUp).toContain('It does not start a trial or charge you');
     expect(privacy).toMatch(
       /It does not contain your name,\s+email\s+address, phone number, message/iu,
     );

@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import type { OrientationStateDto } from '@boomerbuddy/contracts';
 import { useHousehold } from '../../../components/household-context';
-import { apiRequest, readableError } from '../../../lib/api';
+import { ApiError, apiRequest, readableError } from '../../../lib/api';
+import { productionSessionRecoveryPath } from '../../../lib/auth-recovery';
 import {
   householdBoundValue,
   householdRequestIsCurrent,
@@ -64,6 +66,14 @@ const safeWordText: Readonly<Record<OrientationStateDto['safeWordDisposition'], 
 
 type StepKey = (typeof steps)[number]['key'];
 
+function isRecentAuthenticationError(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 403 &&
+    error.message === 'Sign in again before changing household access'
+  );
+}
+
 export default function OrientationPage() {
   const { selectedHouseholdId, selectedScope } = useHousehold();
   const [orientationState, setOrientationState] =
@@ -73,6 +83,8 @@ export default function OrientationPage() {
   const [busyState, setBusyState] = useState<HouseholdBoundValue<string>>();
   const [errorState, setErrorState] = useState<HouseholdBoundValue<string>>();
   const [announcementState, setAnnouncementState] = useState<HouseholdBoundValue<string>>();
+  const [recentAuthenticationState, setRecentAuthenticationState] =
+    useState<HouseholdBoundValue<boolean>>();
   const [reloadVersion, setReloadVersion] = useState(0);
   const selectedHouseholdIdRef = useRef(selectedHouseholdId);
   const loadGenerationRef = useRef(0);
@@ -132,6 +144,8 @@ export default function OrientationPage() {
   const busy = householdBoundValue(busyState, selectedHouseholdId) ?? '';
   const error = householdBoundValue(errorState, selectedHouseholdId) ?? '';
   const announcement = householdBoundValue(announcementState, selectedHouseholdId) ?? '';
+  const recentAuthenticationRequired =
+    householdBoundValue(recentAuthenticationState, selectedHouseholdId) ?? false;
 
   function beginAction(action: string) {
     const householdId = selectedHouseholdId;
@@ -143,6 +157,7 @@ export default function OrientationPage() {
     actionControllerRef.current = controller;
     setBusyState({ householdId, value: action });
     setErrorState(undefined);
+    setRecentAuthenticationState(undefined);
     const isCurrent = (): boolean =>
       !controller.signal.aborted &&
       actionControllerRef.current === controller &&
@@ -207,18 +222,11 @@ export default function OrientationPage() {
     const actionAttempt = beginAction('safe_word');
     if (!actionAttempt) return;
     try {
-      await apiRequest('/v1/orientation/safe-word', {
-        method: 'PUT',
-        body: JSON.stringify(action === 'configure' ? { action, phrase } : { action }),
-        headers: { 'X-BB-Household-Id': actionAttempt.householdId },
-        signal: actionAttempt.controller.signal,
-      });
-      if (!actionAttempt.isCurrent()) return;
       const response = await apiRequest<{ orientation: OrientationStateDto }>(
-        '/v1/orientation/steps/safe_word',
+        '/v1/orientation/safe-word',
         {
           method: 'PUT',
-          body: JSON.stringify({ complete: true }),
+          body: JSON.stringify(action === 'configure' ? { action, phrase } : { action }),
           headers: { 'X-BB-Household-Id': actionAttempt.householdId },
           signal: actionAttempt.controller.signal,
         },
@@ -238,9 +246,15 @@ export default function OrientationPage() {
       });
     } catch (caught) {
       if (actionAttempt.isCurrent()) {
+        if (isRecentAuthenticationError(caught)) {
+          setPhraseState(undefined);
+          setRecentAuthenticationState({ householdId: actionAttempt.householdId, value: true });
+        }
         setErrorState({
           householdId: actionAttempt.householdId,
-          value: readableError(caught),
+          value: isRecentAuthenticationError(caught)
+            ? 'Sign in again before changing the family verification aid. No change was made.'
+            : readableError(caught),
         });
       }
     } finally {
@@ -298,6 +312,18 @@ export default function OrientationPage() {
           ) : null}
         </section>
       )}
+      {recentAuthenticationRequired ? (
+        <section className="notice notice-warning" aria-labelledby="orientation-sign-in-heading">
+          <h2 id="orientation-sign-in-heading">A recent sign-in is required</h2>
+          <p>
+            The phrase was cleared. BoomerBuddy did not make or retry the change. Sign in again,
+            reopen Orientation, review the choice, and submit it yourself.
+          </p>
+          <Link className="button button-secondary" href={productionSessionRecoveryPath}>
+            Clear session and sign in again
+          </Link>
+        </section>
+      ) : null}
       {!orientation && !error ? <p role="status">Loading orientation...</p> : null}
       {orientation ? (
         <div className="card" style={{ marginBlock: '1.5rem' }}>
@@ -369,7 +395,7 @@ export default function OrientationPage() {
                       type="password"
                       autoComplete="new-password"
                       minLength={8}
-                      maxLength={200}
+                      maxLength={128}
                       value={phrase}
                       onChange={(event) =>
                         setPhraseState({

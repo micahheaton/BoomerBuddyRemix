@@ -19,7 +19,7 @@ const applications = [
     directory: resolve('apps/web'),
     host: 'customer.resource-auth.invalid',
     port: 3_200,
-    publicPaths: ['/check', '/robots.txt', '/sitemap.xml'],
+    publicPaths: ['/check', '/learn', '/robots.txt', '/sitemap.xml'],
     authenticationPaths: [
       '/sign-in',
       '/sign-in/client-trust',
@@ -31,6 +31,7 @@ const applications = [
       '/member',
       '/member/history',
       '/checkmate',
+      '/learning',
       '/sign-in-danger',
       '/apiary',
       '/check%6date',

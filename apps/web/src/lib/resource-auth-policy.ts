@@ -24,7 +24,14 @@ function isPathSegment(pathname: string, segment: string): boolean {
 }
 
 export function classifyCustomerResourcePath(pathname: string): CustomerResourceAuthDisposition {
-  if (exactPublicPaths.has(pathname) || isPathSegment(pathname, '/sign-in')) return 'public';
+  if (
+    exactPublicPaths.has(pathname) ||
+    isPathSegment(pathname, '/learn') ||
+    isPathSegment(pathname, '/sign-in') ||
+    isPathSegment(pathname, '/sign-up')
+  ) {
+    return 'public';
+  }
   if (isPathSegment(pathname, '/api')) return 'delegated-to-api';
   if (isPathSegment(pathname, '/member')) return 'guarded';
   return 'unclassified';

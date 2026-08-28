@@ -1,4 +1,5 @@
 import type { CheckResult } from '@boomerbuddy/contracts';
+import { isMobileHostedAuthCallbackUrl } from './hosted-auth';
 
 export type NativeEntrySignal = 'none' | 'route_only_check' | 'rejected_payload';
 
@@ -18,6 +19,9 @@ function hasRejectedNativeEntryCharacter(value: string): boolean {
 }
 
 export function classifyNativeEntryUrl(url: string): NativeEntrySignal {
+  // Clerk owns callback validation, state verification, and session redemption. Never interpret or
+  // retain its callback query as customer Check intake when Linking also observes the app return.
+  if (isMobileHostedAuthCallbackUrl(url)) return 'none';
   const checkPrefix = 'boomerbuddy://check';
   const targetsCheck = url.slice(0, checkPrefix.length).toLowerCase() === checkPrefix;
   if (url.length > 2_048 || hasRejectedNativeEntryCharacter(url)) {

@@ -9,14 +9,14 @@ export default function TermsPage() {
     <PolicyPage
       eyebrow="Terms"
       title="BoomerBuddy early-access terms"
-      summary="These terms govern access to the invite-only BoomerBuddy service provided by BoomerBuddy LLC."
+      summary="These terms govern the BoomerBuddy web service provided by BoomerBuddy LLC."
     >
       <PolicySection title="Eligibility and accounts">
         <p>
-          You must be at least 18, use an identity invited to the customer application, provide
-          accurate information, protect your sign-in methods, and use only households and roles you
-          are authorized to access. Household administration does not override another adult&apos;s
-          consent or privacy choices.
+          You must be at least 18, provide accurate information, protect your sign-in methods, and
+          use only households and roles you are authorized to access. Creating an account does not
+          start a trial or charge you. Household administration does not override another
+          adult&apos;s consent or privacy choices.
         </p>
       </PolicySection>
       <PolicySection title="What the service does">

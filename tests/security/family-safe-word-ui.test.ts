@@ -62,7 +62,35 @@ describe('family safe word customer surfaces', () => {
     expect(mobile.match(/secureTextEntry/gu)).toHaveLength(3);
     expect(mobile).toContain('requiresRecentAuthentication(caught)');
     expect(mobile).toContain('BoomerBuddy did not make or retry the change');
+    expect(mobile).toContain('accessibilityLabel="Loading family verification access"');
+    expect(mobile).toContain('title="Try loading family verification again"');
+    expect(mobile).toContain('title="Try loading safe word status again"');
     expect(navigation).toContain('FamilySafeWord: undefined;');
     expect(app).toContain('name="FamilySafeWord"');
+  });
+
+  it('keeps guided orientation on the canonical lifecycle and recent-authentication boundary', () => {
+    const route = source('apps/api/src/routes/orientation.ts');
+    const persistence = source('packages/persistence/src/orientation.ts');
+    const web = source('apps/web/src/app/member/orientation/page-client.tsx');
+    const mobile = source('apps/mobile/src/screens.tsx');
+
+    expect(route).toContain('assertRecentCustomerAuthentication(auth)');
+    expect(persistence).toContain('this.familySafeWords.replaceWithin(transaction');
+    expect(persistence).toContain('this.familySafeWords.disableWithin(transaction');
+    expect(persistence).not.toContain('INSERT INTO safe_word_verifiers');
+    expect(persistence).not.toContain('DELETE FROM safe_word_verifiers');
+
+    expect(web).toContain('isRecentAuthenticationError(caught)');
+    expect(web).toContain('href={productionSessionRecoveryPath}');
+    expect(web).toContain('maxLength={128}');
+    expect(web).not.toContain("'/v1/orientation/steps/safe_word'");
+    expect(mobile).toContain('requiresRecentAuthentication(caught)');
+    expect(mobile).toContain(
+      'The phrase was cleared. BoomerBuddy did not make or retry the change.',
+    );
+    expect(mobile).toContain('title="Return Home to sign out"');
+    expect(mobile).toContain('maxLength={128}');
+    expect(mobile).not.toContain("'/v1/orientation/steps/safe_word'");
   });
 });

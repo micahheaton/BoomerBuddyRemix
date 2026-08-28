@@ -512,6 +512,165 @@ describe('verified provider commerce inbox', () => {
     });
   });
 
+  it('retries an unused expired annual trial only with a new key and serializes the retry', async () => {
+    const runtime = new CommerceRuntimeRepository(database, sequentialIds());
+    const actor = await runtime.resolveActor({
+      householdId: 'household-harbor',
+      personId: 'person-owner-bob',
+      now: fixedTestNow,
+    });
+    const prepareAnnual = (idempotencyKey: string, now: Date) =>
+      runtime.prepareStripeCheckout({
+        actor,
+        offerId: 'family_annual_v2',
+        planVersionId: 'family_v3',
+        billingInterval: 'year',
+        providerPriceId: 'price_test_family_annual',
+        idempotencyKey,
+        environment: 'test',
+        now,
+      });
+
+    const first = await prepareAnnual('checkout-annual-unused-expiry-0001', fixedTestNow);
+    await expect(
+      prepareAnnual('checkout-annual-unused-expiry-0001', fixedTestNow),
+    ).resolves.toMatchObject({
+      intentId: first.intentId,
+      subscriptionId: first.subscriptionId,
+      duplicate: true,
+    });
+
+    const retryAt = new Date(first.expiresAt.getTime() + 1);
+    await expect(
+      prepareAnnual('checkout-annual-unused-expiry-0001', retryAt),
+    ).rejects.toMatchObject({ code: 'conflict' });
+    const concurrent = await Promise.allSettled([
+      prepareAnnual('checkout-annual-unused-expiry-0002', retryAt),
+      prepareAnnual('checkout-annual-unused-expiry-0003', retryAt),
+    ]);
+    expect(concurrent.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+    const winner = concurrent.find((result) => result.status === 'fulfilled');
+    const loser = concurrent.find((result) => result.status === 'rejected');
+    if (winner?.status !== 'fulfilled' || loser?.status !== 'rejected') {
+      throw new Error('Expected exactly one serialized annual trial retry');
+    }
+    expect(winner.value).toMatchObject({ duplicate: false });
+    expect(loser.reason).toMatchObject({ code: 'conflict' });
+
+    const evidence = await database.query<
+      {
+        readonly reservation_id: string;
+        readonly original_checkout_intent_id: string;
+        readonly checkout_intent_id: string;
+        readonly attempt_number: number;
+        readonly idempotency_key: string;
+      } & Record<string, unknown>
+    >(
+      `SELECT reservation.id AS reservation_id,
+              reservation.checkout_intent_id AS original_checkout_intent_id,
+              attempt.checkout_intent_id, attempt.attempt_number, attempt.idempotency_key
+       FROM commerce_stripe_trial_reservations reservation
+       JOIN commerce_stripe_trial_checkout_attempts attempt
+         ON attempt.reservation_id = reservation.id
+       WHERE reservation.environment = 'test'
+         AND reservation.household_id = 'household-harbor'
+         AND reservation.offer_family = 'family'
+       ORDER BY attempt.attempt_number`,
+    );
+    expect(evidence.rows).toEqual([
+      {
+        reservation_id: evidence.rows[0]?.reservation_id,
+        original_checkout_intent_id: first.intentId,
+        checkout_intent_id: first.intentId,
+        attempt_number: 1,
+        idempotency_key: 'checkout-annual-unused-expiry-0001',
+      },
+      {
+        reservation_id: evidence.rows[0]?.reservation_id,
+        original_checkout_intent_id: first.intentId,
+        checkout_intent_id: winner.value.intentId,
+        attempt_number: 2,
+        idempotency_key:
+          concurrent[0]?.status === 'fulfilled'
+            ? 'checkout-annual-unused-expiry-0002'
+            : 'checkout-annual-unused-expiry-0003',
+      },
+    ]);
+    await expect(
+      database.query(
+        `UPDATE commerce_stripe_trial_checkout_attempts
+         SET recorded_at = recorded_at + interval '1 second'
+         WHERE reservation_id = $1 AND attempt_number = 2`,
+        [evidence.rows[0]?.reservation_id],
+      ),
+    ).rejects.toThrow('append-only');
+  });
+
+  it('denies an annual trial after a canonical verified paid entitlement', async () => {
+    const runtime = new CommerceRuntimeRepository(database, sequentialIds());
+    const actor = await runtime.resolveActor({
+      householdId: 'household-harbor',
+      personId: 'person-owner-bob',
+      now: fixedTestNow,
+    });
+    const startsAt = new Date(fixedTestNow.getTime() - 2 * 86_400_000);
+    const endsAt = new Date(fixedTestNow.getTime() - 86_400_000);
+    await database.query(
+      `INSERT INTO commerce_subscriptions(
+         household_id, id, payer_person_id, plan_version_id, source, lifecycle,
+         source_verified, precedence, current_period_starts_at, current_period_ends_at,
+         ended_at, reconciliation_state, created_at, updated_at
+       ) VALUES (
+         'household-harbor','subscription-prior-paid-bob','person-owner-bob','family_v3',
+         'web','expired',true,300,$1,$2,$2,'reconciled',$1,$2
+       )`,
+      [startsAt.toISOString(), endsAt.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO commerce_provider_subscription_records(
+         id, household_id, subscription_id, provider, environment,
+         external_subscription_id, raw_state, provider_version, observed_at, verified_at
+       ) VALUES (
+         'provider-prior-paid-bob','household-harbor','subscription-prior-paid-bob',
+         'stripe','test','sub_prior_paid_bob','canceled','2026-07-29.dahlia',$1,$1
+       )`,
+      [endsAt.toISOString()],
+    );
+    await database.query(
+      `INSERT INTO entitlement_grants(
+         household_id, id, source, capabilities, starts_at, ends_at,
+         source_verified, precedence, plan_version_id, subscription_id
+       ) VALUES (
+         'household-harbor','grant-prior-paid-bob','web','["check:text"]'::jsonb,$1,$2,
+         true,300,'family_v3','subscription-prior-paid-bob'
+       )`,
+      [startsAt.toISOString(), endsAt.toISOString()],
+    );
+
+    await expect(
+      runtime.prepareStripeCheckout({
+        actor,
+        offerId: 'family_annual_v2',
+        planVersionId: 'family_v3',
+        billingInterval: 'year',
+        providerPriceId: 'price_test_family_annual',
+        idempotencyKey: 'checkout-annual-after-paid-0001',
+        environment: 'test',
+        now: fixedTestNow,
+      }),
+    ).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'A prior verified membership is not eligible for a new annual trial',
+    });
+    const rolledBack = await database.query<{ readonly count: number }>(
+      `SELECT count(*)::integer AS count
+       FROM commerce_checkout_intents
+       WHERE household_id = 'household-harbor'
+         AND idempotency_key = 'checkout-annual-after-paid-0001'`,
+    );
+    expect(rolledBack.rows).toEqual([{ count: 0 }]);
+  });
+
   it('serializes checkout dispatch and journals a stale lease retry under the same key', async () => {
     const runtime = new CommerceRuntimeRepository(database, sequentialIds());
     const actor = await runtime.resolveActor({
@@ -888,6 +1047,7 @@ describe('verified provider commerce inbox', () => {
         kind: 'payment_confirmed',
         sourceInboxId: input.inboxId,
         evidence: {
+          offerId: 'founding_family_monthly_v1',
           providerInvoiceId: input.invoiceId,
           externalSubscriptionId,
           providerSubscriptionItemId: 'si-period-gap-proof',
@@ -1040,6 +1200,7 @@ describe('verified provider commerce inbox', () => {
         kind: 'payment_failed',
         sourceInboxId: failed.id,
         evidence: {
+          offerId: 'founding_family_monthly_v1',
           providerInvoiceId: 'in-period-gap-failed',
           externalSubscriptionId,
           providerSubscriptionItemId: 'si-period-gap-proof',
@@ -1097,6 +1258,7 @@ describe('verified provider commerce inbox', () => {
           kind: 'payment_failed',
           sourceInboxId: failed.id,
           evidence: {
+            offerId: 'founding_family_monthly_v1',
             providerInvoiceId: 'in-period-gap-failed',
             externalSubscriptionId,
             providerSubscriptionItemId: 'si-period-gap-proof',
@@ -1341,6 +1503,7 @@ describe('verified provider commerce inbox', () => {
               kind: 'payment_confirmed',
               sourceInboxId: captured.id,
               evidence: {
+                offerId: 'founding_family_monthly_v1',
                 providerInvoiceId: 'in_growth_recovery',
                 externalSubscriptionId: 'sub-growth-lifecycle',
                 providerSubscriptionItemId: 'si_growth_lifecycle',
@@ -1369,6 +1532,7 @@ describe('verified provider commerce inbox', () => {
                 kind: 'payment_failed',
                 sourceInboxId: captured.id,
                 evidence: {
+                  offerId: 'founding_family_monthly_v1',
                   providerInvoiceId: 'in_growth_failure',
                   externalSubscriptionId: 'sub-growth-lifecycle',
                   providerSubscriptionItemId: 'si_growth_lifecycle',

@@ -104,12 +104,13 @@ describe('customer-facing production copy', () => {
     expect(memberHistory).not.toContain('<dt>Calibration</dt>');
     expect(mobile).toContain('Member sign in');
     expect(mobile).toContain('Current access and plan');
-    expect(mobile).toContain('BoomerBuddy is invite-only');
-    expect(mobile).not.toContain('Create an account');
+    expect(mobile).toContain('Create and manage');
+    expect(mobile).toContain('this app does not take payment');
     expect(mobile).not.toContain('invited seeded person');
 
     const signIn = source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx');
-    expect(signIn).toContain('Use your invited member account');
+    expect(signIn).toContain('Create a free account');
+    expect(signIn).toContain('sign in again with your existing account');
     expect(signIn).not.toContain('the founder invited');
     expect(signIn).not.toContain('Founding Household beta');
   });
@@ -179,9 +180,13 @@ describe('customer-facing production copy', () => {
     const billing = source('apps/web/src/app/member/billing/page-client.tsx');
     const success = source('apps/web/src/app/member/billing/success/page-client.tsx');
 
-    expect(billing).toContain('Family costs $14.99 USD and renews every');
+    expect(billing).toContain(
+      'Family annual is the default: 7 days free, then $149.90 USD per year',
+    );
+    expect(billing).toMatch(/Family\s+monthly remains available at \$14\.99 USD per month/u);
+    expect(billing).toContain('up to three protected adults and six Trusted Circle participants');
     expect(billing).toContain('Access ordinarily continues through the paid');
-    expect(billing).toContain('Monthly charges are generally not refundable after billing');
+    expect(billing).toContain('Charges are generally not refundable after billing');
     expect(billing).toContain('href="/billing-terms"');
     expect(billing).toContain('href="/support"');
     expect(billing).toContain('View invoices or manage billing');

@@ -92,7 +92,7 @@ describe('local-only revenue research preview', () => {
       true,
     );
     expect(revenueResearchPreviewStatusCopy).toBe(
-      'Research preview only. These choices do not start Checkout, reserve a price, or create an offer. Family at USD 14.99 per month is the sole approved production offer candidate, and it is not live. Every yearly and Individual choice shown here is unavailable and is being evaluated only as a hypothesis.',
+      'Research preview only. These choices do not start Checkout, reserve a price, or change the production catalog. Family annual at USD 149.90 after a 7-day trial is the default production offer, and Family monthly at USD 14.99 remains available. Individual offers and every referral choice shown here remain unavailable and are evaluated only as hypotheses.',
     );
 
     for (const audience of ['family', 'individual'] as const) {
@@ -225,8 +225,9 @@ describe('local-only revenue research preview', () => {
     expect(nonResearchSources).not.toContain('/research/offer-pair-v2');
     expect(nonResearchSources).not.toContain('RevenueResearchPreview');
     expect(nonResearchSources).not.toContain('BB_LOCAL_REVENUE_RESEARCH_PREVIEW_ENABLED');
-    expect(publicSources).not.toMatch(/USD (?:8\.99|89(?:\.00)?|149(?:\.00)?)\b/u);
+    expect(publicSources).not.toMatch(/USD (?:8\.99|89(?:\.00|\.90)?)/u);
     expect(publicSources).not.toMatch(/Individual - one person|referral service-credit/iu);
     expect(publicSources).toContain('USD 14.99/month');
+    expect(publicSources).toContain('USD 149.90/year');
   });
 });

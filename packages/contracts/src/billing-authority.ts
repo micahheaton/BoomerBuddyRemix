@@ -87,6 +87,61 @@ export const billingAuthorityTransitionResponseSchema = billingAuthorityEventSch
   .extend({ reused: z.boolean(), externalActionExecuted: z.literal(false) })
   .strict();
 
+export const billingAuthoritySelfConsentVersion = 'billing-authority-self-consent-v1' as const;
+export const billingAuthoritySelfWithdrawalVersion =
+  'billing-authority-self-withdrawal-v1' as const;
+
+export const billingAuthoritySelfStatusResponseSchema = z
+  .object({
+    householdId: opaqueIdSchema,
+    personId: opaqueIdSchema,
+    administratorEligible: z.boolean(),
+    authorityStatus: billingAuthorityStatusSchema,
+    canAccept: z.boolean(),
+    canRevoke: z.boolean(),
+    revokeBlockedReason: z.literal('billing_operation_unsettled').optional(),
+    documents: z
+      .object({
+        accept: z
+          .object({
+            version: z.literal(billingAuthoritySelfConsentVersion),
+            digest: z.string().regex(/^[0-9a-f]{64}$/u),
+            disclosure: z.string().min(1).max(2_000),
+          })
+          .strict(),
+        revoke: z
+          .object({
+            version: z.literal(billingAuthoritySelfWithdrawalVersion),
+            digest: z.string().regex(/^[0-9a-f]{64}$/u),
+            disclosure: z.string().min(1).max(2_000),
+          })
+          .strict(),
+      })
+      .strict(),
+    externalActionExecuted: z.literal(false),
+  })
+  .strict();
+
+export const billingAuthoritySelfAcceptRequestSchema = z
+  .object({
+    documentVersion: z.literal(billingAuthoritySelfConsentVersion),
+    documentDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+    consentAccepted: z.literal(true),
+  })
+  .strict();
+
+export const billingAuthoritySelfRevokeRequestSchema = z
+  .object({
+    documentVersion: z.literal(billingAuthoritySelfWithdrawalVersion),
+    documentDigest: z.string().regex(/^[0-9a-f]{64}$/u),
+    withdrawalAcknowledged: z.literal(true),
+  })
+  .strict();
+
+export const billingAuthoritySelfTransitionResponseSchema = billingAuthorityEventSchema
+  .extend({ reused: z.boolean(), externalActionExecuted: z.literal(false) })
+  .strict();
+
 export type BillingAuthorityTransitionRequest = z.infer<
   typeof billingAuthorityTransitionRequestSchema
 >;
@@ -95,4 +150,7 @@ export type BillingAuthorityHouseholdResponse = z.infer<
 >;
 export type BillingAuthorityTransitionResponse = z.infer<
   typeof billingAuthorityTransitionResponseSchema
+>;
+export type BillingAuthoritySelfStatusResponse = z.infer<
+  typeof billingAuthoritySelfStatusResponseSchema
 >;

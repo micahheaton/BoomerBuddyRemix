@@ -15,6 +15,7 @@ export * from './family-safe-word';
 export * from './feedback';
 export * from './founder-provisioning';
 export * from './founding-households';
+export * from './governed-content';
 export * from './growth-runtime';
 export * from './hq';
 export * from './jobs';

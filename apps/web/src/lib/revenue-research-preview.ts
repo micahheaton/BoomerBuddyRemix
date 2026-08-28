@@ -29,7 +29,7 @@ export interface RevenueResearchAudienceDefinition {
 }
 
 export const revenueResearchPreviewStatusCopy =
-  'Research preview only. These choices do not start Checkout, reserve a price, or create an offer. Family at USD 14.99 per month is the sole approved production offer candidate, and it is not live. Every yearly and Individual choice shown here is unavailable and is being evaluated only as a hypothesis.';
+  'Research preview only. These choices do not start Checkout, reserve a price, or change the production catalog. Family annual at USD 149.90 after a 7-day trial is the default production offer, and Family monthly at USD 14.99 remains available. Individual offers and every referral choice shown here remain unavailable and are evaluated only as hypotheses.';
 
 const familyDefinition = Object.freeze({
   label: 'Family - one household group',

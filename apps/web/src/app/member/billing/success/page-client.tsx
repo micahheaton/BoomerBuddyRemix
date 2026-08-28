@@ -55,7 +55,7 @@ export default function BillingSuccessPage() {
         </p>
         <p className="meta">
           {response?.evidenceNotice ??
-            'Your membership becomes active only after BoomerBuddy confirms a successful payment.'}
+            'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.'}
         </p>
         <Link className="button button-primary" href="/member/billing">
           Review billing

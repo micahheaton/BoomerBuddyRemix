@@ -48,6 +48,8 @@ const environmentSchema = z.object({
   BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED: booleanText.default(false),
   BB_SUPPORT_RECEIPTS_INTAKE_ENABLED: booleanText.default(false),
   BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED: booleanText.default(false),
+  BB_FIRST_PARTY_CONTENT_ENABLED: booleanText.default(false),
+  BB_DAILY_CONTENT_DRAFTS_ENABLED: booleanText.default(false),
   BB_DATABASE_DRIVER: z.enum(['pglite', 'postgres']).default('pglite'),
   BB_PGLITE_PATH: nonEmpty.optional(),
   DATABASE_URL: z.string().url().optional(),
@@ -82,6 +84,11 @@ const environmentSchema = z.object({
   BB_STRIPE_TEST_WEBHOOK_SECRET: z.string().optional(),
   BB_STRIPE_TEST_FOUNDING_PRODUCT_ID: z.string().optional(),
   BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_TEST_INDIVIDUAL_PRODUCT_ID: z.string().optional(),
+  BB_STRIPE_TEST_INDIVIDUAL_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_TEST_INDIVIDUAL_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_TEST_INDIVIDUAL_OFFERS_ENABLED: booleanText.default(false),
   BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
   BB_STRIPE_LIVE_ACCOUNT_ID: z.string().optional(),
   BB_STRIPE_RUNTIME_SURFACE: z.enum(['api', 'worker']).optional(),
@@ -93,7 +100,44 @@ const environmentSchema = z.object({
   BB_STRIPE_LIVE_WEBHOOK_SECRET: z.string().optional(),
   BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID: z.string().optional(),
   BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_LIVE_INDIVIDUAL_PRODUCT_ID: z.string().optional(),
+  BB_STRIPE_LIVE_INDIVIDUAL_MONTHLY_PRICE_ID: z.string().optional(),
+  BB_STRIPE_LIVE_INDIVIDUAL_ANNUAL_PRICE_ID: z.string().optional(),
+  BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED: booleanText.default(false),
   BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID: z.string().optional(),
+  BB_BILLING_PUBLIC_SUPPORT_EMAIL: z.string().trim().email().optional(),
+  BB_BILLING_PUBLIC_SUPPORT_URL: z.string().url().optional(),
+  BB_BILLING_PUBLIC_PRIVACY_URL: z.string().url().optional(),
+  BB_BILLING_PUBLIC_TERMS_URL: z.string().url().optional(),
+  BB_BILLING_PUBLIC_BILLING_TERMS_URL: z.string().url().optional(),
+  BB_BILLING_POLICY_VERSION: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$/u)
+    .optional(),
+  BB_BILLING_POLICY_EFFECTIVE_AT: z.string().datetime({ offset: true }).optional(),
+  BB_BILLING_SUPPORT_OPERATIONS_READY: booleanText.default(false),
+  BB_BILLING_SUPPORT_RECEIPT_ID: z.string().trim().regex(boundedExternalIdentifier).optional(),
+  BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE: z
+    .enum(['stripe_automatic_email', 'consented_durable_channel'])
+    .optional(),
+  BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID: z
+    .string()
+    .trim()
+    .regex(boundedExternalIdentifier)
+    .optional(),
+  BB_BILLING_TAX_TREATMENT_REVIEW_COMPLETE: booleanText.default(false),
+  BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY: z
+    .string()
+    .trim()
+    .regex(boundedExternalIdentifier)
+    .optional(),
+  BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID: z
+    .string()
+    .trim()
+    .regex(boundedExternalIdentifier)
+    .optional(),
   BB_TWILIO_MODE: z.literal('disabled').default('disabled'),
   BB_TWILIO_ACCOUNT_SID: z.string().optional(),
   BB_TWILIO_AUTH_TOKEN: z.string().optional(),
@@ -103,6 +147,49 @@ const environmentSchema = z.object({
   BB_TWILIO_STATUS_CALLBACK_BASE_URL: z.string().optional(),
   BB_LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 });
+
+export type StripeRuntimeOfferId =
+  | 'founding_family_monthly_v1'
+  | 'family_monthly_v2'
+  | 'family_annual_v2'
+  | 'individual_monthly_v1'
+  | 'individual_annual_v1';
+
+export interface StripeRuntimeOffer {
+  readonly offerId: StripeRuntimeOfferId;
+  readonly planVersionId: 'family_v1' | 'family_v3' | 'individual_v3';
+  readonly plan: 'family' | 'individual';
+  readonly displayName: 'Family' | 'Individual';
+  readonly billingInterval: 'month' | 'year';
+  readonly providerProductId: string;
+  readonly providerPriceId: string;
+  readonly currency: 'usd';
+  readonly unitAmountMinor: 899 | 1499 | 8990 | 14990;
+  readonly quantity: 1;
+  readonly trialPeriodDays: 0 | 7;
+  readonly customerSelectable: boolean;
+  readonly defaultAcquisitionOffer: boolean;
+}
+
+export type StripeBillingOperationalReadiness =
+  | { readonly state: 'incomplete' }
+  | {
+      readonly state: 'ready';
+      readonly supportEmail: string;
+      readonly supportUrl: string;
+      readonly privacyUrl: string;
+      readonly termsUrl: string;
+      readonly billingTermsUrl: string;
+      readonly policyVersion: string;
+      readonly policyEffectiveAt: string;
+      readonly supportOperationsReady: true;
+      readonly supportReceiptId: string;
+      readonly trialReminderDeliveryMode: 'stripe_automatic_email' | 'consented_durable_channel';
+      readonly trialReminderDeliveryReceiptId: string;
+      readonly taxTreatmentReviewComplete: true;
+      readonly taxReviewedLaunchGeography: string;
+      readonly taxTreatmentReviewReceiptId: string;
+    };
 
 export interface AppConfig {
   readonly environment: 'development' | 'test' | 'production';
@@ -125,6 +212,10 @@ export interface AppConfig {
     readonly customerAccessEnabled: boolean;
     readonly intakeEnabled: boolean;
     readonly hqQueueEnabled: boolean;
+  };
+  readonly content?: {
+    readonly firstPartyPublishingEnabled: boolean;
+    readonly dailyDraftGenerationEnabled: boolean;
   };
   readonly database:
     | {
@@ -187,16 +278,10 @@ export interface AppConfig {
           readonly runtimeInitiationPermitted: true;
           readonly runtimeNetworkPermitted: true;
           readonly cancelOnlyPortalConfigurationId: string;
-          readonly offer: {
-            readonly offerId: 'founding_family_monthly_v1';
-            readonly planVersionId: 'family_v1';
-            readonly billingInterval: 'month';
-            readonly providerProductId: string;
-            readonly providerPriceId: string;
-            readonly currency: 'usd';
-            readonly unitAmountMinor: 1499;
-            readonly quantity: 1;
-          };
+          readonly defaultOfferId: 'family_annual_v2';
+          readonly offer: StripeRuntimeOffer;
+          readonly offers: readonly StripeRuntimeOffer[];
+          readonly billingOperationalReadiness: StripeBillingOperationalReadiness;
         };
       }
     | {
@@ -213,7 +298,10 @@ export interface AppConfig {
               readonly runtimeNetworkPermitted: true;
               readonly credentialCustody: 'separate_replit_runtime_restricted_keys';
               readonly cancelOnlyPortalConfigurationId: string;
-              readonly offer: StripeFoundingFamilyMonthlyOffer;
+              readonly defaultOfferId: 'family_annual_v2';
+              readonly offer: StripeRuntimeOffer;
+              readonly offers: readonly StripeRuntimeOffer[];
+              readonly billingOperationalReadiness: StripeBillingOperationalReadiness;
             }
           | {
               readonly mode: 'live';
@@ -226,7 +314,10 @@ export interface AppConfig {
               readonly runtimeNetworkPermitted: true;
               readonly credentialCustody: 'separate_replit_runtime_restricted_keys';
               readonly cancelOnlyPortalConfigurationId: string;
-              readonly offer: StripeFoundingFamilyMonthlyOffer;
+              readonly defaultOfferId: 'family_annual_v2';
+              readonly offer: StripeRuntimeOffer;
+              readonly offers: readonly StripeRuntimeOffer[];
+              readonly billingOperationalReadiness: StripeBillingOperationalReadiness;
             };
       };
   readonly messaging?: {
@@ -237,17 +328,6 @@ export interface AppConfig {
     };
   };
   readonly logLevel: 'debug' | 'info' | 'warn' | 'error';
-}
-
-interface StripeFoundingFamilyMonthlyOffer {
-  readonly offerId: 'founding_family_monthly_v1';
-  readonly planVersionId: 'family_v1';
-  readonly billingInterval: 'month';
-  readonly providerProductId: string;
-  readonly providerPriceId: string;
-  readonly currency: 'usd';
-  readonly unitAmountMinor: 1499;
-  readonly quantity: 1;
 }
 
 /** Enforce that each live process receives only its own least-privilege credential family. */
@@ -438,6 +518,10 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
     parsed.BB_STRIPE_TEST_WEBHOOK_SECRET,
     parsed.BB_STRIPE_TEST_FOUNDING_PRODUCT_ID,
     parsed.BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID,
+    parsed.BB_STRIPE_TEST_INDIVIDUAL_PRODUCT_ID,
+    parsed.BB_STRIPE_TEST_INDIVIDUAL_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_TEST_INDIVIDUAL_ANNUAL_PRICE_ID,
     parsed.BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
   ];
   const liveFields = [
@@ -449,6 +533,10 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
     parsed.BB_STRIPE_LIVE_WEBHOOK_SECRET,
     parsed.BB_STRIPE_LIVE_FOUNDING_PRODUCT_ID,
     parsed.BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID,
+    parsed.BB_STRIPE_LIVE_INDIVIDUAL_PRODUCT_ID,
+    parsed.BB_STRIPE_LIVE_INDIVIDUAL_MONTHLY_PRICE_ID,
+    parsed.BB_STRIPE_LIVE_INDIVIDUAL_ANNUAL_PRICE_ID,
     parsed.BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
   ];
   const hasConfiguredField = (fields: readonly (string | undefined)[]) =>
@@ -460,16 +548,27 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
   }
   if (
     parsed.BB_STRIPE_MODE === 'disabled' &&
-    (hasConfiguredField([...testFields, ...liveFields]) || parsed.BB_STRIPE_LIVE_INITIATION_ENABLED)
+    (hasConfiguredField([...testFields, ...liveFields]) ||
+      parsed.BB_STRIPE_LIVE_INITIATION_ENABLED ||
+      parsed.BB_STRIPE_TEST_INDIVIDUAL_OFFERS_ENABLED ||
+      parsed.BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED)
   ) {
     throw new TypeError('Stripe disabled mode refuses all Stripe configuration values');
   }
   if (parsed.BB_STRIPE_MODE === 'disabled') return { stripe: { mode: 'disabled' } };
   const test = parsed.BB_STRIPE_MODE === 'test';
-  if (test && (hasConfiguredField(liveFields) || parsed.BB_STRIPE_LIVE_INITIATION_ENABLED)) {
+  if (
+    test &&
+    (hasConfiguredField(liveFields) ||
+      parsed.BB_STRIPE_LIVE_INITIATION_ENABLED ||
+      parsed.BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED)
+  ) {
     throw new TypeError('Stripe test mode refuses live Stripe configuration values');
   }
-  if (!test && hasConfiguredField(testFields)) {
+  if (
+    !test &&
+    (hasConfiguredField(testFields) || parsed.BB_STRIPE_TEST_INDIVIDUAL_OFFERS_ENABLED)
+  ) {
     throw new TypeError('Stripe live mode refuses test Stripe configuration values');
   }
   if (test && parsed.NODE_ENV === 'production') {
@@ -487,6 +586,18 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
     priceId: test
       ? parsed.BB_STRIPE_TEST_FOUNDING_MONTHLY_PRICE_ID
       : parsed.BB_STRIPE_LIVE_FOUNDING_MONTHLY_PRICE_ID,
+    familyAnnualPriceId: test
+      ? parsed.BB_STRIPE_TEST_FAMILY_ANNUAL_PRICE_ID
+      : parsed.BB_STRIPE_LIVE_FAMILY_ANNUAL_PRICE_ID,
+    individualProductId: test
+      ? parsed.BB_STRIPE_TEST_INDIVIDUAL_PRODUCT_ID
+      : parsed.BB_STRIPE_LIVE_INDIVIDUAL_PRODUCT_ID,
+    individualMonthlyPriceId: test
+      ? parsed.BB_STRIPE_TEST_INDIVIDUAL_MONTHLY_PRICE_ID
+      : parsed.BB_STRIPE_LIVE_INDIVIDUAL_MONTHLY_PRICE_ID,
+    individualAnnualPriceId: test
+      ? parsed.BB_STRIPE_TEST_INDIVIDUAL_ANNUAL_PRICE_ID
+      : parsed.BB_STRIPE_LIVE_INDIVIDUAL_ANNUAL_PRICE_ID,
     cancelOnlyPortalConfigurationId: test
       ? parsed.BB_STRIPE_TEST_CANCEL_ONLY_PORTAL_CONFIGURATION_ID
       : parsed.BB_STRIPE_LIVE_CANCEL_ONLY_PORTAL_CONFIGURATION_ID,
@@ -504,22 +615,157 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
     required.productId === undefined ||
     !/^prod_[A-Za-z0-9_]{6,}$/u.test(required.productId) ||
     required.priceId === undefined ||
-    !/^price_[A-Za-z0-9_]{6,}$/u.test(required.priceId)
+    !/^price_[A-Za-z0-9_]{6,}$/u.test(required.priceId) ||
+    required.familyAnnualPriceId === undefined ||
+    !/^price_[A-Za-z0-9_]{6,}$/u.test(required.familyAnnualPriceId)
   ) {
     throw new TypeError(
-      `Stripe ${parsed.BB_STRIPE_MODE} mode requires complete environment-specific credentials and the founding offer mapping`,
+      `Stripe ${parsed.BB_STRIPE_MODE} mode requires complete environment-specific credentials and the Family monthly and annual offer mapping`,
     );
   }
-  const offer: StripeFoundingFamilyMonthlyOffer = {
+  const individualFields = [
+    required.individualProductId,
+    required.individualMonthlyPriceId,
+    required.individualAnnualPriceId,
+  ];
+  const individualConfigured = individualFields.every((value) => value !== undefined);
+  if (individualFields.some((value) => value !== undefined) && !individualConfigured) {
+    throw new TypeError('Stripe Individual product mapping must be complete or absent');
+  }
+  const individualEnabled = test
+    ? parsed.BB_STRIPE_TEST_INDIVIDUAL_OFFERS_ENABLED
+    : parsed.BB_STRIPE_LIVE_INDIVIDUAL_OFFERS_ENABLED;
+  if (individualEnabled && !individualConfigured) {
+    throw new TypeError(
+      'Stripe Individual checkout cannot be enabled without exact product mapping',
+    );
+  }
+  const offer: StripeRuntimeOffer = {
     offerId: 'founding_family_monthly_v1' as const,
     planVersionId: 'family_v1' as const,
+    plan: 'family' as const,
+    displayName: 'Family' as const,
     billingInterval: 'month' as const,
     providerProductId: required.productId,
     providerPriceId: required.priceId,
     currency: 'usd' as const,
     unitAmountMinor: 1499 as const,
     quantity: 1 as const,
+    trialPeriodDays: 0 as const,
+    customerSelectable: false,
+    defaultAcquisitionOffer: false,
   };
+  const offers: StripeRuntimeOffer[] = [
+    offer,
+    {
+      offerId: 'family_monthly_v2',
+      planVersionId: 'family_v3',
+      plan: 'family',
+      displayName: 'Family',
+      billingInterval: 'month',
+      providerProductId: required.productId,
+      providerPriceId: required.priceId,
+      currency: 'usd',
+      unitAmountMinor: 1499,
+      quantity: 1,
+      trialPeriodDays: 0,
+      customerSelectable: true,
+      defaultAcquisitionOffer: false,
+    },
+    {
+      offerId: 'family_annual_v2',
+      planVersionId: 'family_v3',
+      plan: 'family',
+      displayName: 'Family',
+      billingInterval: 'year',
+      providerProductId: required.productId,
+      providerPriceId: required.familyAnnualPriceId,
+      currency: 'usd',
+      unitAmountMinor: 14_990,
+      quantity: 1,
+      trialPeriodDays: 7,
+      customerSelectable: true,
+      defaultAcquisitionOffer: true,
+    },
+  ];
+  if (individualConfigured) {
+    offers.push(
+      {
+        offerId: 'individual_monthly_v1',
+        planVersionId: 'individual_v3',
+        plan: 'individual',
+        displayName: 'Individual',
+        billingInterval: 'month',
+        providerProductId: required.individualProductId as string,
+        providerPriceId: required.individualMonthlyPriceId as string,
+        currency: 'usd',
+        unitAmountMinor: 899,
+        quantity: 1,
+        trialPeriodDays: 0,
+        customerSelectable: individualEnabled,
+        defaultAcquisitionOffer: false,
+      },
+      {
+        offerId: 'individual_annual_v1',
+        planVersionId: 'individual_v3',
+        plan: 'individual',
+        displayName: 'Individual',
+        billingInterval: 'year',
+        providerProductId: required.individualProductId as string,
+        providerPriceId: required.individualAnnualPriceId as string,
+        currency: 'usd',
+        unitAmountMinor: 8_990,
+        quantity: 1,
+        trialPeriodDays: 7,
+        customerSelectable: individualEnabled,
+        defaultAcquisitionOffer: false,
+      },
+    );
+  }
+  const billingReadinessValues = [
+    parsed.BB_BILLING_PUBLIC_SUPPORT_EMAIL,
+    parsed.BB_BILLING_PUBLIC_SUPPORT_URL,
+    parsed.BB_BILLING_PUBLIC_PRIVACY_URL,
+    parsed.BB_BILLING_PUBLIC_TERMS_URL,
+    parsed.BB_BILLING_PUBLIC_BILLING_TERMS_URL,
+    parsed.BB_BILLING_POLICY_VERSION,
+    parsed.BB_BILLING_POLICY_EFFECTIVE_AT,
+    parsed.BB_BILLING_SUPPORT_RECEIPT_ID,
+    parsed.BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE,
+    parsed.BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID,
+    parsed.BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY,
+    parsed.BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID,
+  ] as const;
+  const billingReadinessComplete =
+    parsed.BB_BILLING_SUPPORT_OPERATIONS_READY &&
+    parsed.BB_BILLING_TAX_TREATMENT_REVIEW_COMPLETE &&
+    billingReadinessValues.every((value) => value !== undefined);
+  const billingOperationalReadiness: StripeBillingOperationalReadiness = billingReadinessComplete
+    ? {
+        state: 'ready',
+        supportEmail: parsed.BB_BILLING_PUBLIC_SUPPORT_EMAIL as string,
+        supportUrl: parsed.BB_BILLING_PUBLIC_SUPPORT_URL as string,
+        privacyUrl: parsed.BB_BILLING_PUBLIC_PRIVACY_URL as string,
+        termsUrl: parsed.BB_BILLING_PUBLIC_TERMS_URL as string,
+        billingTermsUrl: parsed.BB_BILLING_PUBLIC_BILLING_TERMS_URL as string,
+        policyVersion: parsed.BB_BILLING_POLICY_VERSION as string,
+        policyEffectiveAt: parsed.BB_BILLING_POLICY_EFFECTIVE_AT as string,
+        supportOperationsReady: true,
+        supportReceiptId: parsed.BB_BILLING_SUPPORT_RECEIPT_ID as string,
+        trialReminderDeliveryMode: parsed.BB_BILLING_TRIAL_REMINDER_DELIVERY_MODE as
+          'stripe_automatic_email' | 'consented_durable_channel',
+        trialReminderDeliveryReceiptId:
+          parsed.BB_BILLING_TRIAL_REMINDER_DELIVERY_RECEIPT_ID as string,
+        taxTreatmentReviewComplete: true,
+        taxReviewedLaunchGeography: parsed.BB_BILLING_TAX_REVIEWED_LAUNCH_GEOGRAPHY as string,
+        taxTreatmentReviewReceiptId: parsed.BB_BILLING_TAX_TREATMENT_REVIEW_RECEIPT_ID as string,
+      }
+    : { state: 'incomplete' };
+  if (!test && parsed.BB_STRIPE_LIVE_INITIATION_ENABLED && !billingReadinessComplete) {
+    throw new TypeError(
+      'Live Stripe initiation requires exact public support/legal policy configuration, support readiness, a trial-reminder delivery receipt, and a reviewed tax-treatment disposition receipt',
+    );
+  }
   if (!test) {
     const runtimeSurface = parsed.BB_STRIPE_RUNTIME_SURFACE;
     const apiRestrictedKey = parsed.BB_STRIPE_LIVE_API_RESTRICTED_KEY;
@@ -557,7 +803,10 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
           runtimeNetworkPermitted: true,
           credentialCustody: 'separate_replit_runtime_restricted_keys',
           cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+          defaultOfferId: 'family_annual_v2',
           offer,
+          offers: Object.freeze(offers),
+          billingOperationalReadiness,
         },
       };
     }
@@ -573,7 +822,10 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
         runtimeNetworkPermitted: true,
         credentialCustody: 'separate_replit_runtime_restricted_keys',
         cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+        defaultOfferId: 'family_annual_v2',
         offer,
+        offers: Object.freeze(offers),
+        billingOperationalReadiness,
       },
     };
   }
@@ -588,7 +840,10 @@ function stripeConfiguration(parsed: z.infer<typeof environmentSchema>): AppConf
       runtimeInitiationPermitted: true,
       runtimeNetworkPermitted: true,
       cancelOnlyPortalConfigurationId: required.cancelOnlyPortalConfigurationId,
+      defaultOfferId: 'family_annual_v2',
       offer,
+      offers: Object.freeze(offers),
+      billingOperationalReadiness,
     },
   };
 }
@@ -740,6 +995,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
       customerAccessEnabled: parsed.BB_SUPPORT_RECEIPTS_CUSTOMER_ACCESS_ENABLED,
       intakeEnabled: parsed.BB_SUPPORT_RECEIPTS_INTAKE_ENABLED,
       hqQueueEnabled: parsed.BB_SUPPORT_RECEIPTS_HQ_QUEUE_ENABLED,
+    },
+    content: {
+      firstPartyPublishingEnabled: parsed.BB_FIRST_PARTY_CONTENT_ENABLED,
+      dailyDraftGenerationEnabled: parsed.BB_DAILY_CONTENT_DRAFTS_ENABLED,
     },
     database,
     identity: {

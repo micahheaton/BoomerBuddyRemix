@@ -16,9 +16,9 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
     <ClerkProvider
       publishableKey={publishableKey}
       signInUrl="/sign-in"
-      signUpUrl="/sign-in"
+      signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/member"
-      signUpFallbackRedirectUrl="/member"
+      signUpFallbackRedirectUrl="/member/billing"
       afterSignOutUrl="/sign-in"
       allowedRedirectOrigins={[publicOrigin]}
     >

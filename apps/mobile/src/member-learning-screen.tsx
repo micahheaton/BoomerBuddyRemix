@@ -375,7 +375,7 @@ export function MemberLearningScreen(): React.ReactElement {
   async function setWeeklyPractice(enabled: boolean) {
     if (!learning) return;
     if (!enabled) setDeviceReminder(await disableWeeklyRehearsalReminder());
-    const updated = await applyCanonicalMutation(
+    await applyCanonicalMutation(
       'weekly-preference',
       'preferences-update',
       JSON.stringify([learning.preferences.coarseRegion, enabled]),
@@ -389,12 +389,9 @@ export function MemberLearningScreen(): React.ReactElement {
           idempotencyKey,
         ),
       enabled
-        ? 'Weekly in-app practice enabled.'
+        ? 'Weekly in-app practice enabled. Device reminders stay off unless you choose them separately.'
         : 'Weekly practice and this device reminder are off.',
     );
-    if (updated && enabled) {
-      setDeviceReminder(await enableWeeklyRehearsalReminder());
-    }
   }
 
   async function enableThisDeviceReminder() {
@@ -725,11 +722,17 @@ export function MemberLearningScreen(): React.ReactElement {
               devices. In-app updates remain the source of truth.
             </Text>
             {!learning.preferences.weeklyRehearsalEnabled ? (
-              <ActionButton
-                title="Turn on weekly practice"
-                disabled={Boolean(busy)}
-                onPress={() => void setWeeklyPractice(true)}
-              />
+              <>
+                <Text style={s.muted}>
+                  Turning on in-app practice does not request notification permission. You can opt
+                  in to one generic reminder separately after practice is enabled.
+                </Text>
+                <ActionButton
+                  title="Turn on weekly practice"
+                  disabled={Boolean(busy)}
+                  onPress={() => void setWeeklyPractice(true)}
+                />
+              </>
             ) : (
               <>
                 {deviceReminder?.state !== 'scheduled' ? (

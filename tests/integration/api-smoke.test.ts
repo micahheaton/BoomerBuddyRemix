@@ -24,10 +24,13 @@ describe('Run 1 API', () => {
           key: 'family',
           name: 'Family',
           monthlyUsd: 14.99,
-          annualUsd: null,
+          annualUsd: 149.9,
           hypothesis: false,
         },
       ],
+      commerceCatalog: {
+        defaultOfferId: 'family_annual_v2',
+      },
     });
 
     const session = await login(harness.app, 'owner-alice');

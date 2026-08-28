@@ -93,16 +93,70 @@ function config(): AppConfig {
         runtimeNetworkPermitted: true,
         runtimeInitiationPermitted: true,
         cancelOnlyPortalConfigurationId: 'bpc_cancel_only_fixture',
+        defaultOfferId: 'family_annual_v2',
         offer: {
           offerId: 'founding_family_monthly_v1',
           planVersionId: 'family_v1',
+          plan: 'family',
+          displayName: 'Family',
           billingInterval: 'month',
           providerProductId: 'prod_family_fixture',
           providerPriceId: 'price_family_month_fixture',
           currency: 'usd',
           unitAmountMinor: 1499,
           quantity: 1,
+          trialPeriodDays: 0,
+          customerSelectable: false,
+          defaultAcquisitionOffer: false,
         },
+        offers: [
+          {
+            offerId: 'founding_family_monthly_v1',
+            planVersionId: 'family_v1',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'month',
+            providerProductId: 'prod_family_fixture',
+            providerPriceId: 'price_family_month_fixture',
+            currency: 'usd',
+            unitAmountMinor: 1499,
+            quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: false,
+            defaultAcquisitionOffer: false,
+          },
+          {
+            offerId: 'family_monthly_v2',
+            planVersionId: 'family_v3',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'month',
+            providerProductId: 'prod_family_fixture',
+            providerPriceId: 'price_family_month_fixture',
+            currency: 'usd',
+            unitAmountMinor: 1499,
+            quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: true,
+            defaultAcquisitionOffer: false,
+          },
+          {
+            offerId: 'family_annual_v2',
+            planVersionId: 'family_v3',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'year',
+            providerProductId: 'prod_family_fixture',
+            providerPriceId: 'price_family_annual_fixture',
+            currency: 'usd',
+            unitAmountMinor: 14_990,
+            quantity: 1,
+            trialPeriodDays: 7,
+            customerSelectable: true,
+            defaultAcquisitionOffer: true,
+          },
+        ],
+        billingOperationalReadiness: { state: 'incomplete' },
       },
     },
     messaging: {
@@ -183,6 +237,29 @@ function transport(): StripeTransport {
           },
         };
       }
+      if (path === '/v1/prices/price_family_annual_fixture') {
+        return {
+          id: 'price_family_annual_fixture',
+          object: 'price',
+          livemode: false,
+          active: true,
+          product: 'prod_family_fixture',
+          currency: 'usd',
+          unit_amount: 14_990,
+          unit_amount_decimal: '14990',
+          type: 'recurring',
+          billing_scheme: 'per_unit',
+          custom_unit_amount: null,
+          tiers_mode: null,
+          transform_quantity: null,
+          recurring: {
+            interval: 'year',
+            interval_count: 1,
+            usage_type: 'licensed',
+            trial_period_days: null,
+          },
+        };
+      }
       if (path === '/v1/billing_portal/configurations/bpc_cancel_only_fixture') {
         return {
           id: 'bpc_cancel_only_fixture',
@@ -235,6 +312,7 @@ function transport(): StripeTransport {
           household_id: form['metadata[household_id]'],
           canonical_subscription_id: form['metadata[canonical_subscription_id]'],
           plan_version_id: form['metadata[plan_version_id]'],
+          offer_id: form['metadata[offer_id]'],
         },
         expires_at: Number(form.expires_at),
       };
@@ -343,7 +421,7 @@ describe('customer billing recent-MFA boundary', () => {
           'x-bb-household-id': householdId,
           'idempotency-key': `customer_mfa_blocked_${index.toString().padStart(4, '0')}`,
         },
-        payload: { offerId: 'founding_family_monthly_v1' },
+        payload: { offerId: 'family_monthly_v2' },
       });
       expect(response.statusCode, response.body).toBe(403);
       expect(response.json()).toEqual(customerBillingReverificationHint());
@@ -369,7 +447,7 @@ describe('customer billing recent-MFA boundary', () => {
         'x-bb-household-id': householdId,
         'idempotency-key': 'customer_mfa_fresh_0001',
       },
-      payload: { offerId: 'founding_family_monthly_v1' },
+      payload: { offerId: 'family_monthly_v2' },
     } as const;
     const response = await app.inject(request);
     expect(response.statusCode, response.body).toBe(201);
@@ -399,7 +477,7 @@ describe('customer billing recent-MFA boundary', () => {
       household_id: householdId,
       action: 'checkout',
       server_operation_id: 'customer_mfa_fresh_0001',
-      offer_id: 'founding_family_monthly_v1',
+      offer_id: 'family_monthly_v2',
       amount_minor: 1499,
       factor_level: 'multi_factor',
     });
@@ -496,7 +574,7 @@ describe('customer billing recent-MFA boundary', () => {
         ...request.headers,
         'idempotency-key': 'customer_mfa_portal_cross_action_0001',
       },
-      payload: { offerId: 'founding_family_monthly_v1' },
+      payload: { offerId: 'family_monthly_v2' },
     });
     expect(crossActionReplay.statusCode, crossActionReplay.body).toBe(403);
     expect(crossActionReplay.json()).toEqual(customerBillingReverificationHint());
@@ -514,7 +592,7 @@ describe('customer billing recent-MFA boundary', () => {
           'x-bb-household-id': householdId,
           'idempotency-key': serverOperationId,
         },
-        payload: { offerId: 'founding_family_monthly_v1' },
+        payload: { offerId: 'family_monthly_v2' },
       });
     const operationIds = [
       'customer_mfa_competing_first_0001',
@@ -540,6 +618,159 @@ describe('customer billing recent-MFA boundary', () => {
     );
     expect(bindings.rows[0]?.reverification_fingerprint).toMatch(/^[A-Za-z0-9_-]{43}$/u);
     expect(JSON.stringify(bindings.rows[0])).not.toContain('reverification_competing_fresh_0001');
+  });
+
+  it('lets the exact active household administrator accept and withdraw billing authority with durable replay-safe evidence', async () => {
+    await database.query(
+      `DELETE FROM household_billing_authorities
+       WHERE household_id = $1 AND person_id = $2`,
+      [householdId, personId],
+    );
+    const headers = {
+      origin: customerOrigin,
+      cookie: '__session=customer-token-fresh-authority-grant-0001',
+      'x-bb-household-id': householdId,
+    } as const;
+    const status = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/billing-authority',
+      headers,
+    });
+    expect(status.statusCode, status.body).toBe(200);
+    const initial = status.json<{
+      authorityStatus: string;
+      administratorEligible: boolean;
+      canAccept: boolean;
+      documents: {
+        accept: { version: string; digest: string };
+        revoke: { version: string; digest: string };
+      };
+    }>();
+    expect(initial).toMatchObject({
+      authorityStatus: 'absent',
+      administratorEligible: true,
+      canAccept: true,
+    });
+
+    const acceptRequest = {
+      method: 'POST',
+      url: '/v1/commerce/billing-authority/accept',
+      headers: {
+        ...headers,
+        'idempotency-key': 'billing-authority:grant:self-accept-00000001',
+      },
+      payload: {
+        documentVersion: initial.documents.accept.version,
+        documentDigest: initial.documents.accept.digest,
+        consentAccepted: true,
+      },
+    } as const;
+    const accepted = await app.inject(acceptRequest);
+    expect(accepted.statusCode, accepted.body).toBe(200);
+    expect(accepted.json()).toMatchObject({
+      householdId,
+      personId,
+      action: 'grant',
+      previousStatus: 'absent',
+      nextStatus: 'active',
+      reasonCode: 'customer_billing_consent_verified',
+      reused: false,
+      externalActionExecuted: false,
+    });
+    const acceptedReplay = await app.inject(acceptRequest);
+    expect(acceptedReplay.statusCode, acceptedReplay.body).toBe(200);
+    expect(acceptedReplay.json()).toMatchObject({ reused: true, nextStatus: 'active' });
+
+    const activeStatus = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/billing-authority',
+      headers,
+    });
+    expect(activeStatus.statusCode, activeStatus.body).toBe(200);
+    expect(activeStatus.json()).toMatchObject({
+      authorityStatus: 'active',
+      canAccept: false,
+      canRevoke: true,
+    });
+
+    const revokeRequest = {
+      method: 'POST',
+      url: '/v1/commerce/billing-authority/revoke',
+      headers: {
+        ...headers,
+        cookie: '__session=customer-token-portal-fresh-authority-revoke-0001',
+        'idempotency-key': 'billing-authority:revoke:self-revoke-00000001',
+      },
+      payload: {
+        documentVersion: initial.documents.revoke.version,
+        documentDigest: initial.documents.revoke.digest,
+        withdrawalAcknowledged: true,
+      },
+    } as const;
+    const revoked = await app.inject(revokeRequest);
+    expect(revoked.statusCode, revoked.body).toBe(200);
+    expect(revoked.json()).toMatchObject({
+      action: 'revoke',
+      previousStatus: 'active',
+      nextStatus: 'revoked',
+      reasonCode: 'customer_billing_consent_withdrawn',
+      reused: false,
+    });
+    const revokedReplay = await app.inject(revokeRequest);
+    expect(revokedReplay.statusCode, revokedReplay.body).toBe(200);
+    expect(revokedReplay.json()).toMatchObject({ reused: true, nextStatus: 'revoked' });
+
+    const durable = await database.query<
+      {
+        readonly customer_events: number;
+        readonly active_authorities: number;
+        readonly audit_events: number;
+        readonly outbox_events: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT
+         (SELECT count(*)::int FROM household_billing_authority_events
+          WHERE household_id = $1 AND person_id = $2
+            AND transition_source = 'customer_self') AS customer_events,
+         (SELECT count(*)::int FROM household_billing_authorities
+          WHERE household_id = $1 AND person_id = $2 AND status = 'active') AS active_authorities,
+         (SELECT count(*)::int FROM audit_events
+          WHERE household_id = $1 AND actor_person_id = $2
+            AND action IN ('billing_authority.granted','billing_authority.revoked')) AS audit_events,
+         (SELECT count(*)::int FROM outbox_events
+          WHERE aggregate_id = $3
+            AND event_type IN ('billing_authority.granted','billing_authority.revoked')) AS outbox_events`,
+      [householdId, personId, `${householdId}:${personId}`],
+    );
+    expect(durable.rows[0]).toEqual({
+      customer_events: 2,
+      active_authorities: 0,
+      audit_events: 2,
+      outbox_events: 2,
+    });
+
+    const crossHousehold = await app.inject({
+      method: 'GET',
+      url: '/v1/commerce/billing-authority',
+      headers: { ...headers, 'x-bb-household-id': 'household-sunrise' },
+    });
+    expect(crossHousehold.statusCode, crossHousehold.body).toBe(403);
+
+    await database.query(
+      `UPDATE household_administrator_assignments
+       SET status = 'revoked', revoked_at = $3
+       WHERE household_id = $1 AND person_id = $2`,
+      [householdId, personId, now.toISOString()],
+    );
+    const roleDenied = await app.inject({
+      ...acceptRequest,
+      headers: {
+        ...acceptRequest.headers,
+        cookie: '__session=customer-token-competing-fresh-authority-role-0001',
+        'idempotency-key': 'billing-authority:grant:role-denied-0000001',
+      },
+    });
+    expect([401, 403], roleDenied.body).toContain(roleDenied.statusCode);
   });
 
   it('uses a strict ten-minute boundary and keeps local development usable', () => {

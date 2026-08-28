@@ -6,7 +6,15 @@ const s = designTokens.spacing;
 
 export const appStyles = StyleSheet.create({
   safe: { backgroundColor: c.canvas, flex: 1 },
-  screen: { backgroundColor: c.canvas, flexGrow: 1, gap: s.md, padding: s.md },
+  screen: {
+    alignSelf: 'center',
+    backgroundColor: c.canvas,
+    flexGrow: 1,
+    gap: s.md,
+    maxWidth: 840,
+    padding: s.md,
+    width: '100%',
+  },
   title: { color: c.primaryHover, fontSize: 34, fontWeight: '700', lineHeight: 41 },
   heading: { color: c.primaryHover, fontSize: 24, fontWeight: '700', lineHeight: 30 },
   body: { color: c.text, fontSize: designTokens.typography.bodyPx, lineHeight: 28 },

@@ -9,13 +9,13 @@ import {
   type OrientationState,
   type OrientationStep,
 } from '@boomerbuddy/domain';
-import { createSafeWordVerifier } from '@boomerbuddy/security';
 import type { Database, SqlExecutor } from './database';
 import {
   hasEffectiveProtectedEnrollment,
   type EntitlementRuntimeEnvironment,
 } from './entitlements';
 import { writeAuditAndOutbox } from './events';
+import { FamilySafeWordRepository } from './family-safe-word';
 import {
   asDate,
   jsonParameter,
@@ -90,12 +90,21 @@ async function selectOrientation(
 }
 
 export class OrientationRepository {
+  private readonly familySafeWords: FamilySafeWordRepository;
+
   constructor(
     private readonly database: Database,
-    private readonly safeWordPepper: Uint8Array,
+    safeWordPepper: Uint8Array,
     private readonly idFactory: IdFactory = randomIdFactory,
     private readonly runtimeEnvironment: EntitlementRuntimeEnvironment = 'production',
-  ) {}
+  ) {
+    this.familySafeWords = new FamilySafeWordRepository(
+      database,
+      safeWordPepper,
+      idFactory,
+      runtimeEnvironment,
+    );
+  }
 
   async get(householdId: string, personId: string, now: Date): Promise<StoredOrientation> {
     const existing = await selectOrientation(this.database, householdId, personId);
@@ -198,10 +207,6 @@ export class OrientationRepository {
     if (snapshot === null)
       throw new Error('Orientation must be initialized before safe-word setup');
     assertSafeWordStepIsCurrent(snapshot);
-    const verifier =
-      input.action === 'configure'
-        ? await createSafeWordVerifier(input.phrase ?? '', this.safeWordPepper, input.now)
-        : null;
     return this.database.transaction(async (transaction) => {
       if (
         input.actorPersonId === input.subjectPersonId &&
@@ -234,26 +239,21 @@ export class OrientationRepository {
         input.now,
       );
       const state = completeOrientationStep(dispositionState, 'safe_word', input.now);
-      if (verifier !== null) {
-        await transaction.query(
-          `INSERT INTO safe_word_verifiers(
-             household_id, protected_person_id, verifier, version, updated_at
-           ) VALUES ($1,$2,$3,$4,$5)
-           ON CONFLICT (household_id, protected_person_id) DO UPDATE
-             SET verifier = EXCLUDED.verifier, version = EXCLUDED.version, updated_at = EXCLUDED.updated_at`,
-          [
-            input.householdId,
-            input.subjectPersonId,
-            JSON.stringify(verifier),
-            verifier.version,
-            input.now.toISOString(),
-          ],
-        );
+      const safeWordOperation = {
+        householdId: input.householdId,
+        protectedPersonId: input.subjectPersonId,
+        actorPersonId: input.actorPersonId,
+        audience: input.audience,
+        correlationId: input.correlationId,
+        now: input.now,
+      };
+      if (input.action === 'configure') {
+        await this.familySafeWords.replaceWithin(transaction, {
+          ...safeWordOperation,
+          phrase: input.phrase ?? '',
+        });
       } else {
-        await transaction.query(
-          'DELETE FROM safe_word_verifiers WHERE household_id = $1 AND protected_person_id = $2',
-          [input.householdId, input.subjectPersonId],
-        );
+        await this.familySafeWords.disableWithin(transaction, safeWordOperation);
       }
       await this.persistState(transaction, current, state);
       await writeAuditAndOutbox(

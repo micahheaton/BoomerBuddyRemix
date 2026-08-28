@@ -6,6 +6,7 @@ import {
   type ProviderFinancialRestrictionEvidence,
   type ProviderFailedPaymentEvidence,
   type StripeFoundingOffer,
+  type StripeOfferId,
   type StripePreflightEvidence,
 } from '@boomerbuddy/integrations';
 import type { Database, SqlExecutor } from './database';
@@ -63,6 +64,7 @@ export type StripeSessionRetryContext =
       readonly providerIdempotencyKey: string;
       readonly actor: CommerceActor;
       readonly canonicalSubscriptionId: string;
+      readonly offerId: StripeOfferId;
       readonly planVersionId: string;
       readonly providerPriceId: string;
       readonly providerCustomerId?: string;
@@ -171,6 +173,7 @@ export interface StripeControlStatusProjection {
 export interface PreparedStripeCheckout {
   readonly intentId: string;
   readonly subscriptionId: string;
+  readonly offerId: StripeOfferId;
   readonly planVersionId: string;
   readonly actor: CommerceActor;
   readonly duplicate: boolean;
@@ -202,11 +205,11 @@ export interface StripeRuntimeResources {
 export interface BillingReverificationBindingIntent {
   readonly personId: string;
   readonly householdId: string;
-  readonly action: 'checkout' | 'portal';
+  readonly action: 'checkout' | 'portal' | 'billing_authority_grant' | 'billing_authority_revoke';
   readonly environment: 'test' | 'production';
   readonly serverOperationId: string;
-  readonly offerId: 'founding_family_monthly_v1' | 'cancel_only_portal_v1';
-  readonly amountMinor: 0 | 1499;
+  readonly offerId: StripeOfferId | 'cancel_only_portal_v1' | 'billing_authority_self_v1';
+  readonly amountMinor: 0 | 899 | 1499 | 8990 | 14990;
   readonly currency: 'usd';
   readonly factorLevel: 'multi_factor';
 }
@@ -218,7 +221,7 @@ export interface DerivedBillingReverificationBinding {
 }
 
 export type BillingReverificationBindingDecision =
-  | { readonly kind: 'bound'; readonly duplicate: boolean }
+  | { readonly kind: 'bound'; readonly bindingId: string; readonly duplicate: boolean }
   | { readonly kind: 'reverification_reused' };
 
 export function deriveBillingReverificationBinding(
@@ -236,12 +239,23 @@ export function deriveBillingReverificationBinding(
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/u.test(input.reverificationId)) {
     throw new DomainError('not_authorized', 'Billing reverification evidence is invalid');
   }
+  const checkoutAmountByOffer: Readonly<Record<StripeOfferId, 899 | 1499 | 8990 | 14990>> = {
+    founding_family_monthly_v1: 1499,
+    family_monthly_v2: 1499,
+    family_annual_v2: 14990,
+    individual_monthly_v1: 899,
+    individual_annual_v1: 8990,
+  };
   const actionMatchesOffer =
     (input.action === 'checkout' &&
-      input.offerId === 'founding_family_monthly_v1' &&
-      input.amountMinor === 1499) ||
+      input.offerId !== 'cancel_only_portal_v1' &&
+      input.offerId !== 'billing_authority_self_v1' &&
+      input.amountMinor === checkoutAmountByOffer[input.offerId]) ||
     (input.action === 'portal' &&
       input.offerId === 'cancel_only_portal_v1' &&
+      input.amountMinor === 0) ||
+    ((input.action === 'billing_authority_grant' || input.action === 'billing_authority_revoke') &&
+      input.offerId === 'billing_authority_self_v1' &&
       input.amountMinor === 0);
   if (!actionMatchesOffer) {
     throw new DomainError('invalid_input', 'Billing reverification intent is invalid');
@@ -327,7 +341,7 @@ async function bindingFromSubscription(
     `SELECT s.household_id, s.id AS subscription_id, s.plan_version_id,
             completion.provider_customer_id, intent.billing_interval,
             intent.provider_price_id
-     FROM commerce_stripe_checkout_completions completion
+     FROM commerce_stripe_checkout_completion_bindings completion
      JOIN commerce_checkout_intents intent
        ON intent.household_id = completion.household_id
       AND intent.id = completion.checkout_intent_id
@@ -401,9 +415,10 @@ export class CommerceRuntimeRepository {
       );
       const byReverification = await transaction.query<
         {
+          readonly id: string;
           readonly person_id: string;
           readonly household_id: string;
-          readonly action: 'checkout' | 'portal';
+          readonly action: BillingReverificationBindingIntent['action'];
           readonly environment: 'test' | 'production';
           readonly server_operation_id: string;
           readonly offer_id: BillingReverificationBindingIntent['offerId'];
@@ -414,7 +429,7 @@ export class CommerceRuntimeRepository {
           readonly fingerprint_key_version: number;
         } & Record<string, unknown>
       >(
-        `SELECT person_id, household_id, action, environment, server_operation_id,
+        `SELECT id, person_id, household_id, action, environment, server_operation_id,
                 offer_id, amount_minor, currency, factor_level, binding_fingerprint,
                 fingerprint_key_version
          FROM commerce_billing_reverification_bindings
@@ -443,7 +458,7 @@ export class CommerceRuntimeRepository {
             'Billing operation has conflicting reverification evidence',
           );
         }
-        return { kind: 'bound', duplicate: true };
+        return { kind: 'bound', bindingId: priorReverification.id, duplicate: true };
       }
       const byOperation = await transaction.query(
         `SELECT 1 FROM commerce_billing_reverification_bindings
@@ -457,6 +472,7 @@ export class CommerceRuntimeRepository {
           'Billing operation has conflicting reverification evidence',
         );
       }
+      const bindingId = this.idFactory.next('billing-reverification');
       await transaction.query(
         `INSERT INTO commerce_billing_reverification_bindings(
            id, reverification_fingerprint, binding_fingerprint, fingerprint_key_version,
@@ -464,7 +480,7 @@ export class CommerceRuntimeRepository {
            amount_minor, currency, factor_level, effective_factor_age_seconds, created_at
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [
-          this.idFactory.next('billing-reverification'),
+          bindingId,
           input.reverificationFingerprint,
           input.bindingFingerprint,
           input.fingerprintKeyVersion,
@@ -481,7 +497,7 @@ export class CommerceRuntimeRepository {
           input.now.toISOString(),
         ],
       );
-      return { kind: 'bound', duplicate: false };
+      return { kind: 'bound', bindingId, duplicate: false };
     });
   }
 
@@ -713,7 +729,7 @@ export class CommerceRuntimeRepository {
                 AND intent.provider_requested_expires_at = operation.requested_expires_at
                 AND intent.expires_at = intent.provider_requested_expires_at + interval '5 minutes')
                 AS intent_exact,
-              (operation.requested_expires_at > CURRENT_TIMESTAMP + interval '30 minutes') AS deadline_open,
+              (operation.requested_expires_at > $4::timestamptz + interval '30 minutes') AS deadline_open,
               (operation.next_retry_at IS NULL AND operation.attempt_count = operation.authorized_attempt_limit)
                 AS exhausted_hold,
               EXISTS (
@@ -737,9 +753,9 @@ export class CommerceRuntimeRepository {
                   AND eligible.cohort_key = 'founding_household_v1'
                   AND eligible.benefit_key = 'family_v1_monthly_1499'
                   AND eligible.state = 'eligible'
-                  AND eligible.eligibility_expires_at > CURRENT_TIMESTAMP
+                  AND eligible.eligibility_expires_at > $4::timestamptz
                   AND policy.state = 'active'
-                  AND policy.policy_expires_at > CURRENT_TIMESTAMP
+                  AND policy.policy_expires_at > $4::timestamptz
                   AND policy.benefit_key = eligible.benefit_key
                   AND (operation.environment <> 'production' OR policy.live_approved = true)
               ) AS gates_open
@@ -756,7 +772,7 @@ export class CommerceRuntimeRepository {
         AND attention.state IN ('open','snoozed')
        WHERE operation.environment = $3 AND operation.action = 'checkout'
          AND operation.household_id = $1 AND operation.server_operation_id = $2`,
-      [input.householdId, input.serverOperationId, environment],
+      [input.householdId, input.serverOperationId, environment, input.now.toISOString()],
     );
     const row = result.rows[0];
     if (row === undefined) throw new DomainError('not_found', 'Stripe session operation not found');
@@ -948,11 +964,11 @@ export class CommerceRuntimeRepository {
            AND control.state = 'enabled'
            AND eligible.cohort_key = 'founding_household_v1'
            AND eligible.benefit_key = 'family_v1_monthly_1499'
-           AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > CURRENT_TIMESTAMP
-           AND policy.state = 'active' AND policy.policy_expires_at > CURRENT_TIMESTAMP
+           AND eligible.state = 'eligible' AND eligible.eligibility_expires_at > $3::timestamptz
+           AND policy.state = 'active' AND policy.policy_expires_at > $3::timestamptz
            AND policy.benefit_key = eligible.benefit_key AND policy.live_approved = false
          FOR UPDATE OF authority, membership, control, eligible, policy`,
-        [operation.household_id, operation.actor_person_id],
+        [operation.household_id, operation.actor_person_id, input.now.toISOString()],
       );
       if (intent.rowCount !== 1 || attention.rowCount !== 1 || gates.rowCount !== 1) {
         throw new DomainError('not_authorized', 'Stripe same-key repair controls are not open');
@@ -1755,7 +1771,7 @@ export class CommerceRuntimeRepository {
          id, environment, account_id, livemode, api_version, offer_id,
          provider_product_id, provider_price_id, portal_configuration_id,
          currency, unit_amount_minor, quantity, product_active, price_active,
-         recurring_interval, portal_cancel_only, promotions_enabled,
+         recurring_interval, trial_period_days, portal_cancel_only, promotions_enabled,
          automatic_tax_enabled, adaptive_pricing_enabled, evidence_level,
          evidence_digest, checked_at, transport_kind, runtime_run_id,
          authenticity_kind, portal_mutation_controls_exact, retention_coupon_evidence,
@@ -1764,7 +1780,7 @@ export class CommerceRuntimeRepository {
          portal_payment_method_update_enabled, portal_invoice_history_enabled,
          account_charges_enabled,
          account_payouts_enabled, account_country, account_business_type
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'month',$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35)`,
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)`,
       [
         id,
         input.evidence.environment,
@@ -1780,6 +1796,8 @@ export class CommerceRuntimeRepository {
         input.evidence.offer.quantity,
         input.evidence.productActive,
         input.evidence.priceActive,
+        input.evidence.offer.billingInterval,
+        input.evidence.offer.trialPeriodDays,
         input.evidence.portalCancelOnly,
         input.evidence.promotionsEnabled,
         input.evidence.automaticTaxEnabled,
@@ -1808,7 +1826,7 @@ export class CommerceRuntimeRepository {
 
   async prepareStripeCheckout(input: {
     readonly actor: CommerceActor;
-    readonly offerId: 'founding_family_monthly_v1';
+    readonly offerId: StripeOfferId;
     readonly planVersionId: string;
     readonly billingInterval: 'month' | 'year';
     readonly providerPriceId: string;
@@ -1821,6 +1839,12 @@ export class CommerceRuntimeRepository {
     const serverOperationId = input.serverOperationId ?? input.idempotencyKey;
     const providerIdempotencyKey = input.providerIdempotencyKey ?? input.idempotencyKey;
     const environment = input.environment ?? 'test';
+    const trialOfferFamily =
+      input.offerId === 'family_annual_v2'
+        ? ('family' as const)
+        : input.offerId === 'individual_annual_v1'
+          ? ('individual' as const)
+          : undefined;
     if (
       !validIdempotencyKey(input.idempotencyKey) ||
       !validIdempotencyKey(serverOperationId) ||
@@ -1902,9 +1926,48 @@ export class CommerceRuntimeRepository {
         ) {
           throw new DomainError('conflict', 'Checkout idempotency key has conflicting intent');
         }
+        if (trialOfferFamily !== undefined) {
+          const reservationAttempt = await transaction.query<
+            {
+              readonly checkout_intent_id: string;
+              readonly subscription_id: string;
+              readonly offer_id: string;
+              readonly idempotency_key: string;
+            } & Record<string, unknown>
+          >(
+            `SELECT attempt.checkout_intent_id, attempt.subscription_id,
+                    reservation.offer_id, attempt.idempotency_key
+             FROM commerce_stripe_trial_reservations reservation
+             JOIN commerce_stripe_trial_checkout_attempts attempt
+               ON attempt.reservation_id = reservation.id
+              AND attempt.household_id = reservation.household_id
+             WHERE reservation.environment = $1 AND reservation.household_id = $2
+               AND reservation.person_id = $3 AND reservation.offer_family = $4
+               AND attempt.checkout_intent_id = $5
+             FOR SHARE OF reservation, attempt`,
+            [
+              environment,
+              input.actor.householdId,
+              input.actor.personId,
+              trialOfferFamily,
+              prior.id,
+            ],
+          );
+          const exact = reservationAttempt.rows[0];
+          if (
+            reservationAttempt.rows.length !== 1 ||
+            exact?.checkout_intent_id !== prior.id ||
+            exact.subscription_id !== prior.subscription_id ||
+            exact.offer_id !== input.offerId ||
+            exact.idempotency_key !== input.idempotencyKey
+          ) {
+            throw new DomainError('conflict', 'Annual trial reservation evidence is invalid');
+          }
+        }
         return {
           intentId: prior.id,
           subscriptionId: prior.subscription_id,
+          offerId: prior.offer_id as StripeOfferId,
           planVersionId: prior.plan_version_id,
           actor: input.actor,
           duplicate: true,
@@ -1939,11 +2002,13 @@ export class CommerceRuntimeRepository {
          JOIN commerce_plan_versions plan ON plan.id = offer.plan_version_id
          WHERE offer.offer_id = $1 AND offer.plan_version_id = $2
            AND offer.billing_interval = $3 AND offer.currency = 'usd'
-           AND offer.unit_amount_minor = 1499 AND offer.quantity = 1
+           AND offer.quantity = 1
            AND offer.promotions_enabled = false
            AND offer.automatic_tax_enabled = false
            AND offer.adaptive_pricing_enabled = false
-           AND plan.plan_key = 'family' AND plan.state IN ('hypothesis','active')
+           AND ((offer.plan_key = 'family' AND plan.plan_key = 'family')
+             OR (offer.plan_key = 'individual' AND plan.plan_key = 'plus'))
+           AND plan.state IN ('hypothesis','active')
            AND plan.available_from <= $4
            AND (plan.available_until IS NULL OR plan.available_until > $4)
          FOR SHARE`,
@@ -2002,9 +2067,199 @@ export class CommerceRuntimeRepository {
           providerExpiresAt.toISOString(),
         ],
       );
+      if (trialOfferFamily !== undefined) {
+        const priorVerifiedAccess = await transaction.query(
+          `SELECT 1
+           FROM commerce_subscriptions prior_subscription
+           JOIN entitlement_grants grant_record
+             ON grant_record.household_id = prior_subscription.household_id
+            AND grant_record.subscription_id = prior_subscription.id
+           WHERE prior_subscription.source = 'web'
+             AND prior_subscription.source_verified = true
+             AND grant_record.source = 'web' AND grant_record.source_verified = true
+             AND (
+               prior_subscription.household_id = $1
+               OR prior_subscription.payer_person_id = $2
+             )
+           LIMIT 1
+           FOR SHARE OF prior_subscription, grant_record`,
+          [input.actor.householdId, input.actor.personId],
+        );
+        if (priorVerifiedAccess.rowCount !== 0) {
+          throw new DomainError(
+            'conflict',
+            'A prior verified membership is not eligible for a new annual trial',
+          );
+        }
+        await transaction.query(
+          `INSERT INTO commerce_stripe_trial_reservations(
+             id, environment, household_id, person_id, offer_family, offer_id,
+             checkout_intent_id, subscription_id, idempotency_key, reserved_at
+           )
+           SELECT $1,$2,$3,$4,$5,offer.offer_id,$6,$7,$8,$9
+           FROM commerce_stripe_offer_contracts offer
+           WHERE offer.offer_id = $10 AND offer.trial_period_days = 7
+             AND offer.billing_interval = 'year'
+           ON CONFLICT DO NOTHING`,
+          [
+            this.idFactory.next('stripe-trial-reservation'),
+            environment,
+            input.actor.householdId,
+            input.actor.personId,
+            trialOfferFamily,
+            intentId,
+            subscriptionId,
+            input.idempotencyKey,
+            input.now.toISOString(),
+            input.offerId,
+          ],
+        );
+        const reservation = await transaction.query<
+          {
+            readonly id: string;
+            readonly household_id: string;
+            readonly person_id: string;
+            readonly checkout_intent_id: string;
+            readonly subscription_id: string;
+            readonly offer_id: string;
+            readonly idempotency_key: string;
+          } & Record<string, unknown>
+        >(
+          `SELECT id, household_id, person_id, checkout_intent_id, subscription_id,
+                   offer_id, idempotency_key
+           FROM commerce_stripe_trial_reservations
+           WHERE environment = $1 AND offer_family = $2
+             AND (person_id = $3 OR household_id = $4)
+           FOR SHARE`,
+          [environment, trialOfferFamily, input.actor.personId, input.actor.householdId],
+        );
+        const exact = reservation.rows[0];
+        if (
+          reservation.rows.length !== 1 ||
+          exact?.household_id !== input.actor.householdId ||
+          exact.person_id !== input.actor.personId ||
+          exact.offer_id !== input.offerId
+        ) {
+          throw new DomainError(
+            'conflict',
+            'This person or household has already reserved this annual trial',
+          );
+        }
+        const priorAttemptState = await transaction.query<
+          {
+            readonly attempt_count: number;
+            readonly blocked_count: number;
+            readonly consumption_count: number;
+          } & Record<string, unknown>
+        >(
+          `SELECT count(*)::integer AS attempt_count,
+                  count(*) FILTER (WHERE
+                    intent.state <> 'expired'
+                    OR subscription.lifecycle <> 'expired'
+                    OR completion.provider_session_id IS NOT NULL
+                    OR EXISTS (
+                      SELECT 1 FROM commerce_provider_subscription_records provider_record
+                      WHERE provider_record.household_id = attempt.household_id
+                        AND provider_record.subscription_id = attempt.subscription_id
+                        AND provider_record.provider = 'stripe'
+                        AND provider_record.environment = $2
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM entitlement_grants grant_record
+                      WHERE grant_record.household_id = attempt.household_id
+                        AND grant_record.subscription_id = attempt.subscription_id
+                        AND grant_record.source = 'web'
+                        AND grant_record.source_verified = true
+                    )
+                    OR EXISTS (
+                      SELECT 1 FROM commerce_stripe_session_operations operation
+                      WHERE operation.household_id = attempt.household_id
+                        AND operation.checkout_intent_id = attempt.checkout_intent_id
+                        AND operation.environment = $2
+                        AND operation.action = 'checkout'
+                        AND operation.state NOT IN ('failed_no_effect','succeeded')
+                    )
+                  )::integer AS blocked_count,
+                  (SELECT count(*)::integer
+                   FROM commerce_stripe_trial_consumptions consumption
+                   WHERE consumption.reservation_id = $1) AS consumption_count
+           FROM commerce_stripe_trial_checkout_attempts attempt
+           JOIN commerce_checkout_intents intent
+             ON intent.household_id = attempt.household_id
+            AND intent.id = attempt.checkout_intent_id
+           JOIN commerce_subscriptions subscription
+             ON subscription.household_id = attempt.household_id
+            AND subscription.id = attempt.subscription_id
+           LEFT JOIN commerce_stripe_checkout_completion_bindings completion
+             ON completion.household_id = attempt.household_id
+            AND completion.checkout_intent_id = attempt.checkout_intent_id
+            AND completion.environment = $2
+           WHERE attempt.reservation_id = $1`,
+          [exact.id, environment],
+        );
+        const priorState = priorAttemptState.rows[0];
+        const initialReservation =
+          exact.checkout_intent_id === intentId &&
+          exact.subscription_id === subscriptionId &&
+          exact.idempotency_key === input.idempotencyKey;
+        if (
+          priorState === undefined ||
+          priorState.consumption_count !== 0 ||
+          (!initialReservation && (priorState.attempt_count < 1 || priorState.blocked_count !== 0))
+        ) {
+          throw new DomainError(
+            'conflict',
+            'This annual trial has already been used or is pending',
+          );
+        }
+        const attemptNumber = priorState.attempt_count + 1;
+        const attemptId = this.idFactory.next('stripe-trial-attempt');
+        await transaction.query(
+          `INSERT INTO commerce_stripe_trial_checkout_attempts(
+             id, reservation_id, household_id, checkout_intent_id, subscription_id,
+             attempt_number, idempotency_key, recorded_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [
+            attemptId,
+            exact.id,
+            input.actor.householdId,
+            intentId,
+            subscriptionId,
+            attemptNumber,
+            input.idempotencyKey,
+            input.now.toISOString(),
+          ],
+        );
+        const attempt = await transaction.query<
+          {
+            readonly reservation_id: string;
+            readonly checkout_intent_id: string;
+            readonly subscription_id: string;
+            readonly attempt_number: number;
+            readonly idempotency_key: string;
+          } & Record<string, unknown>
+        >(
+          `SELECT reservation_id, checkout_intent_id, subscription_id,
+                  attempt_number, idempotency_key
+           FROM commerce_stripe_trial_checkout_attempts
+           WHERE id = $1`,
+          [attemptId],
+        );
+        const recordedAttempt = attempt.rows[0];
+        if (
+          recordedAttempt?.reservation_id !== exact.id ||
+          recordedAttempt.checkout_intent_id !== intentId ||
+          recordedAttempt.subscription_id !== subscriptionId ||
+          recordedAttempt.attempt_number !== attemptNumber ||
+          recordedAttempt.idempotency_key !== input.idempotencyKey
+        ) {
+          throw new DomainError('conflict', 'Annual trial attempt evidence is invalid');
+        }
+      }
       return {
         intentId,
         subscriptionId,
+        offerId: input.offerId,
         planVersionId: input.planVersionId,
         actor: input.actor,
         duplicate: false,
@@ -2140,6 +2395,7 @@ export class CommerceRuntimeRepository {
         readonly provider_idempotency_key: string;
         readonly actor_person_id: string | null;
         readonly canonical_subscription_id: string | null;
+        readonly offer_id: StripeOfferId | null;
         readonly plan_version_id: string | null;
         readonly provider_price_id: string | null;
         readonly provider_customer_id: string | null;
@@ -2156,7 +2412,7 @@ export class CommerceRuntimeRepository {
     >(
       `SELECT operation.checkout_intent_id, operation.provider_idempotency_key,
               operation.actor_person_id, operation.canonical_subscription_id,
-              intent.plan_version_id, operation.provider_price_id,
+              intent.offer_id, intent.plan_version_id, operation.provider_price_id,
               operation.provider_customer_id, operation.provider_configuration_id,
               operation.success_url, operation.cancel_url, operation.return_url,
               operation.requested_expires_at, operation.state AS operation_state,
@@ -2205,6 +2461,7 @@ export class CommerceRuntimeRepository {
       if (
         row.checkout_intent_id === null ||
         row.canonical_subscription_id === null ||
+        row.offer_id === null ||
         row.plan_version_id === null ||
         row.provider_price_id === null ||
         row.success_url === null ||
@@ -2223,6 +2480,7 @@ export class CommerceRuntimeRepository {
           providerIdempotencyKey: row.provider_idempotency_key,
           actor,
           canonicalSubscriptionId: row.canonical_subscription_id,
+          offerId: row.offer_id,
           planVersionId: row.plan_version_id,
           providerPriceId: row.provider_price_id,
           ...(row.provider_customer_id === null
@@ -3289,6 +3547,373 @@ export class CommerceRuntimeRepository {
     });
   }
 
+  async recordStripeCheckoutCompletionV2(input: {
+    readonly inboxId: string;
+    readonly externalEventId: string;
+    readonly environment: 'test' | 'production';
+    readonly providerSessionId: string;
+    readonly providerSubscriptionId: string;
+    readonly providerCustomerId: string;
+    readonly providerPaymentIntentId?: string;
+    readonly canonicalBinding: {
+      readonly householdId: string;
+      readonly subscriptionId: string;
+      readonly planVersionId: string;
+    };
+    readonly offerId: Exclude<StripeOfferId, 'founding_family_monthly_v1'>;
+    readonly paymentStatus: 'paid' | 'no_payment_required';
+    readonly paymentMethodCollection: 'always';
+    /** Annual trial Checkout completes at zero; its annual amount belongs to invoice evidence. */
+    readonly amountTotal: number;
+    readonly currency: 'usd';
+    readonly providerExpiresAt: Date;
+    readonly providerEventCreatedAt: Date;
+    readonly now: Date;
+  }): Promise<boolean> {
+    const paidCheckout = input.paymentStatus === 'paid';
+    const paymentShapeExact = paidCheckout
+      ? (input.amountTotal === 899 || input.amountTotal === 1499) &&
+        input.providerPaymentIntentId !== undefined
+      : input.amountTotal === 0 && input.providerPaymentIntentId === undefined;
+    if (
+      !paymentShapeExact ||
+      input.paymentMethodCollection !== 'always' ||
+      !Number.isFinite(input.providerExpiresAt.getTime()) ||
+      !Number.isFinite(input.providerEventCreatedAt.getTime())
+    ) {
+      throw new DomainError('conflict', 'Catalog Checkout completion evidence is invalid');
+    }
+    return this.database.transaction(async (transaction) => {
+      await transaction.query(
+        `UPDATE commerce_checkout_intents intent
+         SET state = 'session_created', provider_session_id = $1,
+             provider_returned_expires_at = $2, dispatch_state = 'session_recorded',
+             updated_at = $9
+         WHERE intent.provider = 'stripe' AND intent.environment = $3
+           AND intent.household_id = $4 AND intent.subscription_id = $5
+           AND intent.plan_version_id = $6 AND intent.offer_id = $7
+           AND intent.state = 'prepared' AND intent.provider_session_id IS NULL
+           AND intent.dispatch_state IN ('dispatching','outcome_unknown')
+           AND intent.created_at <= $8 AND $8 <= intent.provider_requested_expires_at
+           AND $2 <= intent.provider_requested_expires_at
+           AND EXISTS (
+             SELECT 1 FROM commerce_stripe_session_operations operation
+             WHERE operation.checkout_intent_id = intent.id
+               AND operation.household_id = intent.household_id
+               AND operation.environment = intent.environment
+               AND operation.action = 'checkout'
+               AND operation.state IN ('dispatching','outcome_unknown')
+           )`,
+        [
+          input.providerSessionId,
+          input.providerExpiresAt.toISOString(),
+          input.environment,
+          input.canonicalBinding.householdId,
+          input.canonicalBinding.subscriptionId,
+          input.canonicalBinding.planVersionId,
+          input.offerId,
+          input.providerEventCreatedAt.toISOString(),
+          input.now.toISOString(),
+        ],
+      );
+      const repaired = await transaction.query<
+        {
+          readonly id: string;
+          readonly attempt_count: number;
+          readonly provider_idempotency_key: string;
+        } & Record<string, unknown>
+      >(
+        `UPDATE commerce_stripe_session_operations operation
+         SET state = 'succeeded', provider_session_id = $1, returned_expires_at = $2,
+             lease_expires_at = NULL, next_retry_at = NULL, terminal_at = $3, updated_at = $3
+         FROM commerce_checkout_intents intent
+         WHERE intent.household_id = $4 AND intent.subscription_id = $5
+           AND intent.environment = $6 AND intent.provider_session_id = $1
+           AND operation.checkout_intent_id = intent.id
+           AND operation.household_id = intent.household_id
+           AND operation.environment = intent.environment
+           AND operation.action = 'checkout'
+           AND operation.state IN ('dispatching','outcome_unknown')
+         RETURNING operation.id, operation.attempt_count, operation.provider_idempotency_key`,
+        [
+          input.providerSessionId,
+          input.providerExpiresAt.toISOString(),
+          input.now.toISOString(),
+          input.canonicalBinding.householdId,
+          input.canonicalBinding.subscriptionId,
+          input.environment,
+        ],
+      );
+      for (const operation of repaired.rows) {
+        await transaction.query(
+          `INSERT INTO commerce_stripe_session_operation_attempts(
+             id, operation_id, attempt, event_kind, provider_idempotency_key,
+             provider_session_id, occurred_at
+           ) VALUES ($1,$2,$3,'succeeded',$4,$5,$6)
+           ON CONFLICT (operation_id, attempt, event_kind) DO NOTHING`,
+          [
+            this.idFactory.next('stripe-session-attempt'),
+            operation.id,
+            operation.attempt_count,
+            operation.provider_idempotency_key,
+            input.providerSessionId,
+            input.now.toISOString(),
+          ],
+        );
+      }
+      const inserted = await transaction.query(
+        `INSERT INTO commerce_stripe_checkout_completions_v2(
+           provider_session_id, environment, household_id, checkout_intent_id,
+           subscription_id, provider_subscription_id, provider_customer_id,
+           provider_payment_intent_id, source_inbox_id, provider_event_id,
+           offer_id, payment_status, session_status, amount_total, currency,
+           payment_method_collection, completed_at, provider_expires_at
+         )
+         SELECT intent.provider_session_id, intent.environment, intent.household_id, intent.id,
+                intent.subscription_id, $4, $5, $6, $1, $2,
+                $7, $8, 'complete', $9, $10, $11, $12, $13
+         FROM commerce_checkout_intents intent
+         JOIN commerce_event_inbox inbox
+           ON inbox.id = $1 AND inbox.external_event_id = $2
+          AND inbox.event_type IN (
+            'checkout.session.completed', 'checkout.session.async_payment_succeeded'
+          )
+          AND inbox.provider = 'stripe' AND inbox.environment = $3
+          AND inbox.provider_object_id = $14 AND inbox.authenticity = 'verified'
+         JOIN commerce_stripe_offer_contracts offer ON offer.offer_id = intent.offer_id
+         WHERE intent.provider = 'stripe' AND intent.environment = $3
+           AND intent.provider_session_id = $14 AND intent.state = 'session_created'
+           AND intent.household_id = $15 AND intent.subscription_id = $16
+           AND intent.plan_version_id = $17 AND intent.offer_id = $7
+           AND intent.provider_returned_expires_at = $13
+           AND $12 <= intent.provider_returned_expires_at
+           AND (
+             ($8 = 'paid' AND offer.trial_period_days = 0
+               AND offer.unit_amount_minor = $9)
+             OR ($8 = 'no_payment_required' AND offer.trial_period_days = 7 AND $9 = 0)
+           )
+         ON CONFLICT (provider_session_id) DO NOTHING`,
+        [
+          input.inboxId,
+          input.externalEventId,
+          input.environment,
+          input.providerSubscriptionId,
+          input.providerCustomerId,
+          input.providerPaymentIntentId ?? null,
+          input.offerId,
+          input.paymentStatus,
+          input.amountTotal,
+          input.currency,
+          input.paymentMethodCollection,
+          input.providerEventCreatedAt.toISOString(),
+          input.providerExpiresAt.toISOString(),
+          input.providerSessionId,
+          input.canonicalBinding.householdId,
+          input.canonicalBinding.subscriptionId,
+          input.canonicalBinding.planVersionId,
+        ],
+      );
+      const completion = await transaction.query<
+        {
+          readonly environment: string;
+          readonly household_id: string;
+          readonly subscription_id: string;
+          readonly provider_subscription_id: string;
+          readonly provider_customer_id: string;
+          readonly source_inbox_id: string;
+          readonly offer_id: string;
+          readonly payment_status: string;
+          readonly amount_total: number;
+        } & Record<string, unknown>
+      >(
+        `SELECT environment, household_id, subscription_id, provider_subscription_id,
+                provider_customer_id, source_inbox_id, offer_id, payment_status, amount_total
+         FROM commerce_stripe_checkout_completions_v2 WHERE provider_session_id = $1`,
+        [input.providerSessionId],
+      );
+      const row = completion.rows[0];
+      if (
+        row === undefined ||
+        row.environment !== input.environment ||
+        row.household_id !== input.canonicalBinding.householdId ||
+        row.subscription_id !== input.canonicalBinding.subscriptionId ||
+        row.provider_subscription_id !== input.providerSubscriptionId ||
+        row.provider_customer_id !== input.providerCustomerId ||
+        row.source_inbox_id !== input.inboxId ||
+        row.offer_id !== input.offerId ||
+        row.payment_status !== input.paymentStatus ||
+        row.amount_total !== input.amountTotal
+      ) {
+        throw new DomainError('conflict', 'Catalog Checkout conflicts with server intent');
+      }
+      if (input.paymentStatus === 'no_payment_required') {
+        await transaction.query(
+          `INSERT INTO commerce_stripe_trial_consumptions(
+             id, reservation_id, environment, household_id, person_id, offer_family,
+             offer_id, provider_session_id, provider_subscription_id, source_inbox_id,
+             consumed_at
+           )
+           SELECT $1,reservation.id,reservation.environment,reservation.household_id,
+                  reservation.person_id,reservation.offer_family,reservation.offer_id,
+                  completion.provider_session_id,completion.provider_subscription_id,
+                  completion.source_inbox_id,$2
+           FROM commerce_stripe_trial_reservations reservation
+           JOIN commerce_stripe_trial_checkout_attempts attempt
+             ON attempt.reservation_id = reservation.id
+            AND attempt.household_id = reservation.household_id
+           JOIN commerce_stripe_checkout_completions_v2 completion
+             ON completion.environment = reservation.environment
+            AND completion.household_id = attempt.household_id
+            AND completion.checkout_intent_id = attempt.checkout_intent_id
+            AND completion.subscription_id = attempt.subscription_id
+            AND completion.offer_id = reservation.offer_id
+           WHERE completion.provider_session_id = $3
+             AND completion.environment = $4
+             AND completion.payment_status = 'no_payment_required'
+             AND completion.amount_total = 0
+           ON CONFLICT DO NOTHING`,
+          [
+            this.idFactory.next('stripe-trial-consumption'),
+            input.providerEventCreatedAt.toISOString(),
+            input.providerSessionId,
+            input.environment,
+          ],
+        );
+        const consumption = await transaction.query<
+          {
+            readonly environment: string;
+            readonly household_id: string;
+            readonly person_id: string;
+            readonly offer_id: string;
+            readonly provider_subscription_id: string;
+            readonly source_inbox_id: string;
+          } & Record<string, unknown>
+        >(
+          `SELECT consumption.environment, consumption.household_id,
+                  consumption.person_id, consumption.offer_id,
+                  consumption.provider_subscription_id, consumption.source_inbox_id
+           FROM commerce_stripe_trial_consumptions consumption
+           WHERE consumption.provider_session_id = $1`,
+          [input.providerSessionId],
+        );
+        const consumed = consumption.rows[0];
+        if (
+          consumption.rows.length !== 1 ||
+          consumed?.environment !== input.environment ||
+          consumed.household_id !== input.canonicalBinding.householdId ||
+          consumed.offer_id !== input.offerId ||
+          consumed.provider_subscription_id !== input.providerSubscriptionId ||
+          consumed.source_inbox_id !== input.inboxId
+        ) {
+          throw new DomainError('conflict', 'Annual trial consumption evidence is invalid');
+        }
+      }
+      await transaction.query(
+        `INSERT INTO commerce_provider_customers(
+           provider, environment, provider_customer_id, household_id, verified_at
+         ) VALUES ('stripe',$1,$2,$3,$4)
+         ON CONFLICT (provider, environment, provider_customer_id) DO NOTHING`,
+        [
+          input.environment,
+          input.providerCustomerId,
+          input.canonicalBinding.householdId,
+          input.now.toISOString(),
+        ],
+      );
+      const customer = await transaction.query<
+        { readonly household_id: string } & Record<string, unknown>
+      >(
+        `SELECT household_id FROM commerce_provider_customers
+         WHERE provider = 'stripe' AND environment = $1 AND provider_customer_id = $2`,
+        [input.environment, input.providerCustomerId],
+      );
+      if (customer.rows[0]?.household_id !== input.canonicalBinding.householdId) {
+        throw new DomainError('conflict', 'Stripe customer belongs to another household');
+      }
+      const waiting = await transaction.query<
+        {
+          readonly reconciliation_run_id: string;
+          readonly trigger_event_id: string;
+          readonly original_job_id: string;
+          readonly household_id: string | null;
+          readonly payload: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT run.id AS reconciliation_run_id, run.trigger_event_id,
+                original_job.id AS original_job_id, original_job.household_id,
+                original_job.payload
+         FROM commerce_reconciliation_runs run
+         JOIN commerce_event_inbox source ON source.id = run.trigger_event_id
+         JOIN durable_jobs original_job
+           ON original_job.job_type = 'commerce.reconcile'
+          AND original_job.idempotency_key =
+              ('stripe-reconcile:' || run.environment || ':' || run.trigger_event_id)
+         WHERE run.provider = 'stripe' AND run.environment = $1
+           AND run.state = 'attention'
+           AND run.failure_code = 'stripe.checkout_binding_pending'
+           AND source.application_state = 'pending'
+           AND original_job.payload->>'externalSubscriptionId' = $2
+         FOR UPDATE OF run, source, original_job`,
+        [input.environment, input.providerSubscriptionId],
+      );
+      for (const dependency of waiting.rows) {
+        const originalPayload = durableJobPayload(dependency.payload);
+        if (
+          originalPayload.inboxId !== dependency.trigger_event_id ||
+          originalPayload.reconciliationRunId !== dependency.reconciliation_run_id ||
+          originalPayload.environment !== input.environment ||
+          originalPayload.externalSubscriptionId !== input.providerSubscriptionId ||
+          originalPayload.repairGeneration !== 0 ||
+          (originalPayload.householdId ?? null) !== dependency.household_id
+        ) {
+          throw new DomainError('conflict', 'Waiting Stripe reconciliation lineage is invalid');
+        }
+        const wakeKey =
+          `stripe-reconcile-checkout-wake:${input.environment}:` +
+          `${dependency.trigger_event_id}:${input.providerSessionId}`;
+        const wake = await enqueueDurableJobWithExecutor(transaction, this.idFactory, {
+          type: 'commerce.reconcile',
+          version: 1,
+          ...(dependency.household_id === null ? {} : { householdId: dependency.household_id }),
+          classification: 'internal',
+          payload: { ...originalPayload, repairGeneration: 0 },
+          idempotencyKey: wakeKey,
+          scheduledAt: input.now,
+          maxAttempts: 4,
+          correlationId: `stripe-reconcile-checkout-wake:${dependency.trigger_event_id}`,
+          causationId: dependency.original_job_id,
+        });
+        const awakened = await transaction.query(
+          `UPDATE commerce_reconciliation_runs
+           SET state = 'queued', failure_code = NULL, completed_at = NULL,
+               last_attempted_at = $2
+           WHERE id = $1 AND provider = 'stripe' AND environment = $3
+             AND state = 'attention'
+             AND failure_code = 'stripe.checkout_binding_pending'`,
+          [dependency.reconciliation_run_id, input.now.toISOString(), input.environment],
+        );
+        if (awakened.rowCount !== 1) {
+          throw new DomainError('conflict', 'Waiting Stripe reconciliation changed');
+        }
+        await transaction.query(
+          `INSERT INTO commerce_stripe_checkout_dependency_wakes(
+             id, reconciliation_run_id, trigger_event_id, provider_session_id,
+             wake_job_id, occurred_at
+           ) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            this.idFactory.next('stripe-checkout-dependency-wake'),
+            dependency.reconciliation_run_id,
+            dependency.trigger_event_id,
+            input.providerSessionId,
+            wake.job.id,
+            input.now.toISOString(),
+          ],
+        );
+      }
+      return inserted.rowCount === 1;
+    });
+  }
+
   async recordStripeFailedInvoiceEvidence(input: {
     readonly environment: 'test' | 'production';
     readonly householdId: string;
@@ -3313,7 +3938,7 @@ export class CommerceRuntimeRepository {
     );
     const binding = await this.database.query(
       `SELECT 1
-       FROM commerce_stripe_checkout_completions
+       FROM commerce_stripe_checkout_completion_bindings
        WHERE environment = $1 AND household_id = $2 AND subscription_id = $3
          AND provider_subscription_id = $4
        UNION ALL
@@ -3717,6 +4342,295 @@ export class CommerceRuntimeRepository {
     return result.rows[0]?.provider_customer_id ?? null;
   }
 
+  async recordStripeTrialReminderIntent(input: {
+    readonly environment: 'test' | 'production';
+    readonly householdId: string;
+    readonly subscriptionId: string;
+    readonly providerSubscriptionId: string;
+    readonly sourceInboxId: string;
+    readonly offerId: 'family_annual_v2' | 'individual_annual_v1';
+    readonly trialEndsAt: Date;
+    readonly now: Date;
+  }): Promise<{ readonly intentId: string; readonly duplicate: boolean }> {
+    if (!Number.isFinite(input.trialEndsAt.getTime()) || input.trialEndsAt <= input.now) {
+      throw new DomainError('conflict', 'Stripe trial reminder period is invalid');
+    }
+    return this.database.transaction(async (transaction) => {
+      const intentId = this.idFactory.next('stripe-trial-reminder');
+      const inserted = await transaction.query(
+        `INSERT INTO commerce_stripe_trial_reminder_intents(
+           id, environment, household_id, subscription_id, provider_subscription_id,
+           source_inbox_id, offer_id, trial_ends_at, charge_amount_minor,
+           currency, disclosure, created_at
+         )
+         SELECT $1,$2,$3,$4,$5,$6,$7,$8,offer.unit_amount_minor,'usd',
+                CASE offer.offer_id
+                  WHEN 'family_annual_v2'
+                    THEN '7 days free, then $149.90/year unless canceled.'
+                  WHEN 'individual_annual_v1'
+                    THEN '7 days free, then $89.90/year unless canceled.'
+                END,
+                $9
+         FROM commerce_event_inbox inbox
+         JOIN commerce_stripe_offer_contracts offer ON offer.offer_id = $7
+         JOIN commerce_stripe_trial_period_evidence trial
+           ON trial.environment = $2 AND trial.household_id = $3
+          AND trial.subscription_id = $4 AND trial.provider_subscription_id = $5
+          AND trial.offer_id = $7 AND trial.trial_ends_at = $8
+         WHERE inbox.id = $6 AND inbox.provider = 'stripe' AND inbox.environment = $2
+           AND inbox.authenticity = 'verified'
+           AND inbox.event_type = 'customer.subscription.trial_will_end'
+           AND inbox.provider_object_id = $5
+           AND inbox.application_state <> 'quarantined'
+           AND offer.trial_period_days = 7 AND offer.billing_interval = 'year'
+         ON CONFLICT (source_inbox_id) DO NOTHING`,
+        [
+          intentId,
+          input.environment,
+          input.householdId,
+          input.subscriptionId,
+          input.providerSubscriptionId,
+          input.sourceInboxId,
+          input.offerId,
+          input.trialEndsAt.toISOString(),
+          input.now.toISOString(),
+        ],
+      );
+      const exact = await transaction.query<
+        {
+          readonly id: string;
+          readonly household_id: string;
+          readonly subscription_id: string;
+          readonly provider_subscription_id: string;
+          readonly offer_id: string;
+          readonly trial_ends_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT id, household_id, subscription_id, provider_subscription_id,
+                offer_id, trial_ends_at
+         FROM commerce_stripe_trial_reminder_intents
+         WHERE source_inbox_id = $1`,
+        [input.sourceInboxId],
+      );
+      const row = exact.rows[0];
+      if (
+        exact.rows.length !== 1 ||
+        row?.household_id !== input.householdId ||
+        row.subscription_id !== input.subscriptionId ||
+        row.provider_subscription_id !== input.providerSubscriptionId ||
+        row.offer_id !== input.offerId ||
+        asDate(row.trial_ends_at).getTime() !== input.trialEndsAt.getTime()
+      ) {
+        throw new DomainError('conflict', 'Stripe trial reminder evidence is invalid');
+      }
+      return { intentId: row.id, duplicate: inserted.rowCount === 0 };
+    });
+  }
+
+  async stripeTrialReminderProjection(input: {
+    readonly actor: CommerceActor;
+    readonly environment: 'test' | 'production';
+    readonly now: Date;
+  }): Promise<
+    | {
+        readonly intentId: string;
+        readonly offerId: 'family_annual_v2' | 'individual_annual_v1';
+        readonly trialEndsAt: Date;
+        readonly chargeAmountMinor: 8990 | 14990;
+        readonly currency: 'usd';
+        readonly disclosure:
+          | '7 days free, then $149.90/year unless canceled.'
+          | '7 days free, then $89.90/year unless canceled.';
+        readonly acknowledgedAt?: Date;
+      }
+    | undefined
+  > {
+    const authority = await resolveActiveBillingAuthority(
+      this.database,
+      input.actor.householdId,
+      input.actor.personId,
+    );
+    if (authority === null || authority.authorityReference !== input.actor.billingAuthorityId) {
+      throw new DomainError('not_authorized', 'Active billing authority is required');
+    }
+    const reminder = await this.database.query<
+      {
+        readonly id: string;
+        readonly offer_id: 'family_annual_v2' | 'individual_annual_v1';
+        readonly trial_ends_at: unknown;
+        readonly charge_amount_minor: 8990 | 14990;
+        readonly currency: 'usd';
+        readonly disclosure:
+          | '7 days free, then $149.90/year unless canceled.'
+          | '7 days free, then $89.90/year unless canceled.';
+        readonly acknowledged_at: unknown;
+      } & Record<string, unknown>
+    >(
+      `SELECT reminder.id, reminder.offer_id, reminder.trial_ends_at,
+              reminder.charge_amount_minor, reminder.currency, reminder.disclosure,
+              acknowledgement.acknowledged_at
+       FROM commerce_stripe_trial_reminder_intents reminder
+       LEFT JOIN commerce_stripe_trial_reminder_acknowledgements acknowledgement
+         ON acknowledgement.reminder_intent_id = reminder.id
+       WHERE reminder.environment = $1 AND reminder.household_id = $2
+         AND reminder.trial_ends_at > $3
+       ORDER BY reminder.trial_ends_at ASC, reminder.created_at DESC, reminder.id DESC
+       LIMIT 1`,
+      [input.environment, input.actor.householdId, input.now.toISOString()],
+    );
+    const row = reminder.rows[0];
+    return row === undefined
+      ? undefined
+      : {
+          intentId: row.id,
+          offerId: row.offer_id,
+          trialEndsAt: asDate(row.trial_ends_at),
+          chargeAmountMinor: row.charge_amount_minor,
+          currency: row.currency,
+          disclosure: row.disclosure,
+          ...(row.acknowledged_at === null ? {} : { acknowledgedAt: asDate(row.acknowledged_at) }),
+        };
+  }
+
+  async acknowledgeStripeTrialReminder(input: {
+    readonly actor: CommerceActor;
+    readonly environment: 'test' | 'production';
+    readonly intentId: string;
+    readonly idempotencyKey: string;
+    readonly now: Date;
+  }): Promise<{
+    readonly intentId: string;
+    readonly receiptId: string;
+    readonly duplicate: boolean;
+    readonly acknowledgedAt: Date;
+  }> {
+    if (!validIdempotencyKey(input.idempotencyKey)) {
+      throw new DomainError('invalid_input', 'A valid acknowledgement idempotency key is required');
+    }
+    return this.database.transaction(async (transaction) => {
+      const authority = await resolveActiveBillingAuthority(
+        transaction,
+        input.actor.householdId,
+        input.actor.personId,
+      );
+      if (authority === null || authority.authorityReference !== input.actor.billingAuthorityId) {
+        throw new DomainError('not_authorized', 'Active billing authority is required');
+      }
+      const reminder = await transaction.query<
+        { readonly id: string; readonly trial_ends_at: unknown } & Record<string, unknown>
+      >(
+        `SELECT id, trial_ends_at FROM commerce_stripe_trial_reminder_intents
+         WHERE id = $1 AND environment = $2 AND household_id = $3
+         FOR SHARE`,
+        [input.intentId, input.environment, input.actor.householdId],
+      );
+      const reminderRow = reminder.rows[0];
+      if (
+        reminder.rows.length !== 1 ||
+        reminderRow === undefined ||
+        asDate(reminderRow.trial_ends_at) <= input.now
+      ) {
+        throw new DomainError('not_found', 'Active trial reminder was not found');
+      }
+      const byKey = await transaction.query<
+        {
+          readonly id: string;
+          readonly reminder_intent_id: string;
+          readonly acknowledged_by_person_id: string;
+          readonly acknowledged_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT id, reminder_intent_id, acknowledged_by_person_id, acknowledged_at
+         FROM commerce_stripe_trial_reminder_acknowledgements
+         WHERE household_id = $1 AND idempotency_key = $2`,
+        [input.actor.householdId, input.idempotencyKey],
+      );
+      const priorKey = byKey.rows[0];
+      if (priorKey !== undefined) {
+        if (
+          priorKey.reminder_intent_id !== input.intentId ||
+          priorKey.acknowledged_by_person_id !== input.actor.personId
+        ) {
+          throw new DomainError('conflict', 'Reminder acknowledgement key was already used');
+        }
+        return {
+          intentId: input.intentId,
+          receiptId: priorKey.id,
+          duplicate: true,
+          acknowledgedAt: asDate(priorKey.acknowledged_at),
+        };
+      }
+      const existing = await transaction.query<
+        {
+          readonly id: string;
+          readonly acknowledged_by_person_id: string;
+          readonly acknowledged_at: unknown;
+        } & Record<string, unknown>
+      >(
+        `SELECT id, acknowledged_by_person_id, acknowledged_at
+         FROM commerce_stripe_trial_reminder_acknowledgements
+         WHERE reminder_intent_id = $1`,
+        [input.intentId],
+      );
+      const priorIntent = existing.rows[0];
+      if (priorIntent !== undefined) {
+        if (priorIntent.acknowledged_by_person_id !== input.actor.personId) {
+          throw new DomainError('conflict', 'Trial reminder was acknowledged by another actor');
+        }
+        return {
+          intentId: input.intentId,
+          receiptId: priorIntent.id,
+          duplicate: true,
+          acknowledgedAt: asDate(priorIntent.acknowledged_at),
+        };
+      }
+      const receiptId = this.idFactory.next('stripe-trial-reminder-ack');
+      await transaction.query(
+        `INSERT INTO commerce_stripe_trial_reminder_acknowledgements(
+           id, reminder_intent_id, household_id, acknowledged_by_person_id,
+           idempotency_key, acknowledged_at
+         ) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [
+          receiptId,
+          input.intentId,
+          input.actor.householdId,
+          input.actor.personId,
+          input.idempotencyKey,
+          input.now.toISOString(),
+        ],
+      );
+      await writeAuditAndOutbox(
+        transaction,
+        this.idFactory,
+        {
+          householdId: input.actor.householdId,
+          actorPersonId: input.actor.personId,
+          correlationId: `stripe-trial-reminder:${input.intentId}`,
+          now: input.now,
+        },
+        {
+          action: 'commerce.trial_reminder_acknowledged',
+          resourceType: 'stripe_trial_reminder',
+          resourceId: input.intentId,
+          outcome: 'completed',
+          metadata: { receiptId },
+        },
+        {
+          eventType: 'commerce.trial_reminder_acknowledged.v1',
+          aggregateType: 'stripe_trial_reminder',
+          aggregateId: input.intentId,
+          payload: { receiptId, personId: input.actor.personId },
+        },
+      );
+      return {
+        intentId: input.intentId,
+        receiptId,
+        duplicate: false,
+        acknowledgedAt: input.now,
+      };
+    });
+  }
+
   async stripeBillingStatus(input: {
     readonly actor: CommerceActor;
     readonly environment: 'test' | 'production';
@@ -3807,7 +4721,7 @@ export class CommerceRuntimeRepository {
             AND state IN ('prepared','session_created')
             AND (expires_at > $3 OR dispatch_state <> 'not_dispatched')
           ORDER BY created_at DESC LIMIT 1) AS dispatch_state,
-         (SELECT count(*)::int FROM commerce_stripe_checkout_completions
+         (SELECT count(*)::int FROM commerce_stripe_checkout_completion_bindings
           WHERE household_id = $1 AND environment = $2) AS completion_count,
          (SELECT count(*)::int FROM entitlement_grants grant_record
           JOIN commerce_subscriptions subscription
@@ -3815,7 +4729,9 @@ export class CommerceRuntimeRepository {
            AND subscription.id = grant_record.subscription_id
           WHERE grant_record.household_id = $1 AND subscription.source = 'web'
             AND subscription.source_verified = true
-            AND subscription.lifecycle IN ('active','grace','cancel_at_period_end','restored')
+            AND subscription.lifecycle IN (
+              'trialing','active','grace','cancel_at_period_end','restored'
+            )
             AND subscription.current_period_starts_at <= $3
             AND subscription.current_period_ends_at > $3
             AND grant_record.source_verified = true AND grant_record.starts_at <= $3

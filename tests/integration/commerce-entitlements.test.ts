@@ -114,10 +114,13 @@ describe('provider-neutral commerce and household allowances', () => {
           key: 'family',
           name: 'Family',
           monthlyUsd: 14.99,
-          annualUsd: null,
+          annualUsd: 149.9,
           hypothesis: false,
         },
       ],
+      commerceCatalog: {
+        defaultOfferId: 'family_annual_v2',
+      },
     });
 
     const aliceEntitlements = await harness.app.inject({
@@ -337,7 +340,7 @@ describe('provider-neutral commerce and household allowances', () => {
       `INSERT INTO commerce_plan_versions(
          id, product_version_id, plan_key, version, display_name, state,
          capabilities, allowances, prices, available_from, created_at
-       ) SELECT 'family_retired_v3', product_version_id, plan_key, 3, 'Retired Family',
+       ) SELECT 'family_retired_v4', product_version_id, plan_key, 4, 'Retired Family',
            'retired', capabilities, allowances, prices, available_from, $1
          FROM commerce_plan_versions WHERE id = 'family_v1'`,
       [harness.clock.now().toISOString()],
@@ -347,7 +350,7 @@ describe('provider-neutral commerce and household allowances', () => {
          household_id, id, plan_version_id, source, lifecycle, source_verified, precedence,
          current_period_starts_at, current_period_ends_at, reconciliation_state,
          created_at, updated_at
-       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v3',
+       ) VALUES ('household-sunrise','subscription-retired-local','family_retired_v4',
          'local','active',true,999,$1,$2,'not_required',$1,$1),
          ('household-sunrise','subscription-web-hypothesis','plus_v1',
          'web','active',true,998,$1,$2,'pending',$1,$1)`,
@@ -371,7 +374,7 @@ describe('provider-neutral commerce and household allowances', () => {
        ) VALUES
          ('household-sunrise','grant-retired-local','local',
           '["check:text","family:manage"]'::jsonb,$1,true,999,
-          'family_retired_v3','subscription-retired-local'),
+          'family_retired_v4','subscription-retired-local'),
          ('household-sunrise','grant-web-hypothesis','web',
           '["check:text","family:manage"]'::jsonb,$1,true,998,
           'plus_v1','subscription-web-hypothesis')`,
@@ -1125,6 +1128,7 @@ describe('provider-neutral commerce and household allowances', () => {
           kind: 'payment_confirmed',
           sourceInboxId: replacementEvent.id,
           evidence: {
+            offerId: 'founding_family_monthly_v1',
             providerInvoiceId: 'in_sunrise_family_replacement',
             externalSubscriptionId: 'sub_sunrise_family_replacement_test',
             providerSubscriptionItemId: 'si_sunrise_family_replacement',

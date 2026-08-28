@@ -216,7 +216,7 @@ export class ProductionIdentityRepository {
       const timestamp = input.now.toISOString();
       await transaction.query(
         `INSERT INTO persons(id, display_name, created_at)
-         VALUES ($1,'Founding household administrator',$2)`,
+         VALUES ($1,'Household administrator',$2)`,
         [personId, timestamp],
       );
       await transaction.query(

@@ -28,6 +28,17 @@ describe('mobile product-value journey', () => {
     expect(home).toContain('National guidance remains available when no reviewed');
     expect(home).not.toContain('review source-linked regional guidance');
     expect(home).toContain("navigation.navigate('LearnUpdates')");
+    for (const directHomeAction of [
+      'Check a message or link',
+      'Open history',
+      'Trusted Circle and family',
+      'Family Safe Word',
+      'Seven lessons and regional guidance',
+      'Share feedback',
+      'Support',
+    ]) {
+      expect(home).toContain(directHomeAction);
+    }
     expect(learning).toContain('selectedScope?.isProtectedMember === true');
     expect(learning).toContain("selectedScope.capabilities.includes('orientation:use')");
     expect(learning).toContain('Protected adult access required');
@@ -101,6 +112,21 @@ describe('mobile product-value journey', () => {
     expect(surface).not.toContain('Clipboard.');
     expect(surface).not.toContain('getExpoPushTokenAsync');
     expect(surface).not.toContain('getDevicePushTokenAsync');
+  });
+
+  it('keeps in-app weekly practice separate from explicit device reminder permission', () => {
+    const screen = source('apps/mobile/src/member-learning-screen.tsx');
+    const weeklyPreference = screen.slice(
+      screen.indexOf('async function setWeeklyPractice'),
+      screen.indexOf('async function enableThisDeviceReminder'),
+    );
+
+    expect(weeklyPreference).not.toContain('enableWeeklyRehearsalReminder');
+    expect(screen).toContain(
+      'Turning on in-app practice does not request notification permission.',
+    );
+    expect(screen).toContain('title="Enable a reminder on this device"');
+    expect(screen).toContain('onPress={() => void enableThisDeviceReminder()}');
   });
 
   it('wires production-safe Trusted Circle connection and durable share follow-up', () => {

@@ -1,8 +1,18 @@
 import { z } from 'zod';
 import { isoDateTimeSchema, opaqueIdSchema } from './common';
 
+export const stripeOfferIds = [
+  'founding_family_monthly_v1',
+  'family_monthly_v2',
+  'family_annual_v2',
+  'individual_monthly_v1',
+  'individual_annual_v1',
+] as const;
+
+export const stripeOfferIdSchema = z.enum(stripeOfferIds);
+
 export const stripeCheckoutRequestSchema = z.object({
-  offerId: z.literal('founding_family_monthly_v1'),
+  offerId: stripeOfferIdSchema,
 });
 
 export const stripeCheckoutResponseSchema = z.object({
@@ -15,7 +25,7 @@ export const stripeCheckoutResponseSchema = z.object({
     expiresAt: isoDateTimeSchema.optional(),
   }),
   limitation: z.literal(
-    'A Checkout redirect is not access. Access remains pending exact completed-session and paid-invoice evidence.',
+    'A Checkout redirect is not access. Access remains pending exact completed-session plus eligible-trial or paid-invoice evidence.',
   ),
 });
 
@@ -32,10 +42,32 @@ export const stripePortalResponseSchema = z.object({
   ),
 });
 
+export const stripePublicOfferSchema = z
+  .object({
+    offerId: stripeOfferIdSchema,
+    plan: z.enum(['family', 'individual']),
+    displayName: z.string().min(1).max(80),
+    billingInterval: z.enum(['month', 'year']),
+    unitAmountMinor: z.number().int().positive(),
+    currency: z.literal('usd'),
+    trialPeriodDays: z.union([z.literal(0), z.literal(7)]),
+    customerSelectable: z.boolean(),
+    defaultAcquisitionOffer: z.boolean(),
+    disclosure: z.string().min(1).max(240),
+  })
+  .strict();
+
+export const stripePublicCatalogSchema = z
+  .object({
+    defaultOfferId: z.literal('family_annual_v2'),
+    offers: z.array(stripePublicOfferSchema).min(4).max(5),
+  })
+  .strict();
+
 export const stripeBillingStatusResponseSchema = z.object({
-  billing: z.object({
+  billing: stripePublicCatalogSchema.extend({
     householdId: opaqueIdSchema,
-    offerId: z.literal('founding_family_monthly_v1'),
+    offerId: stripeOfferIdSchema,
     checkoutState: z.enum([
       'unavailable',
       'eligible_disabled',
@@ -51,6 +83,18 @@ export const stripeBillingStatusResponseSchema = z.object({
     recoveryReason: z
       .enum(['payment_action_required', 'payment_failed', 'invoice_finalization_failed'])
       .optional(),
+    trialEndingReminder: z
+      .object({
+        intentId: opaqueIdSchema,
+        offerId: z.enum(['family_annual_v2', 'individual_annual_v1']),
+        trialEndsAt: isoDateTimeSchema,
+        chargeAmountMinor: z.union([z.literal(14_990), z.literal(8_990)]),
+        currency: z.literal('usd'),
+        disclosure: z.string().min(1).max(240),
+        acknowledgedAt: isoDateTimeSchema.optional(),
+      })
+      .strict()
+      .optional(),
     pendingOperation: z
       .object({
         serverOperationId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{15,159}$/u),
@@ -62,9 +106,25 @@ export const stripeBillingStatusResponseSchema = z.object({
       .optional(),
   }),
   evidenceNotice: z.literal(
-    'Your membership becomes active only after BoomerBuddy confirms a successful payment.',
+    'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.',
   ),
 });
+
+export const stripeTrialReminderAcknowledgeRequestSchema = z
+  .object({
+    intentId: opaqueIdSchema,
+    idempotencyKey: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9:._-]{15,159}$/u),
+  })
+  .strict();
+
+export const stripeTrialReminderAcknowledgeResponseSchema = z
+  .object({
+    intentId: opaqueIdSchema,
+    receiptId: opaqueIdSchema,
+    duplicate: z.boolean(),
+    acknowledgedAt: isoDateTimeSchema,
+  })
+  .strict();
 
 export const stripeInitiationControlRequestSchema = z.object({
   environment: z.enum(['test', 'production']),
@@ -329,9 +389,16 @@ export const stripeWebhookResponseSchema = z.object({
 });
 
 export type StripeCheckoutRequest = z.infer<typeof stripeCheckoutRequestSchema>;
+export type StripeOfferId = z.infer<typeof stripeOfferIdSchema>;
 export type StripeCheckoutResponse = z.infer<typeof stripeCheckoutResponseSchema>;
 export type StripePortalResponse = z.infer<typeof stripePortalResponseSchema>;
 export type StripeBillingStatusResponse = z.infer<typeof stripeBillingStatusResponseSchema>;
+export type StripeTrialReminderAcknowledgeRequest = z.infer<
+  typeof stripeTrialReminderAcknowledgeRequestSchema
+>;
+export type StripeTrialReminderAcknowledgeResponse = z.infer<
+  typeof stripeTrialReminderAcknowledgeResponseSchema
+>;
 export type StripeInitiationControlRequest = z.infer<typeof stripeInitiationControlRequestSchema>;
 export type StripeInitiationControlProjection = z.infer<
   typeof stripeInitiationControlProjectionSchema

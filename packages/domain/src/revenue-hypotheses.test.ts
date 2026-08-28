@@ -89,7 +89,7 @@ describe('isolated revenue hypotheses', () => {
     );
 
     expect(activeAmounts).not.toContain(11_900);
-    expect(seededFamilyAmounts).toEqual([1_499, 14_900]);
+    expect(seededFamilyAmounts).toEqual([1_499, 14_990]);
   });
 
   it('prices each annual candidate at exactly ten monthly payments', () => {

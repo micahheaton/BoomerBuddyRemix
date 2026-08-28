@@ -183,7 +183,11 @@ export function SignInScreen({
         await Linking.openURL(customerWebSignInUrl);
         return;
       }
-      const outcome = await startMobileHostedSignIn(startHostedAuth);
+      if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
+        setError('Secure member sign-in is unavailable on this platform.');
+        return;
+      }
+      const outcome = await startMobileHostedSignIn(startHostedAuth, Platform.OS);
       if (outcome === 'not_completed') {
         setError('Sign-in was not completed. You can try again when you are ready.');
       }
@@ -201,6 +205,10 @@ export function SignInScreen({
       <Text style={s.body}>
         Sign in with the customer account you use for your household. A secure sign-in window opens
         and returns to this app when complete.
+      </Text>
+      <Text style={s.muted}>
+        If secure sign-in asks you to confirm this device, finish that step in the same window.
+        BoomerBuddy accepts only the callback created by that sign-in attempt.
       </Text>
       <View style={s.banner}>
         <Text style={s.label}>Your password stays in secure sign-in</Text>
@@ -222,7 +230,8 @@ export function SignInScreen({
         onPress={() => navigation.navigate('HelpPolicies')}
       />
       <Text style={s.muted}>
-        BoomerBuddy is invite-only. Use the email address that received your invitation.
+        Already have a BoomerBuddy account? Sign in with the same email address. Create and manage
+        paid membership on the BoomerBuddy website; this app does not take payment.
       </Text>
     </Screen>
   );
@@ -529,8 +538,15 @@ export function HomeScreen({
         {canUseFamily ? (
           <ActionButton
             kind="secondary"
-            title="Open Family"
+            title="Trusted Circle and family"
             onPress={() => navigation.navigate('Family')}
+          />
+        ) : null}
+        {!isUnassigned ? (
+          <ActionButton
+            kind="secondary"
+            title="Family Safe Word"
+            onPress={() => navigation.navigate('FamilySafeWord')}
           />
         ) : null}
         {!isUnassigned && canUseOrientation ? (
@@ -551,6 +567,11 @@ export function HomeScreen({
             onPress={() => navigation.navigate('Feedback')}
           />
         ) : null}
+        <ActionButton
+          kind="secondary"
+          title="Support"
+          onPress={() => navigation.navigate('Support')}
+        />
         <ActionButton
           kind="secondary"
           title="Help and policies"
@@ -604,7 +625,7 @@ export function HomeScreen({
           </Text>
           <ActionButton
             kind="secondary"
-            title="Open Learn and updates"
+            title="Seven lessons and regional guidance"
             onPress={() => navigation.navigate('LearnUpdates')}
           />
         </View>
@@ -3714,7 +3735,9 @@ const safeWordStatusLabels: Record<OrientationStateDto['safeWordDisposition'], s
   informed_deferral: 'Deferred after review',
 };
 
-export function OrientationScreen(): React.ReactElement {
+export function OrientationScreen({
+  navigation,
+}: NativeStackScreenProps<RootStackParamList, 'Orientation'>): React.ReactElement {
   const { selectedHouseholdId, selectedScope } = useMobileHousehold();
   const [state, setState] = useState<OrientationStateDto>();
   const [loadedHouseholdId, setLoadedHouseholdId] = useState('');
@@ -3723,6 +3746,7 @@ export function OrientationScreen(): React.ReactElement {
   const [phrase, setPhrase] = useState('');
   const [practice, setPractice] = useState('');
   const [announcement, setAnnouncement] = useState('');
+  const [recentAuthenticationRequired, setRecentAuthenticationRequired] = useState(false);
   const [retryVersion, setRetryVersion] = useState(0);
   const canUseOrientation =
     selectedScope?.isProtectedMember === true &&
@@ -3781,20 +3805,26 @@ export function OrientationScreen(): React.ReactElement {
   async function safeWord(action: 'configure' | 'defer') {
     setBusy('safe_word');
     setError('');
+    setRecentAuthenticationRequired(false);
     try {
-      await mobileRequest('/v1/orientation/safe-word', {
-        method: 'PUT',
-        body: JSON.stringify(action === 'configure' ? { action, phrase } : { action }),
-      });
       const response = await mobileRequest<{ orientation: OrientationStateDto }>(
-        '/v1/orientation/steps/safe_word',
-        { method: 'PUT', body: JSON.stringify({ complete: true }) },
+        '/v1/orientation/safe-word',
+        {
+          method: 'PUT',
+          body: JSON.stringify(action === 'configure' ? { action, phrase } : { action }),
+        },
       );
       setState(response.orientation);
       setPhrase('');
       setAnnouncement('Safe-word choice saved and step completed.');
     } catch (caught) {
-      setError(readableError(caught));
+      if (requiresRecentAuthentication(caught)) {
+        setPhrase('');
+        setRecentAuthenticationRequired(true);
+        setError('Sign in again before changing the family verification aid. No change was made.');
+      } else {
+        setError(readableError(caught));
+      }
     } finally {
       setBusy('');
     }
@@ -3842,6 +3872,20 @@ export function OrientationScreen(): React.ReactElement {
       ) : (
         <>
           {error ? <ErrorText message={error} /> : null}
+          {recentAuthenticationRequired ? (
+            <View style={s.banner}>
+              <Text style={s.heading}>A recent sign-in is required</Text>
+              <Text style={s.body}>
+                The phrase was cleared. BoomerBuddy did not make or retry the change. Return Home,
+                sign out, sign in again, then reopen Orientation and submit the choice yourself.
+              </Text>
+              <ActionButton
+                kind="secondary"
+                title="Return Home to sign out"
+                onPress={() => navigation.navigate('Home')}
+              />
+            </View>
+          ) : null}
           <View style={s.card}>
             <Text style={s.heading}>{visibleState.completedSteps.length} of 6 complete</Text>
             <Text style={s.body}>Status: {orientationStatusLabels[visibleState.status]}</Text>
@@ -3880,6 +3924,7 @@ export function OrientationScreen(): React.ReactElement {
                     <TextInput
                       accessibilityLabel="Private family phrase"
                       autoComplete="new-password"
+                      maxLength={128}
                       onChangeText={setPhrase}
                       secureTextEntry
                       style={s.input}

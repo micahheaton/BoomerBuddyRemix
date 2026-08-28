@@ -4,9 +4,14 @@ import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useReverification } from '@clerk/nextjs';
 import {
+  billingAuthoritySelfStatusResponseSchema,
+  billingAuthoritySelfTransitionResponseSchema,
   stripeCheckoutResponseSchema,
   stripePortalResponseSchema,
+  stripeTrialReminderAcknowledgeResponseSchema,
+  type BillingAuthoritySelfStatusResponse,
   type ErrorEnvelope,
+  type StripeOfferId,
   type StripeBillingStatusResponse,
 } from '@boomerbuddy/contracts';
 import { useHousehold } from '../../../components/household-context';
@@ -141,11 +146,15 @@ function DevelopmentBillingPage() {
 }
 
 function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutationRequest }) {
-  const { selectedHouseholdId, selectedScope } = useHousehold();
+  const { selectedHouseholdId, selectedScope, refreshPrincipal } = useHousehold();
   const [billing, setBilling] = useState<Billing>();
+  const [authority, setAuthority] = useState<BillingAuthoritySelfStatusResponse>();
+  const [selectedOfferId, setSelectedOfferId] = useState<StripeOfferId>('family_annual_v2');
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState<'checkout' | 'portal'>();
+  const [submitting, setSubmitting] = useState<
+    'authority-grant' | 'authority-revoke' | 'checkout' | 'portal' | 'reminder'
+  >();
   const checkoutOperation = useRef<string | undefined>(undefined);
   const portalOperation = useRef<string | undefined>(undefined);
 
@@ -173,6 +182,13 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
     });
   }, [selectedHouseholdId, selectedScope?.isBillingManager]);
 
+  const loadAuthority = useCallback(() => {
+    if (!selectedHouseholdId) return undefined;
+    return apiRequest<BillingAuthoritySelfStatusResponse>('/v1/commerce/billing-authority', {
+      headers: { 'X-BB-Household-Id': selectedHouseholdId },
+    });
+  }, [selectedHouseholdId]);
+
   const refresh = useCallback(async () => {
     const pending = loadBilling();
     if (pending === undefined) return;
@@ -186,6 +202,22 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
       setError(readableError(caught));
     }
   }, [loadBilling, retainServerOperation]);
+
+  useEffect(() => {
+    const pendingAuthority = loadAuthority();
+    if (pendingAuthority === undefined) return;
+    let active = true;
+    void pendingAuthority
+      .then((response) => {
+        if (active) setAuthority(billingAuthoritySelfStatusResponseSchema.parse(response));
+      })
+      .catch((caught: unknown) => {
+        if (active) setError(readableError(caught));
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadAuthority]);
 
   useEffect(() => {
     const pending = loadBilling();
@@ -228,13 +260,80 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
             'Idempotency-Key': checkoutOperation.current,
             'X-BB-Household-Id': selectedHouseholdId,
           },
-          body: JSON.stringify({ offerId: 'founding_family_monthly_v1' }),
+          body: JSON.stringify({ offerId: selectedOfferId }),
         }),
       );
       window.location.assign(response.checkout.url);
     } catch (caught) {
       setError(readableError(caught));
       await refresh();
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function changeAuthority(action: 'grant' | 'revoke'): Promise<void> {
+    if (!selectedHouseholdId || authority === undefined) return;
+    const document = action === 'grant' ? authority.documents.accept : authority.documents.revoke;
+    setSubmitting(action === 'grant' ? 'authority-grant' : 'authority-revoke');
+    setError('');
+    try {
+      billingAuthoritySelfTransitionResponseSchema.parse(
+        await mutationRequest(
+          action === 'grant'
+            ? '/v1/commerce/billing-authority/accept'
+            : '/v1/commerce/billing-authority/revoke',
+          {
+            method: 'POST',
+            headers: {
+              'Idempotency-Key': `billing-authority:${action}:${crypto.randomUUID()}`,
+              'X-BB-Household-Id': selectedHouseholdId,
+            },
+            body: JSON.stringify(
+              action === 'grant'
+                ? {
+                    documentVersion: document.version,
+                    documentDigest: document.digest,
+                    consentAccepted: true,
+                  }
+                : {
+                    documentVersion: document.version,
+                    documentDigest: document.digest,
+                    withdrawalAcknowledged: true,
+                  },
+            ),
+          },
+        ),
+      );
+      await refreshPrincipal(selectedHouseholdId);
+      const next = await loadAuthority();
+      if (next !== undefined) setAuthority(billingAuthoritySelfStatusResponseSchema.parse(next));
+      if (action === 'grant') await refresh();
+    } catch (caught) {
+      setError(readableError(caught));
+    } finally {
+      setSubmitting(undefined);
+    }
+  }
+
+  async function acknowledgeTrialReminder(): Promise<void> {
+    if (!selectedHouseholdId || billing?.trialEndingReminder === undefined) return;
+    setSubmitting('reminder');
+    setError('');
+    try {
+      stripeTrialReminderAcknowledgeResponseSchema.parse(
+        await mutationRequest('/v1/commerce/stripe/trial-reminders/acknowledge', {
+          method: 'POST',
+          headers: { 'X-BB-Household-Id': selectedHouseholdId },
+          body: JSON.stringify({
+            intentId: billing.trialEndingReminder.intentId,
+            idempotencyKey: `trial-reminder-${crypto.randomUUID()}`,
+          }),
+        }),
+      );
+      await refresh();
+    } catch (caught) {
+      setError(readableError(caught));
     } finally {
       setSubmitting(undefined);
     }
@@ -264,7 +363,36 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
     }
   }
 
+  const selectedOffer = billing?.offers.find((offer) => offer.offerId === selectedOfferId);
+
   if (selectedScope?.isBillingManager !== true) {
+    if (selectedScope?.isAdministrator === true && authority?.canAccept) {
+      return (
+        <main id="main-content" className="member-shell member-main">
+          <span className="eyebrow">Billing</span>
+          <h1 className="member-heading">Choose a billing manager</h1>
+          <p className="lede">{authority.documents.accept.disclosure}</p>
+          <p className="meta">
+            You will confirm this choice with an MFA method already enrolled on your account.
+          </p>
+          {error ? (
+            <p className="error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={submitting !== undefined}
+            onClick={() => void changeAuthority('grant')}
+          >
+            {submitting === 'authority-grant'
+              ? 'Confirming billing manager…'
+              : 'Become this household’s billing manager'}
+          </button>
+        </main>
+      );
+    }
     return (
       <main id="main-content" className="member-shell member-main">
         <span className="eyebrow">Billing</span>
@@ -285,8 +413,14 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
       <span className="eyebrow">Family billing</span>
       <h1 className="member-heading">Manage billing</h1>
       <p className="lede">
-        Family is $14.99 USD per month for one household, charged automatically each month until
-        canceled. Any applicable taxes and available payment methods are shown in secure checkout.
+        Family annual is the default: 7 days free, then $149.90 USD per year unless canceled. Family
+        monthly remains available at $14.99 USD per month. Any applicable taxes and available
+        payment methods are shown in secure checkout.
+      </p>
+      <p className="meta">
+        Family covers up to three protected adults and six Trusted Circle participants across the
+        household. Each adult joins by choice, and paying never reveals another adult&apos;s private
+        Checks.
       </p>
       <p className="meta">
         Before Checkout or billing management opens, BoomerBuddy asks you to confirm your identity
@@ -306,7 +440,7 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
         <p>{billing ? stateCopy[billing.checkoutState] : 'Checking the selected household.'}</p>
         <p className="meta">
           {notice ||
-            'Your membership becomes active only after BoomerBuddy confirms a successful payment.'}
+            'Your membership becomes active only after BoomerBuddy verifies an eligible trial or successful payment.'}
         </p>
         {billing?.pendingOperation ? (
           <p className="meta" data-testid="billing-pending-operation">
@@ -334,23 +468,58 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
             )}
           </p>
         ) : null}
+        {billing?.trialEndingReminder ? (
+          <div className="notice" data-testid="billing-trial-ending-reminder">
+            <p>
+              <strong>Trial ending:</strong> {billing.trialEndingReminder.disclosure} Your trial
+              ends {new Date(billing.trialEndingReminder.trialEndsAt).toLocaleString()}.
+            </p>
+            {billing.trialEndingReminder.acknowledgedAt ? (
+              <p className="meta">You acknowledged this reminder.</p>
+            ) : (
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={submitting !== undefined}
+                onClick={() => void acknowledgeTrialReminder()}
+              >
+                {submitting === 'reminder' ? 'Recording…' : 'I understand'}
+              </button>
+            )}
+          </div>
+        ) : null}
         {billing?.checkoutState === 'ready' && billing.runtimeInitiationEnabled ? (
           <>
+            <label>
+              Billing option
+              <select
+                value={selectedOfferId}
+                onChange={(event) => setSelectedOfferId(event.target.value as StripeOfferId)}
+              >
+                {billing.offers
+                  .filter((offer) => offer.customerSelectable)
+                  .map((offer) => (
+                    <option key={offer.offerId} value={offer.offerId}>
+                      {offer.displayName} {offer.billingInterval} - {offer.disclosure}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <div className="notice" data-testid="billing-customer-terms">
               <p>
-                <strong>Before you continue:</strong> Family costs $14.99 USD and renews every month
-                until you cancel.
+                <strong>Before you continue:</strong>{' '}
+                {selectedOffer?.disclosure ?? '7 days free, then $149.90/year unless canceled.'}
               </p>
               <p>
                 Cancel future renewals through billing management when available or by contacting{' '}
                 <Link href="/support">support</Link>. Access ordinarily continues through the paid
-                period. Monthly charges are generally not refundable after billing, with exceptions
+                period. Charges are generally not refundable after billing, with exceptions
                 explained in the <Link href="/billing-terms">billing terms</Link>.
               </p>
             </div>
             <p className="meta" data-testid="billing-recurring-disclosure">
-              By continuing, you authorize a recurring charge of $14.99 USD each month until you
-              cancel.
+              By continuing, you authorize the selected recurring plan after any stated trial.
+              Secure Checkout shows the exact first charge date and amount before confirmation.
             </p>
             <button
               className="button button-primary"
@@ -391,6 +560,21 @@ function BillingPageContent({ mutationRequest }: { mutationRequest: BillingMutat
         >
           Refresh billing status
         </button>
+        {authority?.canRevoke ? (
+          <>
+            <p className="meta">{authority.documents.revoke.disclosure}</p>
+            <button
+              className="button button-secondary"
+              type="button"
+              disabled={submitting !== undefined}
+              onClick={() => void changeAuthority('revoke')}
+            >
+              {submitting === 'authority-revoke'
+                ? 'Withdrawing role…'
+                : 'Withdraw billing-manager role'}
+            </button>
+          </>
+        ) : null}
       </section>
       <nav className="public-nav" aria-label="Billing help" style={{ marginTop: '1rem' }}>
         <Link href="/member">Member home</Link>

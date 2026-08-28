@@ -13,6 +13,7 @@ import {
   verifyStripeWebhook,
   type CommerceAuthorizationPort,
   type StoreServerEventVerifier,
+  type StripeOffer,
   type StripeTransport,
 } from './index';
 
@@ -20,6 +21,23 @@ const now = new Date('2026-08-16T12:00:00.000Z');
 const timestamp = Math.floor(now.getTime() / 1_000);
 const endpointSecret = 'whsec_fixture_only_1234567890';
 const apiVersion = '2026-07-29.fixture';
+const normalizedStripeOffers: readonly StripeOffer[] = [
+  {
+    offerId: 'founding_family_monthly_v1',
+    planVersionId: 'family_v1',
+    plan: 'family',
+    displayName: 'Family',
+    billingInterval: 'month',
+    providerProductId: 'prod_fixture',
+    providerPriceId: 'price_fixture',
+    currency: 'usd',
+    unitAmountMinor: 1499,
+    quantity: 1,
+    trialPeriodDays: 0,
+    customerSelectable: true,
+    defaultAcquisitionOffer: true,
+  },
+];
 
 function stripeBody(overrides: Readonly<Record<string, unknown>> = {}): string {
   return JSON.stringify({
@@ -35,6 +53,12 @@ function stripeBody(overrides: Readonly<Record<string, unknown>> = {}): string {
         livemode: false,
         customer: 'cus_fixture_1',
         status: 'active',
+        metadata: {
+          household_id: 'household-one',
+          canonical_subscription_id: 'subscription-one',
+          plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
+        },
         cancel_at_period_end: false,
         current_period_start: timestamp - 86_400,
         current_period_end: timestamp + 30 * 86_400,
@@ -83,7 +107,7 @@ describe('Stripe test adapter', () => {
       now,
       supportedApiVersions: new Set([apiVersion]),
     });
-    expect(normalizeStripeEvent(verified)).toMatchObject({
+    expect(normalizeStripeEvent(verified, normalizedStripeOffers)).toMatchObject({
       provider: 'stripe',
       environment: 'test',
       externalEventId: 'evt_fixture_1',
@@ -171,6 +195,7 @@ describe('Stripe test adapter', () => {
         now,
         supportedApiVersions: new Set([apiVersion]),
       }),
+      normalizedStripeOffers,
     );
     expect(normalized.requiresReconciliation).toBe(true);
     expect(normalized.subscriptionOfferExact).toBeUndefined();
@@ -560,16 +585,24 @@ describe('Stripe test adapter', () => {
         accountId: 'acct_livefixture1',
         apiVersion: '2026-07-29.dahlia',
         portalConfigurationId: 'bpc_live_cancel_fixture',
-        offer: {
-          offerId: 'founding_family_monthly_v1',
-          planVersionId: 'family_v1',
-          billingInterval: 'month',
-          providerProductId: 'prod_live_family_fixture',
-          providerPriceId: 'price_live_family_fixture',
-          currency: 'usd',
-          unitAmountMinor: 1499,
-          quantity: 1,
-        },
+        defaultOfferId: 'founding_family_monthly_v1',
+        offers: [
+          {
+            offerId: 'founding_family_monthly_v1',
+            planVersionId: 'family_v1',
+            plan: 'family',
+            displayName: 'Family',
+            billingInterval: 'month',
+            providerProductId: 'prod_live_family_fixture',
+            providerPriceId: 'price_live_family_fixture',
+            currency: 'usd',
+            unitAmountMinor: 1499,
+            quantity: 1,
+            trialPeriodDays: 0,
+            customerSelectable: true,
+            defaultAcquisitionOffer: true,
+          },
+        ],
       },
     );
 
@@ -618,6 +651,12 @@ describe('Stripe test adapter', () => {
             livemode: false,
             status: 'past_due',
             cancel_at_period_end: true,
+            metadata: {
+              household_id: 'household-one',
+              canonical_subscription_id: 'subscription-one',
+              plan_version_id: 'family_v1',
+              offer_id: 'founding_family_monthly_v1',
+            },
             current_period_start: timestamp - 30 * 86_400,
             current_period_end: providerPeriodEnd,
             items: {
@@ -664,6 +703,7 @@ describe('Stripe test adapter', () => {
           now,
           supportedApiVersions: new Set([apiVersion]),
         }),
+        normalizedStripeOffers,
       );
       expect(normalized.lifecycle).toBe('grace');
       expect(normalized.currentPeriodEndsAt?.toISOString()).toBe(
@@ -700,6 +740,18 @@ describe('Stripe test adapter', () => {
       },
       period: { start: timestamp, end: timestamp + 30 * 86_400 },
     };
+    const invoiceParent = {
+      type: 'subscription_details',
+      subscription_details: {
+        subscription: 'sub_invoice_fixture',
+        metadata: {
+          household_id: 'household-one',
+          canonical_subscription_id: 'subscription-one',
+          plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
+        },
+      },
+    } as const;
     const get = vi.fn(async ({ path }: { readonly path: string }) => {
       if (path === '/v1/subscriptions/sub_invoice_fixture') {
         return {
@@ -708,6 +760,12 @@ describe('Stripe test adapter', () => {
           livemode: false,
           status: currentEventType === 'invoice.paid' ? 'active' : 'past_due',
           customer: 'cus_invoice_fixture',
+          metadata: {
+            household_id: 'household-one',
+            canonical_subscription_id: 'subscription-one',
+            plan_version_id: 'family_v1',
+            offer_id: 'founding_family_monthly_v1',
+          },
           current_period_start: timestamp,
           current_period_end: timestamp + 30 * 86_400,
           items: {
@@ -782,7 +840,7 @@ describe('Stripe test adapter', () => {
             starting_balance: 0,
             ending_balance: 0,
             amount_overpaid: 0,
-            parent: { subscription_details: { subscription: 'sub_invoice_fixture' } },
+            parent: invoiceParent,
             payments: {
               object: 'list',
               has_more: false,
@@ -821,7 +879,7 @@ describe('Stripe test adapter', () => {
             pre_payment_credit_notes_amount: 0,
             post_payment_credit_notes_amount: 0,
             attempt_count: 1,
-            parent: { subscription_details: { subscription: 'sub_invoice_fixture' } },
+            parent: invoiceParent,
             payments: {
               object: 'list',
               has_more: false,
@@ -1381,6 +1439,7 @@ describe('Stripe test adapter', () => {
           household_id: 'household-one',
           canonical_subscription_id: 'subscription-canonical-one',
           plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
         },
         expires_at: Math.floor((now.getTime() + 30 * 60_000) / 1_000),
       })),
@@ -1412,6 +1471,7 @@ describe('Stripe test adapter', () => {
       adapter.createCheckout({
         actor,
         canonicalSubscriptionId: 'subscription-canonical-one',
+        offerId: 'founding_family_monthly_v1',
         planVersionId: 'family_v1',
         providerPriceId: 'price_family_month_fixture',
         successUrl: 'https://app.boomerbuddy.test/member/billing/success',
@@ -1470,6 +1530,7 @@ describe('Stripe test adapter', () => {
         household_id: actor.householdId,
         canonical_subscription_id: 'subscription-canonical-one',
         plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
       },
       expires_at: Math.floor((now.getTime() + 30 * 60_000) / 1_000),
     };
@@ -1499,6 +1560,7 @@ describe('Stripe test adapter', () => {
     const checkoutInput = {
       actor,
       canonicalSubscriptionId: 'subscription-canonical-one',
+      offerId: 'founding_family_monthly_v1',
       planVersionId: 'family_v1',
       providerPriceId: 'price_family_month_fixture',
       successUrl: 'https://app.boomerbuddy.test/member/billing/success',
@@ -1586,6 +1648,7 @@ describe('Stripe test adapter', () => {
         payment_status: eventType.endsWith('completed') ? 'paid' : 'unpaid',
         amount_total: 1499,
         currency: 'usd',
+        payment_method_collection: 'always',
         expires_at: timestamp + 3600,
         customer: 'cus_fixture_1',
         subscription: 'sub_fixture_1',
@@ -1593,6 +1656,7 @@ describe('Stripe test adapter', () => {
           household_id: 'household-one',
           canonical_subscription_id: 'subscription-one',
           plan_version_id: 'family_v1',
+          offer_id: 'founding_family_monthly_v1',
         },
       };
       for (const mutate of [
@@ -1629,6 +1693,7 @@ describe('Stripe test adapter', () => {
             now,
             supportedApiVersions: new Set([apiVersion]),
           }),
+          normalizedStripeOffers,
         );
         expect(normalized.requiresReconciliation).toBe(true);
         expect(normalized.checkoutCompletion).toBeUndefined();
@@ -1647,6 +1712,7 @@ describe('Stripe test adapter', () => {
       payment_status: 'paid',
       amount_total: 1499,
       currency: 'usd',
+      payment_method_collection: 'always',
       expires_at: timestamp + 3600,
       customer: 'cus_fixture_1',
       subscription: 'sub_fixture_1',
@@ -1655,6 +1721,7 @@ describe('Stripe test adapter', () => {
         household_id: 'household-one',
         canonical_subscription_id: 'subscription-one',
         plan_version_id: 'family_v1',
+        offer_id: 'founding_family_monthly_v1',
       },
     } as const;
     const normalize = (
@@ -1683,6 +1750,7 @@ describe('Stripe test adapter', () => {
           now,
           supportedApiVersions: new Set([apiVersion]),
         }),
+        normalizedStripeOffers,
       );
     };
 

@@ -1,63 +1,77 @@
 import Link from 'next/link';
-import { AccessIntentCta } from '../../components/access-intent-cta';
 import { PublicFooter, PublicHeader } from '../../components/public-shell';
 import { indexedCustomerPageMetadata } from '../../lib/public-page-metadata';
 
-export const dynamic = 'force-dynamic';
 export const metadata = indexedCustomerPageMetadata['/pricing'];
 
-export function privateBetaAccessIntentsEnabled(): boolean {
-  return (
-    process.env.BB_PRIVATE_BETA_ACCESS_INTENTS_ENABLED === 'true' &&
-    process.env.BB_PRIVATE_BETA_ACCESS_INTENTS_EDGE_GUARD_CONFIRMED === 'true'
-  );
-}
-
 export default function PricingPage() {
-  const accessIntentsEnabled = privateBetaAccessIntentsEnabled();
   return (
     <>
       <PublicHeader />
       <main id="main-content">
         <section className="page-shell pricing-hero">
           <span className="eyebrow">Family pricing</span>
-          <h1 className="page-title">Family scam-safety support for $14.99 a month</h1>
+          <h1 className="page-title">Choose annual savings or month-to-month Family</h1>
           <p className="lede">
-            One invited household gets short lessons, private Checks and History, and optional help
-            from a person each adult chooses. No phone monitoring. No automatic family messages.
+            One household gets seven short lessons, private Checks and History, a Family Safe Word,
+            and optional help from a person each adult chooses. No phone monitoring. No automatic
+            family messages. Family currently supports up to three protected adults and six Trusted
+            Circle participants across the household.
           </p>
-          <article className="card pricing-offer" aria-labelledby="family-plan-heading">
-            <div>
-              <span className="data-pill">Available by invitation</span>
-              <h2 id="family-plan-heading">Family</h2>
-              <p className="plan-price" aria-label="14 dollars and 99 cents US per month">
-                $14.99 USD per month
+          <div className="comparison-grid" aria-label="Family billing choices">
+            <article
+              className="card plan-card plan-card-featured"
+              aria-labelledby="family-annual-heading"
+            >
+              <p className="plan-kicker">Best annual value</p>
+              <h2 id="family-annual-heading">Family annual</h2>
+              <p className="plan-price">7 days free, then $149.90 USD per year</p>
+              <p>
+                The annual price equals ten monthly payments. You save $29.98 compared with paying
+                $14.99 for twelve months.
               </p>
-              <p>Billed monthly for one invited household. Renews until canceled.</p>
-              <div className="button-row pricing-quick-actions">
-                <Link className="button button-primary" href="/sign-in">
-                  I have an invitation
-                </Link>
-                <Link className="button button-secondary" href="/check">
-                  Try a free Check
-                </Link>
-              </div>
-            </div>
-            <div>
-              <h3>What is included</h3>
               <ul className="plain-list">
-                <li>Seven short safety lessons</li>
-                <li>Reviewed, source-linked US scam guidance</li>
-                <li>Check suspicious message text or a website address for warning signs</li>
-                <li>Private Check History for up to 30 days</li>
-                <li>Invite a Trusted Circle person and share a summary only when you choose</li>
-                <li>An optional Family Safe Word and weekly in-app practice</li>
+                <li>A payment method is required in secure Stripe Checkout</li>
+                <li>The exact first-charge date is shown before confirmation</li>
+                <li>Cancel before the trial ends to avoid the first annual charge</li>
+                <li>Renews yearly until canceled</li>
               </ul>
-            </div>
-          </article>
+              <Link className="button button-primary" href="/sign-up">
+                Create an account
+              </Link>
+            </article>
+            <article className="card plan-card" aria-labelledby="family-monthly-heading">
+              <p className="plan-kicker">No trial</p>
+              <h2 id="family-monthly-heading">Family monthly</h2>
+              <p className="plan-price">$14.99 USD per month</p>
+              <p>Pay month to month when annual billing is not the right fit.</p>
+              <ul className="plain-list">
+                <li>No free trial</li>
+                <li>The first $14.99 payment is due at secure checkout</li>
+                <li>Renews monthly until canceled</li>
+                <li>The same Family product features are included</li>
+              </ul>
+              <Link className="button button-secondary" href="/sign-up">
+                Create an account
+              </Link>
+            </article>
+          </div>
+          <p className="help">
+            Creating an account does not start a trial or charge you. If checkout is not yet enabled
+            for your account, no payment is attempted and no trial begins.
+          </p>
+          <div className="button-row pricing-quick-actions">
+            <Link className="button button-secondary" href="/check">
+              Try a free Check
+            </Link>
+            <Link className="button button-secondary" href="/sign-in">
+              Already a member? Sign in
+            </Link>
+          </div>
           <div className="notice role-note">
-            <strong>Paying does not give anyone access to another adult&apos;s Checks.</strong>{' '}
-            Every adult chooses whether to join, use Family features, or share a Check.
+            <strong>Paying does not reveal another adult&apos;s Checks.</strong> Every adult chooses
+            whether to join, use Family features, or share a redacted result with one exact Trusted
+            Circle person.
           </div>
         </section>
 
@@ -73,8 +87,15 @@ export default function PricingPage() {
               <article className="card">
                 <h3>Prepare before pressure</h3>
                 <p>
-                  Work through short lessons, reviewed guidance, and a weekly practice prompt at
-                  your own pace.
+                  Work through seven short lessons, reviewed source-linked guidance, and an optional
+                  weekly practice prompt at your own pace.
+                </p>
+              </article>
+              <article className="card">
+                <h3>Check what feels wrong</h3>
+                <p>
+                  Submit message text or a website address deliberately, then review warning signs,
+                  uncertainty, and safer next actions. A Check cannot prove something is safe.
                 </p>
               </article>
               <article className="card">
@@ -91,45 +112,66 @@ export default function PricingPage() {
                   concern was handled; this is self-reported, not independently verified.
                 </p>
               </article>
+              <article className="card">
+                <h3>Use a Family Safe Word</h3>
+                <p>
+                  Agree on an optional private phrase for family-emergency conversations. It is a
+                  social aid, not proof of identity.
+                </p>
+              </article>
+              <article className="card">
+                <h3>Keep each adult in control</h3>
+                <p>
+                  Household administration, payment, protected-member consent, and Trusted Circle
+                  permission remain separate decisions.
+                </p>
+              </article>
             </div>
           </div>
         </section>
 
         <section className="page-shell pricing-access" aria-labelledby="family-access-heading">
           <h2 id="family-access-heading" className="section-heading">
-            How to get Family
+            How web access starts
           </h2>
-          <p>
-            Family is currently available by invitation. If you have an invitation, sign in to see
-            whether your account is ready for payment. If not, Public Check remains free while
-            access opens to more households.
-          </p>
+          <ol className="workflow-list">
+            <li>
+              <strong>Create and verify your account</strong>
+              <span>Signing up alone is free and does not begin billing.</span>
+            </li>
+            <li>
+              <strong>Review account security and choose a plan</strong>
+              <span>
+                For billing safety, sign in again and use a second verification method already set
+                up on your account before secure checkout can open.
+              </span>
+            </li>
+            <li>
+              <strong>Confirm the exact terms in Stripe Checkout</strong>
+              <span>
+                Annual Checkout shows the seven-day trial, first-charge date, $149.90 amount, and
+                renewal before confirmation.
+              </span>
+            </li>
+            <li>
+              <strong>Use the full household safety loop</strong>
+              <span>Prepare, Check, involve someone by choice, and follow through.</span>
+            </li>
+          </ol>
           <div className="button-row">
-            <Link className="button button-primary" href="/sign-in">
-              I have an invitation
+            <Link className="button button-primary" href="/sign-up">
+              Create an account
             </Link>
             <Link className="button button-secondary" href="/check">
               Try a free Check
             </Link>
           </div>
-          {accessIntentsEnabled ? (
-            <AccessIntentCta />
-          ) : (
-            <section
-              className="card access-state"
-              aria-labelledby="early-access-unavailable-heading"
-            >
-              <h3 id="early-access-unavailable-heading">Family access requests are paused</h3>
-              <p>
-                This page has not sent a request or email. Invited members can sign in above. For
-                current contact options, visit the <Link href="/support">support page</Link>.
-              </p>
-            </section>
-          )}
           <div className="notice billing-note">
-            <strong>Monthly renewal.</strong> Cancel future renewal through billing management or
-            support. Access ordinarily continues through the paid period. Taxes, if applicable, are
-            shown before payment. Read the <Link href="/billing-terms">billing terms</Link>.
+            <strong>Renewal and cancellation.</strong> Family annual is seven days free, then
+            $149.90 per year unless canceled before the trial ends. Family monthly is $14.99 from
+            checkout and renews monthly. Cancel future renewal through billing management or
+            support. Access ordinarily continues through a paid period. Read the{' '}
+            <Link href="/billing-terms">billing terms</Link>.
           </div>
         </section>
 

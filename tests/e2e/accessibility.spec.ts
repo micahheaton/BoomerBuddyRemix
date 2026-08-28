@@ -24,17 +24,22 @@ async function gotoReady(page: Page, url: string, heading: string | RegExp): Pro
 
 test('public landmark pages have zero serious or critical axe violations', async ({ page }) => {
   const pages = [
-    ['/', 'Handle suspicious messages with a calmer family plan.'],
+    ['/', 'Practice, check, and respond safely to suspicious messages together.'],
     ['/check', 'Pause before you act.'],
     ['/how-it-works', 'A simple family plan for uncertain moments'],
-    ['/pricing', 'Family scam-safety support for $14.99 a month'],
+    ['/learn', 'Learn how to pause, verify, and respond'],
+    ['/pricing', 'Choose annual savings or month-to-month Family'],
     ['/trust', 'Help without surveillance'],
     ['/support', 'Get help with BoomerBuddy'],
     ['/privacy', 'BoomerBuddy privacy notice'],
     ['/terms', 'BoomerBuddy early-access terms'],
-    ['/billing-terms', 'Family monthly subscription'],
+    ['/billing-terms', 'Family annual and monthly subscriptions'],
     ['/accessibility', 'Accessibility at BoomerBuddy'],
     ['/account-deletion', 'Request account and data deletion'],
+    [
+      '/sign-up',
+      /^(?:Production account creation is disabled locally|Create your BoomerBuddy account|Account creation is temporarily unavailable)$/u,
+    ],
     ['/sign-in', 'Choose a seeded person'],
   ] as const;
   for (const [path, heading] of pages) {
@@ -57,15 +62,22 @@ test('Family value and both honest next steps remain readable across public brea
     await expect(
       page.getByRole('heading', {
         level: 1,
-        name: 'Handle suspicious messages with a calmer family plan.',
+        name: 'Practice, check, and respond safely to suspicious messages together.',
       }),
     ).toBeVisible();
-    await expect(page.getByLabel('Family plan offer')).toContainText('USD 14.99/month');
+    const familyOffer = page.getByLabel('Family plan offer');
+    await expect(familyOffer).toContainText('7 days free, then USD 149.90/year');
+    await expect(familyOffer).toContainText('Or USD 14.99/month without a trial');
     await expect(
-      page.getByRole('link', { name: 'See what Family includes', exact: true }).first(),
+      page.getByRole('link', { name: 'Create an account', exact: true }).first(),
     ).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Try a free Check', exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByText('Creating an account does not start a trial or charge you.', {
+        exact: false,
+      }),
     ).toBeVisible();
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -74,10 +86,18 @@ test('Family value and both honest next steps remain readable across public brea
 
     for (const [path, heading] of [
       ['/how-it-works', 'A simple family plan for uncertain moments'],
-      ['/pricing', 'Family scam-safety support for $14.99 a month'],
+      ['/pricing', 'Choose annual savings or month-to-month Family'],
     ] as const) {
       await page.goto(`${customerUrl}${path}`, { waitUntil: 'domcontentloaded' });
       await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible();
+      if (path === '/pricing') {
+        const annual = page.getByRole('article', { name: 'Family annual' });
+        await expect(annual).toContainText('7 days free, then $149.90 USD per year');
+        await expect(annual).toContainText('Cancel before the trial ends');
+        const monthly = page.getByRole('article', { name: 'Family monthly' });
+        await expect(monthly).toContainText('$14.99 USD per month');
+        await expect(monthly).toContainText('No free trial');
+      }
       const routeOverflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );

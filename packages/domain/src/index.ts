@@ -4,6 +4,7 @@ export * from './entitlements';
 export * from './errors';
 export * from './founder-provisioning';
 export * from './founding-households';
+export * from './governed-content';
 export * from './feedback';
 export * from './messaging';
 export * from './identifiers';

@@ -76,13 +76,15 @@ describe('mobile JTI session retention', () => {
          AND indexname IN (
            'sessions_mobile_jti_retention_idx',
            'consent_evidence_session_retention_idx',
-           'founding_household_enrollments_session_retention_idx'
+           'founding_household_enrollments_session_retention_idx',
+           'household_billing_authority_events_session_retention_idx'
          )
        ORDER BY indexname`,
     );
     expect(indexes.rows).toEqual([
       { indexname: 'consent_evidence_session_retention_idx' },
       { indexname: 'founding_household_enrollments_session_retention_idx' },
+      { indexname: 'household_billing_authority_events_session_retention_idx' },
       { indexname: 'sessions_mobile_jti_retention_idx' },
     ]);
 
@@ -125,6 +127,12 @@ describe('mobile JTI session retention', () => {
       {
         source_table: 'founding_household_enrollments',
         source_column: 'accepted_session_id',
+        target_column: 'id',
+        key_position: 1,
+      },
+      {
+        source_table: 'household_billing_authority_events',
+        source_column: 'actor_session_id',
         target_column: 'id',
         key_position: 1,
       },

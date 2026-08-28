@@ -1,8 +1,92 @@
 # Product value beta evidence ledger
 
-## Purpose and boundary
+## Current integration overlay: uncommitted work in progress
 
-This ledger records the BoomerBuddy 2.0 product-value candidate built on 2026-08-27. It separates repository implementation and synthetic proof from deployment, provider, native-device, real-human, and production evidence.
+This section is the controlling status for the current worktree. The detailed receipt below remains
+an immutable record of the earlier product-value candidate and must not be used as proof for this
+overlay.
+
+- Working branch: `codex/annual-trial-content-beta`.
+- Frozen base commit: `a8d0080701d80f3bb0219905a53c6c86a6a26d47`.
+- Frozen base tag: `run3-1-replit-founding-household-a8d0080701d8`.
+- Frozen base CI: GitHub Actions run `33154571879` passed all five jobs for the exact base commit.
+- Current tree state: uncommitted integration candidate after lane convergence.
+- Evidence boundary: the integrated tree passed the full local verification chain, browser journeys,
+  supported-browser accessibility matrix, migration rehearsal, dependency threshold, mobile asset,
+  and provider-free distribution checks. These results bind the uncommitted tree only and do not
+  replace a clean-tree dependency receipt, exact-SHA CI, provider proof, deployment proof, physical
+  device proof, or customer rehearsal.
+- Data and external boundary: no customer PII belongs in this work. This overlay records no
+  production database, provider, deployment, customer, message, payment, or money write.
+
+### Repository candidates in the current worktree
+
+| Lane | Current repository candidate | Evidence and remaining boundary |
+| --- | --- | --- |
+| Self-service acquisition and identity | Public account creation, dedicated self-hosted sign-up, fixed internal post-auth destinations, and updated public copy remove the invitation-only acquisition dead end. | Full local verification and browser checks passed. The live customer site remains stale, Google sign-in has looped, and email plus inbox verification has reached a missing route. Production Clerk configuration and deployed browser proof remain open. |
+| Family offers | Family annual at USD 149.90 with a seven-day trial is the intended default. Family monthly at USD 14.99 remains available without a trial. Account creation alone does not start a trial or charge; secure Checkout must collect the payment method and show the exact first charge date and amount. Immutable attempt lineage permits a fresh idempotency key only after every prior Checkout attempt is proved expired, unused, and unambiguous; paid or consumed trial history still blocks reuse. | Catalog, contract, commerce, worker, billing UI, and migration work exist in the repository. Stripe Product and Price mapping, trial notice delivery, tax disposition, Portal, webhook, payment, renewal, failure, cancellation, refund, and entitlement proof remain provider and deployment gates. |
+| Individual offers | Individual monthly at USD 8.99 and Individual annual at USD 89.90 with a seven-day trial are implemented as versioned catalog candidates. | Individual remains default-off and unavailable to customers until its explicit launch mapping, allowance contract, public copy, provider resources, lifecycle proof, and support path all close. |
+| Billing authority | An exact active household administrator can accept or revoke billing authority for self after recent Clerk billing re-verification, origin checks, explicit consent, and action-bound idempotency. The repository retains append-only audit and outbox evidence; HQ remains a correction path. | Full combined authorization, commerce, security, and browser verification passed locally. This is not proof of deployed Clerk behavior, production authority, Checkout success, or entitlement. |
+| Referral rewards | Referral foundations remain disabled. | No referral promise, credit, cash value, provider configuration, or public program is authorized by this worktree. |
+| Governed content and Learn | The repository candidate adds encrypted immutable HQ drafts, independent review state, publish, unpublish, and retract intents, a public `/learn` surface, deterministic first-party draft generation from approved source material, and export-only social and video variants. | Full local integration, security, build, browser, worker, correction, and isolated migration checks passed. The candidate does not autonomously browse, publish to social platforms, send customer notifications, or prove production publication. Deployment and human editorial proof remain open. |
+| Mobile hardening | The Expo candidate hardens Clerk callback validation, keeps callback data out of Check intake, exposes the value loop from Home, separates in-app and local-notification choices, improves Safe Word failure recovery, constrains tablet layout, and retains `net.boomerbuddy.app` unless a provider collision is found. Orientation Safe Word changes require recent authentication and use the canonical transaction-aware configure, replace, or disable lifecycle with no automatic retry. | Focused mobile security, reminder, type, lint, formatting, asset, distribution, and Expo export checks have passed during development. Signed IPA and AAB artifacts, real devices, production Clerk native records, store review, and notification behavior remain external. |
+
+### Integrated current-tree proof
+
+- `npm run verify` passed secrets across 896 text files, runtime dependency scope, all TypeScript
+  checks, lint, formatting, 474 unit tests, 516 integration tests, 525 security tests, 12 evaluation
+  fixtures, all five application builds, production UI guards, and protected Next.js resource probes.
+- `npm run test:e2e` passed all 31 Edge journeys. The public accessibility matrix passed Chromium
+  and WebKit on desktop and mobile, including 1440, 768, 390, and 320 pixel widths and 200 percent
+  text reflow. Firefox failed to launch with `spawn UNKNOWN` before test code and is not counted.
+- The fresh isolated Neon branch `rehearsal-annual-content-retry-final-20260828`, cloned from
+  unchanged production, applied migrations 0028 through 0044, reached 44 migration-ledger entries,
+  exposed the expected governed-content, offer-catalog, trial-reservation, and immutable
+  trial-Checkout-attempt tables plus the billing-authority retention index, and applied zero
+  migrations on a second run. Production remained at 27 migrations. Migration 0043 SHA-256 was
+  `b43a99649ef64a5a2f106dee26b27c46e6949e8d65a3e3334cb0cd1595722b6d`; 0044 was
+  `97ac116f7b4ede21206a83ec379f22a4d301086c2e44b78e3a32b77142b72830`.
+- `npm audit --audit-level=high` passed its threshold with 1 low and 23 moderate advisories and no
+  high or critical finding. Mobile asset integrity, Expo export, and provider-free distribution
+  inputs passed for `net.boomerbuddy.app`.
+- The release dependency verifier correctly remains open until the candidate is committed and the
+  checkout is clean. No local result is an exact-SHA CI, provider, deployment, physical-device,
+  real-customer, payment, or outcome receipt.
+
+### Sell-today decision and closure gates
+
+Paid launch today is **no**. Anonymous live evidence still shows the older customer application,
+including a missing `/sign-in/client-trust` route and broken sign-in behavior. The new catalog,
+trial, authority, content, and mobile work passed full combined local verification and isolated
+migration rehearsal. It has not received a clean-tree dependency receipt, a new exact-SHA CI receipt,
+provider configuration proof, production migration, deployment, or first-customer rehearsal.
+
+Before this overlay can become a release candidate, all of the following must close:
+
+1. Commit the tested tree, pass the clean-tree dependency and integrity checks, push, receive green
+   exact-SHA CI, and create a new annotated candidate tag.
+2. Preserve the completed isolated migration rehearsal and recheck the final committed migration
+   hashes before any production action.
+3. Bind every later provider and deployment receipt to that exact candidate SHA and tag.
+4. Close Clerk production sign-up, callback, Google secret rotation, email verification, recent
+   billing re-verification, and multi-factor callback evidence without retaining identity data.
+5. Configure and inventory only the approved Stripe resources, then prove trial notice, Checkout,
+   webhook, Portal, first charge, renewal, failure, cancellation, refund, dispute, and entitlement
+   reconciliation with synthetic identities.
+6. Prove support, legal, tax, monitoring, backup, restore, incident, worker, and timed rollback
+   readiness.
+7. Deploy the exact approved GitHub tag by pull only to the four BoomerBuddy 2.0 Replit consumers,
+   then run two-person value-loop and first-customer rehearsals. Do not touch the legacy Replit
+   project.
+8. Build and test signed mobile packages on physical devices before any store or mobile-availability
+   claim.
+
+## Frozen product-value baseline purpose and boundary
+
+This prior receipt records the BoomerBuddy 2.0 product-value candidate built on 2026-08-27. It
+separates repository implementation and synthetic proof from deployment, provider, native-device,
+real-human, and production evidence. References below to "this candidate" mean that frozen prior
+candidate, not the uncommitted integration overlay above.
 
 - Repository: `https://github.com/micahheaton/BoomerBuddyRemix.git` is the only source of truth.
 - Candidate branch: `codex/product-value-beta`.

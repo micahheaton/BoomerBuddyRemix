@@ -121,6 +121,7 @@ button:disabled {
   font-weight: 850;
   gap: 0.55rem;
   text-decoration: none;
+  white-space: nowrap;
 }
 .brand-mark {
   flex: 0 0 auto;
@@ -141,6 +142,20 @@ button:disabled {
 }
 .public-nav .button-primary {
   color: var(--bb-white);
+}
+.public-nav-menu {
+  display: none;
+}
+.public-nav-menu summary {
+  background: var(--bb-white);
+  border: 2px solid var(--bb-navy);
+  border-radius: 0.55rem;
+  color: var(--bb-navy);
+  cursor: pointer;
+  font-weight: 800;
+  min-height: var(--bb-target-minimum);
+  padding: 0.65rem 1rem;
+  white-space: nowrap;
 }
 .dev-pill,
 .eyebrow,
@@ -638,11 +653,46 @@ textarea {
 }
 
 @media (max-width: 1024px) {
-  .header-inner {
-    align-items: flex-start;
-    flex-direction: column;
+  .site-header .header-inner {
+    align-items: center;
+    flex-direction: row;
     gap: 0.4rem;
     padding-block: 0.8rem;
+  }
+  .site-header .brand {
+    min-width: 0;
+  }
+  .site-header .brand span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .public-nav-desktop {
+    display: none;
+  }
+  .public-nav-menu {
+    display: block;
+    margin-left: auto;
+    position: relative;
+  }
+  .public-nav-menu .public-nav {
+    align-items: stretch;
+    background: var(--bb-white);
+    border: 1px solid var(--bb-border);
+    border-radius: 0.65rem;
+    box-shadow: var(--bb-shadow);
+    display: grid;
+    gap: 0.25rem;
+    grid-template-columns: 1fr;
+    padding: 0.75rem;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    width: min(20rem, calc(100vw - 2rem));
+    z-index: 20;
+  }
+  .public-nav-menu .public-nav a {
+    text-align: left;
   }
   .hero,
   .marketing-hero,
@@ -692,6 +742,9 @@ textarea {
   }
   .public-nav .button-primary {
     grid-column: 1 / -1;
+  }
+  .site-header .public-nav-desktop {
+    display: none;
   }
   .offer-line {
     align-items: flex-start;

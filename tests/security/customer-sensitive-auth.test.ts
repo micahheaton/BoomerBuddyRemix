@@ -1,4 +1,6 @@
 import { DomainError } from '@boomerbuddy/domain';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   assertRecentCustomerAuthentication,
   customerSensitiveChangeMaximumAgeSeconds,
@@ -63,5 +65,20 @@ describe('recent customer authentication boundary', () => {
     expect(() =>
       assertRecentCustomerAuthentication(auth({ kind: 'development' }, 'hq')),
     ).toThrowError('A customer identity confirmation is required');
+  });
+
+  it('guards both API paths that can change a family Safe Word', () => {
+    const repositoryRoot = resolve(import.meta.dirname, '../..');
+    const orientationRoute = readFileSync(
+      resolve(repositoryRoot, 'apps/api/src/routes/orientation.ts'),
+      'utf8',
+    );
+    const dedicatedRoute = readFileSync(
+      resolve(repositoryRoot, 'apps/api/src/routes/family-safe-word.ts'),
+      'utf8',
+    );
+
+    expect(orientationRoute).toContain('assertRecentCustomerAuthentication(auth)');
+    expect(dedicatedRoute).toContain('assertRecentCustomerAuthentication(scope.auth)');
   });
 });

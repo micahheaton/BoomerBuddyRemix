@@ -22,10 +22,13 @@ describe('mobile deep-link intake', () => {
     expect(classifyNativeEntryUrl(url)).toBe('rejected_payload');
   });
 
-  it.each(['https://app.boomerbuddy.net/member', 'mailto:support@boomerbuddy.net', ''])(
-    'ignores unrelated entry URLs: %s',
-    (url) => {
-      expect(classifyNativeEntryUrl(url)).toBe('none');
-    },
-  );
+  it.each([
+    'https://app.boomerbuddy.net/member',
+    'mailto:support@boomerbuddy.net',
+    'net.boomerbuddy.app://callback?state=synthetic&rotating_token_nonce=synthetic',
+    'clerk://net.boomerbuddy.app.hosted-callback?state=synthetic',
+    '',
+  ])('ignores unrelated entry URLs: %s', (url) => {
+    expect(classifyNativeEntryUrl(url)).toBe('none');
+  });
 });

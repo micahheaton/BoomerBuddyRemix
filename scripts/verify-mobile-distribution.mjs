@@ -201,7 +201,7 @@ const approvedListingCopy = [
 for (const truthfulBoundary of [
   'BoomerBuddy reviews only what you submit.',
   'It does not open websites, monitor messages, guarantee safety',
-  'Access is invitation-only during early release.',
+  'Web access is in controlled beta; native apps remain in signed-device and store testing.',
 ]) {
   assertRelease(
     metadata.fullDescription.includes(truthfulBoundary),

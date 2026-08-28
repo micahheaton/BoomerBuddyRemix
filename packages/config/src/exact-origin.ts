@@ -94,9 +94,9 @@ function canonicalHttpsAuthority(authority: string | null): string | undefined {
 /**
  * Require raw Host and proxy-derived authority metadata to select the same configured HTTPS
  * origin. Next can retain its internal listener authority in the framework URL, so that URL is
- * checked only for valid credential-free structure. A raw RFC 7239 Forwarded header and partial
- * X-Forwarded authority tuple are rejected because their precedence is deployment-specific and
- * therefore ambiguous here.
+ * checked only for valid credential-free structure. A raw RFC 7239 Forwarded header is rejected.
+ * X-Forwarded-Host and X-Forwarded-Proto must appear together; X-Forwarded-Port is optional for
+ * proxies such as Replit that omit the default HTTPS port, but it must be exact when present.
  */
 export function isCanonicalPublicRequestOrigin(
   input: CanonicalPublicRequestOriginInput,
@@ -123,12 +123,12 @@ export function isCanonicalPublicRequestOrigin(
 
   const forwardedAuthority = [input.forwardedHost, input.forwardedPort, input.forwardedProto];
   if (forwardedAuthority.every((value) => value === null)) return true;
-  if (forwardedAuthority.some((value) => value === null)) return false;
+  if (input.forwardedHost === null || input.forwardedProto === null) return false;
 
   const expectedPort = new URL(expectedOrigin).port || '443';
   return (
     input.forwardedProto === 'https' &&
-    input.forwardedPort === expectedPort &&
+    (input.forwardedPort === null || input.forwardedPort === expectedPort) &&
     canonicalHttpsAuthority(input.forwardedHost) === expectedOrigin
   );
 }

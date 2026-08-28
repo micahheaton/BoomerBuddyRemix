@@ -73,7 +73,7 @@ describe('exact production origin', () => {
     url: 'https://app.boomerbuddy.net/sign-in/client-trust',
   } as const;
 
-  it('accepts only one canonical request authority with an absent or complete proxy tuple', () => {
+  it('accepts only one canonical request authority with a supported proxy tuple', () => {
     expect(
       isCanonicalPublicRequestOrigin(canonicalRequest, 'https://APP.boomerbuddy.net:443/'),
     ).toBe(true);
@@ -86,6 +86,16 @@ describe('exact production origin', () => {
           forwardedProto: 'https',
           host: 'APP.boomerbuddy.net:443',
           url: 'https://APP.boomerbuddy.net:443/sign-in/sso-callback?state=fixture',
+        },
+        'https://app.boomerbuddy.net',
+      ),
+    ).toBe(true);
+    expect(
+      isCanonicalPublicRequestOrigin(
+        {
+          ...canonicalRequest,
+          forwardedHost: 'app.boomerbuddy.net',
+          forwardedProto: 'https',
         },
         'https://app.boomerbuddy.net',
       ),

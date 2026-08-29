@@ -52,7 +52,7 @@ describe('mobile product-value journey', () => {
     for (const path of [
       "'/v1/member-learning'",
       "'/v1/member-learning/preferences'",
-      "'/v1/member-learning/rehearsal/complete'",
+      "'/v1/member-learning/rehearsal/answer'",
       '`/v1/member-learning/lessons/${encodeURIComponent(lesson.key)}/start`',
       '`/v1/member-learning/lessons/${encodeURIComponent(lesson.key)}/answer`',
       '`/v1/member-learning/feed/${encodeURIComponent(item.key)}`',
@@ -64,6 +64,8 @@ describe('mobile product-value journey', () => {
     expect(resource).toContain('householdHeaders(householdId, idempotencyKey)');
     expect(resource).toContain('memberLearningResponseSchema.safeParse(value)');
     expect(resource).toContain('answerMemberLearningLessonResponseSchema.safeParse(response)');
+    expect(resource).toContain('answerWeeklyRehearsalResponseSchema.safeParse(response)');
+    expect(resource).toContain('occurrenceVersion: rehearsal.occurrenceVersion');
     expect(idempotency).toContain("import * as SecureStore from './secure-store'");
     expect(idempotency).toContain('boomerbuddy.mobile.member-learning.pending-operations');
     expect(idempotency).toContain('SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY');
@@ -79,6 +81,11 @@ describe('mobile product-value journey', () => {
     expect(screen).not.toContain('AsyncStorage');
     expect(screen).not.toContain('localStorage');
     expect(screen).not.toContain('personId:');
+    expect(screen).toContain('Review my first step');
+    expect(screen).toContain('selectedRehearsalOption');
+    expect(screen).toContain("item.kind !== 'weekly_rehearsal'");
+    expect(screen).not.toContain('{weeklyRehearsal.takeaway}');
+    expect(screen).not.toContain('Complete two-minute rehearsal');
   });
 
   it('fails closed on household/offline errors and states content freshness limits', () => {

@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
   env: {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '',
+    // Keep Clerk's browser bundles aligned with the exact versions declared compatible by the
+    // locked @clerk/nextjs dependency. Customer and HQ identity must use one deterministic pair.
+    NEXT_PUBLIC_CLERK_JS_VERSION: '6.30.1',
+    NEXT_PUBLIC_CLERK_UI_VERSION: '1.30.8',
   },
   transpilePackages: ['@boomerbuddy/config', '@boomerbuddy/contracts', '@boomerbuddy/design'],
   async headers() {

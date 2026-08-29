@@ -160,6 +160,21 @@ test('invitation review can be declined and a cancelled code cannot be reused', 
   ).toBeVisible();
 });
 
+test('an invitation handoff link fills only the ID and still requires separate review', async ({
+  page,
+}) => {
+  await signInCustomer(page, 'trusted-jordan');
+  await page.goto(
+    `${customerUrl}/member/family?trustedInvitation=invitation-handoff-test#accept-trusted-invitation`,
+  );
+
+  await expect(page.getByLabel('Invitation ID')).toHaveValue('invitation-handoff-test');
+  await expect(page.getByLabel('One-time invitation credential')).toHaveValue('');
+  await expect(page.getByRole('button', { name: 'Review invitation' })).toBeDisabled();
+  await expect(page.getByRole('status')).toContainText('The link never contains a connection code');
+  await expect(page.getByText(/Invitation consent details/u)).toHaveCount(0);
+});
+
 test('Trusted Circle lifecycle revokes sharing while retaining a discoverable neutral membership exit', async ({
   page,
 }) => {

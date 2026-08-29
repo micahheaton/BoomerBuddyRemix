@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   AnswerMemberLearningLessonResponse,
+  AnswerWeeklyRehearsalResponse,
   MemberLearningFeedItemDto,
   MemberLearningLessonDto,
   MemberLearningMutationAction,
@@ -56,6 +57,8 @@ export default function MemberLearningClient() {
   const [coarseRegion, setCoarseRegion] = useState('US');
   const [weeklyRehearsalEnabled, setWeeklyRehearsalEnabled] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [selectedRehearsalOption, setSelectedRehearsalOption] = useState('');
+  const [rehearsalFeedback, setRehearsalFeedback] = useState('');
   const [announcementState, setAnnouncementState] = useState<HouseholdBoundValue<string>>();
   const [busyState, setBusyState] = useState<HouseholdBoundValue<string>>();
   const [errorState, setErrorState] = useState<HouseholdBoundValue<string>>();
@@ -100,6 +103,8 @@ export default function MemberLearningClient() {
         );
         setSelectedOption('');
         setFeedback('');
+        setSelectedRehearsalOption('');
+        setRehearsalFeedback('');
         setCoarseRegion(response.preferences.coarseRegion);
         setWeeklyRehearsalEnabled(response.preferences.weeklyRehearsalEnabled);
         setErrorState(undefined);
@@ -125,10 +130,10 @@ export default function MemberLearningClient() {
   const announcement = householdBoundValue(announcementState, selectedHouseholdId) ?? '';
   const busy = householdBoundValue(busyState, selectedHouseholdId) ?? '';
   const error = householdBoundValue(errorState, selectedHouseholdId) ?? '';
+  const weeklyRehearsal = learning?.weeklyRehearsal ?? null;
 
-  const activeLesson = useMemo(
-    () => learning?.curriculum.lessons.find((lesson) => lesson.key === activeLessonKey),
-    [activeLessonKey, learning],
+  const activeLesson = learning?.curriculum.lessons.find(
+    (lesson) => lesson.key === activeLessonKey,
   );
 
   function acceptLearning(
@@ -303,17 +308,29 @@ export default function MemberLearningClient() {
     }
   }
 
-  async function completeRehearsal(): Promise<void> {
+  async function answerRehearsal(): Promise<void> {
+    const rehearsal = weeklyRehearsal;
+    if (!rehearsal || !selectedRehearsalOption) return;
+    const optionKey = selectedRehearsalOption;
     const action = beginAction('rehearsal');
     if (!action) return;
     const operationAction = 'weekly-rehearsal-complete' as const;
     try {
-      const operationKey = await mutationKey(action.householdId, operationAction, 'complete:true');
-      const response = await apiRequest<MemberLearningResponse>(
-        '/v1/member-learning/rehearsal/complete',
+      const operationKey = await mutationKey(
+        action.householdId,
+        operationAction,
+        JSON.stringify([rehearsal.key, rehearsal.version, rehearsal.occurrenceVersion, optionKey]),
+      );
+      const response = await apiRequest<AnswerWeeklyRehearsalResponse>(
+        '/v1/member-learning/rehearsal/answer',
         {
           method: 'POST',
-          body: JSON.stringify({ complete: true }),
+          body: JSON.stringify({
+            rehearsalKey: rehearsal.key,
+            rehearsalVersion: rehearsal.version,
+            occurrenceVersion: rehearsal.occurrenceVersion,
+            optionKey,
+          }),
           headers: {
             'X-BB-Household-Id': action.householdId,
             'Idempotency-Key': operationKey,
@@ -323,9 +340,11 @@ export default function MemberLearningClient() {
       );
       await settleMutationKey(action.householdId, operationAction, operationKey);
       if (!action.isCurrent()) return;
+      setSelectedRehearsalOption('');
+      setRehearsalFeedback(`${response.feedback} Practice note: ${rehearsal.takeaway}`);
       acceptLearning(
         action.householdId,
-        response,
+        response.learning,
         'Weekly rehearsal complete. The next one is scheduled in a week.',
       );
     } catch (caught) {
@@ -425,6 +444,11 @@ export default function MemberLearningClient() {
           <section className="card" aria-labelledby="this-week-heading">
             <span className="dev-pill">This week</span>
             <h3 id="this-week-heading">Your in-app updates</h3>
+            {rehearsalFeedback && (
+              <p className="notice" role="status">
+                {rehearsalFeedback}
+              </p>
+            )}
             {learning.feed.items.length === 0 ? (
               <p>You are caught up. No in-app reminder or reviewed update needs attention.</p>
             ) : (
@@ -437,14 +461,52 @@ export default function MemberLearningClient() {
                     <p>{item.summary}</p>
                     <div className="button-row">
                       {item.kind === 'weekly_rehearsal' ? (
-                        <button
-                          className="button-primary"
-                          type="button"
-                          disabled={Boolean(busy)}
-                          onClick={() => void completeRehearsal()}
-                        >
-                          Complete rehearsal
-                        </button>
+                        weeklyRehearsal ? (
+                          <form
+                            className="form-stack"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              void answerRehearsal();
+                            }}
+                          >
+                            <p>{weeklyRehearsal.scenario}</p>
+                            <fieldset>
+                              <legend>{weeklyRehearsal.prompt}</legend>
+                              {weeklyRehearsal.options.map((option) => (
+                                <label className="choice" key={option.key}>
+                                  <input
+                                    type="radio"
+                                    name={`weekly-rehearsal-${weeklyRehearsal.occurrenceVersion}`}
+                                    value={option.key}
+                                    checked={selectedRehearsalOption === option.key}
+                                    onChange={(event) => {
+                                      setSelectedRehearsalOption(event.target.value);
+                                      setRehearsalFeedback('');
+                                    }}
+                                  />
+                                  {option.label}
+                                </label>
+                              ))}
+                            </fieldset>
+                            <button
+                              className="button-primary"
+                              type="submit"
+                              disabled={Boolean(busy) || !selectedRehearsalOption}
+                            >
+                              Review my first step
+                            </button>
+                            <p className="meta">
+                              Scenario reviewed {formatDate(weeklyRehearsal.reviewedAt)}.{' '}
+                              <a href={weeklyRehearsal.source.url} target="_blank" rel="noreferrer">
+                                {weeklyRehearsal.source.title} (opens in a new tab)
+                              </a>
+                            </p>
+                          </form>
+                        ) : (
+                          <p className="notice notice-warning">
+                            This rehearsal changed. Refresh Learn &amp; updates before answering.
+                          </p>
+                        )
                       ) : (
                         <button
                           className="button-secondary"
@@ -455,14 +517,16 @@ export default function MemberLearningClient() {
                           {item.kind === 'lesson' ? 'Open lesson' : 'Mark reviewed'}
                         </button>
                       )}
-                      <button
-                        className="button-secondary"
-                        type="button"
-                        disabled={Boolean(busy)}
-                        onClick={() => void updateFeedItem(item, 'dismissed')}
-                      >
-                        Dismiss
-                      </button>
+                      {item.kind !== 'weekly_rehearsal' && (
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          disabled={Boolean(busy)}
+                          onClick={() => void updateFeedItem(item, 'dismissed')}
+                        >
+                          Dismiss
+                        </button>
+                      )}
                     </div>
                   </li>
                 ))}

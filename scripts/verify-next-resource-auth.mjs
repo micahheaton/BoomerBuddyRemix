@@ -183,6 +183,17 @@ function assertAuthenticationPath(application, path, response) {
       `${application.name} authentication path ${path} allowed public shared caching: ${cacheControl || 'missing cache-control'}`,
     );
   }
+
+  for (const expectedAsset of [
+    '@clerk/clerk-js@6.30.1/dist/clerk.browser.js',
+    '@clerk/ui@1.30.8/dist/ui.browser.js',
+  ]) {
+    if (!response.body.includes(expectedAsset)) {
+      throw new Error(
+        `${application.name} authentication path ${path} did not pin ${expectedAsset}`,
+      );
+    }
+  }
 }
 
 function assertSignedOutRedirect(application, path, response) {
@@ -316,5 +327,5 @@ for (const application of applications) {
 }
 
 process.stdout.write(
-  'Customer and HQ offline configured-placeholder builds prove public metadata, production resource guards, encoded sibling denial, API delegation, missing-identity 503, and wrong-origin 421.\n',
+  'Customer and HQ offline configured-placeholder builds prove pinned Clerk assets, public metadata, production resource guards, encoded sibling denial, API delegation, missing-identity 503, and wrong-origin 421.\n',
 );

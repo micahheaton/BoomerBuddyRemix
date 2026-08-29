@@ -1446,7 +1446,7 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
             style={[s.choice, { flexGrow: 1 }, effectiveKind === item && s.choiceSelected]}
           >
             <View style={[s.radio, effectiveKind === item && s.radioSelected]} />
-            <Text style={s.body}>{item === 'text' ? 'Message text' : 'Website URL'}</Text>
+            <Text style={s.body}>{item === 'text' ? 'Message text' : 'Website address'}</Text>
           </Pressable>
         ))}
       </View>
@@ -1454,7 +1454,7 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         {effectiveKind === 'text' ? 'Suspicious message' : 'Website address (URL)'}
       </Text>
       <TextInput
-        accessibilityLabel={effectiveKind === 'text' ? 'Suspicious message' : 'Website address URL'}
+        accessibilityLabel={effectiveKind === 'text' ? 'Suspicious message' : 'Website address'}
         autoCapitalize="none"
         autoCorrect={false}
         multiline={effectiveKind === 'text'}
@@ -1462,11 +1462,16 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         maxLength={effectiveKind === 'text' ? 20_000 : 2_048}
         onChangeText={setContent}
         placeholder={
-          effectiveKind === 'text' ? 'Paste the message here' : 'https://example.com/path'
+          effectiveKind === 'text' ? 'Paste the message here' : 'example.com or paste an address'
         }
         style={[s.input, effectiveKind === 'text' && s.textarea]}
         value={content}
       />
+      {effectiveKind === 'url' ? (
+        <Text style={s.muted}>
+          Enter example.com or paste the website address. BoomerBuddy accepts the friendly name.
+        </Text>
+      ) : null}
       <Text style={s.muted}>
         BoomerBuddy reviews only the message text or website address you submit. It does not open
         the website or compare it with live online data. It can miss warning signs, so do not treat
@@ -1699,6 +1704,31 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
         </Text>
         <Text style={s.heading}>Risk: {riskLabels[check.risk]}</Text>
         <Text style={s.body}>{check.summary}</Text>
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>Safer next actions</Text>
+        {[...check.actions]
+          .sort((a, b) => a.priority - b.priority)
+          .map((action) => (
+            <View key={action.key}>
+              <Text style={s.label}>
+                {action.priority}. {action.title}
+              </Text>
+              <Text style={s.body}>{action.detail}</Text>
+              {action.officialChannelOnly ? (
+                <Text style={s.muted}>Use a channel you verify independently.</Text>
+              ) : null}
+            </View>
+          ))}
+      </View>
+      <View style={s.banner}>
+        <Text style={s.label}>This is decision support, not proof</Text>
+        <Text style={s.body}>
+          Pause and verify independently when money, credentials, accounts, or safety are involved.
+        </Text>
+      </View>
+      <View style={s.card}>
+        <Text style={s.heading}>About this result</Text>
         <Text style={s.label}>How much the check found</Text>
         <Text style={s.body}>{supportingInformationLabels[check.evidenceSufficiency]}</Text>
         <Text style={s.muted}>
@@ -1731,28 +1761,6 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
             No supporting observations were produced. Treat the risk as unknown.
           </Text>
         )}
-      </View>
-      <View style={s.card}>
-        <Text style={s.heading}>Safer next actions</Text>
-        {[...check.actions]
-          .sort((a, b) => a.priority - b.priority)
-          .map((action) => (
-            <View key={action.key}>
-              <Text style={s.label}>
-                {action.priority}. {action.title}
-              </Text>
-              <Text style={s.body}>{action.detail}</Text>
-              {action.officialChannelOnly ? (
-                <Text style={s.muted}>Use a channel you verify independently.</Text>
-              ) : null}
-            </View>
-          ))}
-      </View>
-      <View style={s.banner}>
-        <Text style={s.label}>This is decision support, not proof</Text>
-        <Text style={s.body}>
-          Pause and verify independently when money, credentials, accounts, or safety are involved.
-        </Text>
       </View>
       {shareStatus ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>

@@ -29,6 +29,8 @@ describe('production identity UI boundary', () => {
     for (const configuration of [webConfig, hqConfig]) {
       expect(configuration).toContain('process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
       expect(configuration).toContain('process.env.CLERK_PUBLISHABLE_KEY');
+      expect(configuration).toContain("NEXT_PUBLIC_CLERK_JS_VERSION: '6.30.1'");
+      expect(configuration).toContain("NEXT_PUBLIC_CLERK_UI_VERSION: '1.30.8'");
       expect(configuration).not.toContain('CLERK_SECRET_KEY');
     }
   });

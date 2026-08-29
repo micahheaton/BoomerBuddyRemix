@@ -345,6 +345,23 @@ export default function CheckPage() {
               {riskText[result.risk]}
             </p>
             <p>{result.summary}</p>
+            <h3>Safer next actions</h3>
+            <ol className="plain-list">
+              {[...result.actions]
+                .sort((a, b) => a.priority - b.priority)
+                .map((action) => (
+                  <li key={action.key}>
+                    <strong>{action.title}</strong> - {action.detail}
+                    {action.officialChannelOnly && (
+                      <span className="meta"> Use an independently verified official channel.</span>
+                    )}
+                  </li>
+                ))}
+            </ol>
+            <p className="notice notice-warning">
+              <strong>This is decision support, not proof.</strong> If money, credentials, accounts,
+              or physical safety are involved, stop and verify independently.
+            </p>
             <dl className="definition-grid">
               <dt>How much information was available</dt>
               <dd>
@@ -379,23 +396,6 @@ export default function CheckPage() {
             ) : (
               <p>No supporting observations were produced. Treat the risk as unknown.</p>
             )}
-            <h3>Safer next actions</h3>
-            <ol className="plain-list">
-              {[...result.actions]
-                .sort((a, b) => a.priority - b.priority)
-                .map((action) => (
-                  <li key={action.key}>
-                    <strong>{action.title}</strong> - {action.detail}
-                    {action.officialChannelOnly && (
-                      <span className="meta"> Use an independently verified official channel.</span>
-                    )}
-                  </li>
-                ))}
-            </ol>
-            <p className="notice notice-warning">
-              <strong>This is decision support, not proof.</strong> If money, credentials, accounts,
-              or physical safety are involved, stop and verify independently.
-            </p>
             {result.access.canShare && isProtectedMember ? (
               <section className="card" aria-labelledby="share-result-heading">
                 <h3 id="share-result-heading">Ask a trusted person to help</h3>

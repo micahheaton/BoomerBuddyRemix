@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   answerMemberLearningLesson,
+  answerMemberWeeklyRehearsal,
   currentMemberLearningLesson,
   memberLearningDisplayState,
   isMemberLearningCoarseRegion,
   memberLearningLessons,
   memberLearningReviewIntervalMs,
+  memberWeeklyRehearsalForDueAt,
+  memberWeeklyRehearsalOccurrenceVersion,
+  memberWeeklyRehearsals,
   nextWeeklyRehearsalAt,
   weeklyRehearsalIntervalMs,
 } from './member-learning';
@@ -89,6 +93,37 @@ describe('member learning curriculum', () => {
     expect(nextWeeklyRehearsalAt({ enabledAt: now, lastRehearsedAt: rehearsed })?.getTime()).toBe(
       rehearsed.getTime() + weeklyRehearsalIntervalMs,
     );
+  });
+
+  it('rotates reviewed two-minute scenarios deterministically and requires an available answer', () => {
+    expect(memberWeeklyRehearsals).toHaveLength(4);
+    expect(memberWeeklyRehearsals.every((rehearsal) => rehearsal.estimatedMinutes === 2)).toBe(
+      true,
+    );
+    expect(
+      memberWeeklyRehearsals.every(
+        (rehearsal) =>
+          rehearsal.source.url.startsWith('https://') &&
+          rehearsal.options.some((option) => option.key === rehearsal.saferOptionKey),
+      ),
+    ).toBe(true);
+
+    const dueAt = new Date('2026-09-03T12:00:00.000Z');
+    const first = memberWeeklyRehearsalForDueAt(dueAt);
+    expect(memberWeeklyRehearsalForDueAt(new Date(dueAt))).toBe(first);
+    expect(memberWeeklyRehearsalOccurrenceVersion(dueAt)).toBeGreaterThan(0);
+
+    expect(
+      answerMemberWeeklyRehearsal({ rehearsal: first, optionKey: first.saferOptionKey }),
+    ).toMatchObject({ saferChoice: true });
+    const otherOption = first.options.find((option) => option.key !== first.saferOptionKey);
+    expect(otherOption).toBeDefined();
+    expect(
+      answerMemberWeeklyRehearsal({ rehearsal: first, optionKey: otherOption!.key }),
+    ).toMatchObject({ saferChoice: false });
+    expect(() =>
+      answerMemberWeeklyRehearsal({ rehearsal: first, optionKey: 'forged_option' }),
+    ).toThrow('available weekly rehearsal response');
   });
 
   it('accepts only the shared national, state, and District of Columbia region set', () => {

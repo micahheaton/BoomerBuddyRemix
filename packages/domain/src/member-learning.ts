@@ -344,6 +344,185 @@ export const memberLearningLessons = [
 export const memberLearningReviewIntervalMs = 30 * 24 * 60 * 60 * 1_000;
 export const weeklyRehearsalIntervalMs = 7 * 24 * 60 * 60 * 1_000;
 
+export const memberWeeklyRehearsalKeys = [
+  'bank_alert_callback',
+  'family_emergency_secret',
+  'unexpected_device_support',
+  'unusual_payment_demand',
+] as const;
+
+export type MemberWeeklyRehearsalKey = (typeof memberWeeklyRehearsalKeys)[number];
+
+export interface MemberWeeklyRehearsal {
+  readonly key: MemberWeeklyRehearsalKey;
+  readonly version: number;
+  readonly title: string;
+  readonly estimatedMinutes: 2;
+  readonly scenario: string;
+  readonly prompt: string;
+  readonly options: readonly MemberLearningOption[];
+  readonly saferOptionKey: string;
+  readonly saferChoiceFeedback: string;
+  readonly otherChoiceFeedback: string;
+  readonly takeaway: string;
+  readonly source: MemberLearningSource;
+  readonly reviewedAt: Date;
+}
+
+const weeklyRehearsalReviewedAt = new Date('2026-08-28T12:00:00.000Z');
+
+export const memberWeeklyRehearsals = [
+  {
+    key: 'bank_alert_callback',
+    version: 1,
+    title: 'A bank alert asks you to act now',
+    estimatedMinutes: 2,
+    scenario:
+      'A text says your bank account is locked. It includes a link and a number to call within ten minutes.',
+    prompt: 'What is the safest first action?',
+    options: [
+      { key: 'open_message_link', label: 'Open the message link before time runs out' },
+      { key: 'reply_for_details', label: 'Reply and ask the sender to explain the problem' },
+      {
+        key: 'use_official_bank_channel',
+        label:
+          'Pause and contact the bank through its app, your card, or a number you already trust',
+      },
+    ],
+    saferOptionKey: 'use_official_bank_channel',
+    saferChoiceFeedback:
+      'That keeps the sender from controlling verification. Using the bank app, your card, or a number you already trust is a reversible first step.',
+    otherChoiceFeedback:
+      "The message may be designed to keep you inside the sender's path. A safer first step is to pause and reach the bank through a channel you already trust.",
+    takeaway: 'Let the official organization, not the unexpected message, control verification.',
+    source: ftcAvoidScams,
+    reviewedAt: weeklyRehearsalReviewedAt,
+  },
+  {
+    key: 'family_emergency_secret',
+    version: 1,
+    title: 'A family emergency comes with secrecy',
+    estimatedMinutes: 2,
+    scenario:
+      'A familiar-sounding caller says a relative is in trouble, needs money now, and asks you not to tell anyone.',
+    prompt: 'What is the safest first action?',
+    options: [
+      { key: 'send_small_amount', label: 'Send a small amount while you learn more' },
+      { key: 'keep_talking', label: 'Stay on the call and ask the caller more questions' },
+      {
+        key: 'call_known_family_contact',
+        label: 'End the call and contact the relative or another trusted person a different way',
+      },
+    ],
+    saferOptionKey: 'call_known_family_contact',
+    saferChoiceFeedback:
+      'That breaks the pressure and secrecy. A separate call to a known family contact gives the real person a chance to confirm what is happening.',
+    otherChoiceFeedback:
+      'More conversation or a small payment still lets the caller control the situation. End the contact and verify with a known family contact another way.',
+    takeaway: 'Verify the person through a second channel before money or information moves.',
+    source: ftcAvoidScams,
+    reviewedAt: weeklyRehearsalReviewedAt,
+  },
+  {
+    key: 'unexpected_device_support',
+    version: 1,
+    title: 'Unexpected support wants access to your screen',
+    estimatedMinutes: 2,
+    scenario:
+      'An unexpected caller says your computer has a serious problem and wants you to install a screen-sharing app.',
+    prompt: 'What is the safest first action?',
+    options: [
+      { key: 'install_without_accounts', label: 'Install it but avoid opening financial accounts' },
+      { key: 'ask_for_badge', label: 'Ask the caller for an employee number before continuing' },
+      {
+        key: 'end_and_find_support',
+        label: 'Decline, end the call, and find trusted support independently',
+      },
+    ],
+    saferOptionKey: 'end_and_find_support',
+    saferChoiceFeedback:
+      'That prevents an unexpected caller from gaining control of the device. You can still seek help through support you find independently.',
+    otherChoiceFeedback:
+      'An employee number or a promise not to open accounts does not make remote access safe. Decline and find trusted support independently.',
+    takeaway: 'Unexpected callers should not choose the software or support channel you use.',
+    source: ftcAvoidScams,
+    reviewedAt: weeklyRehearsalReviewedAt,
+  },
+  {
+    key: 'unusual_payment_demand',
+    version: 1,
+    title: 'An official-sounding demand requires gift cards',
+    estimatedMinutes: 2,
+    scenario:
+      'Someone claiming to be from a government office says you must pay today with gift cards or face arrest.',
+    prompt: 'What is the safest first action?',
+    options: [
+      { key: 'buy_one_card', label: 'Buy one card first to show that you are cooperating' },
+      { key: 'negotiate_time', label: 'Ask the caller for a few more hours to make the payment' },
+      {
+        key: 'stop_and_verify_agency',
+        label:
+          "Do not pay; end the contact and verify through the agency's official website or number",
+      },
+    ],
+    saferOptionKey: 'stop_and_verify_agency',
+    saferChoiceFeedback:
+      'That stops the payment and moves verification to an official channel. Government agencies do not require gift-card payment to avoid arrest.',
+    otherChoiceFeedback:
+      'A smaller payment or more time still treats the threat as genuine. Do not pay; end the contact and verify through an official agency channel.',
+    takeaway: 'An unusual payment method plus a threat is a reason to stop, not negotiate.',
+    source: ftcAvoidScams,
+    reviewedAt: weeklyRehearsalReviewedAt,
+  },
+] as const satisfies readonly MemberWeeklyRehearsal[];
+
+export function memberWeeklyRehearsalOccurrenceVersion(dueAt: Date): number {
+  const dueAtMs = dueAt.getTime();
+  if (!Number.isFinite(dueAtMs)) {
+    throw new DomainError('invalid_input', 'Weekly rehearsal due date is invalid');
+  }
+  return Math.max(1, Math.floor(dueAtMs / weeklyRehearsalIntervalMs));
+}
+
+export function memberWeeklyRehearsalForDueAt(dueAt: Date): MemberWeeklyRehearsal {
+  const occurrenceVersion = memberWeeklyRehearsalOccurrenceVersion(dueAt);
+  const rehearsal = memberWeeklyRehearsals[(occurrenceVersion - 1) % memberWeeklyRehearsals.length];
+  if (rehearsal === undefined) throw new TypeError('Weekly rehearsal catalog is empty');
+  return rehearsal;
+}
+
+export function currentMemberWeeklyRehearsal(
+  rehearsalKey: MemberWeeklyRehearsalKey,
+  rehearsalVersion?: number,
+): MemberWeeklyRehearsal {
+  const rehearsal = memberWeeklyRehearsals.find((candidate) => candidate.key === rehearsalKey);
+  if (rehearsal === undefined) {
+    throw new DomainError('not_found', 'Weekly rehearsal is unavailable');
+  }
+  if (rehearsalVersion !== undefined && rehearsal.version !== rehearsalVersion) {
+    throw new DomainError('conflict', 'A newer weekly rehearsal version is available', {
+      currentVersion: rehearsal.version,
+    });
+  }
+  return rehearsal;
+}
+
+export function answerMemberWeeklyRehearsal(input: {
+  readonly rehearsal: MemberWeeklyRehearsal;
+  readonly optionKey: string;
+}): { readonly saferChoice: boolean; readonly feedback: string } {
+  if (!input.rehearsal.options.some((option) => option.key === input.optionKey)) {
+    throw new DomainError('invalid_input', 'Choose one available weekly rehearsal response');
+  }
+  const saferChoice = input.optionKey === input.rehearsal.saferOptionKey;
+  return {
+    saferChoice,
+    feedback: saferChoice
+      ? input.rehearsal.saferChoiceFeedback
+      : input.rehearsal.otherChoiceFeedback,
+  };
+}
+
 export type StoredMemberLearningState = 'in_progress' | 'completed';
 export type MemberLearningDisplayState = 'not_started' | 'in_progress' | 'completed' | 'review_due';
 

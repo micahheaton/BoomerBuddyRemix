@@ -58,6 +58,7 @@ describe('member learning API', () => {
         externalFetch: false,
       },
       preferences: { coarseRegion: 'US', weeklyRehearsalEnabled: false },
+      weeklyRehearsal: null,
       feed: { delivery: 'in_app_only', externalDelivery: 'disabled' },
       contentBoundary: 'repository_curated_in_app_only',
     });
@@ -155,14 +156,31 @@ describe('member learning API', () => {
       headers: refreshedHeaders,
     });
     expect(due.statusCode, due.body).toBe(200);
-    expect(due.json()).toMatchObject({
+    const dueBody = due.json<{
+      weeklyRehearsal: {
+        key: string;
+        version: number;
+        occurrenceVersion: number;
+        estimatedMinutes: number;
+        options: { key: string }[];
+      };
+      feed: { items: { key: string; kind: string }[] };
+    }>();
+    expect(dueBody).toMatchObject({
+      weeklyRehearsal: {
+        version: 1,
+        occurrenceVersion: expect.any(Number),
+        estimatedMinutes: 2,
+      },
       feed: {
         items: expect.arrayContaining([
           expect.objectContaining({ key: 'weekly-rehearsal', kind: 'weekly_rehearsal' }),
         ]),
       },
     });
-    const rehearsed = await harness.app.inject({
+    expect(due.body).not.toContain('saferOptionKey');
+
+    const legacyCompletion = await harness.app.inject({
       method: 'POST',
       url: '/v1/member-learning/rehearsal/complete',
       headers: {
@@ -171,12 +189,114 @@ describe('member learning API', () => {
       },
       payload: { complete: true },
     });
+    expect(legacyCompletion.statusCode, legacyCompletion.body).toBe(409);
+    expect(legacyCompletion.body).toContain('require a response');
+    const legacyCompletionRetry = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/member-learning/rehearsal/complete',
+      headers: {
+        ...refreshedHeaders,
+        'idempotency-key': operation('weekly-rehearsal-complete', 5),
+      },
+      payload: { complete: true },
+    });
+    expect(legacyCompletionRetry.statusCode, legacyCompletionRetry.body).toBe(409);
+    expect(legacyCompletionRetry.json()).toMatchObject({
+      error: {
+        code: 'invalid_transition',
+        message:
+          'Weekly rehearsals now require a response. Refresh or update BoomerBuddy and answer the current two-minute scenario.',
+      },
+    });
+    const legacyState = await harness.database.query<
+      {
+        readonly last_rehearsed_at: unknown | null;
+        readonly rehearsal_receipts: number;
+      } & Record<string, unknown>
+    >(
+      `SELECT preferences.last_rehearsed_at,
+              (SELECT count(*)::integer
+               FROM member_learning_operation_receipts receipt
+               WHERE receipt.household_id = preferences.household_id
+                 AND receipt.person_id = preferences.person_id
+                 AND receipt.action_kind = 'weekly_rehearsal_complete') AS rehearsal_receipts
+       FROM member_learning_preferences preferences
+       WHERE preferences.household_id = 'household-sunrise'
+         AND preferences.person_id = 'person-owner-alice'`,
+    );
+    expect(legacyState.rows[0]).toEqual({ last_rehearsed_at: null, rehearsal_receipts: 0 });
+    const stillDueAfterLegacyRequest = await harness.app.inject({
+      method: 'GET',
+      url: '/v1/member-learning',
+      headers: refreshedHeaders,
+    });
+    expect(stillDueAfterLegacyRequest.statusCode, stillDueAfterLegacyRequest.body).toBe(200);
+    expect(stillDueAfterLegacyRequest.json()).toMatchObject({
+      weeklyRehearsal: { occurrenceVersion: dueBody.weeklyRehearsal.occurrenceVersion },
+    });
+
+    const completionOnly = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/member-learning/rehearsal/answer',
+      headers: {
+        ...refreshedHeaders,
+        'idempotency-key': operation('weekly-rehearsal-complete', 6),
+      },
+      payload: { complete: true },
+    });
+    expect(completionOnly.statusCode, completionOnly.body).toBe(400);
+
+    const dismissed = await harness.app.inject({
+      method: 'PUT',
+      url: '/v1/member-learning/feed/weekly-rehearsal',
+      headers: {
+        ...refreshedHeaders,
+        'idempotency-key': operation('feed-item-update', 7),
+      },
+      payload: {
+        itemVersion: dueBody.weeklyRehearsal.occurrenceVersion,
+        state: 'dismissed',
+      },
+    });
+    expect(dismissed.statusCode, dismissed.body).toBe(409);
+
+    const answerPayload = {
+      rehearsalKey: dueBody.weeklyRehearsal.key,
+      rehearsalVersion: dueBody.weeklyRehearsal.version,
+      occurrenceVersion: dueBody.weeklyRehearsal.occurrenceVersion,
+      optionKey: dueBody.weeklyRehearsal.options[0]?.key,
+    };
+    const rehearsed = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/member-learning/rehearsal/answer',
+      headers: {
+        ...refreshedHeaders,
+        'idempotency-key': operation('weekly-rehearsal-complete', 8),
+      },
+      payload: answerPayload,
+    });
     expect(rehearsed.statusCode, rehearsed.body).toBe(200);
+    expect(rehearsed.json()).toMatchObject({
+      saferChoice: expect.any(Boolean),
+      feedback: expect.any(String),
+      learning: { weeklyRehearsal: null },
+    });
     expect(
       rehearsed
-        .json<{ feed: { items: { kind: string }[] } }>()
-        .feed.items.some((item) => item.kind === 'weekly_rehearsal'),
+        .json<{ learning: { feed: { items: { kind: string }[] } } }>()
+        .learning.feed.items.some((item) => item.kind === 'weekly_rehearsal'),
     ).toBe(false);
+    const rehearsedRetry = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/member-learning/rehearsal/answer',
+      headers: {
+        ...refreshedHeaders,
+        'idempotency-key': operation('weekly-rehearsal-complete', 8),
+      },
+      payload: answerPayload,
+    });
+    expect(rehearsedRetry.statusCode, rehearsedRetry.body).toBe(200);
+    expect(rehearsedRetry.json()).toEqual(rehearsed.json());
   }, 60_000);
 
   it('denies organizers, helpers, and cross-household selection without protected entitlement', async () => {

@@ -431,6 +431,19 @@ export default function HistoryPage() {
                   >
                     <h2>Redacted result details</h2>
                     <p>{check.summary}</p>
+                    <h3>Safer next actions</h3>
+                    <ol className="plain-list">
+                      {[...check.actions]
+                        .sort((a, b) => a.priority - b.priority)
+                        .map((action) => (
+                          <li key={action.key}>
+                            <strong>{action.title}</strong> - {action.detail}
+                            {action.officialChannelOnly
+                              ? ' Use an independently verified official channel.'
+                              : ''}
+                          </li>
+                        ))}
+                    </ol>
                     <dl className="definition-grid">
                       <dt>Household</dt>
                       <dd>{selectedHouseholdName}</dd>
@@ -461,19 +474,6 @@ export default function HistoryPage() {
                     ) : (
                       <p>No supporting observations were produced. Treat the risk as unknown.</p>
                     )}
-                    <h3>Safer next actions</h3>
-                    <ol className="plain-list">
-                      {[...check.actions]
-                        .sort((a, b) => a.priority - b.priority)
-                        .map((action) => (
-                          <li key={action.key}>
-                            <strong>{action.title}</strong> - {action.detail}
-                            {action.officialChannelOnly
-                              ? ' Use an independently verified official channel.'
-                              : ''}
-                          </li>
-                        ))}
-                    </ol>
                     <p className="help">
                       The submitted message or URL is never included in this detail view.
                     </p>

@@ -142,8 +142,8 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
     directory = await mkdtemp(join(tmpdir(), 'boomerbuddy-run3-1-journey-'));
     database = await createPGliteDatabase(directory);
     const appliedMigrations = await runMigrations(database);
-    expect(appliedMigrations).toHaveLength(44);
-    expect(appliedMigrations.at(-1)).toBe('0044_versioned_stripe_offer_catalog.sql');
+    expect(appliedMigrations).toHaveLength(45);
+    expect(appliedMigrations.at(-1)).toBe('0045_member_learning_rehearsal_answers.sql');
 
     const identities = new ProductionIdentityRepository(database);
     await identities.bootstrapFounder({
@@ -1018,24 +1018,55 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
       preferences: { coarseRegion: 'US-CA', weeklyRehearsalEnabled: true },
       feed: { delivery: 'in_app_only', externalDelivery: 'disabled' },
     });
+    await database.query(
+      `UPDATE member_learning_preferences
+       SET weekly_rehearsal_enabled_at = $3
+       WHERE household_id = $1 AND person_id = $2`,
+      [householdId, customerTwoPersonId, new Date(now.getTime() - 7 * 86_400_000).toISOString()],
+    );
+    const dueLearning = await app.inject({
+      method: 'GET',
+      url: '/v1/member-learning',
+      headers: customerTwoHouseholdHeaders,
+    });
+    expect(dueLearning.statusCode, dueLearning.body).toBe(200);
+    const dueRehearsal = dueLearning.json<{
+      weeklyRehearsal: {
+        key: string;
+        version: number;
+        occurrenceVersion: number;
+        options: { key: string }[];
+      };
+    }>().weeklyRehearsal;
+    expect(dueRehearsal).toBeTruthy();
     const rehearsalCompleted = await app.inject({
       method: 'POST',
-      url: '/v1/member-learning/rehearsal/complete',
+      url: '/v1/member-learning/rehearsal/answer',
       headers: {
         ...customerTwoHouseholdHeaders,
         'idempotency-key': memberLearningOperation('weekly-rehearsal-complete', 4),
       },
-      payload: { complete: true },
+      payload: {
+        rehearsalKey: dueRehearsal.key,
+        rehearsalVersion: dueRehearsal.version,
+        occurrenceVersion: dueRehearsal.occurrenceVersion,
+        optionKey: dueRehearsal.options[0]?.key,
+      },
     });
     expect(rehearsalCompleted.statusCode, rehearsalCompleted.body).toBe(200);
     expect(rehearsalCompleted.json()).toMatchObject({
-      preferences: {
-        coarseRegion: 'US-CA',
-        weeklyRehearsalEnabled: true,
-        lastRehearsedAt: expect.any(String),
-        nextRehearsalAt: expect.any(String),
+      saferChoice: expect.any(Boolean),
+      feedback: expect.any(String),
+      learning: {
+        weeklyRehearsal: null,
+        preferences: {
+          coarseRegion: 'US-CA',
+          weeklyRehearsalEnabled: true,
+          lastRehearsedAt: expect.any(String),
+          nextRehearsalAt: expect.any(String),
+        },
+        feed: { delivery: 'in_app_only', externalDelivery: 'disabled' },
       },
-      feed: { delivery: 'in_app_only', externalDelivery: 'disabled' },
     });
 
     const organizerConnectionCode = await app.inject({

@@ -84,6 +84,7 @@ describe('member learning repository', () => {
       coarseRegion: 'US',
       weeklyRehearsalEnabled: false,
     });
+    expect(initial.weeklyRehearsal).toBeNull();
     expect(initial.feed.items.map((item) => item.kind)).toEqual(['lesson', 'guidance']);
     await expect(
       repository.updatePreferences({
@@ -152,6 +153,18 @@ describe('member learning repository', () => {
     });
     expect(preferences.guidance.briefs.map((brief) => brief.region)).toEqual(['US-CA', 'US']);
     expect(preferences.preferences.nextRehearsalAt?.toISOString()).toBe('2026-09-03T12:00:00.000Z');
+    expect(preferences.weeklyRehearsal).toBeNull();
+
+    await expect(
+      repository.answerWeeklyRehearsal({
+        ...scope,
+        rehearsalKey: 'bank_alert_callback',
+        rehearsalVersion: 1,
+        occurrenceVersion: 1,
+        optionKey: 'use_official_bank_channel',
+        idempotencyKey: operationKey('weekly-rehearsal-complete', 20),
+      }),
+    ).rejects.toThrow('No weekly rehearsal is due yet');
 
     const rehearsalDue = await repository.getSnapshot({
       ...scope,
@@ -166,6 +179,11 @@ describe('member learning repository', () => {
         }),
       ]),
     );
+    expect(rehearsalDue.weeklyRehearsal).toMatchObject({
+      occurrenceVersion: expect.any(Number),
+      dueAt: new Date('2026-09-03T12:00:00.000Z'),
+      rehearsal: { version: 1, estimatedMinutes: 2 },
+    });
     const guidanceItem = rehearsalDue.feed.items.find((item) => item.kind === 'guidance');
     expect(guidanceItem).toBeDefined();
     const feedInput = {
@@ -186,19 +204,77 @@ describe('member learning repository', () => {
     const rehearsalInput = {
       ...scope,
       now: new Date('2026-09-03T12:00:00.000Z'),
+      rehearsalKey: rehearsalDue.weeklyRehearsal!.rehearsal.key,
+      rehearsalVersion: rehearsalDue.weeklyRehearsal!.rehearsal.version,
+      occurrenceVersion: rehearsalDue.weeklyRehearsal!.occurrenceVersion,
+      optionKey: rehearsalDue.weeklyRehearsal!.rehearsal.saferOptionKey,
       idempotencyKey: operationKey('weekly-rehearsal-complete', 7),
     };
-    const rehearsed = await repository.completeWeeklyRehearsal(rehearsalInput);
-    const rehearsalRetry = await repository.completeWeeklyRehearsal({
+    const rehearsed = await repository.answerWeeklyRehearsal(rehearsalInput);
+    const rehearsalRetry = await repository.answerWeeklyRehearsal({
       ...rehearsalInput,
       correlationId: 'correlation-learning-rehearsal-retry',
-      now: new Date('2026-09-04T12:00:00.000Z'),
+      now: new Date('2026-09-10T12:00:00.000Z'),
     });
-    expect(rehearsed.feed.items.some((item) => item.kind === 'weekly_rehearsal')).toBe(false);
-    expect(rehearsed.preferences.nextRehearsalAt?.toISOString()).toBe('2026-09-10T12:00:00.000Z');
-    expect(rehearsalRetry.preferences.lastRehearsedAt?.toISOString()).toBe(
+    expect(rehearsed.saferChoice).toBe(true);
+    expect(rehearsed.feedback.length).toBeGreaterThan(20);
+    expect(rehearsed.snapshot.weeklyRehearsal).toBeNull();
+    expect(rehearsed.snapshot.feed.items.some((item) => item.kind === 'weekly_rehearsal')).toBe(
+      false,
+    );
+    expect(rehearsed.snapshot.preferences.nextRehearsalAt?.toISOString()).toBe(
+      '2026-09-10T12:00:00.000Z',
+    );
+    expect(rehearsalRetry.snapshot.preferences.lastRehearsedAt?.toISOString()).toBe(
       '2026-09-03T12:00:00.000Z',
     );
+    expect(rehearsalRetry).toMatchObject({
+      saferChoice: rehearsed.saferChoice,
+      feedback: rehearsed.feedback,
+    });
+    expect(rehearsalRetry.snapshot.weeklyRehearsal?.rehearsal.key).not.toBe(
+      rehearsalInput.rehearsalKey,
+    );
+    const rehearsalReceipt = await database.query<
+      { readonly canonical_result: unknown } & Record<string, unknown>
+    >(
+      `SELECT canonical_result
+       FROM member_learning_operation_receipts
+       WHERE household_id = 'household-sunrise'
+         AND person_id = 'person-owner-alice'
+         AND action_kind = 'weekly_rehearsal_complete'`,
+    );
+    expect(rehearsalReceipt.rows[0]?.canonical_result).toEqual({
+      schemaVersion: 1,
+      appliedAt: '2026-09-03T12:00:00.000Z',
+      saferChoice: rehearsed.saferChoice,
+      feedback: rehearsed.feedback,
+    });
+    expect(JSON.stringify(rehearsalReceipt.rows[0]?.canonical_result)).not.toContain(
+      rehearsalInput.optionKey,
+    );
+
+    await database.query(
+      `UPDATE member_learning_preferences
+       SET last_rehearsed_at = $3, updated_at = $3
+       WHERE household_id = $1 AND person_id = $2`,
+      ['household-sunrise', 'person-owner-alice', '2026-09-24T12:00:00.000Z'],
+    );
+    const cycledRehearsal = await repository.getSnapshot({
+      ...scope,
+      now: new Date('2026-10-01T12:00:00.000Z'),
+    });
+    expect(cycledRehearsal.weeklyRehearsal).toMatchObject({
+      rehearsal: { key: rehearsalInput.rehearsalKey },
+      occurrenceVersion: rehearsalInput.occurrenceVersion + 4,
+    });
+    await expect(
+      repository.answerWeeklyRehearsal({
+        ...rehearsalInput,
+        idempotencyKey: operationKey('weekly-rehearsal-complete', 8),
+        now: new Date('2026-10-01T12:00:00.000Z'),
+      }),
+    ).rejects.toThrow('different weekly rehearsal');
 
     const events = await database.query<{ readonly count: number }>(
       `SELECT count(*)::integer AS count FROM audit_events
@@ -206,6 +282,67 @@ describe('member learning repository', () => {
          AND action LIKE 'member_learning.%'`,
     );
     expect(events.rows[0]?.count).toBe(6);
+  }, 60_000);
+
+  it('recovers legacy dismissed rehearsals and rejects new rehearsal dismissal', async () => {
+    database = await createSeededTestDatabase(now);
+    const repository = new MemberLearningRepository(database);
+    const scope = {
+      householdId: 'household-sunrise',
+      personId: 'person-owner-alice',
+      audience: 'customer' as const,
+      correlationId: 'correlation-learning-rehearsal-dismissal',
+    };
+    await repository.updatePreferences({
+      ...scope,
+      now,
+      coarseRegion: 'US',
+      weeklyRehearsalEnabled: true,
+      idempotencyKey: operationKey('preferences-update', 30),
+    });
+    const dueAt = new Date('2026-09-03T12:00:00.000Z');
+    const due = await repository.getSnapshot({ ...scope, now: dueAt });
+    const rehearsal = due.weeklyRehearsal;
+    expect(rehearsal).not.toBeNull();
+    await database.query(
+      `INSERT INTO member_in_app_feed_receipts(
+         household_id, person_id, item_key, item_version, state,
+         read_at, dismissed_at, updated_at
+       ) VALUES ($1,$2,'weekly-rehearsal',$3,'dismissed',NULL,$4,$4)`,
+      [scope.householdId, scope.personId, rehearsal!.occurrenceVersion, dueAt.toISOString()],
+    );
+
+    const recovered = await repository.getSnapshot({ ...scope, now: dueAt });
+    expect(recovered.weeklyRehearsal).not.toBeNull();
+    expect(recovered.feed.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: 'weekly-rehearsal',
+          version: rehearsal!.occurrenceVersion,
+          state: 'unread',
+        }),
+      ]),
+    );
+    await expect(
+      repository.updateFeedItem({
+        ...scope,
+        now: dueAt,
+        itemKey: 'weekly-rehearsal',
+        itemVersion: rehearsal!.occurrenceVersion,
+        state: 'dismissed',
+        idempotencyKey: operationKey('feed-item-update', 31),
+      }),
+    ).rejects.toThrow('stay available until a response is chosen');
+
+    const read = await repository.updateFeedItem({
+      ...scope,
+      now: dueAt,
+      itemKey: 'weekly-rehearsal',
+      itemVersion: rehearsal!.occurrenceVersion,
+      state: 'read',
+      idempotencyKey: operationKey('feed-item-update', 32),
+    });
+    expect(read.feed.items.find((item) => item.key === 'weekly-rehearsal')?.state).toBe('read');
   }, 60_000);
 
   it('returns the committed snapshot atomically when protected access is revoked after commit', async () => {

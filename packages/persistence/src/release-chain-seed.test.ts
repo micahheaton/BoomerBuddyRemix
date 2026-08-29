@@ -58,6 +58,7 @@ const releaseMigrations = [
   '0042_run3_1_regional_scam_guidance.sql',
   '0043_governed_first_party_content.sql',
   '0044_versioned_stripe_offer_catalog.sql',
+  '0045_member_learning_rehearsal_answers.sql',
 ] as const;
 
 const now = new Date('2026-08-17T12:00:00.000Z');

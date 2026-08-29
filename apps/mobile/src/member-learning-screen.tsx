@@ -33,7 +33,7 @@ import {
 } from './member-learning-idempotency';
 import {
   answerMemberLearningLesson,
-  completeMemberWeeklyRehearsal,
+  answerMemberWeeklyRehearsal,
   loadMemberLearning,
   startMemberLearningLesson,
   updateMemberLearningFeedItem,
@@ -143,6 +143,12 @@ function deviceReminderMessage(state: WeeklyReminderState | undefined): string {
   }
 }
 
+type HouseholdBoundBusy = Readonly<{
+  householdId: string;
+  requestId: number;
+  value: string;
+}>;
+
 export function MemberLearningScreen(): React.ReactElement {
   const { principal, selectedHouseholdId, selectedScope } = useMobileHousehold();
   const canUseLearning =
@@ -160,8 +166,12 @@ export function MemberLearningScreen(): React.ReactElement {
   const [selectedOptionKeyDraft, setSelectedOptionKeyDraft] =
     useState<HouseholdBoundDraft<string>>();
   const [lessonFeedbackDraft, setLessonFeedbackDraft] = useState<HouseholdBoundDraft<string>>();
+  const [selectedRehearsalOptionDraft, setSelectedRehearsalOptionDraft] =
+    useState<HouseholdBoundDraft<string>>();
+  const [rehearsalFeedbackDraft, setRehearsalFeedbackDraft] =
+    useState<HouseholdBoundDraft<string>>();
   const [regionDraftState, setRegionDraftState] = useState<HouseholdBoundDraft<string>>();
-  const [busy, setBusy] = useState('');
+  const [busyDraft, setBusyDraft] = useState<HouseholdBoundBusy>();
   const [announcementDraft, setAnnouncementDraft] = useState<HouseholdBoundDraft<string>>();
   const [deviceReminder, setDeviceReminder] = useState<WeeklyReminderState>();
 
@@ -170,7 +180,12 @@ export function MemberLearningScreen(): React.ReactElement {
   const selectedOptionKey =
     householdBoundDraftValue(selectedOptionKeyDraft, selectedHouseholdId) ?? '';
   const lessonFeedback = householdBoundDraftValue(lessonFeedbackDraft, selectedHouseholdId) ?? '';
+  const selectedRehearsalOption =
+    householdBoundDraftValue(selectedRehearsalOptionDraft, selectedHouseholdId) ?? '';
+  const rehearsalFeedback =
+    householdBoundDraftValue(rehearsalFeedbackDraft, selectedHouseholdId) ?? '';
   const announcement = householdBoundDraftValue(announcementDraft, selectedHouseholdId) ?? '';
+  const busy = busyDraft?.householdId === selectedHouseholdId ? busyDraft.value : '';
   const setSelectedLessonKey = (value: string): void => {
     setSelectedLessonKeyDraft({ householdId: selectedHouseholdId, value });
   };
@@ -180,8 +195,22 @@ export function MemberLearningScreen(): React.ReactElement {
   const setLessonFeedback = (value: string): void => {
     setLessonFeedbackDraft({ householdId: selectedHouseholdId, value });
   };
+  const setSelectedRehearsalOption = (value: string): void => {
+    setSelectedRehearsalOptionDraft({ householdId: selectedHouseholdId, value });
+  };
+  const setRehearsalFeedback = (value: string): void => {
+    setRehearsalFeedbackDraft({ householdId: selectedHouseholdId, value });
+  };
   const setAnnouncement = (value: string): void => {
     setAnnouncementDraft({ householdId: selectedHouseholdId, value });
+  };
+  const setBusyForRequest = (householdId: string, requestId: number, value: string): void => {
+    setBusyDraft({ householdId, requestId, value });
+  };
+  const clearBusyForRequest = (householdId: string, requestId: number): void => {
+    setBusyDraft((current) =>
+      current?.householdId === householdId && current.requestId === requestId ? undefined : current,
+    );
   };
   const operationKeys = (): DurableActionOperationKeys => {
     operationKeysRef.current ??= createMobileMemberLearningOperationKeys();
@@ -245,6 +274,7 @@ export function MemberLearningScreen(): React.ReactElement {
     ? resource
     : undefined;
   const learning = visibleResource?.status === 'ready' ? visibleResource.value : undefined;
+  const weeklyRehearsal = learning?.weeklyRehearsal ?? null;
 
   const regionDraft =
     householdBoundDraftValue(regionDraftState, selectedHouseholdId) ??
@@ -270,7 +300,7 @@ export function MemberLearningScreen(): React.ReactElement {
     const householdId = selectedHouseholdId;
     if (!householdId || selectedHouseholdIdRef.current !== householdId) return undefined;
     const requestId = ++requestIdRef.current;
-    setBusy(operationName);
+    setBusyForRequest(householdId, requestId, operationName);
     setAnnouncement('');
     dispatch({ type: 'started', householdId, requestId });
     try {
@@ -287,7 +317,7 @@ export function MemberLearningScreen(): React.ReactElement {
       }
       return undefined;
     } finally {
-      if (selectedHouseholdIdRef.current === householdId) setBusy('');
+      clearBusyForRequest(householdId, requestId);
     }
   }
 
@@ -308,7 +338,7 @@ export function MemberLearningScreen(): React.ReactElement {
     const optionKey = selectedOptionKey;
     const householdId = selectedHouseholdId;
     const requestId = ++requestIdRef.current;
-    setBusy(`answer:${lesson.key}`);
+    setBusyForRequest(householdId, requestId, `answer:${lesson.key}`);
     setAnnouncement('');
     dispatch({ type: 'started', householdId, requestId });
     const operationAction = 'lesson-answer' as const;
@@ -342,7 +372,7 @@ export function MemberLearningScreen(): React.ReactElement {
         dispatch({ type: 'failed', householdId, requestId, message: readableError(caught) });
       }
     } finally {
-      if (selectedHouseholdIdRef.current === householdId) setBusy('');
+      clearBusyForRequest(householdId, requestId);
     }
   }
 
@@ -395,26 +425,69 @@ export function MemberLearningScreen(): React.ReactElement {
   }
 
   async function enableThisDeviceReminder() {
-    setBusy('device-reminder');
-    setDeviceReminder(await enableWeeklyRehearsalReminder());
-    setBusy('');
+    const householdId = selectedHouseholdId;
+    const requestId = ++requestIdRef.current;
+    setBusyForRequest(householdId, requestId, 'device-reminder');
+    try {
+      const reminder = await enableWeeklyRehearsalReminder();
+      if (selectedHouseholdIdRef.current === householdId) setDeviceReminder(reminder);
+    } finally {
+      clearBusyForRequest(householdId, requestId);
+    }
   }
 
   async function removeThisDeviceReminder() {
-    setBusy('device-reminder');
-    setDeviceReminder(await disableWeeklyRehearsalReminder());
-    setAnnouncement('This device reminder was removed. In-app weekly practice remains enabled.');
-    setBusy('');
+    const householdId = selectedHouseholdId;
+    const requestId = ++requestIdRef.current;
+    setBusyForRequest(householdId, requestId, 'device-reminder');
+    try {
+      const reminder = await disableWeeklyRehearsalReminder();
+      if (selectedHouseholdIdRef.current === householdId) {
+        setDeviceReminder(reminder);
+        setAnnouncement(
+          'This device reminder was removed. In-app weekly practice remains enabled.',
+        );
+      }
+    } finally {
+      clearBusyForRequest(householdId, requestId);
+    }
   }
 
-  async function completeRehearsal() {
-    await applyCanonicalMutation(
-      'rehearsal',
-      'weekly-rehearsal-complete',
-      'complete:true',
-      (idempotencyKey) => completeMemberWeeklyRehearsal(selectedHouseholdId, idempotencyKey),
-      'Weekly safety rehearsal completed.',
-    );
+  async function answerRehearsal() {
+    const rehearsal = weeklyRehearsal;
+    if (!rehearsal || !selectedRehearsalOption) return;
+    const householdId = selectedHouseholdId;
+    const optionKey = selectedRehearsalOption;
+    const requestId = ++requestIdRef.current;
+    setBusyForRequest(householdId, requestId, 'rehearsal');
+    setAnnouncement('');
+    dispatch({ type: 'started', householdId, requestId });
+    const operationAction = 'weekly-rehearsal-complete' as const;
+    try {
+      const idempotencyKey = await mutationKey(
+        householdId,
+        operationAction,
+        JSON.stringify([rehearsal.key, rehearsal.version, rehearsal.occurrenceVersion, optionKey]),
+      );
+      const response = await answerMemberWeeklyRehearsal(
+        householdId,
+        rehearsal,
+        optionKey,
+        idempotencyKey,
+      );
+      await settleMutationKey(householdId, operationAction, idempotencyKey);
+      if (selectedHouseholdIdRef.current !== householdId) return;
+      dispatch({ type: 'succeeded', householdId, requestId, value: response.learning });
+      setSelectedRehearsalOption('');
+      setRehearsalFeedback(`${response.feedback} Practice note: ${rehearsal.takeaway}`);
+      setAnnouncement('Weekly safety rehearsal saved. The next one is scheduled in a week.');
+    } catch (caught) {
+      if (selectedHouseholdIdRef.current === householdId) {
+        dispatch({ type: 'failed', householdId, requestId, message: readableError(caught) });
+      }
+    } finally {
+      clearBusyForRequest(householdId, requestId);
+    }
   }
 
   async function updateFeedItem(item: MemberLearningFeedItemDto, state: 'read' | 'dismissed') {
@@ -461,6 +534,11 @@ export function MemberLearningScreen(): React.ReactElement {
       {announcement ? (
         <Text accessibilityLiveRegion="polite" style={s.body}>
           {announcement}
+        </Text>
+      ) : null}
+      {rehearsalFeedback ? (
+        <Text accessibilityLiveRegion="polite" style={s.body}>
+          {rehearsalFeedback}
         </Text>
       ) : null}
       {!canUseLearning ? (
@@ -682,12 +760,58 @@ export function MemberLearningScreen(): React.ReactElement {
                       }}
                     />
                   ) : item.action === 'weekly_rehearsal' ? (
-                    <ActionButton
-                      kind="secondary"
-                      title="Complete two-minute rehearsal"
-                      disabled={Boolean(busy)}
-                      onPress={() => void completeRehearsal()}
-                    />
+                    weeklyRehearsal ? (
+                      <View>
+                        <Text style={s.label}>Practice scenario</Text>
+                        <Text style={s.body}>{weeklyRehearsal.scenario}</Text>
+                        <Text style={s.label}>{weeklyRehearsal.prompt}</Text>
+                        {weeklyRehearsal.options.map((option) => (
+                          <Pressable
+                            accessibilityRole="radio"
+                            accessibilityState={{
+                              checked: selectedRehearsalOption === option.key,
+                            }}
+                            key={option.key}
+                            onPress={() => {
+                              setSelectedRehearsalOption(option.key);
+                              setRehearsalFeedback('');
+                            }}
+                            style={[
+                              s.choice,
+                              selectedRehearsalOption === option.key && s.choiceSelected,
+                            ]}
+                          >
+                            <View
+                              style={[
+                                s.radio,
+                                selectedRehearsalOption === option.key && s.radioSelected,
+                              ]}
+                            />
+                            <Text style={s.body}>{option.label}</Text>
+                          </Pressable>
+                        ))}
+                        <ActionButton
+                          title={
+                            busy === 'rehearsal' ? 'Reviewing first step…' : 'Review my first step'
+                          }
+                          disabled={Boolean(busy) || !selectedRehearsalOption}
+                          onPress={() => void answerRehearsal()}
+                        />
+                        <Text style={s.muted}>
+                          Scenario reviewed {formatDate(weeklyRehearsal.reviewedAt)}.
+                        </Text>
+                        <ActionButton
+                          kind="secondary"
+                          title={`Open official source: ${weeklyRehearsal.source.title}`}
+                          disabled={Boolean(busy)}
+                          onPress={() => void openSource(weeklyRehearsal.source.url)}
+                        />
+                      </View>
+                    ) : (
+                      <Text style={s.muted}>
+                        This rehearsal changed. Refresh Learn and updates before answering.
+                      </Text>
+                    )
                   ) : item.state === 'unread' ? (
                     <ActionButton
                       kind="secondary"
@@ -696,12 +820,14 @@ export function MemberLearningScreen(): React.ReactElement {
                       onPress={() => void updateFeedItem(item, 'read')}
                     />
                   ) : null}
-                  <ActionButton
-                    kind="secondary"
-                    title="Dismiss this update"
-                    disabled={Boolean(busy)}
-                    onPress={() => void updateFeedItem(item, 'dismissed')}
-                  />
+                  {item.kind !== 'weekly_rehearsal' ? (
+                    <ActionButton
+                      kind="secondary"
+                      title="Dismiss this update"
+                      disabled={Boolean(busy)}
+                      onPress={() => void updateFeedItem(item, 'dismissed')}
+                    />
+                  ) : null}
                 </View>
               ))
             ) : (

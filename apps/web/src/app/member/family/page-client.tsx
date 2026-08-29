@@ -19,6 +19,12 @@ import {
   householdRequestIsCurrent,
   type HouseholdBoundValue,
 } from '../../../lib/household-request';
+import {
+  buildInvitationHandoffPath,
+  invitationHandoffAnchor,
+  readInvitationHandoff,
+  type InvitationHandoffKind,
+} from '../../../lib/invitation-handoff';
 
 const permissionLabels: Record<TrustedCirclePermissionDto, string> = {
   view_shared_checks: 'View checks that are deliberately shared',
@@ -94,6 +100,30 @@ export default function FamilyPage() {
     }, 0);
     return () => window.clearTimeout(reset);
   }, [selectedHouseholdId]);
+
+  useEffect(() => {
+    const handoff = readInvitationHandoff(window.location.search);
+    if (!handoff) return;
+    const reveal = window.setTimeout(() => {
+      if (handoff.kind === 'member') {
+        setMemberInvitationId(handoff.invitationId);
+      } else {
+        setInvitationId(handoff.invitationId);
+      }
+      setAnnouncement(
+        'The invitation ID was filled from the handoff link. The link never contains a connection code. Enter the code you created or received separately, then review every detail before accepting.',
+      );
+      document.getElementById(invitationHandoffAnchor(handoff.kind))?.scrollIntoView({
+        block: 'start',
+      });
+      document
+        .getElementById(
+          handoff.kind === 'member' ? 'member-invitation-credential' : 'local-invite-code',
+        )
+        ?.focus();
+    }, 0);
+    return () => window.clearTimeout(reveal);
+  }, []);
 
   useEffect(() => {
     const householdId = selectedHouseholdId;
@@ -183,6 +213,20 @@ export default function FamilyPage() {
       setAnnouncement('Connection code copied. Give it only to the person you want to invite you.');
     } catch {
       setAnnouncement('Copy was unavailable. Select the connection code and copy it manually.');
+    }
+  }
+
+  async function copyInvitationHandoff(kind: InvitationHandoffKind, handoffInvitationId: string) {
+    try {
+      const path = buildInvitationHandoffPath(kind, handoffInvitationId);
+      await navigator.clipboard.writeText(new URL(path, window.location.origin).toString());
+      setAnnouncement(
+        'Invitation link copied. It contains only the invitation ID, never the connection code. Give the connection code separately and only to the intended person.',
+      );
+    } catch {
+      setAnnouncement(
+        'Copy was unavailable. Give the visible invitation ID directly to the intended person and keep the connection code separate.',
+      );
     }
   }
 
@@ -599,6 +643,7 @@ export default function FamilyPage() {
       {production ? (
         <>
           <form
+            id="accept-member-invitation"
             className="card form-stack"
             onSubmit={reviewMemberInvite}
             style={{ marginTop: '1.5rem' }}
@@ -710,6 +755,7 @@ export default function FamilyPage() {
         </>
       ) : null}
       <form
+        id="accept-trusted-invitation"
         className="card form-stack"
         onSubmit={reviewInvite}
         style={{ marginTop: '1.5rem' }}
@@ -986,6 +1032,21 @@ export default function FamilyPage() {
                     Invitation ID:{' '}
                     <strong className="invite-id">{createdMemberInvitation.invitation.id}</strong>
                   </p>
+                  <div className="button-row">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() =>
+                        void copyInvitationHandoff('member', createdMemberInvitation.invitation.id)
+                      }
+                    >
+                      Copy household invitation link
+                    </button>
+                  </div>
+                  <p className="help">
+                    The link fills only the invitation ID. It never includes the connection code or
+                    accepts membership automatically.
+                  </p>
                   <p className="meta">
                     {createdMemberInvitation.reused ? 'Recovered invitation' : 'New invitation'} ·
                     Member only · Expires{' '}
@@ -1229,6 +1290,21 @@ export default function FamilyPage() {
               </p>
               <p>
                 Invitation ID: <strong className="invite-id">{created.invitation.id}</strong>
+              </p>
+              <div className="button-row">
+                <button
+                  className="button-secondary"
+                  type="button"
+                  onClick={() =>
+                    void copyInvitationHandoff('trusted-circle', created.invitation.id)
+                  }
+                >
+                  Copy Trusted Circle invitation link
+                </button>
+              </div>
+              <p className="help">
+                The link fills only the invitation ID. It never includes a connection code, shares a
+                Check, or accepts the invitation automatically.
               </p>
               {created.delivery === 'local_only' ? (
                 <p>

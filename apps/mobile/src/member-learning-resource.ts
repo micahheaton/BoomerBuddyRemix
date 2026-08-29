@@ -1,10 +1,12 @@
 import {
   answerMemberLearningLessonResponseSchema,
+  answerWeeklyRehearsalResponseSchema,
   memberLearningResponseSchema,
   type MemberLearningFeedItemDto,
   type MemberLearningLessonDto,
   type MemberLearningPreferencesDto,
   type MemberLearningResponse,
+  type MemberWeeklyRehearsalDto,
 } from '@boomerbuddy/contracts';
 import { MobileCustomerError, mobileRequest } from './api';
 
@@ -94,16 +96,29 @@ export async function updateMemberLearningPreferences(
   return parseLearningResponse(response);
 }
 
-export async function completeMemberWeeklyRehearsal(
+export async function answerMemberWeeklyRehearsal(
   householdId: string,
+  rehearsal: Pick<MemberWeeklyRehearsalDto, 'key' | 'version' | 'occurrenceVersion'>,
+  optionKey: string,
   idempotencyKey: string,
-): Promise<MemberLearningResponse> {
-  const response = await mobileRequest<unknown>('/v1/member-learning/rehearsal/complete', {
+): Promise<Readonly<{ saferChoice: boolean; feedback: string; learning: MemberLearningResponse }>> {
+  const response = await mobileRequest<unknown>('/v1/member-learning/rehearsal/answer', {
     method: 'POST',
     headers: householdHeaders(householdId, idempotencyKey),
-    body: JSON.stringify({ complete: true }),
+    body: JSON.stringify({
+      rehearsalKey: rehearsal.key,
+      rehearsalVersion: rehearsal.version,
+      occurrenceVersion: rehearsal.occurrenceVersion,
+      optionKey,
+    }),
   });
-  return parseLearningResponse(response);
+  const parsed = answerWeeklyRehearsalResponseSchema.safeParse(response);
+  if (!parsed.success) {
+    throw new MobileCustomerError(
+      'BoomerBuddy received an unexpected weekly practice response. Please try again.',
+    );
+  }
+  return parsed.data;
 }
 
 export async function updateMemberLearningFeedItem(

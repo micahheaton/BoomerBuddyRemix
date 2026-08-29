@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   answerMemberLearningLessonRequestSchema,
+  answerWeeklyRehearsalRequestSchema,
   memberLearningCoarseRegionSchema,
   memberLearningLessonSchema,
+  memberWeeklyRehearsalSchema,
   updateMemberLearningFeedItemRequestSchema,
   updateMemberLearningPreferencesRequestSchema,
 } from './member-learning';
@@ -89,5 +91,61 @@ describe('member learning contracts', () => {
         destination: 'forbidden',
       }),
     ).toThrow();
+  });
+
+  it('requires a version-bound weekly scenario choice without accepting customer content', () => {
+    expect(
+      answerWeeklyRehearsalRequestSchema.parse({
+        rehearsalKey: 'bank_alert_callback',
+        rehearsalVersion: 1,
+        occurrenceVersion: 2_955,
+        optionKey: 'use_official_bank_channel',
+      }),
+    ).toEqual({
+      rehearsalKey: 'bank_alert_callback',
+      rehearsalVersion: 1,
+      occurrenceVersion: 2_955,
+      optionKey: 'use_official_bank_channel',
+    });
+    for (const forbidden of ['complete', 'answerText', 'personId', 'householdId']) {
+      expect(() =>
+        answerWeeklyRehearsalRequestSchema.parse({
+          rehearsalKey: 'bank_alert_callback',
+          rehearsalVersion: 1,
+          occurrenceVersion: 2_955,
+          optionKey: 'use_official_bank_channel',
+          [forbidden]: forbidden === 'complete' ? true : 'forbidden',
+        }),
+      ).toThrow();
+    }
+    expect(() =>
+      answerWeeklyRehearsalRequestSchema.parse({
+        rehearsalKey: 'bank_alert_callback',
+        rehearsalVersion: 1,
+        optionKey: 'use_official_bank_channel',
+      }),
+    ).toThrow();
+  });
+
+  it('does not expose a weekly rehearsal answer key through the response contract', () => {
+    const parsed = memberWeeklyRehearsalSchema.parse({
+      key: 'bank_alert_callback',
+      version: 1,
+      occurrenceVersion: 10,
+      title: 'A bank alert asks you to act now',
+      estimatedMinutes: 2,
+      scenario: 'A message says your account is locked.',
+      prompt: 'What is the safest first action?',
+      options: [
+        { key: 'open_message_link', label: 'Open the link' },
+        { key: 'use_official_bank_channel', label: 'Use the official bank channel' },
+      ],
+      saferOptionKey: 'use_official_bank_channel',
+      takeaway: 'Verify independently.',
+      source: { title: 'Official source', url: 'https://example.gov/scams' },
+      reviewedAt: '2026-08-28T12:00:00.000Z',
+      dueAt: '2026-09-03T12:00:00.000Z',
+    });
+    expect(parsed).not.toHaveProperty('saferOptionKey');
   });
 });

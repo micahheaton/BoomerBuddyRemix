@@ -2,6 +2,8 @@ import { assertAuthorized } from '@boomerbuddy/authorization';
 import {
   answerMemberLearningLessonRequestSchema,
   answerMemberLearningLessonResponseSchema,
+  answerWeeklyRehearsalRequestSchema,
+  answerWeeklyRehearsalResponseSchema,
   completeWeeklyRehearsalRequestSchema,
   memberLearningFeedItemKeySchema,
   memberLearningLessonKeySchema,
@@ -110,6 +112,23 @@ function memberLearningDto(snapshot: MemberLearningSnapshot) {
         ? {}
         : { updatedAt: snapshot.preferences.updatedAt.toISOString() }),
     },
+    weeklyRehearsal:
+      snapshot.weeklyRehearsal === null
+        ? null
+        : {
+            key: snapshot.weeklyRehearsal.rehearsal.key,
+            version: snapshot.weeklyRehearsal.rehearsal.version,
+            occurrenceVersion: snapshot.weeklyRehearsal.occurrenceVersion,
+            title: snapshot.weeklyRehearsal.rehearsal.title,
+            estimatedMinutes: snapshot.weeklyRehearsal.rehearsal.estimatedMinutes,
+            scenario: snapshot.weeklyRehearsal.rehearsal.scenario,
+            prompt: snapshot.weeklyRehearsal.rehearsal.prompt,
+            options: snapshot.weeklyRehearsal.rehearsal.options.map((option) => ({ ...option })),
+            takeaway: snapshot.weeklyRehearsal.rehearsal.takeaway,
+            source: { ...snapshot.weeklyRehearsal.rehearsal.source },
+            reviewedAt: snapshot.weeklyRehearsal.rehearsal.reviewedAt.toISOString(),
+            dueAt: snapshot.weeklyRehearsal.dueAt.toISOString(),
+          },
     feed: {
       items: snapshot.feed.items.map((item) => ({
         key: item.key,
@@ -261,21 +280,42 @@ export function registerMemberLearningRoutes(app: FastifyInstance, context: ApiC
     return memberLearningDto(snapshot);
   });
 
-  app.post('/v1/member-learning/rehearsal/complete', async (request, reply) => {
+  app.post('/v1/member-learning/rehearsal/answer', async (request, reply) => {
     const scope = await memberLearningScope(request, context);
     authorizeMemberLearning(scope, 'orientation:update');
     assertMutationOrigin(request, context.config, scope.auth);
-    completeWeeklyRehearsalRequestSchema.parse(request.body);
-    const snapshot = await context.repositories.memberLearning.completeWeeklyRehearsal({
+    const body = answerWeeklyRehearsalRequestSchema.parse(request.body);
+    const result = await context.repositories.memberLearning.answerWeeklyRehearsal({
       householdId: scope.householdId,
       personId: scope.personId,
+      rehearsalKey: body.rehearsalKey,
+      rehearsalVersion: body.rehearsalVersion,
+      occurrenceVersion: body.occurrenceVersion,
+      optionKey: body.optionKey,
       idempotencyKey: memberLearningOperationKey(request, 'weekly-rehearsal-complete'),
       audience: scope.auth.audience,
       correlationId: correlationId(request),
       now: context.now(),
     });
     privateResponse(reply);
-    return memberLearningDto(snapshot);
+    return answerWeeklyRehearsalResponseSchema.parse({
+      saferChoice: result.saferChoice,
+      feedback: result.feedback,
+      learning: memberLearningDto(result.snapshot),
+    });
+  });
+
+  app.post('/v1/member-learning/rehearsal/complete', async (request, reply) => {
+    const scope = await memberLearningScope(request, context);
+    authorizeMemberLearning(scope, 'orientation:update');
+    assertMutationOrigin(request, context.config, scope.auth);
+    completeWeeklyRehearsalRequestSchema.parse(request.body);
+    memberLearningOperationKey(request, 'weekly-rehearsal-complete');
+    privateResponse(reply);
+    throw new DomainError(
+      'invalid_transition',
+      'Weekly rehearsals now require a response. Refresh or update BoomerBuddy and answer the current two-minute scenario.',
+    );
   });
 
   app.put('/v1/member-learning/feed/:itemKey', async (request, reply) => {

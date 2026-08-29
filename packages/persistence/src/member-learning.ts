@@ -1,17 +1,22 @@
 import { createHash } from 'node:crypto';
 import {
   answerMemberLearningLesson,
+  answerMemberWeeklyRehearsal,
   currentMemberLearningLesson,
   DomainError,
   isMemberLearningCoarseRegion,
   memberLearningDisplayState,
   memberLearningLessons,
+  memberWeeklyRehearsalForDueAt,
+  memberWeeklyRehearsalOccurrenceVersion,
   nextWeeklyRehearsalAt,
   type Audience,
   type MemberLearningDisplayState,
   type MemberLearningCoarseRegion,
   type MemberLearningLesson,
   type MemberLearningLessonKey,
+  type MemberWeeklyRehearsal,
+  type MemberWeeklyRehearsalKey,
   type StoredMemberLearningProgress,
 } from '@boomerbuddy/domain';
 import { constantTimeEqual, lengthPrefixed } from '@boomerbuddy/security';
@@ -99,6 +104,7 @@ interface OperationEvidence {
 interface StoredOperationResult {
   readonly appliedAt: Date;
   readonly correct?: boolean;
+  readonly saferChoice?: boolean;
   readonly feedback?: string;
 }
 
@@ -176,6 +182,12 @@ export interface MemberLearningFeedItemView {
   readonly createdAt: Date;
 }
 
+export interface MemberWeeklyRehearsalView {
+  readonly rehearsal: MemberWeeklyRehearsal;
+  readonly occurrenceVersion: number;
+  readonly dueAt: Date;
+}
+
 export interface MemberLearningSnapshot {
   readonly curriculum: {
     readonly version: 'beta-1';
@@ -190,6 +202,7 @@ export interface MemberLearningSnapshot {
   };
   readonly guidance: MemberScamGuidanceView;
   readonly preferences: MemberLearningPreferencesView;
+  readonly weeklyRehearsal: MemberWeeklyRehearsalView | null;
   readonly feed: {
     readonly items: readonly MemberLearningFeedItemView[];
     readonly unreadCount: number;
@@ -255,6 +268,10 @@ function storedOperationResult(value: unknown): StoredOperationResult {
   if (correct !== undefined && typeof correct !== 'boolean') {
     throw new TypeError('Invalid member learning answer receipt');
   }
+  const saferChoice = result.saferChoice;
+  if (saferChoice !== undefined && typeof saferChoice !== 'boolean') {
+    throw new TypeError('Invalid member learning rehearsal receipt');
+  }
   const feedback = result.feedback;
   if (feedback !== undefined && typeof feedback !== 'string') {
     throw new TypeError('Invalid member learning answer feedback receipt');
@@ -262,6 +279,7 @@ function storedOperationResult(value: unknown): StoredOperationResult {
   return {
     appliedAt,
     ...(correct === undefined ? {} : { correct }),
+    ...(saferChoice === undefined ? {} : { saferChoice }),
     ...(feedback === undefined ? {} : { feedback }),
   };
 }
@@ -271,6 +289,7 @@ function operationResultParameter(result: StoredOperationResult): string {
     schemaVersion: 1,
     appliedAt: result.appliedAt.toISOString(),
     ...(result.correct === undefined ? {} : { correct: result.correct }),
+    ...(result.saferChoice === undefined ? {} : { saferChoice: result.saferChoice }),
     ...(result.feedback === undefined ? {} : { feedback: result.feedback }),
   });
 }
@@ -499,10 +518,6 @@ function feedReceiptKey(itemKey: string, itemVersion: number): string {
   return `${itemKey}:${itemVersion}`;
 }
 
-function weeklyFeedVersion(dueAt: Date): number {
-  return Math.max(1, Math.floor(dueAt.getTime() / (7 * 24 * 60 * 60 * 1_000)));
-}
-
 export class MemberLearningRepository {
   constructor(
     private readonly database: Database,
@@ -639,6 +654,14 @@ export class MemberLearningRepository {
     if (nextRehearsalAt !== undefined) {
       Object.assign(preferences, { nextRehearsalAt });
     }
+    const weeklyRehearsal: MemberWeeklyRehearsalView | null =
+      nextRehearsalAt !== undefined && nextRehearsalAt <= input.now
+        ? {
+            rehearsal: memberWeeklyRehearsalForDueAt(nextRehearsalAt),
+            occurrenceVersion: memberWeeklyRehearsalOccurrenceVersion(nextRehearsalAt),
+            dueAt: nextRehearsalAt,
+          }
+        : null;
 
     const briefResult = await executor.query<BriefRow>(
       `SELECT brief_key, version, region_code, title, summary, safe_actions,
@@ -706,17 +729,17 @@ export class MemberLearningRepository {
         createdAt: leadBrief.publishedAt,
       });
     }
-    if (nextRehearsalAt !== undefined && nextRehearsalAt <= input.now) {
+    if (weeklyRehearsal !== null) {
       candidateFeed.push({
         key: 'weekly-rehearsal',
-        version: weeklyFeedVersion(nextRehearsalAt),
+        version: weeklyRehearsal.occurrenceVersion,
         kind: 'weekly_rehearsal',
         state: 'unread',
         title: 'Weekly two-minute safety rehearsal',
-        summary: 'Practice pausing, verifying independently, and calling a trusted person.',
+        summary: weeklyRehearsal.rehearsal.title,
         action: 'weekly_rehearsal',
-        dueAt: nextRehearsalAt,
-        createdAt: nextRehearsalAt,
+        dueAt: weeklyRehearsal.dueAt,
+        createdAt: weeklyRehearsal.dueAt,
       });
     }
 
@@ -733,7 +756,11 @@ export class MemberLearningRepository {
       ]),
     );
     const feedItems = candidateFeed
-      .filter((item) => receipts.get(feedReceiptKey(item.key, item.version)) !== 'dismissed')
+      .filter(
+        (item) =>
+          item.kind === 'weekly_rehearsal' ||
+          receipts.get(feedReceiptKey(item.key, item.version)) !== 'dismissed',
+      )
       .map((item) => ({
         ...item,
         state:
@@ -754,6 +781,7 @@ export class MemberLearningRepository {
       },
       guidance,
       preferences,
+      weeklyRehearsal,
       feed: {
         items: feedItems,
         unreadCount: feedItems.filter((item) => item.state === 'unread').length,
@@ -1070,20 +1098,33 @@ export class MemberLearningRepository {
     });
   }
 
-  async completeWeeklyRehearsal(input: {
+  async answerWeeklyRehearsal(input: {
     readonly householdId: string;
     readonly personId: string;
+    readonly rehearsalKey: MemberWeeklyRehearsalKey;
+    readonly rehearsalVersion: number;
+    readonly occurrenceVersion: number;
+    readonly optionKey: string;
     readonly idempotencyKey: string;
     readonly audience: Audience;
     readonly correlationId: string;
     readonly now: Date;
-  }): Promise<MemberLearningSnapshot> {
+  }): Promise<{
+    readonly saferChoice: boolean;
+    readonly feedback: string;
+    readonly snapshot: MemberLearningSnapshot;
+  }> {
     const evidence = operationEvidence({
       action: 'weekly_rehearsal_complete',
       operationKey: input.idempotencyKey,
       householdId: input.householdId,
       personId: input.personId,
-      requestFields: ['complete'],
+      requestFields: [
+        input.rehearsalKey,
+        String(input.rehearsalVersion),
+        String(input.occurrenceVersion),
+        input.optionKey,
+      ],
     });
     return this.database.transaction(async (transaction) => {
       await assertEffectiveProtectedLearningAccess(
@@ -1095,18 +1136,48 @@ export class MemberLearningRepository {
         true,
       );
       const prior = await this.priorOperation(transaction, input, evidence);
-      if (prior !== undefined) return this.readSnapshot(transaction, input);
+      if (prior !== undefined) {
+        if (prior.saferChoice === undefined || prior.feedback === undefined) {
+          throw new TypeError('Invalid member learning rehearsal operation receipt');
+        }
+        return {
+          saferChoice: prior.saferChoice,
+          feedback: prior.feedback,
+          snapshot: await this.readSnapshot(transaction, input),
+        };
+      }
+      const current = await this.readSnapshot(transaction, input);
+      const active = current.weeklyRehearsal;
+      if (active === null) {
+        throw new DomainError('invalid_transition', 'No weekly rehearsal is due yet');
+      }
+      if (
+        active.rehearsal.key !== input.rehearsalKey ||
+        active.rehearsal.version !== input.rehearsalVersion ||
+        active.occurrenceVersion !== input.occurrenceVersion
+      ) {
+        throw new DomainError('conflict', 'A different weekly rehearsal is now available', {
+          rehearsalKey: active.rehearsal.key,
+          rehearsalVersion: active.rehearsal.version,
+          occurrenceVersion: active.occurrenceVersion,
+        });
+      }
+      const answer = answerMemberWeeklyRehearsal({
+        rehearsal: active.rehearsal,
+        optionKey: input.optionKey,
+      });
       const updated = await transaction.query(
         `UPDATE member_learning_preferences
          SET last_rehearsed_at = $3, updated_at = $3
          WHERE household_id = $1 AND person_id = $2
-           AND weekly_rehearsal_enabled = true`,
-        [input.householdId, input.personId, input.now.toISOString()],
+           AND weekly_rehearsal_enabled = true
+           AND COALESCE(last_rehearsed_at, weekly_rehearsal_enabled_at) < $4`,
+        [input.householdId, input.personId, input.now.toISOString(), active.dueAt.toISOString()],
       );
       if (updated.rowCount !== 1) {
         throw new DomainError(
           'invalid_transition',
-          'Enable the in-app weekly rehearsal before completing it',
+          'This weekly rehearsal was already completed or is no longer enabled',
         );
       }
       await writeAuditAndOutbox(
@@ -1120,25 +1191,45 @@ export class MemberLearningRepository {
           now: input.now,
         },
         {
-          action: 'member_learning.weekly_rehearsal_completed',
+          action: 'member_learning.weekly_rehearsal_answered',
           resourceType: 'member_learning_rehearsal',
           resourceId: input.personId,
           outcome: 'completed',
+          metadata: {
+            rehearsalKey: active.rehearsal.key,
+            rehearsalVersion: active.rehearsal.version,
+            occurrenceVersion: active.occurrenceVersion,
+            saferChoice: answer.saferChoice,
+          },
         },
         {
-          eventType: 'member_learning.weekly_rehearsal_completed.v1',
+          eventType: 'member_learning.weekly_rehearsal_answered.v1',
           aggregateType: 'member_learning',
           aggregateId: input.personId,
-          payload: { completed: true },
+          payload: {
+            completed: true,
+            rehearsalKey: active.rehearsal.key,
+            rehearsalVersion: active.rehearsal.version,
+            occurrenceVersion: active.occurrenceVersion,
+            saferChoice: answer.saferChoice,
+          },
         },
       );
       const snapshot = await this.readSnapshot(transaction, input);
       await this.recordOperation(transaction, {
         ...input,
         evidence,
-        result: { appliedAt: input.now },
+        result: {
+          appliedAt: input.now,
+          saferChoice: answer.saferChoice,
+          feedback: answer.feedback,
+        },
       });
-      return snapshot;
+      return {
+        saferChoice: answer.saferChoice,
+        feedback: answer.feedback,
+        snapshot,
+      };
     });
   }
 
@@ -1176,6 +1267,12 @@ export class MemberLearningRepository {
         (candidate) => candidate.key === input.itemKey && candidate.version === input.itemVersion,
       );
       if (item === undefined) throw new DomainError('not_found', 'In-app feed item is unavailable');
+      if (item.kind === 'weekly_rehearsal' && input.state === 'dismissed') {
+        throw new DomainError(
+          'invalid_transition',
+          'Weekly rehearsals stay available until a response is chosen',
+        );
+      }
       await transaction.query(
         `INSERT INTO member_in_app_feed_receipts(
            household_id, person_id, item_key, item_version, state,

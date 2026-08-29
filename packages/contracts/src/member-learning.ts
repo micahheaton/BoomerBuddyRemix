@@ -2,11 +2,13 @@ import {
   memberLearningCoarseRegionCodes,
   memberLearningCoarseRegionLabels,
   memberLearningLessonKeys,
+  memberWeeklyRehearsalKeys,
 } from '@boomerbuddy/domain';
 import { z } from 'zod';
 import { isoDateTimeSchema } from './common';
 
 export const memberLearningLessonKeySchema = z.enum(memberLearningLessonKeys);
+export const memberWeeklyRehearsalKeySchema = z.enum(memberWeeklyRehearsalKeys);
 export const memberLearningOptionKeySchema = z
   .string()
   .regex(/^[a-z][a-z0-9_]{1,63}$/u, 'Expected a lesson option key');
@@ -133,6 +135,29 @@ export const memberLearningFeedItemSchema = z.object({
   createdAt: isoDateTimeSchema,
 });
 
+export const memberWeeklyRehearsalSchema = z.object({
+  key: memberWeeklyRehearsalKeySchema,
+  version: z.number().int().positive(),
+  occurrenceVersion: z.number().int().positive(),
+  title: z.string().min(1).max(160),
+  estimatedMinutes: z.literal(2),
+  scenario: z.string().min(1).max(600),
+  prompt: z.string().min(1).max(200),
+  options: z
+    .array(
+      z.object({
+        key: memberLearningOptionKeySchema,
+        label: z.string().min(1).max(240),
+      }),
+    )
+    .min(2)
+    .max(4),
+  takeaway: z.string().min(1).max(300),
+  source: memberLearningSourceSchema,
+  reviewedAt: isoDateTimeSchema,
+  dueAt: isoDateTimeSchema,
+});
+
 export const memberLearningResponseSchema = z.object({
   curriculum: z.object({
     version: z.literal('beta-1'),
@@ -143,6 +168,7 @@ export const memberLearningResponseSchema = z.object({
   }),
   guidance: memberScamGuidanceSchema,
   preferences: memberLearningPreferencesSchema,
+  weeklyRehearsal: memberWeeklyRehearsalSchema.nullable(),
   feed: z.object({
     items: z.array(memberLearningFeedItemSchema).max(20),
     unreadCount: z.number().int().nonnegative(),
@@ -176,9 +202,24 @@ export const updateMemberLearningPreferencesRequestSchema = z
   })
   .strict();
 
+export const answerWeeklyRehearsalRequestSchema = z
+  .object({
+    rehearsalKey: memberWeeklyRehearsalKeySchema,
+    rehearsalVersion: z.number().int().positive(),
+    occurrenceVersion: z.number().int().positive(),
+    optionKey: memberLearningOptionKeySchema,
+  })
+  .strict();
+
 export const completeWeeklyRehearsalRequestSchema = z
   .object({ complete: z.literal(true) })
   .strict();
+
+export const answerWeeklyRehearsalResponseSchema = z.object({
+  saferChoice: z.boolean(),
+  feedback: z.string().min(1).max(500),
+  learning: memberLearningResponseSchema,
+});
 
 export const updateMemberLearningFeedItemRequestSchema = z
   .object({
@@ -193,6 +234,7 @@ export type MemberLearningProgressDto = z.infer<typeof memberLearningProgressSch
 export type MemberScamGuidanceDto = z.infer<typeof memberScamGuidanceSchema>;
 export type MemberLearningPreferencesDto = z.infer<typeof memberLearningPreferencesSchema>;
 export type MemberLearningFeedItemDto = z.infer<typeof memberLearningFeedItemSchema>;
+export type MemberWeeklyRehearsalDto = z.infer<typeof memberWeeklyRehearsalSchema>;
 export type StartMemberLearningLessonRequest = z.infer<
   typeof startMemberLearningLessonRequestSchema
 >;
@@ -205,6 +247,8 @@ export type AnswerMemberLearningLessonResponse = z.infer<
 export type UpdateMemberLearningPreferencesRequest = z.infer<
   typeof updateMemberLearningPreferencesRequestSchema
 >;
+export type AnswerWeeklyRehearsalRequest = z.infer<typeof answerWeeklyRehearsalRequestSchema>;
+export type AnswerWeeklyRehearsalResponse = z.infer<typeof answerWeeklyRehearsalResponseSchema>;
 export type CompleteWeeklyRehearsalRequest = z.infer<typeof completeWeeklyRehearsalRequestSchema>;
 export type UpdateMemberLearningFeedItemRequest = z.infer<
   typeof updateMemberLearningFeedItemRequestSchema

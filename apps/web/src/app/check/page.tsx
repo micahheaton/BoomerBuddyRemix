@@ -401,6 +401,23 @@ export default function PublicCheckPage() {
                 {riskText[result.risk]}
               </p>
               <p>{result.summary}</p>
+              <h3>Safer next actions</h3>
+              <ol className="plain-list">
+                {[...result.actions]
+                  .sort((left, right) => left.priority - right.priority)
+                  .map((action) => (
+                    <li key={action.key}>
+                      <strong>{action.title}</strong> - {action.detail}
+                      {action.officialChannelOnly
+                        ? ' Use a contact channel you verify independently.'
+                        : ''}
+                    </li>
+                  ))}
+              </ol>
+              <p className="notice notice-warning">
+                <strong>Do not treat this as proof.</strong> If money, credentials, accounts, or
+                physical safety are involved, stop and verify independently.
+              </p>
               <section aria-labelledby="public-check-warning-signs">
                 <h3 id="public-check-warning-signs">What the Check noticed</h3>
                 <ul className="plain-list">
@@ -443,23 +460,6 @@ export default function PublicCheckPage() {
                   </ul>
                 </div>
               ) : null}
-              <h3>Safer next actions</h3>
-              <ol className="plain-list">
-                {[...result.actions]
-                  .sort((left, right) => left.priority - right.priority)
-                  .map((action) => (
-                    <li key={action.key}>
-                      <strong>{action.title}</strong> - {action.detail}
-                      {action.officialChannelOnly
-                        ? ' Use a contact channel you verify independently.'
-                        : ''}
-                    </li>
-                  ))}
-              </ol>
-              <p className="notice notice-warning">
-                <strong>Do not treat this as proof.</strong> If money, credentials, accounts, or
-                physical safety are involved, stop and verify independently.
-              </p>
               <section className="card" aria-labelledby="optional-save-heading">
                 <h3 id="optional-save-heading">Optional: save to your household</h3>
                 <p>

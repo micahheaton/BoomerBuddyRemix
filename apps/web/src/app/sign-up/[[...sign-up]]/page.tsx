@@ -1,6 +1,6 @@
 'use client';
 
-import { SignUp } from '@clerk/nextjs';
+import { ClerkFailed, ClerkLoaded, ClerkLoading, SignUp } from '@clerk/nextjs';
 import Link from 'next/link';
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 
@@ -50,21 +50,38 @@ function ProductionSignUp() {
         <h1 className="page-title">Create your BoomerBuddy account</h1>
         <p className="lede">
           Creating and verifying an account is free. It does not start a trial or charge you. After
-          sign-up, review account security, Family plan choices, and current billing availability in
-          the member billing page.
+          sign-up, preview the safety lessons and Check experience before choosing whether to review
+          a paid plan.
         </p>
         <div className="notice">
           <strong>Before any annual trial begins:</strong> secure Checkout shows seven days free,
           the exact first-charge date, and $149.90 per year unless canceled before the trial ends.
         </div>
         <div className="card" style={{ marginTop: '2rem', display: 'grid', placeItems: 'center' }}>
-          <SignUp
-            path="/sign-up"
-            routing="path"
-            forceRedirectUrl="/member/billing"
-            signInUrl="/sign-in"
-            signInForceRedirectUrl="/member"
-          />
+          <ClerkLoading>
+            <p className="help" role="status">
+              Loading secure account creation...
+            </p>
+          </ClerkLoading>
+          <ClerkFailed>
+            <p className="error" role="alert">
+              The secure account-creation form could not load. Reload this page or contact support.
+            </p>
+          </ClerkFailed>
+          <ClerkLoaded>
+            <SignUp
+              path="/sign-up"
+              routing="path"
+              forceRedirectUrl="/member"
+              signInUrl="/sign-in"
+              signInForceRedirectUrl="/member"
+              fallback={
+                <p className="help" role="status">
+                  Loading secure account creation...
+                </p>
+              }
+            />
+          </ClerkLoaded>
         </div>
         <p className="help">
           Already have an account? <Link href="/sign-in">Sign in</Link>. For current privacy and

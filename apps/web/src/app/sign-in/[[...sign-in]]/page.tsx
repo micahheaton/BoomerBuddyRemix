@@ -1,6 +1,6 @@
 'use client';
 
-import { SignIn, useClerk } from '@clerk/nextjs';
+import { ClerkFailed, ClerkLoaded, ClerkLoading, SignIn, useClerk } from '@clerk/nextjs';
 import { useMemo, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -146,15 +146,32 @@ function ProductionSignIn() {
           not reveal another adult&apos;s Checks, grant billing authority, or accept an invitation.
         </p>
         <div className="card" style={{ marginTop: '2rem', display: 'grid', placeItems: 'center' }}>
-          <SignIn
-            path="/sign-in"
-            routing="path"
-            withSignUp={false}
-            forceRedirectUrl="/member"
-            fallbackRedirectUrl="/member"
-            signUpUrl="/sign-up"
-            signUpForceRedirectUrl="/member/billing"
-          />
+          <ClerkLoading>
+            <p className="help" role="status">
+              Loading secure sign-in...
+            </p>
+          </ClerkLoading>
+          <ClerkFailed>
+            <p className="error" role="alert">
+              The secure sign-in form could not load. Reload this page or contact support.
+            </p>
+          </ClerkFailed>
+          <ClerkLoaded>
+            <SignIn
+              path="/sign-in"
+              routing="path"
+              withSignUp
+              forceRedirectUrl="/member"
+              fallbackRedirectUrl="/member"
+              signUpUrl="/sign-up"
+              signUpForceRedirectUrl="/member"
+              fallback={
+                <p className="help" role="status">
+                  Loading secure sign-in...
+                </p>
+              }
+            />
+          </ClerkLoaded>
         </div>
         <p className="help">
           New to BoomerBuddy? <Link href="/sign-up">Create a free account</Link>. Account creation

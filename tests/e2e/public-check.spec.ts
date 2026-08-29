@@ -29,6 +29,11 @@ test('anonymous Public Check uses bounded attribution and saves only after expli
   const result = page.getByTestId('public-check-result');
   await expect(result).toBeVisible();
   await expect(result).toContainText('This result can be wrong');
+  await expect(result).toContainText('What the Check noticed');
+  await expect(result).toContainText('Uses urgent language that can pressure a rushed decision.');
+  await expect(result).toContainText(
+    'Requests a payment method often used in hard-to-reverse scams.',
+  );
   await expect(result).toContainText('Sensitive patterns removed');
   await expect(result).toContainText('[PAYMENT_CARD]');
   await expect(result).toContainText('[ONE_TIME_CODE]');

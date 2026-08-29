@@ -80,6 +80,7 @@ export function registerPublicCheckRoutes(
             evidenceSufficiency: assessment.confidence,
             calibration: assessment.calibration,
             summary: decision.summary,
+            warningSigns: assessment.explanation.reasons.slice(0, 10),
             actions: decision.actions,
             inputSafety: assessment.inputSafety,
             expiresAt: grant.expiresAt.toISOString(),

@@ -43,7 +43,8 @@ describe('production identity UI boundary', () => {
     expect(customerSignIn).toContain('<ProductionSignIn />');
     expect(customerSignIn).toContain('path="/sign-in"');
     expect(customerSignIn).toContain('routing="path"');
-    expect(customerSignIn).toContain('withSignUp={false}');
+    expect(customerSignIn).toContain('withSignUp');
+    expect(customerSignIn).not.toContain('withSignUp={false}');
     expect(customerSignIn).toContain('/v1/dev/sessions/customer');
     expect(hqSignInRoute).toContain('<ProductionHqSignIn />');
     expect(hqScreen).toContain("process.env.NODE_ENV !== 'production'");

@@ -14,7 +14,9 @@ describe('self-service web-beta acquisition boundary', () => {
     const pricing = source('apps/web/src/app/pricing/page.tsx');
     const combined = `${home}\n${pricing}`;
 
-    expect(home).toContain('Practice, check, and respond safely to suspicious messages together.');
+    expect(home).toMatch(
+      /practice, check, and\s+respond safely to suspicious messages together\./u,
+    );
     expect(combined).toContain('7 days free, then USD 149.90/year');
     expect(pricing).toContain('7 days free, then $149.90 USD per year');
     expect(combined).toContain('USD 14.99/month without a trial');
@@ -34,16 +36,52 @@ describe('self-service web-beta acquisition boundary', () => {
     const provider = source('apps/web/src/components/identity-provider.tsx');
     const policy = source('apps/web/src/lib/resource-auth-policy.ts');
 
-    expect(signUp).toContain("import { SignUp } from '@clerk/nextjs'");
+    expect(signUp).toMatch(/import \{[^}]*\bSignUp\b[^}]*\} from '@clerk\/nextjs';/u);
     expect(signUp).toContain('path="/sign-up"');
-    expect(signUp).toContain('forceRedirectUrl="/member/billing"');
+    expect(signUp).toContain('forceRedirectUrl="/member"');
     expect(signUp).toContain('signInForceRedirectUrl="/member"');
     expect(signUp).not.toContain('redirect_url');
     expect(signIn).toContain('signUpUrl="/sign-up"');
-    expect(signIn).toContain('signUpForceRedirectUrl="/member/billing"');
+    expect(signIn).toContain('withSignUp');
+    expect(signIn).not.toContain('withSignUp={false}');
+    expect(signIn).toContain('signUpForceRedirectUrl="/member"');
     expect(provider).toContain('signUpUrl="/sign-up"');
-    expect(provider).toContain('signUpFallbackRedirectUrl="/member/billing"');
+    expect(provider).toContain('signUpFallbackRedirectUrl="/member"');
     expect(policy).toContain("isPathSegment(pathname, '/sign-up')");
+  });
+
+  it('routes a new account to a no-charge product preview before billing', () => {
+    const signUp = source('apps/web/src/app/sign-up/[[...sign-up]]/page.tsx');
+    const signIn = source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx');
+    const memberHome = source('apps/web/src/app/member/page-client.tsx');
+
+    expect(signUp).toContain('forceRedirectUrl="/member"');
+    expect(signIn).toContain('signUpForceRedirectUrl="/member"');
+    expect(memberHome).toContain('Free account preview');
+    expect(memberHome).toContain('Preview the lessons');
+    expect(memberHome).toContain('This does not start');
+    expect(memberHome).toContain('explicitly reviews and completes secure Checkout');
+    expect(source('apps/web/src/app/learn/page.tsx')).not.toContain(
+      'Create a free account for the full lessons',
+    );
+  });
+
+  it('keeps Clerk loading and failure states visible on both customer identity routes', () => {
+    const signUp = source('apps/web/src/app/sign-up/[[...sign-up]]/page.tsx');
+    const signIn = source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx');
+
+    for (const route of [signIn, signUp]) {
+      expect(route).toContain('ClerkLoading');
+      expect(route).toContain('ClerkLoaded');
+      expect(route).toContain('ClerkFailed');
+      expect(route).toContain('role="status"');
+      expect(route).toContain('role="alert"');
+      expect(route).toContain('fallback={');
+    }
+    expect(signIn).toContain('Loading secure sign-in...');
+    expect(signIn).toContain('The secure sign-in form could not load.');
+    expect(signUp).toContain('Loading secure account creation...');
+    expect(signUp).toContain('The secure account-creation form could not load.');
   });
 
   it('does not pretend account creation starts billing or that external channels are ready', () => {

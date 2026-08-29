@@ -47,6 +47,28 @@ describe('launch public surfaces', () => {
     expect(marketing).not.toContain('You cannot create a new Trusted Circle invitation right now.');
   });
 
+  it('publishes the real problem, specific Check explanations, and seven learning previews', async () => {
+    const [home, publicCheck, learn, publicCheckContract, publicCheckRoute] = await Promise.all([
+      source('apps/web/src/app/page.tsx'),
+      source('apps/web/src/app/check/page.tsx'),
+      source('apps/web/src/app/learn/page.tsx'),
+      source('packages/contracts/src/public-checks.ts'),
+      source('apps/api/src/routes/public-checks.ts'),
+    ]);
+
+    expect(home).toContain('Help your family pause before a scam becomes a loss.');
+    expect(home).toContain('201,266');
+    expect(home).toContain('$7.748 billion');
+    expect(home).toContain('FBI 2025 IC3 Annual Report');
+    expect(home).not.toMatch(/10,000\+|testimonial|prevents scams/iu);
+    expect(publicCheck).toContain('What the Check noticed');
+    expect(publicCheckContract).toContain('warningSigns:');
+    expect(publicCheckRoute).toContain('assessment.explanation.reasons.slice(0, 10)');
+    expect(learn).toContain('memberLearningLessons.map');
+    expect(learn).toContain('Seven short safety lessons');
+    expect(learn).toContain('Practice the next safe move before pressure hits');
+  });
+
   it('ties public Family claims to current member implementation anchors', async () => {
     const [learning, family, check, history, guidance] = await Promise.all([
       source('apps/web/src/app/member/orientation/member-learning-client.tsx'),

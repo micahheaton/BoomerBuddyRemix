@@ -76,7 +76,8 @@ describe('rendered production customer funnel', () => {
     const home = renderedProductionRoutes().home;
 
     expect(home).toContain('href="/pricing"');
-    expect(home).toContain('Practice, check, and respond safely to suspicious messages together.');
+    expect(home).toContain('Help your family pause before a scam becomes a loss.');
+    expect(home).toContain('practice, check, and respond safely to suspicious messages together.');
     expect(home).toContain('Scam-safety practice and support for older adults and families');
     expect(home).toContain('seven short safety lessons');
     expect(home).toContain('7 days free, then USD 149.90/year');
@@ -140,6 +141,7 @@ describe('rendered production customer funnel', () => {
     const pricingHero = routes.pricing.slice(0, routes.pricing.indexOf('</section>'));
 
     expect(homeHero).toContain('older adults and families');
+    expect(homeHero).toContain('Help your family pause before a scam becomes a loss.');
     expect(homeHero).toContain('seven short safety lessons');
     expect(homeHero).toContain('7 days free, then USD 149.90/year');
     expect(homeHero).toContain('Or USD 14.99/month without a trial');

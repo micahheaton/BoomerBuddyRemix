@@ -119,6 +119,71 @@ function byteLengthBucket(value: string): FeatureVector['byteLengthBucket'] {
   return 'large';
 }
 
+const explicitUrlScheme = /^([a-z][a-z0-9+.-]*):\/\//iu;
+const schemePrefix = /^([a-z][a-z0-9+.-]*):/iu;
+const friendlyHostPort = /^(?:localhost|(?:[^/?#\s:]+\.)+[^/?#\s:]+):\d{1,5}(?:[/?#]|$)/iu;
+
+function normalizeCheckUrl(value: string): string {
+  const trimmed = value.normalize('NFKC').trim();
+  if (trimmed.length === 0) {
+    throw new DomainError('invalid_input', 'Website address cannot be empty');
+  }
+  if (/[\p{Cc}\\]/u.test(trimmed)) {
+    throw new DomainError('invalid_input', 'Website address is malformed');
+  }
+
+  const explicitScheme = explicitUrlScheme.exec(trimmed);
+  const prefixedScheme = schemePrefix.exec(trimmed);
+  let normalized: string;
+  if (explicitScheme !== null) {
+    const scheme = explicitScheme[1]?.toLowerCase();
+    if (scheme !== 'http' && scheme !== 'https') {
+      throw new DomainError(
+        'invalid_input',
+        'Only http and https website addresses can be checked',
+      );
+    }
+    normalized = trimmed;
+  } else if (/^https?\/\//iu.test(trimmed)) {
+    throw new DomainError('invalid_input', 'Website address is malformed');
+  } else if (prefixedScheme !== null && !friendlyHostPort.test(trimmed)) {
+    throw new DomainError('invalid_input', 'Only http and https website addresses can be checked');
+  } else {
+    normalized = `https://${trimmed}`;
+  }
+
+  const authorityStart = normalized.indexOf('://') + 3;
+  const authoritySuffix = normalized.slice(authorityStart);
+  const authorityEnd = authoritySuffix.search(/[/?#]/u);
+  const authority = authorityEnd === -1 ? authoritySuffix : authoritySuffix.slice(0, authorityEnd);
+  if (authority.length === 0 || authority.includes('@')) {
+    throw new DomainError(
+      'invalid_input',
+      'Website addresses containing user information cannot be checked',
+    );
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new DomainError('invalid_input', 'Website address is malformed');
+  }
+  if (
+    (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+    parsed.hostname.length === 0
+  ) {
+    throw new DomainError('invalid_input', 'Only http and https website addresses can be checked');
+  }
+  if (parsed.username !== '' || parsed.password !== '') {
+    throw new DomainError(
+      'invalid_input',
+      'Website addresses containing user information cannot be checked',
+    );
+  }
+  return normalized;
+}
+
 function analyzeUrl(value: string): {
   readonly url: NonNullable<FeatureVector['url']>;
   readonly signals: readonly SignalKind[];
@@ -140,10 +205,15 @@ function analyzeUrl(value: string): {
   const subdomainCount =
     domain.subdomain === null || domain.subdomain === '' ? 0 : domain.subdomain.split('.').length;
   const hasCredentials = parsed.username !== '' || parsed.password !== '';
+  if (hasCredentials) {
+    throw new DomainError(
+      'invalid_input',
+      'Website addresses containing user information cannot be checked',
+    );
+  }
   const usesInternationalizedDomain = parsed.hostname.includes('xn--');
   const defaultPort = parsed.protocol === 'https:' ? '443' : '80';
   const hasNonstandardPort = parsed.port !== '' && parsed.port !== defaultPort;
-  if (hasCredentials) signals.push('url_userinfo');
   if (ipHost) signals.push('url_ip_host');
   if (usesInternationalizedDomain) signals.push('url_punycode');
   if (parsed.protocol === 'http:') signals.push('url_insecure_scheme');
@@ -387,7 +457,12 @@ export function prepareCheckInput(input: {
   readonly kind: 'text' | 'url';
   readonly content: string;
 }): PreparedCheckInput {
-  const minimized = redactSensitiveInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
+  const content = input.kind === 'url' ? normalizeCheckUrl(input.content) : input.content;
+  const maximumBytes = input.kind === 'url' ? 4_096 : 16_384;
+  if (Buffer.byteLength(content, 'utf8') > maximumBytes) {
+    throw new DomainError('invalid_input', 'Check content exceeds the supported size');
+  }
+  const minimized = redactSensitiveInput(content, maximumBytes);
   if (minimized.status === 'rejected') {
     throw new DomainError(
       'restricted_input',

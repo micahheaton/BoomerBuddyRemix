@@ -153,6 +153,8 @@ export default function MemberHomePage() {
       ));
   const canUseFamily = isUnassigned || selectedScope !== undefined;
   const canManageSponsoredAccess = selectedScope?.isAdministrator === true;
+  const shouldShowFreePreview =
+    selectedScope !== undefined && !canCheck && !canUseOrientation && !hasTrustedCircleGrant;
   const orientation = householdBoundValue(orientationState, selectedHouseholdId);
   const orientationError = householdBoundValue(orientationErrorState, selectedHouseholdId);
   const checkCount = householdBoundValue(checkCountState, selectedHouseholdId);
@@ -221,6 +223,30 @@ export default function MemberHomePage() {
           <button className="button-secondary" type="button" onClick={retryHome}>
             Try loading household details again
           </button>
+        </section>
+      ) : null}
+      {shouldShowFreePreview ? (
+        <section className="card" style={{ marginTop: '1.5rem' }}>
+          <span className="dev-pill">Free account preview</span>
+          <h2>See how BoomerBuddy helps before choosing a plan</h2>
+          <p>
+            Preview seven short safety lessons and try a limited public Check. This does not start a
+            trial or charge a card. Paid access begins only after the household billing manager
+            explicitly reviews and completes secure Checkout.
+          </p>
+          <div className="button-row">
+            <Link className="button button-primary" href="/learn">
+              Preview the lessons
+            </Link>
+            <Link className="button button-secondary" href="/check">
+              Try a free Check
+            </Link>
+            {selectedScope?.isAdministrator ? (
+              <Link className="button button-secondary" href="/member/billing">
+                Review plans when ready
+              </Link>
+            ) : null}
+          </div>
         </section>
       ) : null}
       {isUnassigned ? (

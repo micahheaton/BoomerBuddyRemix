@@ -18,7 +18,7 @@ export function IdentityProvider({ children }: { children: React.ReactNode }) {
       signInUrl="/sign-in"
       signUpUrl="/sign-up"
       signInFallbackRedirectUrl="/member"
-      signUpFallbackRedirectUrl="/member/billing"
+      signUpFallbackRedirectUrl="/member"
       afterSignOutUrl="/sign-in"
       allowedRedirectOrigins={[publicOrigin]}
     >

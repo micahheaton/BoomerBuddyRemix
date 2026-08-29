@@ -282,12 +282,14 @@ export default function CheckPage() {
           ) : (
             <input
               id="check-content"
-              type="url"
+              type="text"
               inputMode="url"
+              autoCapitalize="none"
+              autoCorrect="off"
               value={content}
               maxLength={2_048}
               required
-              placeholder="https://example.com/path"
+              placeholder="example.com or https://example.com/path"
               onChange={(event) => setContent(event.target.value)}
             />
           )}

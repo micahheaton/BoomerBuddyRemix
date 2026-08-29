@@ -14,12 +14,16 @@ export default function HomePage() {
             <span className="eyebrow">
               Scam-safety practice and support for older adults and families
             </span>
-            <h1>Practice, check, and respond safely to suspicious messages together.</h1>
+            <h1>Help your family pause before a scam becomes a loss.</h1>
             <p className="lede">
-              BoomerBuddy gives each adult seven short safety lessons, a private way to check
-              suspicious text or links, and an optional redacted handoff to one person they choose.
-              During web access, you contact that person directly; BoomerBuddy does not message them
-              automatically.
+              Scammers create urgency, impersonate people we trust, and try to isolate us from a
+              second opinion. BoomerBuddy helps older adults and families practice, check, and
+              respond safely to suspicious messages together.
+            </p>
+            <p>
+              Each adult gets seven short safety lessons, a private way to check suspicious text or
+              links, and an optional redacted handoff to one person they choose. During web access,
+              you contact that person directly; BoomerBuddy does not message them automatically.
             </p>
             <p className="offer-line" aria-label="Family plan offer">
               <strong>Family</strong>
@@ -54,8 +58,26 @@ export default function HomePage() {
             </p>
           </div>
           <aside className="hero-card workflow-card" aria-label="The Family response plan">
-            <span className="data-pill">A plan before the pressure</span>
-            <h2>A simple habit when something feels wrong</h2>
+            <span className="data-pill">Why families need a plan</span>
+            <h2>Fraud can turn one pressured moment into a life-changing loss.</h2>
+            <p>
+              In 2025, people age 60 and older filed <strong>201,266</strong> complaints with the
+              FBI&apos;s Internet Crime Complaint Center and reported{' '}
+              <strong>$7.748 billion</strong>
+              in losses. More than 12,000 complainants reported losing over $100,000.
+            </p>
+            <p className="help">
+              These are reported complaints and losses, not an estimate of every incident. Source:{' '}
+              <a
+                href="https://www.ic3.gov/AnnualReport/Reports/2025_IC3Report.pdf"
+                rel="noreferrer"
+                target="_blank"
+              >
+                FBI 2025 IC3 Annual Report
+              </a>
+              .
+            </p>
+            <h3>A simple habit when something feels wrong</h3>
             <ol className="workflow-list">
               <li>
                 <strong>Learn</strong>

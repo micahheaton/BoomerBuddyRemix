@@ -96,6 +96,7 @@ export const createPublicCheckResponseSchema = z.object({
     evidenceSufficiency: evidenceSufficiencySchema,
     calibration: z.literal('not_calibrated'),
     summary: z.string().min(1).max(1_000),
+    warningSigns: z.array(z.string().min(1).max(500)).min(1).max(10),
     actions: z.array(safeActionSchema).max(20),
     inputSafety: publicInputSafetySchema,
     expiresAt: isoDateTimeSchema,

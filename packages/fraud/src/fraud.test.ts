@@ -12,6 +12,7 @@ import {
   type ProviderRequest,
   type ProviderRole,
   type PreparedCheckInput,
+  prepareCheckInput,
   ProviderDispatcher,
   riskBands,
 } from './index';
@@ -229,6 +230,16 @@ describe('deterministic fraud pipeline', () => {
       'BoomerBuddy did not fetch or resolve the submitted destination.',
     );
     fetchSpy.mockRestore();
+  });
+
+  it('normalizes trimmed friendly website addresses without changing explicit http schemes', () => {
+    expect(
+      prepareCheckInput({ kind: 'url', content: '  example.com/account/verify?source=message  ' })
+        .redactedContent,
+    ).toBe('https://example.com/account/verify?source=message');
+    expect(
+      prepareCheckInput({ kind: 'url', content: 'http://example.com/path' }).redactedContent,
+    ).toBe('http://example.com/path');
   });
 
   it('discloses least-data live URL-provider egress without claiming vendor non-contact', async () => {
@@ -888,5 +899,21 @@ describe('deterministic fraud pipeline', () => {
     await expect(analyzeCheck({ kind: 'url', content: credentialUrl })).rejects.toBeInstanceOf(
       DomainError,
     );
+    for (const content of [
+      'ftp://example.test/path',
+      'https:example.test/path',
+      'https//example.test/path',
+      'https:///missing-host',
+      'https://@example.test/path',
+      'example.test\\@different.test/path',
+    ]) {
+      expect(() => prepareCheckInput({ kind: 'url', content })).toThrow(DomainError);
+    }
+    expect(() =>
+      prepareCheckInput({
+        kind: 'url',
+        content: 'example.test/path?access_token=generated-sensitive-value',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'restricted_input' }));
   });
 });

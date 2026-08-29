@@ -66,6 +66,7 @@ describe('privacy-bounded public Check journey', () => {
       result: {
         id: string;
         risk: string;
+        warningSigns: string[];
         inputSafety: { flags: string[] };
         conversionGrant: {
           token: string;
@@ -77,6 +78,12 @@ describe('privacy-bounded public Check journey', () => {
       };
     }>();
     expect(body.result.risk).toMatch(/^(unknown|caution|high_concern)$/u);
+    expect(body.result.warningSigns).toEqual(
+      expect.arrayContaining([
+        'Uses urgent language that can pressure a rushed decision.',
+        'Requests an authentication credential or highly sensitive identifier.',
+      ]),
+    );
     expect(body.result.inputSafety.flags).toEqual(
       expect.arrayContaining(['contained_one_time_code', 'contained_payment_card']),
     );

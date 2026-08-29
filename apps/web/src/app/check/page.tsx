@@ -32,6 +32,7 @@ type PublicCheckResult = {
   evidenceSufficiency: CheckResult['evidenceSufficiency'];
   calibration: 'not_calibrated';
   summary: string;
+  warningSigns: string[];
   actions: CheckResult['actions'];
   inputSafety: {
     redactions: Array<{
@@ -334,12 +335,14 @@ export default function PublicCheckPage() {
             ) : (
               <input
                 id="public-check-content"
-                type="url"
+                type="text"
                 inputMode="url"
+                autoCapitalize="none"
+                autoCorrect="off"
                 value={content}
                 maxLength={2_048}
                 required
-                placeholder="https://example.com/path"
+                placeholder="example.com or https://example.com/path"
                 onChange={(event) => setContent(event.target.value)}
               />
             )}
@@ -398,6 +401,18 @@ export default function PublicCheckPage() {
                 {riskText[result.risk]}
               </p>
               <p>{result.summary}</p>
+              <section aria-labelledby="public-check-warning-signs">
+                <h3 id="public-check-warning-signs">What the Check noticed</h3>
+                <ul className="plain-list">
+                  {result.warningSigns.map((warningSign) => (
+                    <li key={warningSign}>{warningSign}</li>
+                  ))}
+                </ul>
+                <p className="help">
+                  These are warning patterns in the submitted characters, not proof that the sender
+                  or request is fraudulent.
+                </p>
+              </section>
               <dl className="definition-grid">
                 <dt>How much information was available</dt>
                 <dd>

@@ -7,7 +7,12 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? process.env.CLERK_PUBLISHABLE_KEY ?? '',
   },
-  transpilePackages: ['@boomerbuddy/config', '@boomerbuddy/contracts', '@boomerbuddy/design'],
+  transpilePackages: [
+    '@boomerbuddy/config',
+    '@boomerbuddy/contracts',
+    '@boomerbuddy/design',
+    '@boomerbuddy/domain',
+  ],
   async headers() {
     return [
       {

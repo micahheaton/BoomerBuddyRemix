@@ -4,11 +4,25 @@ Status: Living execution plan. The 2026-08-24 audit is historical; the current c
 
 Historical audit evidence date: 2026-08-24
 
-Current closure ledger refreshed: 2026-08-28
+Current closure ledger refreshed: 2026-08-29
 
-Release audited: `9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf`
+Release audited: `d0c22310de5ea0c4727035ca278f1a552c65eafb`
 
-Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
+Annotated release tag: `run3-1-replit-founding-household-d0c22310de5e`
+
+Current external-state overlay: tag CI run `33238936758` passed all five jobs; production migration
+0045 is applied; API, worker, customer web, and HQ published successfully from the exact tag; API
+and worker health passed; current pricing, Learn, and public policy routes are live; and
+`/sign-in/client-trust` no longer returns 404. A production `pg_dump` was DPAPI-encrypted and
+restored successfully on the disposable Neon branch with matching 45-row migration evidence. See
+[the candidate-bound production release evidence](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
+
+The release remains noncharging. Real Google and email/password sessions including any inbox
+verification or Device Trust challenge, authenticated member and HQ rehearsals, staffed support,
+qualified legal and tax decisions, authentic Stripe lifecycle proof, timed application rollback,
+signed mobile packages, physical-device evidence, and Customer 1 remain open. Any later section that
+says the current release is untagged, undeployed, at 27 production migrations, or returning a live
+Device Trust 404 is historical evidence rather than current state.
 
 Last historical candidate with complete local and GitHub CI evidence: `1fbd079de126aabccd788bfa3a854a77d1f6c1a3`
 

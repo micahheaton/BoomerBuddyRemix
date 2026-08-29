@@ -1,5 +1,10 @@
 # Live deployment drift receipt
 
+> Historical observation receipt. Its dated observations remain valid for the deployments inspected
+> through 2026-08-28, but its current-state conclusions were superseded on 2026-08-29 by
+> [the exact d0c22310 production noncharging release evidence](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
+> Do not use the historical 404, old pricing, or old release identity as present production state.
+
 ## Observation boundary
 
 - Observed at 2026-08-26 14:47 UTC.

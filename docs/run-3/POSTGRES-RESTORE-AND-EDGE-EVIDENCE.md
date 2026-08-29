@@ -1,5 +1,12 @@
 # PostgreSQL, Restore, and Edge Evidence
 
+> Historical gap snapshot recorded 2026-08-16. Production is now migrated through 0045 and a fresh
+> DPAPI-encrypted `pg_dump` passed decrypt-and-hash validation plus a disposable-Neon restore with
+> matching migration evidence. See
+> [PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
+> This closes the database backup/restore portion only; timed application rollback and broader edge
+> operations evidence remain open.
+
 Status: **blocked on a disposable real PostgreSQL target and deployed edge; local preparation only**
 
 Recorded: 2026-08-16

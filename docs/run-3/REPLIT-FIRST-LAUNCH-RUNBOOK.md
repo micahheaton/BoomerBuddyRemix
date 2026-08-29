@@ -1,5 +1,11 @@
 # Replit-First Launch Runbook
 
+> Historical pre-deployment runbook recorded 2026-08-16. Do not repeat its tag, migration, pull, or
+> publish sequence for the healthy exact `d0c22310` release. Current deployment and backup evidence
+> is recorded in
+> [PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
+> Use this file only for controls that a later bounded change explicitly carries forward.
+
 Status: **prepared locally; provider resources, managed PostgreSQL, exact deployment configuration, and deployed evidence remain open**
 
 Recorded: 2026-08-16

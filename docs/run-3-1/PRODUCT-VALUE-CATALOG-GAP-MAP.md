@@ -1,5 +1,12 @@
 # Product Value and Catalog Gap Map
 
+> Historical snapshot recorded 2026-08-28. Its repository evidence remains useful, but the exact
+> `d0c22310` release later closed the tag, deployment, migration 0045, Device Trust 404, public-route,
+> worker-heartbeat, and DPAPI restore gaps. Use
+> [the current production release evidence](./PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md) for external
+> state. Real authentication, Stripe, support/legal operations, signed mobile, rehearsals, and
+> Customer 1 remain open.
+
 Date: 2026-08-28
 
 This map distinguishes repository implementation from production proof. It contains no customer

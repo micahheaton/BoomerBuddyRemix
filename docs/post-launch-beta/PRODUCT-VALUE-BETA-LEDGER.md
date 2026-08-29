@@ -1,10 +1,26 @@
 # Product value beta evidence ledger
 
-## Current integration overlay: committed and merged candidate
+## Current deployed overlay: 2026-08-29
 
-This section is the controlling status for the committed integrated implementation baseline. The
+The exact `d0c22310de5ea0c4727035ca278f1a552c65eafb` release is tagged, green in all five tag
+CI jobs, migrated through 0045, and deployed successfully to API, worker, customer web, and HQ. The
+current pricing, Learn, sign-in, Device Trust, and public policy surfaces are live. A fresh production
+DPAPI backup restored on the disposable Neon branch with matching 45-row migration evidence. See
+[the production noncharging release evidence](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
+
+This closes the earlier tag, deployment, 0045 migration, live-route, worker-heartbeat, and database
+restore gaps. It does not prove a real Google or email/password session including any inbox
+verification or Device Trust challenge, an authenticated member or Trusted Circle journey, staffed
+support, legal or tax approval, Stripe, timed application rollback, signed mobile packages,
+physical-device use, a first customer, or revenue. Stripe, Twilio, referrals, access-intent
+collection, support intake, and governed-content automation remain disabled.
+
+## Historical integration overlay: committed and merged candidate
+
+This section records the committed integrated implementation baseline before the exact deployed
+overlay above. The
 detailed receipt below remains an immutable record of the earlier product-value candidate and must
-not be used as proof for this overlay.
+not be used as current deployment proof.
 
 - Implementation branch: `codex/annual-trial-content-beta`.
 - Frozen base commit: `a8d0080701d80f3bb0219905a53c6c86a6a26d47`.

@@ -2,9 +2,10 @@
 
 ## Authoritative planning set
 
+- [PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md): current candidate-bound evidence for the exact `d0c22310` tag, green tag CI, four successful BoomerBuddy 2.0 Replit deployments, production migration 0045, live noncharging smoke checks, and the DPAPI-encrypted production backup plus disposable-branch restore.
 - [EXECUTION-PLAN.md](./EXECUTION-PLAN.md): historical `9b5d585` audit plus the controlling current closure ledger, explicit unknowns and closure gates, historical code anchors, seven-day owner map, 30-day operating model, cash controls, autonomy model, backlog, and two-year target.
 - [EXECUTION-PLAN-SUPPLEMENT.md](./EXECUTION-PLAN-SUPPLEMENT.md): immutable audit receipt for the 2026-08-24 live Stripe inventory and corrections now integrated into the base plan.
-- [LIVE-DEPLOYMENT-DRIFT.md](./LIVE-DEPLOYMENT-DRIFT.md): sanitized anonymous read-only evidence that the live BoomerBuddy 2.0 web and API deployment does not match the reviewed GitHub candidate.
+- [LIVE-DEPLOYMENT-DRIFT.md](./LIVE-DEPLOYMENT-DRIFT.md): historical sanitized read-only evidence for the deployment drift observed through 2026-08-28. The exact `d0c22310` deployment supersedes its current-state conclusions but not its dated observations.
 - [PRODUCT-VALUE-BETA-LEDGER.md](./PRODUCT-VALUE-BETA-LEDGER.md): current repository evidence for the Trusted Circle, collaborative Check, learning, regional-guidance, reminder, web, and mobile beta value loop, with explicit external closure gates.
 - [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md): historical planning index for annual, Individual, and referral hypotheses. The committed versioned catalog promotes Family annual into the current repository offer candidate while Individual and referral entries remain default-off hypotheses. Neither document can authorize provider configuration, deployment, or production activation.
 - [REVENUE-EXPERIMENT-ACTION-PACKET.md](./REVENUE-EXPERIMENT-ACTION-PACKET.md): exact local synthetic specification and candidate-bound noncharging setup packet for an isolated offer-research Stripe sandbox and private, noncollecting website preview. It records that access-intent receipts are not leads and cannot currently measure lead-to-paid conversion.
@@ -18,7 +19,33 @@
 
 The two gauntlet files together are the complete G0 through G15 pack. Neither file is complete by itself.
 
-## Current evidence snapshot
+## Current release status
+
+The exact release commit is `d0c22310de5ea0c4727035ca278f1a552c65eafb`, tree
+`b3f74c3ea858c0ce9b3d407a811327497af81248`, under annotated tag
+`run3-1-replit-founding-household-d0c22310de5e`. Tag CI run `33238936758` passed all five jobs.
+Production migration 0045 is applied, all four BoomerBuddy 2.0 Replit services published
+successfully, the API and worker are healthy, the current pricing and Learn surfaces are live, and
+`/sign-in/client-trust` no longer returns 404.
+
+A fresh production `pg_dump` was encrypted with Windows DPAPI `CurrentUser`, authenticated by a
+decrypt-and-hash round trip, and restored successfully on the disposable Neon branch. Source and
+restored migration evidence both equal `45|0045_member_learning_rehearsal_answers.sql`. The ignored
+local artifact and sanitized receipt live under `.data/backups/`; the candidate-bound safe evidence
+is summarized in the current production release dossier linked above.
+
+This is a deployed noncharging release, not a completed paid beta. Real Google and email/password
+member sessions including any inbox verification or Device Trust challenge, authenticated member
+and Trusted Circle rehearsals, staffed support, qualified legal and tax dispositions, authentic
+Stripe sandbox and live lifecycle proof, timed application rollback, signed mobile packages,
+physical-device proof, and Customer 1 remain open. Stripe, Twilio, referrals, support intake,
+access-intent collection, and governed-content automation remain disabled. No first payment is
+claimed.
+
+## Historical pre-deployment evidence snapshot
+
+The remainder of this section records the state before the exact `d0c22310` release. Preserve it as
+dated lineage, not as the current deployment verdict.
 
 The integrated implementation was committed as
 `db2ff5efbc139623b72584f55e896213128c2552`, followed by the PostgreSQL verifier repair

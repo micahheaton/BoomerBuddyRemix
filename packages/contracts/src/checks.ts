@@ -17,9 +17,23 @@ function boundedContent(maxCharacters: number, maxBytes: number) {
     });
 }
 
+const refreshCheckField = { refresh: z.boolean().default(false) } as const;
+
 export const createCheckRequestSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('text'), content: boundedContent(20_000, 16_384) }).strict(),
-  z.object({ kind: z.literal('url'), content: boundedContent(2_048, 4_096) }).strict(),
+  z
+    .object({
+      kind: z.literal('text'),
+      content: boundedContent(20_000, 16_384),
+      ...refreshCheckField,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('url'),
+      content: boundedContent(2_048, 4_096),
+      ...refreshCheckField,
+    })
+    .strict(),
 ]);
 
 export const checkListQuerySchema = z
@@ -72,7 +86,53 @@ export const checkResultSchema = z.object({
   }),
 });
 
-export const createCheckResponseSchema = z.object({ check: checkResultSchema });
+const checkAnalysisTimingShape = {
+  analyzedAt: isoDateTimeSchema,
+} as const;
+
+export const checkAnalysisDispositionSchema = z
+  .discriminatedUnion('source', [
+    z
+      .object({
+        source: z.literal('new'),
+        reused: z.literal(false),
+        ...checkAnalysisTimingShape,
+        refreshAfter: isoDateTimeSchema.nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        source: z.literal('recent_owned'),
+        reused: z.literal(true),
+        ...checkAnalysisTimingShape,
+        refreshAfter: isoDateTimeSchema,
+      })
+      .strict(),
+    z
+      .object({
+        source: z.literal('public_conversion'),
+        reused: z.literal(true),
+        ...checkAnalysisTimingShape,
+        refreshAfter: isoDateTimeSchema.nullable(),
+      })
+      .strict(),
+  ])
+  .refine(
+    (value) =>
+      value.refreshAfter === null ||
+      new Date(value.refreshAfter).getTime() > new Date(value.analyzedAt).getTime(),
+    {
+      message: 'Check refresh deadline must follow analysis time',
+      path: ['refreshAfter'],
+    },
+  );
+
+export const createCheckResponseSchema = z
+  .object({
+    check: checkResultSchema,
+    analysis: checkAnalysisDispositionSchema,
+  })
+  .strict();
 export const checkListResponseSchema = z.object({
   checks: z.array(checkResultSchema),
   total: z.number().int().nonnegative(),
@@ -149,7 +209,7 @@ export const closeCheckShareResponseSchema = z.object({
 export type CheckKind = z.infer<typeof checkKindSchema>;
 export type Risk = z.infer<typeof riskSchema>;
 export type EvidenceSufficiency = z.infer<typeof evidenceSufficiencySchema>;
-export type CreateCheckRequest = z.infer<typeof createCheckRequestSchema>;
+export type CreateCheckRequest = z.input<typeof createCheckRequestSchema>;
 export type CheckListQuery = z.infer<typeof checkListQuerySchema>;
 export type CheckResult = z.infer<typeof checkResultSchema>;
 export type CreateCheckResponse = z.infer<typeof createCheckResponseSchema>;

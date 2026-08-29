@@ -294,7 +294,7 @@ export interface FraudAssessment {
   };
   readonly actions: readonly SafeAction[];
   readonly versions: {
-    readonly normalization: 'normalize-v2';
+    readonly normalization: 'normalize-v3';
     readonly signals: 'signals-v2';
     readonly scoring: 'score-v2';
     readonly actions: 'actions-v1';

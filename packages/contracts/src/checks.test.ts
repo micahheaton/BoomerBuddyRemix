@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkAnalysisDispositionSchema,
   checkShareLifecycleSchema,
   closeCheckShareRequestSchema,
+  createCheckRequestSchema,
   shareCheckResponseSchema,
 } from './checks';
 
@@ -64,5 +66,53 @@ describe('Check share lifecycle contracts', () => {
         },
       }).lifecycle.state,
     ).toBe('shared');
+  });
+});
+
+describe('Check freshness contracts', () => {
+  it('keeps refresh optional on the wire and defaults it after parsing', () => {
+    expect(createCheckRequestSchema.parse({ kind: 'url', content: 'example.com' })).toEqual({
+      kind: 'url',
+      content: 'example.com',
+      refresh: false,
+    });
+  });
+
+  it('binds reuse state to its source and a forward freshness deadline', () => {
+    const analyzedAt = '2026-08-15T12:00:00.000Z';
+    const refreshAfter = '2026-08-16T12:00:00.000Z';
+    expect(
+      checkAnalysisDispositionSchema.parse({
+        source: 'recent_owned',
+        reused: true,
+        analyzedAt,
+        refreshAfter,
+      }),
+    ).toMatchObject({ source: 'recent_owned', reused: true });
+    expect(
+      checkAnalysisDispositionSchema.parse({
+        source: 'new',
+        reused: false,
+        analyzedAt,
+        refreshAfter: null,
+      }),
+    ).toMatchObject({ source: 'new', reused: false, refreshAfter: null });
+
+    expect(() =>
+      checkAnalysisDispositionSchema.parse({
+        source: 'recent_owned',
+        reused: false,
+        analyzedAt,
+        refreshAfter,
+      }),
+    ).toThrow();
+    expect(() =>
+      checkAnalysisDispositionSchema.parse({
+        source: 'recent_owned',
+        reused: true,
+        analyzedAt,
+        refreshAfter: analyzedAt,
+      }),
+    ).toThrow();
   });
 });

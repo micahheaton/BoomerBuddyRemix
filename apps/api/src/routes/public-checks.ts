@@ -8,7 +8,17 @@ import {
   publicCheckResultParamsSchema,
   savePublicCheckRequestSchema,
 } from '@boomerbuddy/contracts';
-import { analyzePreparedCheck, LocalUnknownProvider, prepareCheckInput } from '@boomerbuddy/fraud';
+import {
+  analyzePreparedCheck,
+  checkAnalysisReuseProvenanceKey,
+  checkAnalysisReuseUntil,
+  checkAnalysisReuseWindowMs,
+  fraudAnalysisVersions,
+  LocalUnknownProvider,
+  localOnlyProviderPolicy,
+  prepareCheckInput,
+  ProviderDispatcher,
+} from '@boomerbuddy/fraud';
 import type { PublicCheckRepository } from '@boomerbuddy/persistence';
 import type { FastifyInstance } from 'fastify';
 import { assertMutationOrigin, authenticate, correlationId, selectedHousehold } from '../auth';
@@ -54,11 +64,26 @@ export function registerPublicCheckRoutes(
         now,
       });
       const prepared = prepareCheckInput({ kind: body.kind, content: body.content });
+      const provider = new LocalUnknownProvider();
+      const policy = localOnlyProviderPolicy([provider]);
+      const freshnessWindowMs = Math.min(
+        checkAnalysisReuseWindowMs(provider.manifest),
+        policy.maximumEvidenceAgeMs,
+      );
+      const reuseProvenanceKey = checkAnalysisReuseProvenanceKey({
+        versions: fraudAnalysisVersions,
+        providers: [provider.manifest],
+        policy,
+      });
       const assessment = await analyzePreparedCheck(prepared, {
-        provider: new LocalUnknownProvider(),
+        dispatcher: new ProviderDispatcher([provider], policy),
         now,
       });
-      const decision = decisionFromAssessment(assessment);
+      const reuseUntil = checkAnalysisReuseUntil(assessment, now, freshnessWindowMs);
+      const decision = decisionFromAssessment(
+        assessment,
+        reuseUntil === undefined ? undefined : reuseProvenanceKey,
+      );
       const grant = await publicChecks.createResult({
         kind: prepared.kind,
         redactedContent: prepared.redactedContent,
@@ -69,6 +94,9 @@ export function registerPublicCheckRoutes(
         },
         interaction,
         now,
+        ...(reuseUntil === undefined
+          ? {}
+          : { reuseProvenanceKey, reuseUntil: reuseUntil.toISOString() }),
       });
       await publicChecks.recordCompleted(interaction, now);
       return reply.code(201).send(
@@ -139,6 +167,12 @@ export function registerPublicCheckRoutes(
     return reply.code(saved.created ? 201 : 200).send(
       createCheckResponseSchema.parse({
         check: checkDto(saved.check, auth.principal.personId),
+        analysis: {
+          reused: true,
+          source: 'public_conversion',
+          analyzedAt: saved.check.createdAt.toISOString(),
+          refreshAfter: saved.check.reuseUntil?.toISOString() ?? null,
+        },
       }),
     );
   });

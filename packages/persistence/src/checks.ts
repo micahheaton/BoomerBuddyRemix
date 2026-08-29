@@ -1,9 +1,13 @@
+import { createHash } from 'node:crypto';
 import { DomainError } from '@boomerbuddy/domain';
 import {
   encryptField,
   fingerprintMinimized,
+  lengthPrefixed,
   minimizeRestrictedInput,
   serializeEncryptedField,
+  type SafeRedaction,
+  type SensitiveSafetyFlag,
 } from '@boomerbuddy/security';
 import type { Audience } from '@boomerbuddy/domain';
 import type { Database, SqlExecutor } from './database';
@@ -54,6 +58,7 @@ export interface DecisionRecord {
     readonly version: string;
   };
   readonly rulesetVersion: string;
+  readonly reuseProvenanceKey?: string;
   readonly evidenceSufficiency: 'limited' | 'moderate' | 'strong';
   readonly calibration: 'not_calibrated';
 }
@@ -99,6 +104,7 @@ export interface StoredCheck extends DecisionRecord {
   readonly ownerPersonId: string;
   readonly kind: 'text' | 'url';
   readonly createdAt: Date;
+  readonly reuseUntil?: Date;
   readonly deleteAfter: Date;
   readonly state: 'active' | 'deleted';
 }
@@ -170,6 +176,8 @@ interface CheckRow extends Record<string, unknown> {
   readonly provider_state: StoredCheck['provider']['state'];
   readonly provider_version: string;
   readonly ruleset_version: string;
+  readonly reuse_provenance_key: string | null;
+  readonly reuse_until: unknown | null;
   readonly created_at: unknown;
   readonly delete_after: unknown;
   readonly artifact_state: string;
@@ -207,7 +215,11 @@ function mapCheck(row: CheckRow): StoredCheck {
       version: row.provider_version,
     },
     rulesetVersion: row.ruleset_version,
+    ...(row.reuse_provenance_key === null ? {} : { reuseProvenanceKey: row.reuse_provenance_key }),
     createdAt: asDate(row.created_at, 'analyses.created_at'),
+    ...(row.reuse_until === null
+      ? {}
+      : { reuseUntil: asDate(row.reuse_until, 'analyses.reuse_until') }),
     deleteAfter: asDate(row.delete_after, 'artifacts.delete_after'),
     state: row.artifact_state === 'deleted' ? 'deleted' : 'active',
   };
@@ -217,7 +229,8 @@ const checkProjection = `
   SELECT a.id, a.artifact_id, a.household_id, a.requested_by AS owner_person_id,
          r.kind, a.risk, a.evidence_sufficiency, a.calibration, a.summary, a.evidence, a.actions,
          a.provider_name, a.provider_state, a.provider_version, a.ruleset_version,
-         a.created_at, r.delete_after, r.state AS artifact_state
+         a.reuse_provenance_key, a.reuse_until, a.created_at,
+         r.delete_after, r.state AS artifact_state
   FROM analyses a
   JOIN artifacts r ON r.household_id = a.household_id AND r.id = a.artifact_id
 `;
@@ -231,7 +244,66 @@ export interface CreateStoredCheckInput {
   readonly decision: DecisionRecord;
   readonly correlationId: string;
   readonly now: Date;
+  readonly analysisCreatedAt?: Date;
+  readonly reuseUntil?: Date;
+  readonly inputSafety?: CheckInputSafetySignature;
   readonly ids?: { readonly artifactId: string; readonly analysisId: string };
+}
+
+export interface FindFreshExactCheckInput {
+  readonly householdId: string;
+  readonly actorPersonId: string;
+  readonly kind: 'text' | 'url';
+  readonly content: string;
+  readonly reuseProvenanceKey: string;
+  readonly inputSafety: CheckInputSafetySignature;
+  readonly freshnessWindowMs: number;
+  readonly now: Date;
+}
+
+export interface CreateOrReuseExactCheckInput extends Omit<
+  CreateStoredCheckInput,
+  'decision' | 'now' | 'reuseUntil'
+> {
+  readonly inputSafety: CheckInputSafetySignature;
+  readonly reuseProvenanceKey: string;
+  readonly freshnessWindowMs: number;
+  readonly currentTime: () => Date;
+  readonly analyze: (now: Date) => Promise<{
+    readonly decision: DecisionRecord;
+    readonly reuseUntil?: Date;
+  }>;
+}
+
+const maximumCheckFreshnessWindowMs = 24 * 60 * 60 * 1_000;
+
+export interface CheckInputSafetySignature {
+  readonly redactions: readonly Pick<SafeRedaction, 'class' | 'count'>[];
+  readonly flags: readonly SensitiveSafetyFlag[];
+}
+
+function fingerprintSource(
+  minimizedContent: string,
+  inputSafety?: CheckInputSafetySignature,
+): string {
+  const redactions = [...(inputSafety?.redactions ?? [])]
+    .map((redaction) => ({ class: redaction.class, count: redaction.count }))
+    .sort((left, right) =>
+      left.class === right.class ? left.count - right.count : left.class.localeCompare(right.class),
+    );
+  return JSON.stringify({
+    content: minimizedContent,
+    redactions,
+    flags: [...(inputSafety?.flags ?? [])].sort(),
+  });
+}
+
+function advisoryLockParts(fields: readonly string[]): readonly [number, number] {
+  const digest = createHash('sha256').update(lengthPrefixed(fields)).digest('hex');
+  return [
+    Number.parseInt(digest.slice(0, 8), 16) | 0,
+    Number.parseInt(digest.slice(8, 16), 16) | 0,
+  ];
 }
 
 export class CheckRepository {
@@ -246,10 +318,154 @@ export class CheckRepository {
     return this.database.transaction((transaction) => this.createWithExecutor(transaction, input));
   }
 
+  async createOrReuseExact(
+    input: CreateOrReuseExactCheckInput,
+  ): Promise<{ readonly check: StoredCheck; readonly reused: boolean }> {
+    const minimized = minimizeRestrictedInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
+    if (minimized.status === 'rejected') {
+      throw new DomainError(
+        'restricted_input',
+        'Remove credentials or payment details before checking',
+        { detected: minimized.detected.join(',') },
+      );
+    }
+    const fingerprint = fingerprintMinimized(
+      fingerprintSource(minimized.minimized, input.inputSafety),
+      this.protection.fingerprintKey,
+      {
+        tenantId: input.householdId,
+        purpose: `artifact:${input.kind}`,
+        keyVersion: this.protection.fingerprintKeyVersion,
+      },
+    );
+    const lockParts = advisoryLockParts([
+      'boomerbuddy:check-reuse:v1',
+      input.householdId,
+      input.actorPersonId,
+      input.kind,
+      fingerprint.value,
+      String(this.protection.fingerprintKeyVersion),
+      input.reuseProvenanceKey,
+    ]);
+    return this.database.transaction(async (transaction) => {
+      await transaction.query('SELECT pg_advisory_xact_lock($1, $2)', lockParts);
+      const operationNow = input.currentTime();
+      if (!Number.isFinite(operationNow.getTime())) {
+        throw new TypeError('Check operation time is invalid');
+      }
+      const existing = await this.findFreshExactWithExecutor(transaction, {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        kind: input.kind,
+        content: input.content,
+        inputSafety: input.inputSafety,
+        reuseProvenanceKey: input.reuseProvenanceKey,
+        freshnessWindowMs: input.freshnessWindowMs,
+        now: operationNow,
+      });
+      if (existing !== null) return { check: existing, reused: true };
+
+      const analyzed = await input.analyze(operationNow);
+      const check = await this.createWithExecutor(transaction, {
+        householdId: input.householdId,
+        actorPersonId: input.actorPersonId,
+        audience: input.audience,
+        kind: input.kind,
+        content: input.content,
+        inputSafety: input.inputSafety,
+        decision: analyzed.decision,
+        correlationId: input.correlationId,
+        now: operationNow,
+        ...(input.analysisCreatedAt === undefined
+          ? {}
+          : { analysisCreatedAt: input.analysisCreatedAt }),
+        ...(input.ids === undefined ? {} : { ids: input.ids }),
+        ...(analyzed.reuseUntil === undefined ? {} : { reuseUntil: analyzed.reuseUntil }),
+      });
+      return { check, reused: false };
+    });
+  }
+
+  async findFreshExact(input: FindFreshExactCheckInput): Promise<StoredCheck | null> {
+    return this.findFreshExactWithExecutor(this.database, input);
+  }
+
+  private async findFreshExactWithExecutor(
+    executor: SqlExecutor,
+    input: FindFreshExactCheckInput,
+  ): Promise<StoredCheck | null> {
+    if (
+      !Number.isSafeInteger(input.freshnessWindowMs) ||
+      input.freshnessWindowMs <= 0 ||
+      input.freshnessWindowMs > maximumCheckFreshnessWindowMs
+    ) {
+      throw new TypeError('Check freshness window is invalid');
+    }
+    const minimized = minimizeRestrictedInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
+    if (minimized.status === 'rejected') {
+      throw new DomainError(
+        'restricted_input',
+        'Remove credentials or payment details before checking',
+        { detected: minimized.detected.join(',') },
+      );
+    }
+    const fingerprint = fingerprintMinimized(
+      fingerprintSource(minimized.minimized, input.inputSafety),
+      this.protection.fingerprintKey,
+      {
+        tenantId: input.householdId,
+        purpose: `artifact:${input.kind}`,
+        keyVersion: this.protection.fingerprintKeyVersion,
+      },
+    );
+    const freshnessCutoff = new Date(input.now.getTime() - input.freshnessWindowMs);
+    const result = await executor.query<CheckRow>(
+      `${checkProjection}
+       WHERE a.household_id = $1
+         AND a.requested_by = $2 AND r.owner_person_id = $2
+         AND r.kind = $3 AND r.input_fingerprint = $4
+         AND r.fingerprint_key_version = $5
+         AND a.reuse_provenance_key = $6
+         AND a.state = 'completed' AND r.state = 'active'
+         AND a.created_at > $7 AND a.reuse_until > $8 AND r.delete_after > $8
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT 1`,
+      [
+        input.householdId,
+        input.actorPersonId,
+        input.kind,
+        fingerprint.value,
+        this.protection.fingerprintKeyVersion,
+        input.reuseProvenanceKey,
+        freshnessCutoff.toISOString(),
+        input.now.toISOString(),
+      ],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : mapCheck(row);
+  }
+
   async createWithExecutor(
     transaction: SqlExecutor,
     input: CreateStoredCheckInput,
   ): Promise<StoredCheck> {
+    const analysisCreatedAt = input.analysisCreatedAt ?? input.now;
+    if (
+      !Number.isFinite(analysisCreatedAt.getTime()) ||
+      analysisCreatedAt.getTime() > input.now.getTime()
+    ) {
+      throw new TypeError('Check analysis time is invalid');
+    }
+    const hasReuseProvenance = input.decision.reuseProvenanceKey !== undefined;
+    if (
+      hasReuseProvenance !== (input.reuseUntil !== undefined) ||
+      (input.reuseUntil !== undefined &&
+        (!Number.isFinite(input.reuseUntil.getTime()) ||
+          input.reuseUntil.getTime() <= analysisCreatedAt.getTime() ||
+          input.reuseUntil.getTime() > analysisCreatedAt.getTime() + maximumCheckFreshnessWindowMs))
+    ) {
+      throw new TypeError('Check reuse provenance is invalid');
+    }
     const minimized = minimizeRestrictedInput(input.content, input.kind === 'url' ? 4_096 : 16_384);
     if (minimized.status === 'rejected') {
       throw new DomainError(
@@ -272,11 +488,15 @@ export class CheckRepository {
         keyVersion: this.protection.encryptionKeyVersion,
       }),
     );
-    const fingerprint = fingerprintMinimized(minimized.minimized, this.protection.fingerprintKey, {
-      tenantId: input.householdId,
-      purpose: `artifact:${input.kind}`,
-      keyVersion: this.protection.fingerprintKeyVersion,
-    });
+    const fingerprint = fingerprintMinimized(
+      fingerprintSource(minimized.minimized, input.inputSafety),
+      this.protection.fingerprintKey,
+      {
+        tenantId: input.householdId,
+        purpose: `artifact:${input.kind}`,
+        keyVersion: this.protection.fingerprintKeyVersion,
+      },
+    );
     const hasEnrollment = await hasEffectiveProtectedEnrollment(
       transaction,
       input.householdId,
@@ -309,8 +529,9 @@ export class CheckRepository {
     await transaction.query(
       `INSERT INTO analyses(
            household_id, id, artifact_id, requested_by, risk, evidence_sufficiency, calibration, summary, evidence,
-           actions, provider_name, provider_state, provider_version, ruleset_version, state, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14,'completed',$15)`,
+           actions, provider_name, provider_state, provider_version, ruleset_version,
+           reuse_provenance_key, reuse_until, state, created_at
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14,$15,$16,'completed',$17)`,
       [
         input.householdId,
         analysisId,
@@ -326,7 +547,9 @@ export class CheckRepository {
         input.decision.provider.state,
         input.decision.provider.version,
         input.decision.rulesetVersion,
-        input.now.toISOString(),
+        input.decision.reuseProvenanceKey ?? null,
+        input.reuseUntil?.toISOString() ?? null,
+        analysisCreatedAt.toISOString(),
       ],
     );
     await writeAuditAndOutbox(
@@ -368,7 +591,8 @@ export class CheckRepository {
       ownerPersonId: input.actorPersonId,
       kind: input.kind,
       ...input.decision,
-      createdAt: input.now,
+      createdAt: analysisCreatedAt,
+      ...(input.reuseUntil === undefined ? {} : { reuseUntil: input.reuseUntil }),
       deleteAfter,
       state: 'active',
     };

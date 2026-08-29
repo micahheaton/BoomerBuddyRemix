@@ -15,7 +15,17 @@ import {
   shareCheckResponseSchema,
 } from '@boomerbuddy/contracts';
 import { DomainError, ids } from '@boomerbuddy/domain';
-import { analyzePreparedCheck, LocalUnknownProvider, prepareCheckInput } from '@boomerbuddy/fraud';
+import {
+  analyzePreparedCheck,
+  checkAnalysisReuseProvenanceKey,
+  checkAnalysisReuseUntil,
+  checkAnalysisReuseWindowMs,
+  fraudAnalysisVersions,
+  LocalUnknownProvider,
+  localOnlyProviderPolicy,
+  prepareCheckInput,
+  ProviderDispatcher,
+} from '@boomerbuddy/fraud';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { assertMutationOrigin, authenticate, correlationId, selectedHousehold } from '../auth';
@@ -27,6 +37,27 @@ const checkShareParamsSchema = z.object({
   checkId: opaqueIdSchema,
   sharedWithPersonId: opaqueIdSchema,
 });
+
+function checkAnalysisDisposition(
+  check: { readonly createdAt: Date; readonly reuseUntil?: Date },
+  source: 'new' | 'recent_owned',
+) {
+  if (source === 'recent_owned') {
+    if (check.reuseUntil === undefined) throw new TypeError('Reused Check has no freshness limit');
+    return {
+      reused: true as const,
+      source,
+      analyzedAt: check.createdAt.toISOString(),
+      refreshAfter: check.reuseUntil.toISOString(),
+    };
+  }
+  return {
+    reused: false as const,
+    source,
+    analyzedAt: check.createdAt.toISOString(),
+    refreshAfter: check.reuseUntil?.toISOString() ?? null,
+  };
+}
 
 function shareLifecycleDto(share: {
   readonly checkId: string;
@@ -54,13 +85,13 @@ function shareLifecycleDto(share: {
 
 export function registerCheckRoutes(app: FastifyInstance, context: ApiContext): void {
   app.post('/v1/checks', async (request, reply) => {
-    const now = context.now();
+    const authenticationNow = context.now();
     const auth = await authenticate(
       request,
       context.repositories.sessions,
       context.config,
       ['customer', 'mobile'],
-      now,
+      authenticationNow,
     );
     assertMutationOrigin(request, context.config, auth);
     const household = selectedHousehold(auth, request);
@@ -75,23 +106,79 @@ export function registerCheckRoutes(app: FastifyInstance, context: ApiContext): 
       },
     });
     const prepared = prepareCheckInput(body);
-    const assessment = await analyzePreparedCheck(prepared, {
-      provider: new LocalUnknownProvider(),
-      now,
+    const provider = new LocalUnknownProvider();
+    const policy = localOnlyProviderPolicy([provider]);
+    const reuseProvenanceKey = checkAnalysisReuseProvenanceKey({
+      versions: fraudAnalysisVersions,
+      providers: [provider.manifest],
+      policy,
     });
+    const inputSafety = {
+      redactions: prepared.redactions,
+      flags: prepared.safetyFlags,
+    };
+    const freshnessWindowMs = Math.min(
+      checkAnalysisReuseWindowMs(provider.manifest),
+      policy.maximumEvidenceAgeMs,
+    );
+    const analyze = async (analysisNow: Date) => {
+      const assessment = await analyzePreparedCheck(prepared, {
+        dispatcher: new ProviderDispatcher([provider], policy),
+        now: analysisNow,
+      });
+      const reuseUntil = checkAnalysisReuseUntil(assessment, analysisNow, freshnessWindowMs);
+      return {
+        decision: decisionFromAssessment(
+          assessment,
+          reuseUntil === undefined ? undefined : reuseProvenanceKey,
+        ),
+        ...(reuseUntil === undefined ? {} : { reuseUntil }),
+      };
+    };
+    if (!body.refresh) {
+      const outcome = await context.repositories.checks.createOrReuseExact({
+        householdId: household.householdId,
+        actorPersonId: auth.principal.personId,
+        audience: auth.audience,
+        kind: body.kind,
+        content: prepared.redactedContent,
+        inputSafety,
+        reuseProvenanceKey,
+        freshnessWindowMs,
+        correlationId: correlationId(request),
+        currentTime: context.now,
+        analyze,
+      });
+      return reply.code(outcome.reused ? 200 : 201).send(
+        createCheckResponseSchema.parse({
+          check: checkDto(outcome.check, auth.principal.personId),
+          analysis: checkAnalysisDisposition(
+            outcome.check,
+            outcome.reused ? 'recent_owned' : 'new',
+          ),
+        }),
+      );
+    }
+    const analysisNow = context.now();
+    const analyzed = await analyze(analysisNow);
     const check = await context.repositories.checks.create({
       householdId: household.householdId,
       actorPersonId: auth.principal.personId,
       audience: auth.audience,
       kind: body.kind,
       content: prepared.redactedContent,
-      decision: decisionFromAssessment(assessment),
+      inputSafety,
+      decision: analyzed.decision,
       correlationId: correlationId(request),
-      now,
+      now: analysisNow,
+      ...(analyzed.reuseUntil === undefined ? {} : { reuseUntil: analyzed.reuseUntil }),
     });
-    return reply
-      .code(201)
-      .send(createCheckResponseSchema.parse({ check: checkDto(check, auth.principal.personId) }));
+    return reply.code(201).send(
+      createCheckResponseSchema.parse({
+        check: checkDto(check, auth.principal.personId),
+        analysis: checkAnalysisDisposition(check, 'new'),
+      }),
+    );
   });
 
   app.get('/v1/checks', async (request) => {

@@ -255,10 +255,11 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     0043_governed_first_party_content.sql
     0044_versioned_stripe_offer_catalog.sql
     0045_member_learning_rehearsal_answers.sql
+    0046_check_analysis_reuse.sql
     ```
 
     Therefore, for an exact `0027` production prefix and a candidate whose manifest ends at
-    `0045`, the pending suffix is exactly
+    `0046`, the pending suffix is exactly
     `0028_run3_1_billing_authority_workflow.sql`,
     `0029_run3_1_stripe_live_control_plane.sql`,
     `0030_run3_1_billing_reverification_binding.sql`,
@@ -276,11 +277,12 @@ non-test invitation, sign-in, or customer data is allowed until step 26's indepe
     `0042_run3_1_regional_scam_guidance.sql`,
     `0043_governed_first_party_content.sql`, and
     `0044_versioned_stripe_offer_catalog.sql`, and
-    `0045_member_learning_rehearsal_answers.sql`. For an exact `0032` prefix, it is exactly `0033`
-    through `0045`. A genuinely empty database receives the entire tagged `0001` through final-candidate
+    `0045_member_learning_rehearsal_answers.sql`, and
+    `0046_check_analysis_reuse.sql`. For an exact `0032` prefix, it is exactly `0033`
+    through `0046`. A genuinely empty database receives the entire tagged `0001` through final-candidate
     manifest. A future forward migration must be the next contiguous entry in the exact tagged
     manifest and must appear in the external receipt. Do not guess its filename, treat this documented
-    `0045` snapshot as a future release ceiling, or run an untagged migration. The only
+    `0046` snapshot as a future release ceiling, or run an untagged migration. The only
     allowed pending set is the tagged candidate manifest minus the exact database prefix.
 
     Before applying a suffix that includes `0035`, perform a read-only inventory of the exact

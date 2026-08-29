@@ -24,7 +24,10 @@ function customerEvidenceLabel(label: string): string {
   return label === 'Local pattern' ? 'Pattern in the submitted content' : label;
 }
 
-export function decisionFromAssessment(assessment: FraudAssessment): DecisionRecord {
+export function decisionFromAssessment(
+  assessment: FraudAssessment,
+  reuseProvenanceKey?: string,
+): DecisionRecord {
   const providerEvidence = assessment.evidence.find(
     (item) => item.source.kind !== 'artifact_derived',
   );
@@ -64,6 +67,7 @@ export function decisionFromAssessment(assessment: FraudAssessment): DecisionRec
       version: providerEvidence?.source.version ?? '1',
     },
     rulesetVersion: assessment.versions.scoring,
+    ...(reuseProvenanceKey === undefined ? {} : { reuseProvenanceKey }),
   };
 }
 

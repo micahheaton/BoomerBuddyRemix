@@ -184,6 +184,8 @@ describe('privacy-bounded public Check journey', () => {
     const result = analyzed.json<{
       result: { id: string; conversionGrant: { token: string } };
     }>().result;
+    const analyzedAt = harness.clock.now().toISOString();
+    harness.clock.advance(5 * 60_000);
 
     const unauthenticated = await harness.app.inject({
       method: 'POST',
@@ -217,8 +219,46 @@ describe('privacy-bounded public Check journey', () => {
       },
     });
     expect(saved.statusCode).toBe(201);
-    const check = saved.json<{ check: { id: string; access: { kind: string } } }>().check;
+    const savedBody = saved.json<{
+      check: { id: string; access: { kind: string }; createdAt: string };
+      analysis: {
+        reused: boolean;
+        source: string;
+        analyzedAt: string;
+        refreshAfter: string;
+      };
+    }>();
+    const check = savedBody.check;
     expect(check.access.kind).toBe('owned');
+    expect(check.createdAt).toBe(analyzedAt);
+    expect(savedBody.analysis).toEqual({
+      reused: true,
+      source: 'public_conversion',
+      analyzedAt,
+      refreshAfter: new Date(new Date(analyzedAt).getTime() + 24 * 60 * 60_000).toISOString(),
+    });
+    const storedTimes = await harness.database.query<{
+      readonly analysis_created_at: unknown;
+      readonly artifact_created_at: unknown;
+      readonly delete_after: unknown;
+    }>(
+      `SELECT analysis.created_at AS analysis_created_at,
+              artifact.created_at AS artifact_created_at, artifact.delete_after
+       FROM analyses analysis
+       JOIN artifacts artifact ON artifact.household_id = analysis.household_id
+        AND artifact.id = analysis.artifact_id
+       WHERE analysis.id = $1`,
+      [check.id],
+    );
+    expect(new Date(storedTimes.rows[0]?.analysis_created_at as string).toISOString()).toBe(
+      analyzedAt,
+    );
+    expect(new Date(storedTimes.rows[0]?.artifact_created_at as string).toISOString()).toBe(
+      harness.clock.now().toISOString(),
+    );
+    expect(new Date(storedTimes.rows[0]?.delete_after as string).toISOString()).toBe(
+      new Date(harness.clock.now().getTime() + 30 * 24 * 60 * 60_000).toISOString(),
+    );
 
     const evidence = await harness.database.query<
       {
@@ -374,6 +414,53 @@ describe('privacy-bounded public Check journey', () => {
     });
     expect(wrongToken.statusCode).toBe(404);
   });
+
+  it('reuses a converted public analysis only through its original deadline', async () => {
+    const content = 'Urgent public conversion asks for an immediate gift card payment.';
+    const analyzed = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/public/checks',
+      payload: { contextToken: await contextToken(), kind: 'text', content },
+    });
+    expect(analyzed.statusCode).toBe(201);
+    const result = analyzed.json<{
+      result: { id: string; conversionGrant: { token: string } };
+    }>().result;
+    harness.clock.advance(5 * 60_000);
+    let pat = await login(harness.app, 'protected-pat');
+    const saved = await harness.app.inject({
+      method: 'POST',
+      url: `/v1/public/checks/${result.id}/save`,
+      headers: browserHeaders(pat.cookie ?? ''),
+      payload: {
+        conversionToken: result.conversionGrant.token,
+        saveConsent: true,
+        consentVersion: 'public-check-save-v1',
+      },
+    });
+    expect(saved.statusCode).toBe(201);
+    const savedId = saved.json<{ check: { id: string } }>().check.id;
+
+    const withinWindow = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/checks',
+      headers: browserHeaders(pat.cookie ?? ''),
+      payload: { kind: 'text', content },
+    });
+    expect(withinWindow.statusCode).toBe(200);
+    expect(withinWindow.json<{ check: { id: string } }>().check.id).toBe(savedId);
+
+    harness.clock.advance(23 * 60 * 60_000 + 55 * 60_000);
+    pat = await login(harness.app, 'protected-pat');
+    const afterOriginalDeadline = await harness.app.inject({
+      method: 'POST',
+      url: '/v1/checks',
+      headers: browserHeaders(pat.cookie ?? ''),
+      payload: { kind: 'text', content },
+    });
+    expect(afterOriginalDeadline.statusCode).toBe(201);
+    expect(afterOriginalDeadline.json<{ check: { id: string } }>().check.id).not.toBe(savedId);
+  }, 30_000);
 
   it('serializes concurrent matching retries and rejects a concurrent owner mismatch', async () => {
     const analyzed = await harness.app.inject({

@@ -28,13 +28,35 @@ const sufficiencyText: Record<CheckResult['evidenceSufficiency'], string> = {
   strong: 'Strong',
 };
 
+type RefreshInput = {
+  readonly checkId: string;
+  readonly householdId: string;
+  readonly kind: CheckKind;
+  readonly content: string;
+};
+
+function reuseExplanation(kind: CheckKind): string {
+  const comparison =
+    kind === 'url'
+      ? 'normalized website address'
+      : 'message content after private details were minimized';
+  return `This matched one of your recent Checks in this household for the same ${comparison}, so BoomerBuddy reused that analysis while it was still fresh.`;
+}
+
 export default function CheckPage() {
   const { selectedHouseholdId, selectedHouseholdName, selectedScope } = useHousehold();
   const [kind, setKind] = useState<CheckKind>('text');
   const [content, setContent] = useState('');
   const [resultState, setResultState] = useState<HouseholdBoundValue<CheckResult>>();
+  const [analysisState, setAnalysisState] = useState<
+    HouseholdBoundValue<{
+      readonly checkId: string;
+      readonly analysis: CreateCheckResponse['analysis'];
+    }>
+  >();
   const [busyState, setBusyState] = useState<HouseholdBoundValue<boolean>>();
   const [errorState, setErrorState] = useState<HouseholdBoundValue<string>>();
+  const [refreshErrorState, setRefreshErrorState] = useState<HouseholdBoundValue<string>>();
   const [shareTargetsState, setShareTargetsState] = useState<
     HouseholdBoundValue<{
       readonly checkId: string;
@@ -52,6 +74,7 @@ export default function CheckPage() {
   const shareLoadGenerationRef = useRef(0);
   const submitControllerRef = useRef<AbortController | undefined>(undefined);
   const shareActionControllerRef = useRef<AbortController | undefined>(undefined);
+  const refreshInputRef = useRef<RefreshInput | undefined>(undefined);
   const isProtectedMember = selectedScope?.isProtectedMember === true;
   const canCheckText =
     isProtectedMember && (selectedScope?.capabilities.includes('check:text') ?? false);
@@ -72,13 +95,26 @@ export default function CheckPage() {
     () => () => {
       submitControllerRef.current?.abort();
       shareActionControllerRef.current?.abort();
+      refreshInputRef.current = undefined;
     },
     [selectedHouseholdId],
   );
 
+  useEffect(() => {
+    const clearRefreshInputWhenHidden = () => {
+      if (document.visibilityState !== 'visible') refreshInputRef.current = undefined;
+    };
+    document.addEventListener('visibilitychange', clearRefreshInputWhenHidden);
+    return () => document.removeEventListener('visibilitychange', clearRefreshInputWhenHidden);
+  }, []);
+
   const result = householdBoundValue(resultState, selectedHouseholdId);
+  const analysisResource = householdBoundValue(analysisState, selectedHouseholdId);
+  const analysis =
+    result && analysisResource?.checkId === result.id ? analysisResource.analysis : undefined;
   const busy = householdBoundValue(busyState, selectedHouseholdId) ?? false;
   const error = householdBoundValue(errorState, selectedHouseholdId) ?? '';
+  const refreshError = householdBoundValue(refreshErrorState, selectedHouseholdId) ?? '';
   const shareTargetsResource = householdBoundValue(shareTargetsState, selectedHouseholdId);
   const currentShareTargetsResource =
     result && shareTargetsResource?.checkId === result.id ? shareTargetsResource : undefined;
@@ -167,6 +203,7 @@ export default function CheckPage() {
     event.preventDefault();
     const householdId = selectedHouseholdId;
     if (!householdId) return;
+    const submittedInput = { kind: effectiveKind, content };
     submitControllerRef.current?.abort();
     const controller = new AbortController();
     submitControllerRef.current = controller;
@@ -176,7 +213,10 @@ export default function CheckPage() {
       selectedHouseholdIdRef.current === householdId;
     setBusyState({ householdId, value: true });
     setErrorState(undefined);
+    setRefreshErrorState(undefined);
     setResultState(undefined);
+    setAnalysisState(undefined);
+    refreshInputRef.current = undefined;
     setShareTargetsState(undefined);
     setSharedWith([]);
     setShareStatus('');
@@ -185,7 +225,7 @@ export default function CheckPage() {
     try {
       const response = await apiRequest<CreateCheckResponse>('/v1/checks', {
         method: 'POST',
-        body: JSON.stringify({ kind: effectiveKind, content }),
+        body: JSON.stringify(submittedInput),
         headers: { 'X-BB-Household-Id': householdId },
         signal: controller.signal,
       });
@@ -198,10 +238,91 @@ export default function CheckPage() {
         return;
       }
       setResultState({ householdId, value: response.check });
+      setAnalysisState({
+        householdId,
+        value: { checkId: response.check.id, analysis: response.analysis },
+      });
+      refreshInputRef.current =
+        response.analysis.source === 'recent_owned'
+          ? {
+              checkId: response.check.id,
+              householdId,
+              kind: submittedInput.kind,
+              content: submittedInput.content,
+            }
+          : undefined;
       setContent('');
     } catch (caught) {
       if (actionIsCurrent()) {
         setErrorState({ householdId, value: readableError(caught) });
+      }
+    } finally {
+      if (actionIsCurrent()) setBusyState(undefined);
+    }
+  }
+
+  async function runFreshAnalysis() {
+    const householdId = selectedHouseholdId;
+    const refreshInput = refreshInputRef.current;
+    if (
+      !result ||
+      analysis?.source !== 'recent_owned' ||
+      !refreshInput ||
+      refreshInput.checkId !== result.id ||
+      refreshInput.householdId !== householdId
+    ) {
+      setRefreshErrorState({
+        householdId,
+        value: 'Return to Check and submit the item again to run a fresh analysis.',
+      });
+      return;
+    }
+    submitControllerRef.current?.abort();
+    const controller = new AbortController();
+    submitControllerRef.current = controller;
+    const actionIsCurrent = (): boolean =>
+      !controller.signal.aborted &&
+      submitControllerRef.current === controller &&
+      selectedHouseholdIdRef.current === householdId;
+    setBusyState({ householdId, value: true });
+    setRefreshErrorState(undefined);
+    try {
+      const response = await apiRequest<CreateCheckResponse>('/v1/checks', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: refreshInput.kind,
+          content: refreshInput.content,
+          refresh: true,
+        }),
+        headers: { 'X-BB-Household-Id': householdId },
+        signal: controller.signal,
+      });
+      if (!actionIsCurrent()) return;
+      if (response.check.householdId !== householdId) {
+        refreshInputRef.current = undefined;
+        setRefreshErrorState({
+          householdId,
+          value: 'The fresh Check result did not match the selected household. Nothing is shown.',
+        });
+        return;
+      }
+      setResultState({ householdId, value: response.check });
+      setAnalysisState({
+        householdId,
+        value: { checkId: response.check.id, analysis: response.analysis },
+      });
+      refreshInputRef.current =
+        response.analysis.source === 'recent_owned'
+          ? { ...refreshInput, checkId: response.check.id }
+          : undefined;
+      setShareTargetsState(undefined);
+      setSharedWith([]);
+      setShareStatus('');
+      setShareError('');
+      setSharingWith('');
+    } catch (caught) {
+      if (actionIsCurrent()) {
+        setRefreshErrorState({ householdId, value: readableError(caught) });
       }
     } finally {
       if (actionIsCurrent()) setBusyState(undefined);
@@ -362,6 +483,48 @@ export default function CheckPage() {
               <strong>This is decision support, not proof.</strong> If money, credentials, accounts,
               or physical safety are involved, stop and verify independently.
             </p>
+            {analysis ? (
+              <section className="card" aria-labelledby="analysis-timing-heading">
+                <h3 id="analysis-timing-heading">When this was analyzed</h3>
+                <p>
+                  Analyzed{' '}
+                  <time dateTime={analysis.analyzedAt}>
+                    {new Date(analysis.analyzedAt).toLocaleString()}
+                  </time>
+                  .
+                </p>
+                {analysis.source === 'recent_owned' ? (
+                  <>
+                    <p>{reuseExplanation(result.kind)}</p>
+                    <p className="help">
+                      This analysis could be reused through{' '}
+                      <time dateTime={analysis.refreshAfter}>
+                        {new Date(analysis.refreshAfter).toLocaleString()}
+                      </time>
+                      . A fresh analysis runs only when you choose it; BoomerBuddy does not retry
+                      automatically.
+                    </p>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void runFreshAnalysis()}
+                    >
+                      {busy ? 'Running a fresh analysis…' : 'Run a fresh analysis now'}
+                    </button>
+                    {refreshError ? (
+                      <p className="error" role="alert">
+                        {refreshError}
+                      </p>
+                    ) : null}
+                  </>
+                ) : null}
+                <p className="help">
+                  The analysis time does not mean website reputation or other online information was
+                  checked live.
+                </p>
+              </section>
+            ) : null}
             <dl className="definition-grid">
               <dt>How much information was available</dt>
               <dd>

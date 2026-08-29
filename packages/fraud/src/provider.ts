@@ -445,6 +445,20 @@ export function localOnlyProviderPolicy(
   };
 }
 
+export const maximumCheckAnalysisReuseWindowMs = 24 * 60 * 60 * 1_000;
+
+export function checkAnalysisReuseWindowMs(
+  manifest: Pick<ProviderManifest, 'deployment' | 'networkEgress' | 'maximumEvidenceAgeMs'>,
+): number {
+  if (!Number.isSafeInteger(manifest.maximumEvidenceAgeMs) || manifest.maximumEvidenceAgeMs <= 0) {
+    throw new TypeError('Provider evidence freshness is invalid');
+  }
+  if (manifest.deployment === 'local_unknown' && manifest.networkEgress === 'none') {
+    return maximumCheckAnalysisReuseWindowMs;
+  }
+  return Math.min(manifest.maximumEvidenceAgeMs, maximumCheckAnalysisReuseWindowMs);
+}
+
 export class LocalUnknownProvider implements FraudProvider {
   readonly manifest: ProviderManifest = {
     providerName: 'local-unknown',

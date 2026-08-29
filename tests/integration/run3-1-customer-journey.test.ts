@@ -142,8 +142,8 @@ describe('Run 3.1 production-like Customer #1 journey', () => {
     directory = await mkdtemp(join(tmpdir(), 'boomerbuddy-run3-1-journey-'));
     database = await createPGliteDatabase(directory);
     const appliedMigrations = await runMigrations(database);
-    expect(appliedMigrations).toHaveLength(45);
-    expect(appliedMigrations.at(-1)).toBe('0045_member_learning_rehearsal_answers.sql');
+    expect(appliedMigrations).toHaveLength(46);
+    expect(appliedMigrations.at(-1)).toBe('0046_check_analysis_reuse.sql');
 
     const identities = new ProductionIdentityRepository(database);
     await identities.bootstrapFounder({

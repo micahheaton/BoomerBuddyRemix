@@ -52,6 +52,8 @@ export interface PublicCheckPayload {
     readonly redactions: readonly SafeRedaction[];
     readonly flags: readonly SensitiveSafetyFlag[];
   };
+  readonly reuseProvenanceKey?: string;
+  readonly reuseUntil?: string;
 }
 
 export interface PublicCheckResultGrant {
@@ -79,6 +81,7 @@ interface ResultRow extends Record<string, unknown> {
   readonly encrypted_payload: string | null;
   readonly state: 'active' | 'consumed' | 'expired';
   readonly expires_at: unknown;
+  readonly created_at: unknown;
   readonly context_id: string | null;
   readonly attribution_source: PublicAttributionSource | null;
   readonly attribution_campaign: PublicAttributionCampaign | null;
@@ -213,7 +216,12 @@ function parsePayload(serialized: string): PublicCheckPayload {
     typeof value.decision !== 'object' ||
     value.decision === null ||
     typeof value.inputSafety !== 'object' ||
-    value.inputSafety === null
+    value.inputSafety === null ||
+    (value.reuseProvenanceKey === undefined) !== (value.reuseUntil === undefined) ||
+    (value.reuseProvenanceKey !== undefined &&
+      (typeof value.reuseProvenanceKey !== 'string' ||
+        typeof value.reuseUntil !== 'string' ||
+        !Number.isFinite(new Date(value.reuseUntil).getTime())))
   ) {
     throw new TypeError('Invalid public result');
   }
@@ -488,6 +496,12 @@ export class PublicCheckRepository {
       redactedContent: defensivelyMinimized.minimized,
       decision: input.decision,
       inputSafety: input.inputSafety,
+      ...(input.reuseProvenanceKey === undefined
+        ? {}
+        : {
+            reuseProvenanceKey: input.reuseProvenanceKey,
+            reuseUntil: input.reuseUntil,
+          }),
     };
     const encrypted = serializeEncryptedField(
       encryptField(JSON.stringify(payload), this.protection.encryptionKey, {
@@ -547,7 +561,7 @@ export class PublicCheckRepository {
     const expected = tokenHmac('conversion', parsed.id, parsed.secret, this.protection.hmacKey);
     const outcome = await this.database.transaction(async (transaction) => {
       const selected = await transaction.query<ResultRow>(
-        `SELECT id, conversion_hmac, encrypted_payload, state, expires_at,
+        `SELECT id, conversion_hmac, encrypted_payload, state, expires_at, created_at,
                 context_id, attribution_source, attribution_campaign
          FROM public_check_results WHERE id = $1 FOR UPDATE`,
         [input.resultId],
@@ -626,15 +640,20 @@ export class PublicCheckRepository {
       ).toString('utf8');
       const payload = parsePayload(decrypted);
       input.authorizeKind(payload.kind);
+      const reuseUntil =
+        payload.reuseUntil === undefined ? undefined : new Date(payload.reuseUntil);
       const check = await input.checks.createWithExecutor(transaction, {
         householdId: input.householdId,
         actorPersonId: input.actorPersonId,
         audience: input.audience,
         kind: payload.kind,
         content: payload.redactedContent,
+        inputSafety: payload.inputSafety,
         decision: payload.decision,
         correlationId: input.correlationId,
         now: input.now,
+        analysisCreatedAt: asDate(row.created_at, 'public result created_at'),
+        ...(reuseUntil === undefined ? {} : { reuseUntil }),
       });
       await transaction.query(
         `INSERT INTO public_check_conversions(

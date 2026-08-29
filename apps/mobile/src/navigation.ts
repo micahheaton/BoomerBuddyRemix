@@ -1,4 +1,4 @@
-import type { CheckResult } from '@boomerbuddy/contracts';
+import type { CheckResult, CreateCheckResponse } from '@boomerbuddy/contracts';
 import { isMobileHostedAuthCallbackUrl } from './hosted-auth';
 
 export type NativeEntrySignal = 'none' | 'route_only_check' | 'rejected_payload';
@@ -39,7 +39,7 @@ export type RootStackParamList = {
   SessionRecovery: undefined;
   Home: undefined;
   Check: undefined;
-  Result: { check: CheckResult };
+  Result: { check: CheckResult; analysis?: CreateCheckResponse['analysis'] };
   History: undefined;
   Family: undefined;
   FamilySafeWord: undefined;

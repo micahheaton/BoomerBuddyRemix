@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { parse as parseDomain } from 'tldts';
 import { DomainError } from '@boomerbuddy/domain';
@@ -15,6 +16,8 @@ import type {
   FraudProvider,
   OrganizationCandidateId,
   PreparedCheckInput,
+  ProviderDispatchPolicy,
+  ProviderManifest,
   ProviderResult,
   RiskBand,
   SafeAction,
@@ -111,6 +114,111 @@ const organizationCandidateRules: readonly {
 
 const preparedInputs = new WeakSet<object>();
 
+export const fraudAnalysisVersions = Object.freeze({
+  normalization: 'normalize-v3',
+  signals: 'signals-v2',
+  scoring: 'score-v2',
+  actions: 'actions-v1',
+} as const);
+
+export type FraudAnalysisVersionSet = {
+  readonly normalization: string;
+  readonly signals: string;
+  readonly scoring: string;
+  readonly actions: string;
+};
+
+export function checkAnalysisReuseProvenanceKey(input: {
+  readonly versions: FraudAnalysisVersionSet;
+  readonly providers: readonly ProviderManifest[];
+  readonly policy: ProviderDispatchPolicy;
+}): string {
+  const providers = input.providers.map((manifest) => ({
+    providerName: manifest.providerName,
+    providerVersion: manifest.providerVersion,
+    role: manifest.role,
+    capabilityId: manifest.capabilityId,
+    dataPolicyVersion: manifest.dataPolicyVersion,
+    supportedArtifactKinds: [...manifest.supportedArtifactKinds].sort(),
+    inputFields: [...manifest.inputFields].sort(),
+    deployment: manifest.deployment,
+    networkEgress: manifest.networkEgress,
+    retention: manifest.retention,
+    trainingUse: manifest.trainingUse,
+    timeoutMs: manifest.timeoutMs,
+    costUnits: manifest.costUnits,
+    maximumEvidenceAgeMs: manifest.maximumEvidenceAgeMs,
+    maximumRequestsPerMinute: manifest.maximumRequestsPerMinute,
+    failureSemantics: manifest.failureSemantics,
+    capabilityDisabled: input.policy.capabilityKillSwitch({
+      providerName: manifest.providerName,
+      providerVersion: manifest.providerVersion,
+      capabilityId: manifest.capabilityId,
+    }),
+  }));
+  const canonical = JSON.stringify({
+    versions: input.versions,
+    providers,
+    policy: {
+      policyVersion: input.policy.policyVersion,
+      allowedProviders: [...input.policy.allowedProviders].sort(),
+      allowedRoles: [...input.policy.allowedRoles].sort(),
+      maximumProviders: input.policy.maximumProviders,
+      maximumTotalCostUnits: input.policy.maximumTotalCostUnits,
+      maximumTimeoutMs: input.policy.maximumTimeoutMs,
+      maximumEvidenceAgeMs: input.policy.maximumEvidenceAgeMs,
+      maximumRequestsPerProviderPerMinute: input.policy.maximumRequestsPerProviderPerMinute,
+      allowNetworkEgress: input.policy.allowNetworkEgress,
+      allowProviderRetention: input.policy.allowProviderRetention,
+      allowProviderTraining: input.policy.allowProviderTraining,
+      killSwitchActive: input.policy.killSwitch(),
+      durableRateLimitConfigured: input.policy.reserveDurableRateLimit !== undefined,
+    },
+  });
+  return `check-reuse-v1:${createHash('sha256').update(canonical).digest('base64url')}`;
+}
+
+export function checkAnalysisReuseUntil(
+  assessment: Pick<FraudAssessment, 'evidence'>,
+  analyzedAt: Date,
+  maximumWindowMs: number,
+): Date | undefined {
+  if (
+    !Number.isFinite(analyzedAt.getTime()) ||
+    !Number.isSafeInteger(maximumWindowMs) ||
+    maximumWindowMs <= 0
+  ) {
+    throw new TypeError('Check reuse freshness input is invalid');
+  }
+  let reuseUntil = analyzedAt.getTime() + maximumWindowMs;
+  for (const evidence of assessment.evidence) {
+    if (
+      evidence.source.kind === 'missing_or_failed' &&
+      (evidence.source.status !== 'unknown' ||
+        evidence.source.provenance?.deployment !== 'local_unknown' ||
+        evidence.source.provenance.networkEgress !== 'none')
+    ) {
+      return undefined;
+    }
+    if (evidence.source.kind !== 'provider' || evidence.validUntil === undefined) continue;
+    if (evidence.freshness === 'stale' || evidence.source.provenance === undefined)
+      return undefined;
+    const observedAt = new Date(evidence.observedAt).getTime();
+    const validUntil = new Date(evidence.validUntil).getTime();
+    const maximumEvidenceAgeMs = evidence.source.provenance.maximumEvidenceAgeMs;
+    if (
+      !Number.isFinite(observedAt) ||
+      !Number.isFinite(validUntil) ||
+      !Number.isSafeInteger(maximumEvidenceAgeMs) ||
+      maximumEvidenceAgeMs <= 0
+    ) {
+      return undefined;
+    }
+    reuseUntil = Math.min(reuseUntil, validUntil, observedAt + maximumEvidenceAgeMs);
+  }
+  return reuseUntil <= analyzedAt.getTime() ? undefined : new Date(reuseUntil);
+}
+
 function byteLengthBucket(value: string): FeatureVector['byteLengthBucket'] {
   const length = Buffer.byteLength(value, 'utf8');
   if (length === 0) return 'empty';
@@ -181,7 +289,7 @@ function normalizeCheckUrl(value: string): string {
       'Website addresses containing user information cannot be checked',
     );
   }
-  return normalized;
+  return parsed.href;
 }
 
 function analyzeUrl(value: string): {
@@ -758,12 +866,7 @@ export async function analyzePreparedCheck(
         'BoomerBuddy is not a guarantee, bank, emergency service, law-enforcement agency, or identity proof.',
     },
     actions: actionsFor(risk, signals),
-    versions: {
-      normalization: 'normalize-v2',
-      signals: 'signals-v2',
-      scoring: 'score-v2',
-      actions: 'actions-v1',
-    },
+    versions: fraudAnalysisVersions,
   };
 }
 

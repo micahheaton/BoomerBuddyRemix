@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   Linking,
   Platform,
   Pressable,
@@ -48,6 +49,11 @@ import {
   readableError,
   requiresRecentAuthentication,
 } from './api';
+import {
+  clearCheckRefreshDraft,
+  readCheckRefreshDraft,
+  retainCheckRefreshDraft,
+} from './check-refresh-draft';
 import {
   emptyHouseholdResource,
   householdBoundDraftValue,
@@ -1371,7 +1377,7 @@ export function NativeProofScreen(): React.ReactElement {
 }
 
 export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackParamList, 'Check'>) {
-  const { selectedScope } = useMobileHousehold();
+  const { selectedHouseholdId, selectedScope } = useMobileHousehold();
   const [kind, setKind] = useState<CheckKind>('text');
   const [content, setContent] = useState('');
   const [busy, setBusy] = useState(false);
@@ -1388,15 +1394,29 @@ export function CheckScreen({ navigation }: NativeStackScreenProps<RootStackPara
         ? 'text'
         : 'url';
   async function check() {
+    const submittedInput = { kind: effectiveKind, content };
     setBusy(true);
     setError('');
+    clearCheckRefreshDraft();
     try {
       const response = await mobileRequest<CreateCheckResponse>('/v1/checks', {
         method: 'POST',
-        body: JSON.stringify({ kind: effectiveKind, content }),
+        body: JSON.stringify(submittedInput),
       });
+      if (response.check.householdId !== selectedHouseholdId) {
+        setError('The Check result did not match the selected household. Nothing is shown.');
+        return;
+      }
+      if (response.analysis.source === 'recent_owned') {
+        retainCheckRefreshDraft({
+          checkId: response.check.id,
+          householdId: response.check.householdId,
+          kind: submittedInput.kind,
+          content: submittedInput.content,
+        });
+      }
       setContent('');
-      navigation.navigate('Result', { check: response.check });
+      navigation.navigate('Result', { check: response.check, analysis: response.analysis });
     } catch (caught) {
       setError(readableError(caught));
     } finally {
@@ -1510,6 +1530,13 @@ const supportingInformationLabels: Record<CheckResult['evidenceSufficiency'], st
   moderate: 'The check found some supporting information.',
   strong: 'The check found multiple supporting details.',
 };
+function reuseExplanation(kind: CheckKind): string {
+  const comparison =
+    kind === 'url'
+      ? 'normalized website address'
+      : 'message content after private details were minimized';
+  return `This matched one of your recent Checks in this household for the same ${comparison}, so BoomerBuddy reused that analysis while it was still fresh.`;
+}
 function riskStyle(risk: CheckResult['risk']): ViewStyle {
   return risk === 'caution' ? s.riskCaution : risk === 'high_concern' ? s.riskHigh : s.riskUnknown;
 }
@@ -1521,9 +1548,11 @@ export function ResultScreen(props: ResultScreenProps): React.ReactElement {
 }
 
 function ResultContent({ route, navigation }: ResultScreenProps) {
-  const { check } = route.params;
+  const { check, analysis } = route.params;
   const { principal, selectedHouseholdId, selectedScope } = useMobileHousehold();
   const isProtectedMember = selectedScope?.isProtectedMember === true;
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [refreshError, setRefreshError] = useState('');
   const [shareTargetsState, setShareTargetsState] = useState<{
     readonly householdId: string;
     readonly checkId: string;
@@ -1543,6 +1572,23 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
       ? shareTargetsState
       : undefined;
   const shareTargets = visibleShareTargetsState?.targets;
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        clearCheckRefreshDraft(check.id);
+      },
+      [check.id],
+    ),
+  );
+  useEffect(() => {
+    if (check.householdId !== selectedHouseholdId) clearCheckRefreshDraft(check.id);
+  }, [check.householdId, check.id, selectedHouseholdId]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState !== 'active') clearCheckRefreshDraft(check.id);
+    });
+    return () => subscription.remove();
+  }, [check.id]);
   useEffect(() => {
     let active = true;
     if (!isProtectedMember || !check.access.canShare || check.householdId !== selectedHouseholdId)
@@ -1677,6 +1723,39 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
       setSharingWith('');
     }
   }
+  async function runFreshAnalysis() {
+    if (check.householdId !== selectedHouseholdId) return;
+    const refreshInput = readCheckRefreshDraft(check.id, selectedHouseholdId);
+    if (!refreshInput) {
+      setRefreshError('Return to Check and submit the item again to run a fresh analysis.');
+      return;
+    }
+    setRefreshBusy(true);
+    setRefreshError('');
+    try {
+      const response = await mobileRequest<CreateCheckResponse>('/v1/checks', {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: refreshInput.kind,
+          content: refreshInput.content,
+          refresh: true,
+        }),
+      });
+      if (response.check.householdId !== selectedHouseholdId) {
+        clearCheckRefreshDraft(check.id);
+        setRefreshError(
+          'The fresh Check result did not match the selected household. Nothing is shown.',
+        );
+        return;
+      }
+      clearCheckRefreshDraft(check.id);
+      navigation.replace('Result', { check: response.check, analysis: response.analysis });
+    } catch (caught) {
+      setRefreshError(readableError(caught));
+    } finally {
+      setRefreshBusy(false);
+    }
+  }
   const receivedShare = shareLifecycles.find(
     (share) => share.sharedWithPersonId === principal.personId,
   );
@@ -1727,6 +1806,36 @@ function ResultContent({ route, navigation }: ResultScreenProps) {
           Pause and verify independently when money, credentials, accounts, or safety are involved.
         </Text>
       </View>
+      {analysis ? (
+        <View style={s.card}>
+          <Text accessibilityRole="header" style={s.heading}>
+            When this was analyzed
+          </Text>
+          <Text style={s.body}>Analyzed {new Date(analysis.analyzedAt).toLocaleString()}.</Text>
+          {analysis.source === 'recent_owned' ? (
+            <>
+              <Text style={s.body}>{reuseExplanation(check.kind)}</Text>
+              <Text style={s.muted}>
+                This analysis could be reused through{' '}
+                {new Date(analysis.refreshAfter).toLocaleString()}. A fresh analysis runs only when
+                you choose it; BoomerBuddy does not retry automatically.
+              </Text>
+              <ActionButton
+                accessibilityHint="Sends the same input for a new analysis"
+                kind="secondary"
+                title={refreshBusy ? 'Running a fresh analysis…' : 'Run a fresh analysis now'}
+                disabled={refreshBusy}
+                onPress={() => void runFreshAnalysis()}
+              />
+              {refreshError ? <ErrorText message={refreshError} /> : null}
+            </>
+          ) : null}
+          <Text style={s.muted}>
+            The analysis time does not mean website reputation or other online information was
+            checked live.
+          </Text>
+        </View>
+      ) : null}
       <View style={s.card}>
         <Text style={s.heading}>About this result</Text>
         <Text style={s.label}>How much the check found</Text>

@@ -2,43 +2,150 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { settleIdentitySignOut } from '@boomerbuddy/security';
 import {
-  clearActiveClerkSession,
+  clearClerkClientSessions,
   clearCustomerSessionState,
+  clearMemberAuthenticationProbe,
   clearClerkSessionAndNavigate,
   clearClerkSessionWhenLoaded,
+  clearClerkSessionsWithLocalFallback,
   createAuthenticationRecoveryCoordinator,
   createSessionRecoveryRetryController,
+  decideMemberAuthenticationProbe,
+  hasPendingMemberAuthenticationProbe,
   isSameOriginMemberRedirectTarget,
+  isTerminalSessionReset,
+  markMemberAuthenticationProbe,
+  memberAuthenticationProbeStorageKey,
   productionSessionRecoveryPath,
+  productionSessionResetPath,
+  productionSessionResetTarget,
+  resetBrowserClerkSession,
   shouldBeginProductionAuthenticationRecovery,
 } from '../../apps/web/src/lib/auth-recovery';
+import { resetCustomerBrowserSession } from '../../apps/web/src/app/sign-in/session-reset/route';
 import { classifyApiRequestSecurity } from '../../apps/web/src/lib/api';
 
 const source = (path: string) => readFile(path, 'utf8');
 
 describe('customer production authentication recovery', () => {
-  it('clears only the exact active Clerk session and suppresses provider navigation', async () => {
+  it('clears every Clerk session on this browser and requires provider confirmation', async () => {
     const signOut = vi.fn(async (callback: () => void | Promise<void>) => {
       await callback();
     });
 
-    await clearActiveClerkSession({ sessionId: 'sess_current', signOut });
+    await clearClerkClientSessions({ signOut });
 
     expect(signOut).toHaveBeenCalledOnce();
-    expect(signOut).toHaveBeenCalledWith(expect.any(Function), { sessionId: 'sess_current' });
-    expect(signOut).not.toHaveBeenCalledWith(expect.any(Function), { sessionId: 'sess_other' });
+    expect(signOut).toHaveBeenCalledWith(expect.any(Function));
   });
 
-  it('refuses to use all-session Clerk sign-out when no active session can be identified', async () => {
+  it('rejects a resolved Clerk no-op that never invokes its completion callback', async () => {
     const signOut = vi.fn(async () => undefined);
 
-    await expect(clearActiveClerkSession({ sessionId: null, signOut })).rejects.toThrow(
-      'active Clerk session could not be identified',
+    await expect(clearClerkClientSessions({ signOut })).rejects.toThrow(
+      'did not confirm that this browser session was cleared',
     );
-    expect(signOut).not.toHaveBeenCalled();
+    expect(signOut).toHaveBeenCalledOnce();
   });
 
-  it('recognizes only same-origin member redirects as stale-session recovery evidence', () => {
+  it('uses the same-origin reset fallback after a rejected or resolved-no-op Clerk cleanup', async () => {
+    const resetLocalSession = vi.fn(async () => undefined);
+
+    await clearClerkSessionsWithLocalFallback({
+      clearClerkSessions: () => clearClerkClientSessions({ signOut: vi.fn(async () => undefined) }),
+      resetLocalSession,
+    });
+
+    expect(resetLocalSession).toHaveBeenCalledOnce();
+  });
+
+  it('does not call the local fallback after Clerk confirms cleanup', async () => {
+    const resetLocalSession = vi.fn(async () => undefined);
+
+    await clearClerkSessionsWithLocalFallback({
+      clearClerkSessions: () =>
+        clearClerkClientSessions({
+          signOut: vi.fn(async (callback: () => void | Promise<void>) => callback()),
+        }),
+      resetLocalSession,
+    });
+
+    expect(resetLocalSession).not.toHaveBeenCalled();
+  });
+
+  it('posts the browser reset only to the fixed same-origin route with credentials', async () => {
+    const fetchSessionReset = vi.fn(async () => new Response(null, { status: 204 }));
+
+    await resetBrowserClerkSession(fetchSessionReset as typeof fetch);
+
+    expect(fetchSessionReset).toHaveBeenCalledWith(productionSessionResetPath, {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { accept: 'application/json' },
+    });
+  });
+
+  it('rejects a browser reset response that did not clear the cookie', async () => {
+    const fetchSessionReset = vi.fn(async () => new Response(null, { status: 403 }));
+
+    await expect(resetBrowserClerkSession(fetchSessionReset as typeof fetch)).rejects.toThrow(
+      'status 403',
+    );
+  });
+
+  it('expires only the host-scoped Clerk session cookie for an exact same-origin POST', () => {
+    const origin = 'https://app.boomerbuddy.net';
+    const response = resetCustomerBrowserSession(
+      new Request(`${origin}${productionSessionResetPath}`, {
+        method: 'POST',
+        headers: { origin },
+      }),
+      { BB_PUBLIC_ORIGIN: origin, NODE_ENV: 'production' },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    const cookie = response.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain('__session=;');
+    expect(cookie).toContain('Path=/');
+    expect(cookie).toContain('Max-Age=0');
+    expect(cookie).toContain('SameSite=lax');
+    expect(cookie).toContain('Secure');
+    expect(cookie).not.toContain('__client_uat');
+  });
+
+  it('rejects a cross-origin or unconfigured browser-session reset', () => {
+    const origin = 'https://app.boomerbuddy.net';
+    const crossOrigin = resetCustomerBrowserSession(
+      new Request(`${origin}${productionSessionResetPath}`, {
+        method: 'POST',
+        headers: { origin: 'https://evil.example' },
+      }),
+      { BB_PUBLIC_ORIGIN: origin, NODE_ENV: 'production' },
+    );
+    const unconfigured = resetCustomerBrowserSession(
+      new Request(`${origin}${productionSessionResetPath}`, {
+        method: 'POST',
+        headers: { origin },
+      }),
+      { NODE_ENV: 'production' },
+    );
+
+    expect(crossOrigin.status).toBe(403);
+    expect(crossOrigin.headers.get('set-cookie')).toBeNull();
+    expect(unconfigured.status).toBe(503);
+    expect(unconfigured.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('marks only the explicit post-reset sign-in target as terminal', () => {
+    expect(productionSessionResetTarget).toBe('/sign-in?session_reset=1');
+    expect(isTerminalSessionReset('?session_reset=1')).toBe(true);
+    expect(isTerminalSessionReset('?session_reset=0')).toBe(false);
+    expect(isTerminalSessionReset('?redirect_url=%2Fmember')).toBe(false);
+  });
+
+  it('recognizes only same-origin member paths as valid probe destinations', () => {
     const origin = 'https://app.boomerbuddy.net';
 
     expect(isSameOriginMemberRedirectTarget(`${origin}/member`, origin)).toBe(true);
@@ -60,9 +167,57 @@ describe('customer production authentication recovery', () => {
     }
   });
 
+  it('sends the first ordinary signed-in redirect through one member probe without recovery', () => {
+    expect(
+      decideMemberAuthenticationProbe({
+        currentOrigin: 'https://app.boomerbuddy.net',
+        probePending: false,
+        redirectTarget: '/member',
+      }),
+    ).toEqual({ action: 'navigate', target: '/member' });
+    expect(
+      decideMemberAuthenticationProbe({
+        currentOrigin: 'https://app.boomerbuddy.net',
+        probePending: false,
+        redirectTarget: '/member/account-security?return=billing',
+      }),
+    ).toEqual({ action: 'navigate', target: '/member/account-security?return=billing' });
+    expect(
+      decideMemberAuthenticationProbe({
+        currentOrigin: 'https://app.boomerbuddy.net',
+        probePending: false,
+        redirectTarget: 'https://evil.example/member',
+      }),
+    ).toEqual({ action: 'navigate', target: '/member' });
+  });
+
+  it('shows recovery only when a marked member probe returns to sign in', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: (key: string) => values.delete(key),
+      setItem: (key: string, value: string) => values.set(key, value),
+    };
+
+    expect(hasPendingMemberAuthenticationProbe(storage)).toBe(false);
+    markMemberAuthenticationProbe(storage);
+    expect(values.get(memberAuthenticationProbeStorageKey)).toBe('pending');
+    expect(hasPendingMemberAuthenticationProbe(storage)).toBe(true);
+    expect(
+      decideMemberAuthenticationProbe({
+        currentOrigin: 'https://app.boomerbuddy.net',
+        probePending: hasPendingMemberAuthenticationProbe(storage),
+        redirectTarget: '/member',
+      }),
+    ).toEqual({ action: 'recover' });
+    clearMemberAuthenticationProbe(storage);
+    expect(hasPendingMemberAuthenticationProbe(storage)).toBe(false);
+  });
+
   it('clears household and protected-operation state without deleting unrelated session data', () => {
     const keys = [
       'boomerbuddy.selected-household',
+      memberAuthenticationProbeStorageKey,
       'bb:protected-self:enroll:person-one:household-one',
       'bb:protected-self:withdraw:person-one:household-one',
       'bb:member-learning:pending:household-one:lesson-answer',
@@ -388,14 +543,17 @@ describe('customer production authentication recovery', () => {
   });
 
   it('wires every customer API 401 through the boundary without automatic recovery redirects', async () => {
-    const [api, recovery, provider, boundary, signIn, publicCheck] = await Promise.all([
-      source('apps/web/src/lib/api.ts'),
-      source('apps/web/src/lib/auth-recovery.ts'),
-      source('apps/web/src/components/identity-provider.tsx'),
-      source('apps/web/src/components/production-auth-recovery.tsx'),
-      source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
-      source('apps/web/src/app/check/page.tsx'),
-    ]);
+    const [api, recovery, provider, boundary, signIn, sessionReset, household, publicCheck] =
+      await Promise.all([
+        source('apps/web/src/lib/api.ts'),
+        source('apps/web/src/lib/auth-recovery.ts'),
+        source('apps/web/src/components/identity-provider.tsx'),
+        source('apps/web/src/components/production-auth-recovery.tsx'),
+        source('apps/web/src/app/sign-in/[[...sign-in]]/page.tsx'),
+        source('apps/web/src/app/sign-in/session-reset/route.ts'),
+        source('apps/web/src/components/household-context.tsx'),
+        source('apps/web/src/app/check/page.tsx'),
+      ]);
 
     expect(api).toContain('shouldBeginProductionAuthenticationRecovery(');
     expect(api).toContain('!anonymousPublicRequest');
@@ -412,9 +570,11 @@ describe('customer production authentication recovery', () => {
     expect(boundary).toContain('registerProductionAuthenticationRecovery(async () =>');
     expect(boundary).toContain('clearClerkSessionAndNavigate({');
     expect(boundary).toContain('clearClerkSessionWhenLoaded({');
-    expect(boundary).toContain('clearActiveClerkSession({');
-    expect(boundary).toContain('sessionId,');
-    expect(boundary).toContain('clerk.signOut(callback, options)');
+    expect(boundary).toContain('clearClerkClientSessions({');
+    expect(boundary).toContain('clearClerkSessionsWithLocalFallback({');
+    expect(boundary).toContain('resetBrowserClerkSession()');
+    expect(boundary).toContain('clerk.signOut(callback)');
+    expect(boundary).not.toContain('sessionId');
     expect(boundary).toContain('isLoaded: () => clerk.loaded');
     expect(boundary).not.toContain('redirectUrl');
     expect(boundary).toContain('window.location.replace(productionSessionRecoveryPath)');
@@ -422,9 +582,10 @@ describe('customer production authentication recovery', () => {
     expect(signIn).toContain('pathname === productionSessionRecoveryPath');
     expect(signIn).toContain('createSessionRecoveryRetryController({');
     expect(signIn).toContain('clearClerkSessionWhenLoaded({');
+    expect(signIn).toContain('clearClerkSessionsWithLocalFallback({');
     expect(signIn).toContain('clearCustomerSessionState(window.sessionStorage);');
-    expect(signIn).toContain('clearActiveClerkSession({');
-    expect(signIn).toContain('clerk.signOut(callback, options)');
+    expect(signIn).toContain('clearClerkClientSessions({');
+    expect(signIn).toContain('clerk.signOut(callback)');
     expect(signIn).toContain('isLoaded: () => clerk.loaded');
     expect(signIn).toMatch(/<ClerkLoaded>\s*<ProductionLoadedSignIn\s*\/>\s*<\/ClerkLoaded>/u);
     expect(signIn).toContain('const { isLoaded, isSignedIn } = useAuth();');
@@ -432,15 +593,27 @@ describe('customer production authentication recovery', () => {
     expect(signIn).toContain('if (isSignedIn) return <ProductionSignedInSignInRecovery />;');
     expect(signIn).not.toMatch(/\bSignedIn\b/u);
     expect(signIn).not.toMatch(/\bSignedOut\b/u);
-    expect(signIn).toContain('isSameOriginMemberRedirectTarget(');
+    expect(signIn).toContain('decideMemberAuthenticationProbe({');
+    expect(signIn).toContain('probePending: hasPendingMemberAuthenticationProbe(');
     expect(signIn).toContain("new URL(window.location.href).searchParams.get('redirect_url')");
+    expect(signIn).toContain("if (decision.action === 'recover')");
+    expect(signIn).toContain('markMemberAuthenticationProbe(window.sessionStorage)');
+    expect(signIn).toContain('window.location.replace(decision.target)');
+    expect(signIn).toContain('if (isTerminalSessionReset(window.location.search))');
+    expect(signIn).toContain('setTerminalResetFailure(true)');
     expect(signIn).toContain('memberNavigationStarted.current = true');
     expect(signIn).toContain('onClick={() => void retry.retry()}');
-    expect(signIn).toContain('Clear this session and sign in again');
+    expect(signIn).toContain('Clear browser sign-ins and sign in again');
     expect(signIn).not.toContain('void retry.retry();');
-    expect(signIn).toContain("window.location.replace('/sign-in')");
+    expect(signIn).toContain('window.location.replace(productionSessionResetTarget)');
     expect(signIn).toMatch(/This page does\s+not continue automatically\./u);
     expect(signIn).toContain('href="/sign-in"');
+    expect(sessionReset).toContain("request.headers.get('origin') !== configuredOrigin");
+    expect(sessionReset).toContain("response.cookies.set('__session', ''");
+    expect(sessionReset).not.toContain('__client_uat');
+    expect(household).toContain(
+      'if (value !== undefined) clearMemberAuthenticationProbe(window.sessionStorage);',
+    );
     expect(recovery).toContain('This page has not continued. Try again or email support.');
   });
 });

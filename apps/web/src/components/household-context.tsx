@@ -9,6 +9,7 @@ import {
   readableError,
   setSelectedHouseholdId,
 } from '../lib/api';
+import { clearMemberAuthenticationProbe } from '../lib/auth-recovery';
 
 type HouseholdScope = PrincipalDto['households'][number];
 type PrincipalRefresh = { me: MeResponse; selectedHouseholdId: string };
@@ -115,6 +116,10 @@ export function HouseholdProvider({ children }: { children: React.ReactNode }) {
         : undefined,
     [householdNames, me, refreshPrincipal, selectHousehold, selectedHouseholdId, selectedScope],
   );
+
+  useEffect(() => {
+    if (value !== undefined) clearMemberAuthenticationProbe(window.sessionStorage);
+  }, [value]);
 
   if (error) {
     return (

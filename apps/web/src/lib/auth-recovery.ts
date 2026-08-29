@@ -3,7 +3,11 @@ import { memberLearningPendingOperationStoragePrefix } from './member-learning-i
 
 export const selectedHouseholdStorageKey = 'boomerbuddy.selected-household';
 export const protectedSelfOperationStoragePrefix = 'bb:protected-self:';
+export const memberAuthenticationProbeStorageKey = 'bb:member-authentication-probe';
 export const productionSessionRecoveryPath = '/sign-in/session-recovery';
+export const productionSessionResetPath = '/sign-in/session-reset';
+export const productionSessionResetSearchParam = 'session_reset';
+export const productionSessionResetTarget = `/sign-in?${productionSessionResetSearchParam}=1`;
 export const clerkRecoveryLoadTimeoutMs = 2_000;
 
 type RecoveryAction = () => void | Promise<void>;
@@ -21,10 +25,7 @@ export interface SessionRecoveryRetryState {
   readonly error: string;
 }
 
-type ClerkSessionSignOut = (
-  callback: () => void | Promise<void>,
-  options: { readonly sessionId: string },
-) => Promise<void>;
+type ClerkSessionSignOut = (callback: () => void | Promise<void>) => Promise<void>;
 
 const cleanupFailureMessage =
   'BoomerBuddy could not confirm that the session was cleared. This page has not continued. Try again or email support.';
@@ -51,18 +52,81 @@ export function isSameOriginMemberRedirectTarget(
   }
 }
 
-export async function clearActiveClerkSession(input: {
-  readonly sessionId: string | null | undefined;
-  readonly signOut: ClerkSessionSignOut;
-}): Promise<void> {
-  if (!input.sessionId) {
-    throw new Error('The active Clerk session could not be identified.');
+export type MemberAuthenticationProbeDecision =
+  { readonly action: 'navigate'; readonly target: string } | { readonly action: 'recover' };
+
+export function decideMemberAuthenticationProbe(input: {
+  readonly currentOrigin: string;
+  readonly probePending: boolean;
+  readonly redirectTarget: string | null | undefined;
+}): MemberAuthenticationProbeDecision {
+  if (input.probePending) return { action: 'recover' };
+  if (!isSameOriginMemberRedirectTarget(input.redirectTarget, input.currentOrigin)) {
+    return { action: 'navigate', target: '/member' };
   }
 
-  await input.signOut(() => undefined, { sessionId: input.sessionId });
+  const target = new URL(input.redirectTarget ?? '/member', input.currentOrigin);
+  return { action: 'navigate', target: `${target.pathname}${target.search}${target.hash}` };
+}
+
+export async function clearClerkClientSessions(input: {
+  readonly signOut: ClerkSessionSignOut;
+}): Promise<void> {
+  let providerConfirmed = false;
+  await input.signOut(() => {
+    providerConfirmed = true;
+  });
+
+  if (!providerConfirmed) {
+    throw new Error('Clerk did not confirm that this browser session was cleared.');
+  }
+}
+
+export async function resetBrowserClerkSession(
+  fetchSessionReset: typeof fetch = globalThis.fetch,
+): Promise<void> {
+  const response = await fetchSessionReset(productionSessionResetPath, {
+    method: 'POST',
+    cache: 'no-store',
+    credentials: 'include',
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`The local browser session reset failed with status ${response.status}.`);
+  }
+}
+
+export async function clearClerkSessionsWithLocalFallback(input: {
+  readonly clearClerkSessions: () => Promise<void>;
+  readonly resetLocalSession: () => Promise<void>;
+}): Promise<void> {
+  try {
+    await input.clearClerkSessions();
+  } catch {
+    await input.resetLocalSession();
+  }
+}
+
+export function isTerminalSessionReset(search: string): boolean {
+  return new URLSearchParams(search).get(productionSessionResetSearchParam) === '1';
 }
 
 type CustomerSessionStorage = Pick<Storage, 'key' | 'length' | 'removeItem'>;
+type MemberAuthenticationProbeStorage = Pick<Storage, 'getItem' | 'removeItem' | 'setItem'>;
+
+export function hasPendingMemberAuthenticationProbe(
+  storage: MemberAuthenticationProbeStorage,
+): boolean {
+  return storage.getItem(memberAuthenticationProbeStorageKey) === 'pending';
+}
+
+export function markMemberAuthenticationProbe(storage: MemberAuthenticationProbeStorage): void {
+  storage.setItem(memberAuthenticationProbeStorageKey, 'pending');
+}
+
+export function clearMemberAuthenticationProbe(storage: MemberAuthenticationProbeStorage): void {
+  storage.removeItem(memberAuthenticationProbeStorageKey);
+}
 
 export function clearCustomerSessionState(storage: CustomerSessionStorage): void {
   const operationKeys: string[] = [];
@@ -76,6 +140,7 @@ export function clearCustomerSessionState(storage: CustomerSessionStorage): void
     }
   }
   storage.removeItem(selectedHouseholdStorageKey);
+  storage.removeItem(memberAuthenticationProbeStorageKey);
   for (const key of operationKeys) storage.removeItem(key);
 }
 

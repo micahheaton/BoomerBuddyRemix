@@ -8,12 +8,18 @@ import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contract
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
 import {
-  clearActiveClerkSession,
+  clearClerkClientSessions,
   clearCustomerSessionState,
   clearClerkSessionWhenLoaded,
+  clearClerkSessionsWithLocalFallback,
   createSessionRecoveryRetryController,
-  isSameOriginMemberRedirectTarget,
+  decideMemberAuthenticationProbe,
+  hasPendingMemberAuthenticationProbe,
+  isTerminalSessionReset,
+  markMemberAuthenticationProbe,
   productionSessionRecoveryPath,
+  productionSessionResetTarget,
+  resetBrowserClerkSession,
   type SessionRecoveryRetryState,
 } from '../../../lib/auth-recovery';
 
@@ -122,48 +128,60 @@ function DevelopmentSignIn() {
 
 function ProductionSignedInSignInRecovery() {
   const clerk = useClerk();
-  const { sessionId } = useAuth();
   const memberNavigationStarted = useRef(false);
   const [recoveryRequired, setRecoveryRequired] = useState(false);
+  const [terminalResetFailure, setTerminalResetFailure] = useState(false);
   const [state, setState] = useState<SessionRecoveryRetryState>({ busy: false, error: '' });
   const retry = useMemo(
     () =>
       createSessionRecoveryRetryController({
-        clearClerkSession: () =>
-          clearClerkSessionWhenLoaded({
-            clearClerkSession: async () => {
-              clearCustomerSessionState(window.sessionStorage);
-              await clearActiveClerkSession({
-                sessionId,
-                signOut: (callback, options) => clerk.signOut(callback, options),
-              });
-            },
-            isLoaded: () => clerk.loaded,
-          }),
+        clearClerkSession: async () => {
+          clearCustomerSessionState(window.sessionStorage);
+          await clearClerkSessionsWithLocalFallback({
+            clearClerkSessions: () =>
+              clearClerkSessionWhenLoaded({
+                clearClerkSession: () =>
+                  clearClerkClientSessions({
+                    signOut: (callback) => clerk.signOut(callback),
+                  }),
+                isLoaded: () => clerk.loaded,
+              }),
+            resetLocalSession: () => resetBrowserClerkSession(),
+          });
+        },
         confirmNavigation: () =>
           new Promise((resolve) => {
-            window.setTimeout(
-              () =>
-                resolve(window.location.pathname === '/sign-in' && window.location.search === ''),
-              1_000,
-            );
+            window.setTimeout(() => resolve(isTerminalSessionReset(window.location.search)), 1_000);
           }),
-        navigate: () => window.location.replace('/sign-in'),
+        navigate: () => window.location.replace(productionSessionResetTarget),
         onStateChange: setState,
       }),
-    [clerk, sessionId],
+    [clerk],
   );
 
   useEffect(() => {
-    const rejectedRedirectUrl = new URL(window.location.href).searchParams.get('redirect_url');
-    if (isSameOriginMemberRedirectTarget(rejectedRedirectUrl, window.location.origin)) {
+    if (isTerminalSessionReset(window.location.search)) {
+      const update = window.setTimeout(() => {
+        setRecoveryRequired(true);
+        setTerminalResetFailure(true);
+      }, 0);
+      return () => window.clearTimeout(update);
+    }
+
+    const decision = decideMemberAuthenticationProbe({
+      currentOrigin: window.location.origin,
+      probePending: hasPendingMemberAuthenticationProbe(window.sessionStorage),
+      redirectTarget: new URL(window.location.href).searchParams.get('redirect_url'),
+    });
+    if (decision.action === 'recover') {
       const update = window.setTimeout(() => setRecoveryRequired(true), 0);
       return () => window.clearTimeout(update);
     }
 
     if (memberNavigationStarted.current) return undefined;
     memberNavigationStarted.current = true;
-    window.location.replace('/member');
+    markMemberAuthenticationProbe(window.sessionStorage);
+    window.location.replace(decision.target);
     return undefined;
   }, []);
 
@@ -172,18 +190,22 @@ function ProductionSignedInSignInRecovery() {
       <strong>
         {state.busy
           ? 'Refreshing member sign-in...'
-          : recoveryRequired || state.error
-            ? 'Member sign-in needs one refresh'
-            : 'Opening your member area...'}
+          : terminalResetFailure
+            ? 'Member sign-in could not be reset'
+            : recoveryRequired || state.error
+              ? 'Member sign-in needs one refresh'
+              : 'Opening your member area...'}
       </strong>
       <p>
-        {state.error
-          ? 'The previous browser session could not be cleared automatically. No account or household data was changed.'
-          : recoveryRequired
-            ? 'BoomerBuddy found an old browser session that the server could not verify. Clear only this session to open a clean sign-in page.'
-            : 'BoomerBuddy is checking the signed-in session with the member area.'}
+        {terminalResetFailure
+          ? 'BoomerBuddy cleared the browser session, but the identity provider still reports it as signed in. Stop here and email support.'
+          : state.error
+            ? 'The previous browser session could not be cleared automatically. No account or household data was changed.'
+            : recoveryRequired
+              ? 'BoomerBuddy found an old browser session that the server could not verify. Clear BoomerBuddy sign-ins on this browser to open a clean sign-in page.'
+              : 'BoomerBuddy is checking the signed-in session with the member area.'}
       </p>
-      {recoveryRequired ? (
+      {recoveryRequired && !terminalResetFailure ? (
         <>
           <button
             className="button-primary"
@@ -191,7 +213,9 @@ function ProductionSignedInSignInRecovery() {
             disabled={state.busy}
             onClick={() => void retry.retry()}
           >
-            {state.busy ? 'Clearing this session...' : 'Clear this session and sign in again'}
+            {state.busy
+              ? 'Clearing browser sign-ins...'
+              : 'Clear browser sign-ins and sign in again'}
           </button>
           {state.error ? (
             <p className="error" role="alert">
@@ -201,6 +225,7 @@ function ProductionSignedInSignInRecovery() {
           {state.error ? <a href="mailto:support@boomerbuddy.net">Email support</a> : null}
         </>
       ) : null}
+      {terminalResetFailure ? <a href="mailto:support@boomerbuddy.net">Email support</a> : null}
     </div>
   );
 }
@@ -373,30 +398,32 @@ function SessionRecoveryContent({
 
 function ProductionSessionRecovery() {
   const clerk = useClerk();
-  const { sessionId } = useAuth();
   const [state, setState] = useState<SessionRecoveryRetryState>({ busy: false, error: '' });
   const retry = useMemo(
     () =>
       createSessionRecoveryRetryController({
-        clearClerkSession: () =>
-          clearClerkSessionWhenLoaded({
-            clearClerkSession: async () => {
-              clearCustomerSessionState(window.sessionStorage);
-              await clearActiveClerkSession({
-                sessionId,
-                signOut: (callback, options) => clerk.signOut(callback, options),
-              });
-            },
-            isLoaded: () => clerk.loaded,
-          }),
+        clearClerkSession: async () => {
+          clearCustomerSessionState(window.sessionStorage);
+          await clearClerkSessionsWithLocalFallback({
+            clearClerkSessions: () =>
+              clearClerkSessionWhenLoaded({
+                clearClerkSession: () =>
+                  clearClerkClientSessions({
+                    signOut: (callback) => clerk.signOut(callback),
+                  }),
+                isLoaded: () => clerk.loaded,
+              }),
+            resetLocalSession: () => resetBrowserClerkSession(),
+          });
+        },
         confirmNavigation: () =>
           new Promise((resolve) => {
-            window.setTimeout(() => resolve(window.location.pathname === '/sign-in'), 1_000);
+            window.setTimeout(() => resolve(isTerminalSessionReset(window.location.search)), 1_000);
           }),
-        navigate: () => window.location.replace('/sign-in'),
+        navigate: () => window.location.replace(productionSessionResetTarget),
         onStateChange: setState,
       }),
-    [clerk, sessionId],
+    [clerk],
   );
 
   return (

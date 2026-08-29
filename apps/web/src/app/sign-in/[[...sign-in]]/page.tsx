@@ -1,15 +1,6 @@
 'use client';
 
-import {
-  ClerkFailed,
-  ClerkLoaded,
-  ClerkLoading,
-  SignedIn,
-  SignedOut,
-  SignIn,
-  useAuth,
-  useClerk,
-} from '@clerk/nextjs';
+import { ClerkFailed, ClerkLoaded, ClerkLoading, SignIn, useAuth, useClerk } from '@clerk/nextjs';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
@@ -214,6 +205,37 @@ function ProductionSignedInSignInRecovery() {
   );
 }
 
+function ProductionLoadedSignIn() {
+  const { isLoaded, isSignedIn } = useAuth();
+
+  if (!isLoaded) {
+    return (
+      <p className="help" role="status">
+        Loading secure sign-in...
+      </p>
+    );
+  }
+
+  if (isSignedIn) return <ProductionSignedInSignInRecovery />;
+
+  return (
+    <SignIn
+      path="/sign-in"
+      routing="path"
+      withSignUp
+      forceRedirectUrl="/member"
+      fallbackRedirectUrl="/member"
+      signUpUrl="/sign-up"
+      signUpForceRedirectUrl="/member"
+      fallback={
+        <p className="help" role="status">
+          Loading secure sign-in...
+        </p>
+      }
+    />
+  );
+}
+
 function ProductionSignIn() {
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     return (
@@ -253,25 +275,7 @@ function ProductionSignIn() {
             </p>
           </ClerkFailed>
           <ClerkLoaded>
-            <SignedIn>
-              <ProductionSignedInSignInRecovery />
-            </SignedIn>
-            <SignedOut>
-              <SignIn
-                path="/sign-in"
-                routing="path"
-                withSignUp
-                forceRedirectUrl="/member"
-                fallbackRedirectUrl="/member"
-                signUpUrl="/sign-up"
-                signUpForceRedirectUrl="/member"
-                fallback={
-                  <p className="help" role="status">
-                    Loading secure sign-in...
-                  </p>
-                }
-              />
-            </SignedOut>
+            <ProductionLoadedSignIn />
           </ClerkLoaded>
         </div>
         <p className="help">

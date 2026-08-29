@@ -426,9 +426,12 @@ describe('customer production authentication recovery', () => {
     expect(signIn).toContain('clearActiveClerkSession({');
     expect(signIn).toContain('clerk.signOut(callback, options)');
     expect(signIn).toContain('isLoaded: () => clerk.loaded');
-    expect(signIn).toMatch(
-      /<ClerkLoaded>\s*<SignedIn>\s*<ProductionSignedInSignInRecovery\s*\/>\s*<\/SignedIn>\s*<SignedOut>\s*<SignIn\b[\s\S]*?<\/SignedOut>\s*<\/ClerkLoaded>/u,
-    );
+    expect(signIn).toMatch(/<ClerkLoaded>\s*<ProductionLoadedSignIn\s*\/>\s*<\/ClerkLoaded>/u);
+    expect(signIn).toContain('const { isLoaded, isSignedIn } = useAuth();');
+    expect(signIn).toContain('if (!isLoaded)');
+    expect(signIn).toContain('if (isSignedIn) return <ProductionSignedInSignInRecovery />;');
+    expect(signIn).not.toMatch(/\bSignedIn\b/u);
+    expect(signIn).not.toMatch(/\bSignedOut\b/u);
     expect(signIn).toContain('isSameOriginMemberRedirectTarget(');
     expect(signIn).toContain("new URL(window.location.href).searchParams.get('redirect_url')");
     expect(signIn).toContain('memberNavigationStarted.current = true');

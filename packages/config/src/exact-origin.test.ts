@@ -65,11 +65,13 @@ describe('exact production origin', () => {
   });
 
   const canonicalRequest = {
+    deployment: undefined,
     forwarded: null,
     forwardedHost: null,
     forwardedPort: null,
     forwardedProto: null,
     host: 'app.boomerbuddy.net',
+    port: undefined,
     url: 'https://app.boomerbuddy.net/sign-in/client-trust',
   } as const;
 
@@ -86,6 +88,19 @@ describe('exact production origin', () => {
           forwardedProto: 'https',
           host: 'APP.boomerbuddy.net:443',
           url: 'https://APP.boomerbuddy.net:443/sign-in/sso-callback?state=fixture',
+        },
+        'https://app.boomerbuddy.net',
+      ),
+    ).toBe(true);
+    expect(
+      isCanonicalPublicRequestOrigin(
+        {
+          ...canonicalRequest,
+          deployment: '1',
+          forwardedHost: 'app.boomerbuddy.net',
+          forwardedPort: '3000',
+          forwardedProto: 'https',
+          port: '3000',
         },
         'https://app.boomerbuddy.net',
       ),
@@ -152,6 +167,43 @@ describe('exact production origin', () => {
         forwardedHost: 'app.boomerbuddy.net',
         forwardedPort: '80',
         forwardedProto: 'https',
+      },
+    ],
+    [
+      'empty forwarded port',
+      {
+        forwardedHost: 'app.boomerbuddy.net',
+        forwardedPort: '',
+        forwardedProto: 'https',
+      },
+    ],
+    [
+      'internal port outside Replit deployment',
+      {
+        forwardedHost: 'app.boomerbuddy.net',
+        forwardedPort: '3000',
+        forwardedProto: 'https',
+        port: '3000',
+      },
+    ],
+    [
+      'internal port mismatched with Replit PORT',
+      {
+        deployment: '1',
+        forwardedHost: 'app.boomerbuddy.net',
+        forwardedPort: '3000',
+        forwardedProto: 'https',
+        port: '3001',
+      },
+    ],
+    [
+      'internal port with noncanonical Replit PORT',
+      {
+        deployment: '1',
+        forwardedHost: 'app.boomerbuddy.net',
+        forwardedPort: '03000',
+        forwardedProto: 'https',
+        port: '03000',
       },
     ],
     [

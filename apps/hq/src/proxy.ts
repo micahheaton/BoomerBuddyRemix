@@ -57,11 +57,13 @@ export default function proxy(request: NextRequest, event: NextFetchEvent) {
   if (
     !isCanonicalPublicRequestOrigin(
       {
+        deployment: process.env.REPLIT_DEPLOYMENT,
         forwarded: request.headers.get('forwarded'),
         forwardedHost: request.headers.get('x-forwarded-host'),
         forwardedPort: request.headers.get('x-forwarded-port'),
         forwardedProto: request.headers.get('x-forwarded-proto'),
         host: request.headers.get('host'),
+        port: process.env.PORT,
         url: request.url,
       },
       configuredPublicOrigin,

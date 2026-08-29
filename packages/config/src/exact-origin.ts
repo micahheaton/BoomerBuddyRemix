@@ -79,11 +79,13 @@ export function canonicalPublicOrigin(
 }
 
 export interface CanonicalPublicRequestOriginInput {
+  readonly deployment: string | undefined;
   readonly forwarded: string | null;
   readonly forwardedHost: string | null;
   readonly forwardedPort: string | null;
   readonly forwardedProto: string | null;
   readonly host: string | null;
+  readonly port: string | undefined;
   readonly url: string;
 }
 
@@ -95,8 +97,9 @@ function canonicalHttpsAuthority(authority: string | null): string | undefined {
  * Require raw Host and proxy-derived authority metadata to select the same configured HTTPS
  * origin. Next can retain its internal listener authority in the framework URL, so that URL is
  * checked only for valid credential-free structure. A raw RFC 7239 Forwarded header is rejected.
- * X-Forwarded-Host and X-Forwarded-Proto must appear together; X-Forwarded-Port is optional for
- * proxies such as Replit that omit the default HTTPS port, but it must be exact when present.
+ * X-Forwarded-Host and X-Forwarded-Proto must appear together. X-Forwarded-Port may be absent or
+ * exact. A published Replit app may instead report its server-owned internal PORT; accept only that
+ * canonical value when REPLIT_DEPLOYMENT=1 and the configured browser origin uses default HTTPS.
  */
 export function isCanonicalPublicRequestOrigin(
   input: CanonicalPublicRequestOriginInput,
@@ -126,9 +129,15 @@ export function isCanonicalPublicRequestOrigin(
   if (input.forwardedHost === null || input.forwardedProto === null) return false;
 
   const expectedPort = new URL(expectedOrigin).port || '443';
+  const replitInternalPort =
+    input.deployment === '1' && expectedPort === '443' && isCanonicalPort(input.port)
+      ? input.port
+      : undefined;
   return (
     input.forwardedProto === 'https' &&
-    (input.forwardedPort === null || input.forwardedPort === expectedPort) &&
+    (input.forwardedPort === null ||
+      input.forwardedPort === expectedPort ||
+      (replitInternalPort !== undefined && input.forwardedPort === replitInternalPort)) &&
     canonicalHttpsAuthority(input.forwardedHost) === expectedOrigin
   );
 }

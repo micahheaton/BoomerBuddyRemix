@@ -1,16 +1,27 @@
 'use client';
 
-import { ClerkFailed, ClerkLoaded, ClerkLoading, SignIn, useClerk } from '@clerk/nextjs';
-import { useMemo, useState, type FormEvent } from 'react';
+import {
+  ClerkFailed,
+  ClerkLoaded,
+  ClerkLoading,
+  SignedIn,
+  SignedOut,
+  SignIn,
+  useAuth,
+  useClerk,
+} from '@clerk/nextjs';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { BrowserSessionResponse, DevPersonaId } from '@boomerbuddy/contracts';
 import { PublicFooter, PublicHeader } from '../../../components/public-shell';
 import { apiRequest, readableError, setSelectedHouseholdId } from '../../../lib/api';
 import {
+  clearActiveClerkSession,
   clearCustomerSessionState,
   clearClerkSessionWhenLoaded,
   createSessionRecoveryRetryController,
+  isSameOriginMemberRedirectTarget,
   productionSessionRecoveryPath,
   type SessionRecoveryRetryState,
 } from '../../../lib/auth-recovery';
@@ -118,6 +129,91 @@ function DevelopmentSignIn() {
   );
 }
 
+function ProductionSignedInSignInRecovery() {
+  const clerk = useClerk();
+  const { sessionId } = useAuth();
+  const memberNavigationStarted = useRef(false);
+  const [recoveryRequired, setRecoveryRequired] = useState(false);
+  const [state, setState] = useState<SessionRecoveryRetryState>({ busy: false, error: '' });
+  const retry = useMemo(
+    () =>
+      createSessionRecoveryRetryController({
+        clearClerkSession: () =>
+          clearClerkSessionWhenLoaded({
+            clearClerkSession: async () => {
+              clearCustomerSessionState(window.sessionStorage);
+              await clearActiveClerkSession({
+                sessionId,
+                signOut: (callback, options) => clerk.signOut(callback, options),
+              });
+            },
+            isLoaded: () => clerk.loaded,
+          }),
+        confirmNavigation: () =>
+          new Promise((resolve) => {
+            window.setTimeout(
+              () =>
+                resolve(window.location.pathname === '/sign-in' && window.location.search === ''),
+              1_000,
+            );
+          }),
+        navigate: () => window.location.replace('/sign-in'),
+        onStateChange: setState,
+      }),
+    [clerk, sessionId],
+  );
+
+  useEffect(() => {
+    const rejectedRedirectUrl = new URL(window.location.href).searchParams.get('redirect_url');
+    if (isSameOriginMemberRedirectTarget(rejectedRedirectUrl, window.location.origin)) {
+      const update = window.setTimeout(() => setRecoveryRequired(true), 0);
+      return () => window.clearTimeout(update);
+    }
+
+    if (memberNavigationStarted.current) return undefined;
+    memberNavigationStarted.current = true;
+    window.location.replace('/member');
+    return undefined;
+  }, []);
+
+  return (
+    <div className="notice" aria-live="polite">
+      <strong>
+        {state.busy
+          ? 'Refreshing member sign-in...'
+          : recoveryRequired || state.error
+            ? 'Member sign-in needs one refresh'
+            : 'Opening your member area...'}
+      </strong>
+      <p>
+        {state.error
+          ? 'The previous browser session could not be cleared automatically. No account or household data was changed.'
+          : recoveryRequired
+            ? 'BoomerBuddy found an old browser session that the server could not verify. Clear only this session to open a clean sign-in page.'
+            : 'BoomerBuddy is checking the signed-in session with the member area.'}
+      </p>
+      {recoveryRequired ? (
+        <>
+          <button
+            className="button-primary"
+            type="button"
+            disabled={state.busy}
+            onClick={() => void retry.retry()}
+          >
+            {state.busy ? 'Clearing this session...' : 'Clear this session and sign in again'}
+          </button>
+          {state.error ? (
+            <p className="error" role="alert">
+              {state.error}
+            </p>
+          ) : null}
+          {state.error ? <a href="mailto:support@boomerbuddy.net">Email support</a> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function ProductionSignIn() {
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     return (
@@ -157,20 +253,25 @@ function ProductionSignIn() {
             </p>
           </ClerkFailed>
           <ClerkLoaded>
-            <SignIn
-              path="/sign-in"
-              routing="path"
-              withSignUp
-              forceRedirectUrl="/member"
-              fallbackRedirectUrl="/member"
-              signUpUrl="/sign-up"
-              signUpForceRedirectUrl="/member"
-              fallback={
-                <p className="help" role="status">
-                  Loading secure sign-in...
-                </p>
-              }
-            />
+            <SignedIn>
+              <ProductionSignedInSignInRecovery />
+            </SignedIn>
+            <SignedOut>
+              <SignIn
+                path="/sign-in"
+                routing="path"
+                withSignUp
+                forceRedirectUrl="/member"
+                fallbackRedirectUrl="/member"
+                signUpUrl="/sign-up"
+                signUpForceRedirectUrl="/member"
+                fallback={
+                  <p className="help" role="status">
+                    Loading secure sign-in...
+                  </p>
+                }
+              />
+            </SignedOut>
           </ClerkLoaded>
         </div>
         <p className="help">
@@ -268,6 +369,7 @@ function SessionRecoveryContent({
 
 function ProductionSessionRecovery() {
   const clerk = useClerk();
+  const { sessionId } = useAuth();
   const [state, setState] = useState<SessionRecoveryRetryState>({ busy: false, error: '' });
   const retry = useMemo(
     () =>
@@ -276,7 +378,10 @@ function ProductionSessionRecovery() {
           clearClerkSessionWhenLoaded({
             clearClerkSession: async () => {
               clearCustomerSessionState(window.sessionStorage);
-              await clerk.signOut();
+              await clearActiveClerkSession({
+                sessionId,
+                signOut: (callback, options) => clerk.signOut(callback, options),
+              });
             },
             isLoaded: () => clerk.loaded,
           }),
@@ -287,7 +392,7 @@ function ProductionSessionRecovery() {
         navigate: () => window.location.replace('/sign-in'),
         onStateChange: setState,
       }),
-    [clerk],
+    [clerk, sessionId],
   );
 
   return (

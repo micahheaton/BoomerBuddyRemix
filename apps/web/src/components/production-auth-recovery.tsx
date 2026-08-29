@@ -1,8 +1,9 @@
 'use client';
 
-import { useClerk } from '@clerk/nextjs';
+import { useAuth, useClerk } from '@clerk/nextjs';
 import { useLayoutEffect } from 'react';
 import {
+  clearActiveClerkSession,
   clearClerkSessionAndNavigate,
   clearClerkSessionWhenLoaded,
   productionSessionRecoveryPath,
@@ -11,6 +12,7 @@ import {
 
 export function ProductionAuthenticationRecovery({ children }: { children: React.ReactNode }) {
   const clerk = useClerk();
+  const { sessionId } = useAuth();
 
   useLayoutEffect(
     () =>
@@ -18,13 +20,17 @@ export function ProductionAuthenticationRecovery({ children }: { children: React
         await clearClerkSessionAndNavigate({
           clearClerkSession: () =>
             clearClerkSessionWhenLoaded({
-              clearClerkSession: () => clerk.signOut(),
+              clearClerkSession: () =>
+                clearActiveClerkSession({
+                  sessionId,
+                  signOut: (callback, options) => clerk.signOut(callback, options),
+                }),
               isLoaded: () => clerk.loaded,
             }),
           navigate: () => window.location.replace(productionSessionRecoveryPath),
         });
       }),
-    [clerk],
+    [clerk, sessionId],
   );
 
   return children;

@@ -2,11 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it, vi } from 'vitest';
 import { settleIdentitySignOut } from '@boomerbuddy/security';
 import {
+  clearActiveClerkSession,
   clearCustomerSessionState,
   clearClerkSessionAndNavigate,
   clearClerkSessionWhenLoaded,
   createAuthenticationRecoveryCoordinator,
   createSessionRecoveryRetryController,
+  isSameOriginMemberRedirectTarget,
   productionSessionRecoveryPath,
   shouldBeginProductionAuthenticationRecovery,
 } from '../../apps/web/src/lib/auth-recovery';
@@ -15,6 +17,49 @@ import { classifyApiRequestSecurity } from '../../apps/web/src/lib/api';
 const source = (path: string) => readFile(path, 'utf8');
 
 describe('customer production authentication recovery', () => {
+  it('clears only the exact active Clerk session and suppresses provider navigation', async () => {
+    const signOut = vi.fn(async (callback: () => void | Promise<void>) => {
+      await callback();
+    });
+
+    await clearActiveClerkSession({ sessionId: 'sess_current', signOut });
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(signOut).toHaveBeenCalledWith(expect.any(Function), { sessionId: 'sess_current' });
+    expect(signOut).not.toHaveBeenCalledWith(expect.any(Function), { sessionId: 'sess_other' });
+  });
+
+  it('refuses to use all-session Clerk sign-out when no active session can be identified', async () => {
+    const signOut = vi.fn(async () => undefined);
+
+    await expect(clearActiveClerkSession({ sessionId: null, signOut })).rejects.toThrow(
+      'active Clerk session could not be identified',
+    );
+    expect(signOut).not.toHaveBeenCalled();
+  });
+
+  it('recognizes only same-origin member redirects as stale-session recovery evidence', () => {
+    const origin = 'https://app.boomerbuddy.net';
+
+    expect(isSameOriginMemberRedirectTarget(`${origin}/member`, origin)).toBe(true);
+    expect(
+      isSameOriginMemberRedirectTarget(`${origin}/member/account-security?return=billing`, origin),
+    ).toBe(true);
+    expect(isSameOriginMemberRedirectTarget('/member', origin)).toBe(true);
+
+    for (const value of [
+      null,
+      '',
+      'not a URL',
+      'https://boomerbuddy.net/member',
+      'https://app.boomerbuddy.net/member-danger',
+      'https://app.boomerbuddy.net.evil.example/member',
+      'https://user:password@app.boomerbuddy.net/member',
+    ]) {
+      expect(isSameOriginMemberRedirectTarget(value, origin)).toBe(false);
+    }
+  });
+
   it('clears household and protected-operation state without deleting unrelated session data', () => {
     const keys = [
       'boomerbuddy.selected-household',
@@ -367,7 +412,9 @@ describe('customer production authentication recovery', () => {
     expect(boundary).toContain('registerProductionAuthenticationRecovery(async () =>');
     expect(boundary).toContain('clearClerkSessionAndNavigate({');
     expect(boundary).toContain('clearClerkSessionWhenLoaded({');
-    expect(boundary).toContain('clearClerkSession: () => clerk.signOut()');
+    expect(boundary).toContain('clearActiveClerkSession({');
+    expect(boundary).toContain('sessionId,');
+    expect(boundary).toContain('clerk.signOut(callback, options)');
     expect(boundary).toContain('isLoaded: () => clerk.loaded');
     expect(boundary).not.toContain('redirectUrl');
     expect(boundary).toContain('window.location.replace(productionSessionRecoveryPath)');
@@ -376,8 +423,18 @@ describe('customer production authentication recovery', () => {
     expect(signIn).toContain('createSessionRecoveryRetryController({');
     expect(signIn).toContain('clearClerkSessionWhenLoaded({');
     expect(signIn).toContain('clearCustomerSessionState(window.sessionStorage);');
-    expect(signIn).toContain('await clerk.signOut();');
+    expect(signIn).toContain('clearActiveClerkSession({');
+    expect(signIn).toContain('clerk.signOut(callback, options)');
     expect(signIn).toContain('isLoaded: () => clerk.loaded');
+    expect(signIn).toMatch(
+      /<ClerkLoaded>\s*<SignedIn>\s*<ProductionSignedInSignInRecovery\s*\/>\s*<\/SignedIn>\s*<SignedOut>\s*<SignIn\b[\s\S]*?<\/SignedOut>\s*<\/ClerkLoaded>/u,
+    );
+    expect(signIn).toContain('isSameOriginMemberRedirectTarget(');
+    expect(signIn).toContain("new URL(window.location.href).searchParams.get('redirect_url')");
+    expect(signIn).toContain('memberNavigationStarted.current = true');
+    expect(signIn).toContain('onClick={() => void retry.retry()}');
+    expect(signIn).toContain('Clear this session and sign in again');
+    expect(signIn).not.toContain('void retry.retry();');
     expect(signIn).toContain("window.location.replace('/sign-in')");
     expect(signIn).toMatch(/This page does\s+not continue automatically\./u);
     expect(signIn).toContain('href="/sign-in"');

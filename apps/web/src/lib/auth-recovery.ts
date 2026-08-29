@@ -21,10 +21,46 @@ export interface SessionRecoveryRetryState {
   readonly error: string;
 }
 
+type ClerkSessionSignOut = (
+  callback: () => void | Promise<void>,
+  options: { readonly sessionId: string },
+) => Promise<void>;
+
 const cleanupFailureMessage =
   'BoomerBuddy could not confirm that the session was cleared. This page has not continued. Try again or email support.';
 const navigationFailureMessage =
   'BoomerBuddy cleared the session but could not open a fresh sign-in page. This page has not continued. Try again or email support.';
+
+export function isSameOriginMemberRedirectTarget(
+  value: string | null | undefined,
+  currentOrigin: string,
+): boolean {
+  if (!value) return false;
+
+  try {
+    const origin = new URL(currentOrigin);
+    const target = new URL(value, origin);
+    return (
+      target.origin === origin.origin &&
+      target.username === '' &&
+      target.password === '' &&
+      (target.pathname === '/member' || target.pathname.startsWith('/member/'))
+    );
+  } catch {
+    return false;
+  }
+}
+
+export async function clearActiveClerkSession(input: {
+  readonly sessionId: string | null | undefined;
+  readonly signOut: ClerkSessionSignOut;
+}): Promise<void> {
+  if (!input.sessionId) {
+    throw new Error('The active Clerk session could not be identified.');
+  }
+
+  await input.signOut(() => undefined, { sessionId: input.sessionId });
+}
 
 type CustomerSessionStorage = Pick<Storage, 'key' | 'length' | 'removeItem'>;
 

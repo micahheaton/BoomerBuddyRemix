@@ -24,7 +24,7 @@ async function gotoReady(page: Page, url: string, heading: string | RegExp): Pro
 
 test('public landmark pages have zero serious or critical axe violations', async ({ page }) => {
   const pages = [
-    ['/', 'Practice, check, and respond safely to suspicious messages together.'],
+    ['/', 'Help your family pause before a scam becomes a loss.'],
     ['/check', 'Pause before you act.'],
     ['/how-it-works', 'A simple family plan for uncertain moments'],
     ['/learn', 'Learn how to pause, verify, and respond'],
@@ -62,7 +62,7 @@ test('Family value and both honest next steps remain readable across public brea
     await expect(
       page.getByRole('heading', {
         level: 1,
-        name: 'Practice, check, and respond safely to suspicious messages together.',
+        name: 'Help your family pause before a scam becomes a loss.',
       }),
     ).toBeVisible();
     const familyOffer = page.getByLabel('Family plan offer');

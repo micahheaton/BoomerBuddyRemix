@@ -2,11 +2,18 @@
 
 Status: Standalone execution prompt pack
 
-Evidence baseline: 2026-08-24
+Evidence baseline: 2026-08-29
 
-Audited release: `9b5d585e89e4a691a113b9cd4264c1edbb3cdfdf`
+Deployed production release: `d0c22310de5ea0c4727035ca278f1a552c65eafb`
 
-Annotated release tag: `run3-1-replit-founding-household-9b5d585e89e4`
+Annotated deployed release tag: `run3-1-replit-founding-household-d0c22310de5e`
+
+Deployed production database: migrations through `0045_member_learning_rehearsal_answers.sql`
+
+Runtime release candidate: `0059c4dc07325fdcc7d36565480f1698d8f140de`, with migrations through
+`0046_check_analysis_reuse.sql`; this candidate is not the deployed production release.
+This later documentation and governance state is outside `0059c4d` and is not covered by exact-SHA
+CI run `33255158115`.
 
 ## How to use this pack
 
@@ -21,7 +28,19 @@ account-holder identity or agreement steps, qualified legal or tax decisions, mi
 security or privacy failure, unbounded spend, missing evidence, or failed rollback. It does not stop
 safe independent lanes or create a new approval ritual.
 
-The launch path is web-first. Family annual at USD 149.90 after a seven-day trial is the intended default production offer candidate, and Family monthly at USD 14.99 remains available without a trial; neither is live. Account creation alone does not start a trial or charge. A customer must explicitly choose Checkout, consent to the disclosed amount and first charge date, and provide a payment method. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md) controls default-off Individual, group-rate, and referral hypotheses and preserves historical Family annual research; referrals remain disabled. No phase may promote a default-off hypothesis into production configuration, customer copy, live provider resources, or external action. Mobile is P0 work in parallel, but public store approval is not a condition for Customer 1. Use `net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple, Google, Clerk, or Expo collision is found. A verified collision requires a recorded replacement decision and matching provider and repository evidence.
+The launch path is web-first. The deployed customer surfaces present the annual-first Family catalog:
+Family annual at USD 149.90 after a seven-day trial is the default, and Family monthly at USD 14.99
+without a trial is the alternative. Stripe initiation and purchasing remain disabled, so neither offer can currently be purchased.
+Account creation alone does not start a trial or charge. A
+customer must explicitly choose Checkout, consent to the disclosed amount and first charge date,
+and provide a payment method after initiation is deliberately enabled. [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md)
+controls default-off Individual, group-rate, and referral hypotheses and preserves historical Family
+annual research; referrals remain disabled. No phase may promote a default-off hypothesis into
+production configuration, customer copy, live provider resources, or external action. Mobile is P0
+work in parallel, but public store approval is not a condition for Customer 1. Use
+`net.boomerbuddy.app` as the proposed iOS bundle and Android package identifier unless an Apple,
+Google, Clerk, or Expo collision is found. A verified collision requires a recorded replacement
+decision and matching provider and repository evidence.
 
 Twilio remains disabled until a later, separate consent and compliance gate covers sender registration, opt-out, suppression, quiet hours, delivery evidence, privacy, and incident handling. No phase in this pack authorizes Twilio credentials or traffic.
 

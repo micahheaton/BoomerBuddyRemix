@@ -8,6 +8,10 @@ current pricing, Learn, sign-in, Device Trust, and public policy surfaces are li
 DPAPI backup restored on the disposable Neon branch with matching 45-row migration evidence. See
 [the production noncharging release evidence](../run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md).
 
+The deployed catalog presents Family annual at USD 149.90 after a seven-day trial as the default and
+Family monthly at USD 14.99 without a trial. Stripe initiation and purchasing remain disabled. The
+catalog is visible, but no Checkout, trial, subscription, or charge can begin.
+
 This closes the earlier tag, deployment, 0045 migration, live-route, worker-heartbeat, and database
 restore gaps. It does not prove a real Google or email/password session including any inbox
 verification or Device Trust challenge, an authenticated member or Trusted Circle journey, staffed
@@ -15,33 +19,32 @@ support, legal or tax approval, Stripe, timed application rollback, signed mobil
 physical-device use, a first customer, or revenue. Stripe, Twilio, referrals, access-intent
 collection, support intake, and governed-content automation remain disabled.
 
-## Finite product-value handoff: Check reuse candidate
+## Finite product-value handoff: Check reuse and auth recovery candidate
 
 ### Evidence boundary
 
-The Check reuse implementation is frozen at commit
-`ceda86958837409b666b5b574b00fc7eef6a1e20`, tree
-`6e6d4a23bece6188c9bf329bd477a34dccaa5ac1`. It began from
-`0983832ebe460ea93fdef88730e458b4293f7f91`. Focused validation passed 8 files and 30 tests. The
-final tree also passed 496 unit tests, 527 integration tests, 560 security tests, all 12 synthetic
-evaluation fixtures, all workspace type checks, lint, formatting, secret and runtime-dependency
-checks, API, worker, customer web, HQ, and mobile web builds, and both production route guards. Two
-stale tests that described migration 0045 as the end of the repository chain were updated to 0046
-and then passed. Windows sandbox resource and temporary-file denials were rerun successfully in
-narrow outside-sandbox process contexts.
+The current runtime release candidate is frozen at commit
+`0059c4dc07325fdcc7d36565480f1698d8f140de`, tree
+`bb5f73fa527dbfe9df71d72ddb0cda68b7f28ee8`. Check reuse was implemented in ancestor
+`ceda86958837409b666b5b574b00fc7eef6a1e20`; the current candidate also adds bounded recovery when a
+stale client session is rejected by server middleware. Exact-SHA GitHub Actions run `33255158115`
+passed all five jobs after bounded browser reruns. Focused auth tests, lint, type checks, formatting,
+secret scanning, and the production customer-web build also passed before push. Later documentation
+and governance changes do not alter this runtime identity or expand its exact-SHA CI evidence.
 
 The deployed production baseline remains
-`d0c22310de5ea0c4727035ca278f1a552c65eafb` with migrations through 0045. This repository candidate
-adds migration `0046_check_analysis_reuse.sql`; it has not been applied to production, tagged,
-deployed to Replit, or exercised by a real customer. No Stripe, Twilio, payment, customer, provider,
-production database, or mobile-store write occurred in this batch.
+`d0c22310de5ea0c4727035ca278f1a552c65eafb` with migrations through 0045. This runtime release candidate
+adds migration `0046_check_analysis_reuse.sql`; it has not been merged, annotated-tagged, applied to
+production, deployed to Replit, or exercised by a real customer. No Stripe, Twilio, payment,
+customer, production database, or mobile-store write occurred in this candidate batch. The separate
+Clerk credential, routing, and Replit web configuration repairs do not make `0059c4d` deployed code.
 
 ### Built, partial, and missing
 
 | State | Customer value | Evidence boundary |
 | --- | --- | --- |
 | Built in the deployed baseline | Friendly URL and text Check, prioritized safer actions, private History and deletion, deliberate redacted sharing, Trusted Circle acknowledgement and closure, Family Safe Word, seven short lessons, four weekly rehearsal scenarios, reviewed national plus five-state guidance, and generic mobile local reminders. | Repository and prior release evidence exist. Real member sessions, physical devices, human usefulness, and customer outcomes remain separate evidence classes. |
-| Frozen repository candidate | An exact recent Check can be reused only for the same actor, household, kind, active retained artifact, fingerprint-key version, and full engine, provider, and policy provenance key. Reuse is bounded to at most 24 hours and to the original stored evidence deadline. Web and mobile show the original analysis time and expose an explicit fresh-analysis action. Friendly and fully qualified forms of the same URL can match. | Commit and synthetic proof exist. Migration, tag, exact-SHA CI, production deployment, and real-session proof remain open. |
+| Frozen runtime release candidate | An exact recent Check can be reused only for the same actor, household, kind, active retained artifact, fingerprint-key version, and full engine, provider, and policy provenance key. Reuse is bounded to at most 24 hours and to the original stored evidence deadline. Web and mobile show the original analysis time and expose an explicit fresh-analysis action. Friendly and fully qualified forms of the same URL can match. A signed-in client whose stale session is rejected by middleware gets one bounded recovery attempt and a terminal retry/support state instead of a hidden form loop. | Commit and exact-SHA CI proof exist. Merge, migration rehearsal for the final candidate, annotated tag, tag CI, production deployment, and real-session proof remain open. |
 | Partial | Learn is seven one-question lessons plus four weekly scenarios, not an adaptive curriculum. Weekly rehearsal is individual, not yet a joint Trusted Circle exercise. Regional guidance has five state-specific inventories plus national fallback. Notifications are in-app and local-device only. Mobile has broad source parity but no signed-device proof. | Preserve the narrower beta promise. |
 | Missing | Live reputation or campaign intelligence, History-originated reanalysis after raw input is gone, daily quizzes, adaptive tracks, multimedia publishing to Learn and mobile, remote push, email, or SMS, automatic family escalation, native share-in, image or QR intake, signed IPA and AAB evidence, store submission, and demonstrated older-adult value. | None may be implied by Check timestamps, reuse, repository tests, public copy, or provider-free mobile configuration. |
 
@@ -49,20 +52,20 @@ Check reuse reduces duplicate work. It does not turn the current `LocalUnknownPr
 reputation provider. Analysis and refresh timestamps describe the local analysis and reuse boundary
 only.
 
-### Tonight's finite stopping point
+### Current finite release handoff
 
-1. The implementation batch ends at the frozen commit above. Do not open another feature lane
-   tonight.
-2. Record the final documentation commit, push the branch, and require exact-SHA CI.
-3. Leave the deployed `d0c22310` release and production migration 0045 unchanged.
-4. Do not apply migration 0046, retag, republish Replit, activate billing, enable Twilio, or claim
-   mobile availability as part of this handoff.
-5. Stop after the candidate, CI state, and tomorrow agenda are unambiguous.
+1. Preserve exact candidate `0059c4d` and green CI run `33255158115`; do not reopen the candidate for
+   unrelated feature work.
+2. Merge only if `main` preserves the exact candidate, then create and verify a new annotated tag.
+3. Rehearse migration 0046 against disposable PostgreSQL and bind backup, rollback, target, and
+   service actions before production migration or deployment.
+4. Until that cutover is proved, leave deployed `d0c22310` and production migration 0045 unchanged.
+5. Keep Stripe initiation, Twilio, referrals, and mobile availability claims disabled.
 
 ### Tomorrow's founder walkthrough
 
-Label the environment before each observation: deployed `d0c22310`, local synthetic, or a later
-exact Check reuse candidate. Do not combine evidence from different environments.
+Label the environment before each observation: deployed `d0c22310`, local synthetic, or exact
+candidate `0059c4d`. Do not combine evidence from different environments.
 
 1. Complete one real Google sign-in and one real email and password plus inbox-verification journey
    without retaining identity data.
@@ -84,8 +87,9 @@ exact Check reuse candidate. Do not combine evidence from different environments
 
 ### Remaining launch gates
 
-- Obtain green exact-SHA CI, rehearse migration 0046 on disposable PostgreSQL, and retain backup,
-  rollback, tag, and deployment evidence before production use.
+- Preserve the green exact-SHA CI result, rehearse migration 0046 on disposable PostgreSQL, merge
+  without changing the candidate, and retain backup, rollback, annotated-tag CI, and deployment
+  evidence before production use.
 - Prove real Google and email and password sessions, inbox verification, Device Trust, recent billing
   authentication, sign-out, and recovery.
 - Run the authenticated two-person member and Trusted Circle journey on the exact deployed
@@ -129,9 +133,9 @@ not be used as current deployment proof.
 
 ### Repository candidates in the committed implementation baseline
 
-| Lane | Current repository candidate | Evidence and remaining boundary |
+| Lane | Committed implementation | Evidence and remaining boundary |
 | --- | --- | --- |
-| Self-service acquisition and identity | Public account creation, dedicated self-hosted sign-up, fixed internal post-auth destinations, and updated public copy remove the invitation-only acquisition dead end. | Full local verification and browser checks passed. The live customer site remains stale, Google sign-in has looped, and email plus inbox verification has reached a missing route. Production Clerk configuration and deployed browser proof remain open. |
+| Self-service acquisition and identity | Public account creation, dedicated self-hosted sign-up, fixed internal post-auth destinations, and updated public copy remove the invitation-only acquisition dead end. | The deployed forms hydrate, the Device Trust route resolves, and a 2026-08-29 provider and service configuration session corrected Customer routing, OAuth, and Clerk key alignment. Its sanitized receipt and all real provider-session journeys remain open. Runtime candidate `0059c4d` adds bounded rejected-session recovery. |
 | Family offers | Family annual at USD 149.90 with a seven-day trial is the intended default. Family monthly at USD 14.99 remains available without a trial. Account creation alone does not start a trial or charge; secure Checkout must collect the payment method and show the exact first charge date and amount. Immutable attempt lineage permits a fresh idempotency key only after every prior Checkout attempt is proved expired, unused, and unambiguous; paid or consumed trial history still blocks reuse. | Catalog, contract, commerce, worker, billing UI, and migration work exist in the repository. Stripe Product and Price mapping, trial notice delivery, tax disposition, Portal, webhook, payment, renewal, failure, cancellation, refund, and entitlement proof remain provider and deployment gates. |
 | Individual offers | Individual monthly at USD 8.99 and Individual annual at USD 89.90 with a seven-day trial are implemented as versioned catalog candidates. | Individual remains default-off and unavailable to customers until its explicit launch mapping, allowance contract, public copy, provider resources, lifecycle proof, and support path all close. |
 | Billing authority | An exact active household administrator can accept or revoke billing authority for self after recent Clerk billing re-verification, origin checks, explicit consent, and action-bound idempotency. The repository retains append-only audit and outbox evidence; HQ remains a correction path. | Full combined authorization, commerce, security, and browser verification passed locally. This is not proof of deployed Clerk behavior, production authority, Checkout success, or entitlement. |
@@ -220,7 +224,7 @@ artifacts, physical-device behavior, real-customer value, or payment.
 
 | Capability | Repository implementation | Evidence state |
 | --- | --- | --- |
-| Customer sign-in recovery route | An explicit `/sign-in/client-trust` page preserves the Clerk device-trust callback and has its own descriptive metadata. | Source, type, route, and browser proof in the candidate. The live site remains on an older deployment and is not repaired until the exact candidate is deployed and Clerk configuration is closed. |
+| Customer sign-in recovery route | An explicit `/sign-in/client-trust` page preserves the Clerk device-trust callback and has its own descriptive metadata. | Deployed `d0c22310` resolves the route. Runtime candidate `0059c4d` adds bounded rejected-session recovery. A sanitized provider-configuration receipt and real Google plus email/password session proof remain open. |
 | Neutral household onboarding | A signed-in adult creates and retains an identity-bound, short-lived, one-use connection code. An organizer creates a neutral household invitation and shares only its invitation ID. The recipient previews and accepts with their own code. | API, persistence, web, mobile, tenant, restart, wrong-identity, revoked-invite, and retry tests. No automatic role, protected status, payer authority, billing authority, or Trusted Circle permission is granted. |
 | Neutral membership exit | Eligible neutral members can leave; administrators can remove eligible neutral members. | Web and mobile confirmation flows, recent-auth handling, stale-household response guards, principal refresh, and focused security tests. Server authority remains canonical. |
 | Protected-member enrollment | The invited adult separately reviews and directly consents to protected enrollment. | Existing authorization and consent flow plus integrated customer-journey regression. Household membership alone cannot supply consent or protected authority. |
@@ -281,8 +285,8 @@ These are repository and synthetic evidence. They are not production, provider, 
 
 | Gate | Why it remains open | Verifiable closure |
 | --- | --- | --- |
-| Exact candidate identity | The pushed implementation baselines are identified above, but this living documentation can change afterward and cannot self-bind the final release commit. | Record the later full commit SHA and tree, clean status, upstream equality, annotated tag, and exact-SHA green CI in an external scope receipt. |
-| Live customer sign-in | The live deployment is older, `/sign-in/client-trust` returned 404, and Google sign-in looped. | Preserve Replit-local configuration evidence, deploy the exact approved GitHub SHA by pull only, rotate the exposed Google OAuth secret, close Clerk callback/fallback/legal/support configuration, and pass fresh Gmail plus email-code journeys without recording identity data. |
+| Exact release identity | Candidate `0059c4d`, its tree, and green exact-SHA CI are known, but it is not merged or annotated-tagged. | Preserve the exact candidate through merge, record upstream equality, create and verify the annotated tag, and bind migration, deployment targets, rollback, and digests in an external scope receipt. |
+| Live customer sign-in | A 2026-08-29 authenticated provider and service configuration session reports that `/sign-in/client-trust` resolves, Customer routing is corrected, the prior Google OAuth credential was rotated and revoked, the web server and client Clerk keys match, and exact `d0c22310` web code was republished. Its sanitized external receipt remains open. Deployed `d0c22310` still lacks candidate `0059c4d` rejected-session recovery, and no real member session is proved. | Deploy the exact approved candidate by pull only, then pass fresh Google plus email/password, inbox or Device Trust handling, stable reload, sign-out, re-entry, recovery, and wrong-realm journeys without recording identity data. |
 | Real PostgreSQL runtime | The repository contains a real-PostgreSQL concurrency and migration verifier. | Run it in exact-SHA CI or an approved managed staging database and retain the sanitized job receipt. |
 | Physical mobile devices | Windows and web preview cannot prove native credential, notification, accessibility, signing, or store behavior. | Pass signed iOS and Android builds on supported devices, lock-screen privacy, VoiceOver/TalkBack, large text, slow/offline behavior, session revocation, and store review. |
 | Native share entry | Manual paste works; iOS Share Extension and Android Sharesheet receivers are not implemented and device-proved in this candidate. | Build thin native receivers, retain the API as authority, and pass hostile-input, cross-account, termination, retry, and cleanup tests on devices. |
@@ -290,10 +294,10 @@ These are repository and synthetic evidence. They are not production, provider, 
 | Recovery follow-through | Results provide prioritized safe actions, redacted collaboration, recipient acknowledgement, and owner closure with a bounded self-reported reason. BoomerBuddy does not verify completion, file reports, contact banks or agencies, or manage a recovery case. | Keep the observed beta promise to decision support and self-reported follow-through. Before claiming managed recovery, add an owner-chosen safe-action record and separately prove any case, deadline, evidence, contact, or filing workflow. |
 | Regional breadth | National guidance works for every supported region; only reviewed state items are shown as state-specific. | Add state briefs only through dated official sources, editorial review, expiry, and regression fixtures. Never infer local coverage from a state selection. |
 | Human value and usability | Automated tests cannot prove that older adults and family pairs understand or value the service. | Run observed, consented beta sessions with older adults and adult-child pairs; measure first safe action, comprehension, return use, Trusted Circle follow-through, support burden, and complaints without claiming loss prevented. |
-| Live operations | No on-call, alert, restore, support, or production rollback receipt is created by this repository-only candidate. | Complete exact-SHA staging, backup/restore, monitoring, support, incident, and timed rollback rehearsals before relying on production service. |
+| Live operations | API and worker health plus the production backup and disposable restore are proved for `d0c22310`. Staffed support, alert delivery, incident response, and timed application rollback remain unproved. | Complete exact-candidate monitoring, support, incident, and timed rollback rehearsals before paid onboarding. |
 
 ## Release and rollback rule
 
-Commit and push this candidate only after the local gauntlet is green. GitHub remains the source. Each BoomerBuddy 2.0 Replit service may later pull the exact approved commit after its local checkpoint and `.replit` differences are preserved and reconciled. Never push from Replit. Never use or modify the legacy `BoomerBuddy` Replit project as part of this release.
+Candidate `0059c4d` is committed, pushed, and green in exact-SHA CI. GitHub remains the source. Each BoomerBuddy 2.0 Replit service may later pull only the exact approved tagged commit after its local checkpoint and `.replit` differences are preserved and reconciled. Never push from Replit. Never use or modify the legacy `BoomerBuddy` Replit project as part of this release.
 
 If a candidate validation fails, keep the live services on their current artifacts and fix forward on this branch. If a later deployment fails, restore only the affected service's recorded prior artifact while billing initiation and outbound messaging remain disabled.

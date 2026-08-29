@@ -2,16 +2,17 @@
 
 ## Boundary
 
-The versioned production catalog now defines Family annual at USD 149.90 after a seven-day trial as
-the intended default repository candidate and retains Family monthly at USD 14.99 without a trial.
-Neither offer is live. Account creation alone does not start a trial or charge; a customer must
+The versioned production catalog defines Family annual at USD 149.90 after a seven-day trial as the
+default and retains Family monthly at USD 14.99 without a trial. The deployed noncharging customer
+application presents both choices, but Stripe initiation and purchasing remain disabled, so neither
+offer is purchasable. Account creation alone does not start a trial or charge; a later customer must
 explicitly select Checkout, consent, and provide a payment method. The production catalog, Stripe
 mapping, and customer copy remain separate from this hypothesis registry.
 
 For default-off Individual, group-rate, and referral hypotheses, this document is the controlling
 planning index and `packages/domain/src/revenue-hypotheses.ts` is the controlling typed registry.
 Family annual rows here remain historical research evidence; the versioned production catalog
-controls the current Family repository candidates. Conflicting historical or exploratory text
+controls the current Family catalog definitions. Conflicting historical or exploratory text
 grants no execution authority.
 
 The registry is evidence for controlled future experiments only. Every entry has exactly two

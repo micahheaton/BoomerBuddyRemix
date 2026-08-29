@@ -8,12 +8,21 @@ Implementation reconciliation: 2026-08-16
 
 Run 2 amendment: 2026-08-16
 
-Current offer amendment: 2026-08-25. For launch execution, Family at USD 14.99 per month is the
-sole approved production offer candidate. It is not public or live. [OFFER-HYPOTHESIS-REGISTRY.md](./post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md)
-controls every annual, Individual, and referral hypothesis and limits each one to synthetic or
-Stripe sandbox evaluation. Older Plus, annual, USD 119, capacity, and referral language below is
-historical research context and cannot authorize production copy, configuration, provider
-resources, customer promises, or external action.
+Current offer amendment: 2026-08-29. The deployed noncharging application presents Family annual
+at USD 149.90 after a seven-day trial as the default and Family monthly at USD 14.99 without a
+trial. Stripe initiation and purchasing remain disabled, so neither visible offer is purchasable and
+account creation alone does not start a trial or charge. Individual monthly and annual are
+implemented but default-off; referrals remain disabled.
+[OFFER-HYPOTHESIS-REGISTRY.md](./post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md) controls the remaining
+Individual, referral, group-rate, and promotion hypotheses. Older Plus, USD 119, capacity, and
+referral language below is historical research context and cannot authorize provider resources,
+customer promises, or external action.
+
+Current-state amendment: all Run 1 and Run 2 statements below that prohibit production deployment
+or describe hosted PostgreSQL, restore, or deployed-proxy evidence as blocked are dated historical
+boundaries. Exact `d0c22310de5ea0c4727035ca278f1a552c65eafb` with migrations through 0045 is
+the deployed noncharging baseline. Runtime release candidate
+`0059c4dc07325fdcc7d36565480f1698d8f140de` with migration 0046 remains undeployed.
 
 Working product name: **BoomerBuddy** (not audience-tested or legally cleared)
 

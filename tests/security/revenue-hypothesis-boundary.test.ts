@@ -8,6 +8,9 @@ import { describe, expect, it } from 'vitest';
 
 const repositoryRoot = resolve(import.meta.dirname, '../..');
 const isolatedRegistryPath = 'packages/domain/src/revenue-hypotheses.ts';
+const canonicalGauntletPath = 'docs/post-launch-beta/GAUNTLET-PROMPT-PACK.md';
+const continuationGauntletPath = 'docs/post-launch-beta/GAUNTLET-PROMPT-PACK-G4-G15.md';
+const runNextPath = 'docs/post-launch-beta/RUN-NEXT.md';
 const productionSourceRoots = [
   'apps/api/src',
   'apps/hq/src',
@@ -20,10 +23,10 @@ const hypothesisGovernanceEntryPoints = [
   'docs/post-launch-beta/README.md',
   'docs/post-launch-beta/EXECUTION-PLAN.md',
   'docs/post-launch-beta/REVENUE-EXPERIMENT-ACTION-PACKET.md',
-  'docs/post-launch-beta/RUN-NEXT.md',
+  runNextPath,
   'docs/post-launch-beta/RUN-NEXT-EXECUTION.md',
-  'docs/post-launch-beta/GAUNTLET-PROMPT-PACK.md',
-  'docs/post-launch-beta/GAUNTLET-PROMPT-PACK-G4-G15.md',
+  canonicalGauntletPath,
+  continuationGauntletPath,
 ] as const;
 
 async function source(path: string): Promise<string> {
@@ -125,6 +128,71 @@ describe('revenue hypothesis production boundary', () => {
     const currentPlan = entries.find((entry) => entry.path.endsWith('EXECUTION-PLAN.md'))?.content;
     expect(currentPlan).toBeDefined();
     expect(currentPlan).not.toMatch(/Enable annual Family|test Plus|\$119 founding annual/iu);
+  });
+
+  it('keeps one canonical G0 and makes every first-prompt entry point reference it', async () => {
+    const [canonical, continuation, runNext] = await Promise.all([
+      source(canonicalGauntletPath),
+      source(continuationGauntletPath),
+      source(runNextPath),
+    ]);
+    const combined = `${canonical}\n${continuation}\n${runNext}`;
+    const canonicalG0 = canonical.match(
+      /^## G0 - Explore and baseline\r?\n\r?\n```text\r?\n([\s\S]*?)\r?\n```/mu,
+    );
+
+    expect(combined.match(/^## G0 - Explore and baseline$/gmu)).toHaveLength(1);
+    expect(canonicalG0?.[1]).toBeDefined();
+    for (const section of [
+      'Objective',
+      'Repository boundary',
+      'Required reading',
+      'Allowed actions',
+      'Forbidden actions',
+      'Parallel workstreams',
+      'Evidence gates',
+      'Tests',
+      'Commit, tag, and release policy',
+      'Founder-only stop conditions',
+      'Rollback',
+      'Verifiable completion',
+      'Durable goal',
+    ]) {
+      expect(canonicalG0?.[1]).toContain(section);
+    }
+
+    for (const pointer of [continuation, runNext]) {
+      expect(pointer).toContain('[GAUNTLET-PROMPT-PACK.md](./GAUNTLET-PROMPT-PACK.md)');
+      expect(pointer).toMatch(/single canonical/iu);
+      expect(pointer).not.toContain(
+        'Establish an exact, read-only baseline for the saved BoomerBuddy repository',
+      );
+    }
+    expect(runNext).not.toContain('```text');
+    for (let phase = 4; phase <= 15; phase += 1) {
+      expect(continuation).toMatch(new RegExp(`^## G${phase} - `, 'mu'));
+    }
+  });
+
+  it('distinguishes the deployed runtime from the runtime release candidate in each gauntlet entry point', async () => {
+    const entries = await Promise.all(
+      [canonicalGauntletPath, continuationGauntletPath, runNextPath].map(async (path) => ({
+        path,
+        content: await source(path),
+      })),
+    );
+
+    for (const entry of entries) {
+      expect(entry.content, entry.path).toMatch(/deployed production release.+d0c22310/isu);
+      expect(entry.content, entry.path).toContain('0045_member_learning_rehearsal_answers.sql');
+      expect(entry.content, entry.path).toMatch(/runtime release candidate.+0059c4d/isu);
+      expect(entry.content, entry.path).toContain('0046_check_analysis_reuse.sql');
+      expect(entry.content, entry.path).toMatch(/annual-first Family catalog/iu);
+      expect(entry.content, entry.path).toMatch(
+        /Stripe initiation and purchasing remain disabled/iu,
+      );
+      expect(entry.content, entry.path).toMatch(/neither offer can currently be purchased/iu);
+    }
   });
 
   it('keeps every active launch document aligned to the annual-first Family catalog', async () => {

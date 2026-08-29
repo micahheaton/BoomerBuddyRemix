@@ -132,6 +132,13 @@ External activation remains deliberately closed:
 
 The exact deployed release is real, but paid beta remains unproved until all of the following close:
 
+Post-release supersession note, 2026-08-29: an authenticated provider and service configuration
+session reports that the prior Google OAuth credential was rotated and revoked, Customer routing
+and web Clerk key alignment were corrected, and exact `d0c22310` web code was republished. A
+sanitized external configuration receipt and all real member-session journeys remain open. The
+rotation instruction in item 1 below is retained as this release dossier's dated pre-repair state
+and is superseded only for the reported rotation action.
+
 1. Replace the Google OAuth secret that appeared in authenticated inspection output, install the
    replacement in Customer Clerk, revoke the prior secret, and retain only safe credential IDs and
    timestamps. Then complete real Google and email/password member journeys, any inbox verification

@@ -2,11 +2,14 @@
 
 Status: **packaging and prices are hypotheses; no willingness-to-pay evidence exists**. Prices and policies checked 2026-08-15.
 
-Current offer amendment: 2026-08-25. Family at USD 14.99 per month is the only public or live
-offer. [OFFER-HYPOTHESIS-REGISTRY.md](../post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md) controls all
-annual, Individual, and referral hypotheses and limits them to synthetic or Stripe sandbox
-evaluation. The plan names, capacities, and prices below are retained as historical research inputs
-and cannot authorize production copy, configuration, provider resources, or external action.
+Current offer amendment: 2026-08-29. The deployed noncharging application presents Family annual
+at USD 149.90 after a seven-day trial as the default and Family monthly at USD 14.99 without a
+trial. Stripe initiation and purchasing remain disabled, so neither visible offer is purchasable.
+Individual offers remain implemented but default-off, and referrals remain disabled.
+[OFFER-HYPOTHESIS-REGISTRY.md](../post-launch-beta/OFFER-HYPOTHESIS-REGISTRY.md) controls the remaining
+Individual, referral, group-rate, and promotion hypotheses. The plan names, capacities, and prices
+below are retained as historical research inputs and cannot authorize provider resources or
+external action.
 
 ## What is being sold
 

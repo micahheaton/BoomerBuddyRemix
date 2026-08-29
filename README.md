@@ -1,8 +1,10 @@
 # BoomerBuddy 2.0
 
-BoomerBuddy 2.0 is a trust-first commercialization foundation for helping a consenting household decide what to do with a suspicious message or URL string. Run 2 adds a privacy-bounded Public Check, orthogonal Family authority and append-only consent, test-mode commerce adapters, durable jobs, governed fraud evidence, and an owner-only HQ Business OS to the Run 1 product slice.
+BoomerBuddy 2.0 is a trust-first service for helping a consenting household decide what to do with a suspicious message or URL string, learn safer habits, and coordinate deliberate help through a Trusted Circle.
 
-This is **not a production service**. It performs no live URL fetch, sends no email/SMS/push notification, takes no real payment, and uses no production credentials. Production startup deliberately fails closed until managed identity and KMS exist. Fraud results are rules-based, explicitly not calibrated, and must not be treated as authoritative.
+The exact `d0c22310de5ea0c4727035ca278f1a552c65eafb` noncharging release is deployed to the four BoomerBuddy 2.0 Replit services with production migrations through 0045. Its public application presents Family annual at USD 149.90 after a seven-day trial as the default and Family monthly at USD 14.99 without a trial, but Stripe initiation and purchasing remain disabled. It performs no live URL fetch and sends no email, SMS, or remote push notification. Fraud results are rules-based, explicitly not calibrated, and must not be treated as authoritative.
+
+The current runtime release candidate is `0059c4dc07325fdcc7d36565480f1698d8f140de`, tree `bb5f73fa527dbfe9df71d72ddb0cda68b7f28ee8`. It adds migration 0046 for bounded Check reuse plus rejected-session recovery, and exact-SHA CI run `33255158115` passed all five jobs after bounded browser reruns. It is not merged, tagged, or deployed. Later documentation and governance changes do not alter that runtime identity or expand its CI coverage. See the [current beta ledger](docs/post-launch-beta/PRODUCT-VALUE-BETA-LEDGER.md) and [deployed release evidence](docs/run-3-1/PRODUCTION-NONCHARGING-RELEASE-EVIDENCE.md) for evidence boundaries.
 
 ## Local setup
 
@@ -26,7 +28,7 @@ Demo seeding is deliberately opt-in and one-shot. `npm run db:seed` creates synt
 
 Start the mobile shell separately with `npm run dev:mobile`. This Windows host verifies its TypeScript and Expo web export, but not native iOS/Android bundles, SecureStore behavior, or device accessibility.
 
-Start the database-backed job runner separately with `npm run dev:worker`. Stripe remains disabled unless a complete test-only configuration is supplied; signed fixtures are not provider-executed transactions.
+Start the database-backed job runner separately with `npm run dev:worker`. Stripe initiation remains disabled unless the complete approved configuration and evidence gates are supplied; signed fixtures are not provider-executed transactions.
 
 ## Verification
 

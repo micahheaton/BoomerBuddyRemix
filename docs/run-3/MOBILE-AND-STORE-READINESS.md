@@ -110,8 +110,10 @@ Status: **Production-configured Expo/Clerk client; native device and store evide
 
 ## Web-first commerce boundary
 
-- Family at USD 14.99 per month is the sole approved production offer candidate and is not live. Annual Family, Individual, referral,
-  coupon, trial, group-rate, and native-purchase offers remain non-public synthetic hypotheses.
+- The deployed customer web surface presents Family annual at USD 149.90 after a seven-day trial as
+  the default and Family monthly at USD 14.99 without a trial. Stripe initiation and purchasing
+  remain disabled, so neither visible offer is purchasable. Individual, referral, coupon, group-rate,
+  and native-purchase offers remain unavailable.
 - The native app reads canonical household access only. A billing manager can refresh access after a
   start, renewal, cancellation, or restoration has been confirmed. Refreshing never starts or changes
   a purchase, and a provider status alone never grants access.

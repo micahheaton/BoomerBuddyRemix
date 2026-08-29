@@ -6,7 +6,7 @@
 - [EXECUTION-PLAN.md](./EXECUTION-PLAN.md): historical `9b5d585` audit plus the controlling current closure ledger, explicit unknowns and closure gates, historical code anchors, seven-day owner map, 30-day operating model, cash controls, autonomy model, backlog, and two-year target.
 - [EXECUTION-PLAN-SUPPLEMENT.md](./EXECUTION-PLAN-SUPPLEMENT.md): immutable audit receipt for the 2026-08-24 live Stripe inventory and corrections now integrated into the base plan.
 - [LIVE-DEPLOYMENT-DRIFT.md](./LIVE-DEPLOYMENT-DRIFT.md): historical sanitized read-only evidence for the deployment drift observed through 2026-08-28. The exact `d0c22310` deployment supersedes its current-state conclusions but not its dated observations.
-- [PRODUCT-VALUE-BETA-LEDGER.md](./PRODUCT-VALUE-BETA-LEDGER.md): current repository evidence for the Trusted Circle, collaborative Check, learning, regional-guidance, reminder, web, and mobile beta value loop, with explicit external closure gates. Its top finite handoff separates the deployed baseline from the repository-only Check reuse candidate, tonight's stopping point, tomorrow's founder walkthrough, and the remaining launch gates.
+- [PRODUCT-VALUE-BETA-LEDGER.md](./PRODUCT-VALUE-BETA-LEDGER.md): current repository evidence for the Trusted Circle, collaborative Check, learning, regional-guidance, reminder, web, and mobile beta value loop, with explicit external closure gates. Its top finite handoff separates the deployed baseline from the repository-only Check reuse and rejected-session recovery candidate, the next release actions, the founder walkthrough, and the remaining launch gates.
 - [OFFER-HYPOTHESIS-REGISTRY.md](./OFFER-HYPOTHESIS-REGISTRY.md): historical planning index for annual, Individual, and referral hypotheses. The committed versioned catalog promotes Family annual into the current repository offer candidate while Individual and referral entries remain default-off hypotheses. Neither document can authorize provider configuration, deployment, or production activation.
 - [REVENUE-EXPERIMENT-ACTION-PACKET.md](./REVENUE-EXPERIMENT-ACTION-PACKET.md): exact local synthetic specification and candidate-bound noncharging setup packet for an isolated offer-research Stripe sandbox and private, noncollecting website preview. It records that access-intent receipts are not leads and cannot currently measure lead-to-paid conversion.
 - [NONCHARGING-RELEASE-RECEIPT.md](./NONCHARGING-RELEASE-RECEIPT.md): retired historical template for
@@ -28,6 +28,11 @@ Production migration 0045 is applied, all four BoomerBuddy 2.0 Replit services p
 successfully, the API and worker are healthy, the current pricing and Learn surfaces are live, and
 `/sign-in/client-trust` no longer returns 404.
 
+The deployed pricing surface is annual-first: Family annual is USD 149.90 after a seven-day trial,
+and Family monthly is USD 14.99 without a trial. Stripe initiation and purchasing remain disabled,
+so these are visible catalog choices rather than purchasable offers. Account creation alone does not
+start a trial or charge.
+
 A fresh production `pg_dump` was encrypted with Windows DPAPI `CurrentUser`, authenticated by a
 decrypt-and-hash round trip, and restored successfully on the disposable Neon branch. Source and
 restored migration evidence both equal `45|0045_member_learning_rehearsal_answers.sql`. The ignored
@@ -41,6 +46,15 @@ Stripe sandbox and live lifecycle proof, timed application rollback, signed mobi
 physical-device proof, and Customer 1 remain open. Stripe, Twilio, referrals, support intake,
 access-intent collection, and governed-content automation remain disabled. No first payment is
 claimed.
+
+The current runtime release candidate is
+`0059c4dc07325fdcc7d36565480f1698d8f140de`, tree
+`bb5f73fa527dbfe9df71d72ddb0cda68b7f28ee8`. It contains migration
+`0046_check_analysis_reuse.sql`, bounded Check reuse, and rejected-session recovery. Exact-SHA
+GitHub Actions run `33255158115` passed all five jobs after bounded browser reruns. The candidate is
+pushed but is not merged, annotated-tagged, migrated, or deployed. Production therefore remains on
+`d0c22310` and migration 0045. Later documentation and governance changes do not alter this runtime
+identity or expand its exact-SHA CI evidence.
 
 ## Historical pre-deployment evidence snapshot
 
@@ -114,7 +128,7 @@ for that deployment.
   whose objective prerequisites and rollback receipts are complete.
 - [RUN-NEXT.md](./RUN-NEXT.md) is a read-only re-audit prompt. Use it only after the repository, deployment, providers, or evidence baseline materially changes, or when a fresh independent baseline is specifically needed.
 
-Section 3.0 of the base plan is authoritative for current execution. Its later sections preserve historical audit evidence and must not be read as proof for later committed or deployed work. The supplement is retained as an audit receipt and no longer overrides the integrated base plan. The versioned production catalog controls the current Family annual and monthly repository candidates. The offer hypothesis registry controls default-off Individual, group-rate, and referral hypotheses and preserves historical annual research rows. Older or broader wording cannot create a production offer, provider write, customer promise, or referral program.
+Section 3.0 of the base plan is authoritative for current execution. Its later sections preserve historical audit evidence and must not be read as proof for later committed or deployed work. The supplement is retained as an audit receipt and no longer overrides the integrated base plan. The versioned production catalog controls the current Family annual and monthly catalog definitions. The offer hypothesis registry controls default-off Individual, group-rate, and referral hypotheses and preserves historical annual research rows. Older or broader wording cannot create a production offer, provider write, customer promise, or referral program.
 
 ## Execution authority
 

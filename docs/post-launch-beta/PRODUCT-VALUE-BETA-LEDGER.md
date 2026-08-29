@@ -15,6 +15,93 @@ support, legal or tax approval, Stripe, timed application rollback, signed mobil
 physical-device use, a first customer, or revenue. Stripe, Twilio, referrals, access-intent
 collection, support intake, and governed-content automation remain disabled.
 
+## Finite product-value handoff: Check reuse candidate
+
+### Evidence boundary
+
+The Check reuse implementation is frozen at commit
+`ceda86958837409b666b5b574b00fc7eef6a1e20`, tree
+`6e6d4a23bece6188c9bf329bd477a34dccaa5ac1`. It began from
+`0983832ebe460ea93fdef88730e458b4293f7f91`. Focused validation passed 8 files and 30 tests. The
+final tree also passed 496 unit tests, 527 integration tests, 560 security tests, all 12 synthetic
+evaluation fixtures, all workspace type checks, lint, formatting, secret and runtime-dependency
+checks, API, worker, customer web, HQ, and mobile web builds, and both production route guards. Two
+stale tests that described migration 0045 as the end of the repository chain were updated to 0046
+and then passed. Windows sandbox resource and temporary-file denials were rerun successfully in
+narrow outside-sandbox process contexts.
+
+The deployed production baseline remains
+`d0c22310de5ea0c4727035ca278f1a552c65eafb` with migrations through 0045. This repository candidate
+adds migration `0046_check_analysis_reuse.sql`; it has not been applied to production, tagged,
+deployed to Replit, or exercised by a real customer. No Stripe, Twilio, payment, customer, provider,
+production database, or mobile-store write occurred in this batch.
+
+### Built, partial, and missing
+
+| State | Customer value | Evidence boundary |
+| --- | --- | --- |
+| Built in the deployed baseline | Friendly URL and text Check, prioritized safer actions, private History and deletion, deliberate redacted sharing, Trusted Circle acknowledgement and closure, Family Safe Word, seven short lessons, four weekly rehearsal scenarios, reviewed national plus five-state guidance, and generic mobile local reminders. | Repository and prior release evidence exist. Real member sessions, physical devices, human usefulness, and customer outcomes remain separate evidence classes. |
+| Frozen repository candidate | An exact recent Check can be reused only for the same actor, household, kind, active retained artifact, fingerprint-key version, and full engine, provider, and policy provenance key. Reuse is bounded to at most 24 hours and to the original stored evidence deadline. Web and mobile show the original analysis time and expose an explicit fresh-analysis action. Friendly and fully qualified forms of the same URL can match. | Commit and synthetic proof exist. Migration, tag, exact-SHA CI, production deployment, and real-session proof remain open. |
+| Partial | Learn is seven one-question lessons plus four weekly scenarios, not an adaptive curriculum. Weekly rehearsal is individual, not yet a joint Trusted Circle exercise. Regional guidance has five state-specific inventories plus national fallback. Notifications are in-app and local-device only. Mobile has broad source parity but no signed-device proof. | Preserve the narrower beta promise. |
+| Missing | Live reputation or campaign intelligence, History-originated reanalysis after raw input is gone, daily quizzes, adaptive tracks, multimedia publishing to Learn and mobile, remote push, email, or SMS, automatic family escalation, native share-in, image or QR intake, signed IPA and AAB evidence, store submission, and demonstrated older-adult value. | None may be implied by Check timestamps, reuse, repository tests, public copy, or provider-free mobile configuration. |
+
+Check reuse reduces duplicate work. It does not turn the current `LocalUnknownProvider` into a live
+reputation provider. Analysis and refresh timestamps describe the local analysis and reuse boundary
+only.
+
+### Tonight's finite stopping point
+
+1. The implementation batch ends at the frozen commit above. Do not open another feature lane
+   tonight.
+2. Record the final documentation commit, push the branch, and require exact-SHA CI.
+3. Leave the deployed `d0c22310` release and production migration 0045 unchanged.
+4. Do not apply migration 0046, retag, republish Replit, activate billing, enable Twilio, or claim
+   mobile availability as part of this handoff.
+5. Stop after the candidate, CI state, and tomorrow agenda are unambiguous.
+
+### Tomorrow's founder walkthrough
+
+Label the environment before each observation: deployed `d0c22310`, local synthetic, or a later
+exact Check reuse candidate. Do not combine evidence from different environments.
+
+1. Complete one real Google sign-in and one real email and password plus inbox-verification journey
+   without retaining identity data.
+2. Enter a member household and review Home, Check, History, Family, and Learn together.
+3. Submit a friendly URL such as `example.com` and a synthetic suspicious message. Confirm the
+   result leads to a safer action and truthfully says that no live reputation lookup occurred.
+4. On the exact candidate, submit the same item again. Confirm the prior result is reused and the
+   original analysis time and reuse window are visible.
+5. Choose `Run a fresh analysis now`. Confirm a new Check is created and History still supports view
+   and deletion without claiming it can reconstruct unavailable raw input.
+6. Complete one lesson and one response-required weekly rehearsal.
+7. With two synthetic accounts, create and accept a Trusted Circle invitation, deliberately share a
+   redacted result, acknowledge it, close it with a bounded reason, revoke access, and exercise the
+   Family Safe Word flow.
+8. Use a signed iOS or Android artifact only if an exact build receipt exists. Otherwise record
+   physical mobile testing as not performed.
+9. Record confusion, time to first safer action, perceived value, and missing value without names,
+   email addresses, Check content, Safe Words, tokens, or other PII.
+
+### Remaining launch gates
+
+- Obtain green exact-SHA CI, rehearse migration 0046 on disposable PostgreSQL, and retain backup,
+  rollback, tag, and deployment evidence before production use.
+- Prove real Google and email and password sessions, inbox verification, Device Trust, recent billing
+  authentication, sign-out, and recovery.
+- Run the authenticated two-person member and Trusted Circle journey on the exact deployed
+  candidate.
+- Staff and test support; close qualified legal and tax dispositions; then prove the authentic
+  Stripe sandbox lifecycle and initiation-closed live configuration before accepting money.
+- Produce signed IPA and AAB artifacts and complete physical-device authentication, local
+  notification, accessibility, slow or offline, revocation, and rollback tests before claiming
+  mobile availability.
+- Run moderated older-adult, adult-child, and pair sessions before claiming that the product is easy,
+  useful, or worth paying for.
+- Keep Twilio, remote notifications, referrals, and automatic publication disabled until their
+  separate consent, compliance, delivery, and operating gates close.
+- Do not claim live scam monitoring or reputation intelligence until a least-data provider is
+  qualified, integrated, evaluated, and independently evidenced.
+
 ## Historical integration overlay: committed and merged candidate
 
 This section records the committed integrated implementation baseline before the exact deployed
